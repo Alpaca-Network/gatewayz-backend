@@ -12,13 +12,13 @@ import requests
 import json
 import resend
 
-from notification_models import (
+from ..schemas.notification_models import (
     NotificationPreferences, Notification, NotificationType, 
     NotificationChannel, NotificationStatus, SendNotificationRequest,
     LowBalanceAlert, TrialExpiryAlert, NotificationStats
 )
-from db import get_supabase_client, get_user, get_user_plan
-from trial_validation import validate_trial_access
+from ..db.db import get_supabase_client, get_user, get_user_plan
+from .trial_validation import validate_trial_access
 
 logger = logging.getLogger(__name__)
 

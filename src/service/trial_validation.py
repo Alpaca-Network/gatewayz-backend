@@ -7,7 +7,7 @@ Direct trial validation without complex service layer
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
-from supabase_config import get_supabase_client
+from ..db.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 

@@ -13,13 +13,13 @@ import json
 import resend
 import secrets
 
-from notification_models import (
+from ..schemas.notification_models import (
     NotificationPreferences, Notification, NotificationType, 
     NotificationChannel, NotificationStatus, SendNotificationRequest,
     LowBalanceAlert, TrialExpiryAlert, NotificationStats
 )
-from db import get_supabase_client, get_user, get_user_plan
-from professional_email_templates import email_templates
+from ..db.db import get_supabase_client, get_user, get_user_plan
+from .professional_email_templates import email_templates
 
 logger = logging.getLogger(__name__)
 
