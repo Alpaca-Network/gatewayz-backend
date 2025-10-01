@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 from functools import lru_cache
-from rate_limiting_fallback import get_fallback_rate_limit_manager
+from .rate_limiting_fallback import get_fallback_rate_limit_manager
 
 logger = logging.getLogger(__name__)
 

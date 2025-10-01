@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from supabase import create_client, Client
 import os
-from trial_models import (
+from ..schemas.trial_models import (
     TrialStatus, SubscriptionPlan, TrialUsage, SubscriptionHistory,
     TrialConversion, StartTrialRequest, StartTrialResponse,
     ConvertTrialRequest, ConvertTrialResponse, TrialStatusResponse,

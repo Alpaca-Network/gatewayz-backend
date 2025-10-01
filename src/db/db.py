@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from supabase_config import get_supabase_client
+from .supabase_config import get_supabase_client
 import secrets
 import json
 
