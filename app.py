@@ -2062,34 +2062,55 @@ def generate_api_key() -> str:
 # Privy Authentication endpoints
 @app.post("/auth", response_model=PrivyAuthResponse, tags=["privy-auth"])
 async def privy_authenticate(request: PrivyAuthRequest):
-    """Handle complete Privy authentication response from frontend"""
+    """
+    **Request Body:**
+    Direct user object from Privy with:
+    - `id`: Privy user ID
+    - `createdAt`: Account creation timestamp
+    - `linkedAccounts`: Array of linked authentication accounts
+    - `email`: Direct email object (if available)
+    - `google`: Direct Google object (if available)
+    - `delegatedWallets`: Array of delegated wallets
+    - `mfaMethods`: Array of MFA methods
+    - `hasAcceptedTerms`: Terms acceptance status
+    - `isGuest`: Guest user status
+    
+    **Response:**
+    - Returns API key, user details, and authentication status
+    - Automatically handles both new user registration and existing user login
+    """
     try:
         logger.info("Received Privy authentication request")
         
-        # Extract user data from Privy response
-        user_data = request.user
+        # Extract user data directly from request (no wrapper)
+        user_data = request
         privy_user_id = user_data.id
-        linked_accounts = user_data.linked_accounts
-        token = request.token
-        privy_access_token = request.privy_access_token
-        refresh_token = request.refresh_token
-        is_new_user = request.is_new_user or False
+        linked_accounts = user_data.linkedAccounts
+        is_new_user = True  # Assume new user for now, will check if exists
         
         if not privy_user_id:
             raise HTTPException(status_code=400, detail="Privy user ID is required")
         
-        # Extract account information from linked accounts
+        # Extract account information from linked accounts and direct objects
         google_account = None
         email_account = None
         github_account = None
         
-        for account in linked_accounts:
-            if account.type == 'google_oauth':
-                google_account = account
-            elif account.type == 'email':
-                email_account = account
-            elif account.type == 'github_oauth':
-                github_account = account
+        # First check the direct email and google objects (preferred)
+        if user_data.google:
+            google_account = user_data.google
+        elif user_data.email:
+            email_account = user_data.email
+        
+        # Fallback to linked accounts if direct objects not available
+        if not google_account and not email_account:
+            for account in linked_accounts:
+                if account.type == 'google_oauth':
+                    google_account = account
+                elif account.type == 'email':
+                    email_account = account
+                elif account.type == 'github_oauth':
+                    github_account = account
         
         # Determine primary authentication method and user details
         auth_method = None
@@ -2099,13 +2120,26 @@ async def privy_authenticate(request: PrivyAuthRequest):
         
         if google_account:
             auth_method = AuthMethod.GOOGLE
-            email = google_account.email
-            display_name = google_account.name
-            username = f"google_{google_account.subject or ''}"
+            # Handle both direct google object and linked account formats
+            if hasattr(google_account, 'email'):
+                email = google_account.email
+                display_name = google_account.name
+                username = f"google_{google_account.subject or ''}"
+            else:
+                # Fallback for linked account format
+                email = getattr(google_account, 'email', None)
+                display_name = getattr(google_account, 'name', None)
+                username = f"google_{getattr(google_account, 'subject', '') or ''}"
         elif email_account:
             auth_method = AuthMethod.EMAIL
-            email = email_account.email
-            username = email.split('@')[0] if email else None
+            # Handle both direct email object and linked account formats
+            if hasattr(email_account, 'address'):
+                email = email_account.address
+                username = email.split('@')[0] if email else None
+            else:
+                # Fallback for linked account format
+                email = getattr(email_account, 'email', None) or getattr(email_account, 'address', None)
+                username = email.split('@')[0] if email else None
         elif github_account:
             auth_method = AuthMethod.GITHUB
             username = github_account.name  # GitHub uses 'name' field
@@ -2119,13 +2153,11 @@ async def privy_authenticate(request: PrivyAuthRequest):
         existing_user = get_user_by_privy_id(privy_user_id)
         
         if existing_user:
-            # User exists, update tokens
-            logger.info(f"User {privy_user_id} already exists, updating tokens")
+            # User exists, update last login
+            logger.info(f"User {privy_user_id} already exists, updating last login")
             
-            # Update user tokens in database
+            # Update user last login in database
             update_user_tokens(existing_user['id'], {
-                'privy_access_token': privy_access_token,
-                'refresh_token': refresh_token,
                 'last_login': datetime.utcnow().isoformat()
             })
             
@@ -2151,14 +2183,12 @@ async def privy_authenticate(request: PrivyAuthRequest):
             logger.info(f"Creating new user for Privy ID: {privy_user_id}")
             
             # Create user with Privy data
-            user_result = create_privy_user_with_tokens(
+            user_result = create_privy_user(
                 privy_user_id=privy_user_id,
                 username=username,
                 email=email,
                 auth_method=auth_method,
-                display_name=display_name,
-                privy_access_token=privy_access_token,
-                refresh_token=refresh_token
+                display_name=display_name
             )
             
             # Auto-generate API key for new user

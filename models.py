@@ -46,25 +46,40 @@ class PrivyLinkedAccount(BaseModel):
     subject: Optional[str] = None
     email: Optional[str] = None
     name: Optional[str] = None
-    verified_at: Optional[int] = None
-    first_verified_at: Optional[int] = None
-    latest_verified_at: Optional[int] = None
+    address: Optional[str] = None  # For email accounts
+    firstVerifiedAt: Optional[str] = None  # ISO datetime string
+    latestVerifiedAt: Optional[str] = None  # ISO datetime string
+
+class PrivyEmailData(BaseModel):
+    address: str
+
+class PrivyGoogleData(BaseModel):
+    subject: str
+    email: str
+    name: str
 
 class PrivyUserData(BaseModel):
     id: str
-    created_at: int
-    linked_accounts: List[PrivyLinkedAccount] = []
-    mfa_methods: List[str] = []
-    has_accepted_terms: bool = False
-    is_guest: bool = False
+    createdAt: str  # ISO datetime string
+    linkedAccounts: List[PrivyLinkedAccount] = []
+    email: Optional[PrivyEmailData] = None
+    google: Optional[PrivyGoogleData] = None
+    delegatedWallets: List[dict] = []
+    mfaMethods: List[str] = []
+    hasAcceptedTerms: bool = False
+    isGuest: bool = False
 
 class PrivyAuthRequest(BaseModel):
-    user: PrivyUserData
-    token: str
-    privy_access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    session_update_action: Optional[str] = None
-    is_new_user: Optional[bool] = None
+    # Direct user object from frontend (no wrapper)
+    id: str
+    createdAt: str  # ISO datetime string
+    linkedAccounts: List[PrivyLinkedAccount] = []
+    email: Optional[PrivyEmailData] = None
+    google: Optional[PrivyGoogleData] = None
+    delegatedWallets: List[dict] = []
+    mfaMethods: List[str] = []
+    hasAcceptedTerms: bool = False
+    isGuest: bool = False
 
 class PrivyAuthResponse(BaseModel):
     success: bool

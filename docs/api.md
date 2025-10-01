@@ -99,6 +99,67 @@ Example response for `/providers`:
 ## User Endpoints
 
 ### Authentication & Registration
+
+**POST** `/auth`
+- **Main Privy Authentication Endpoint** - Handles complete authentication from frontend
+- Processes direct user object from Privy's frontend SDK (no wrapper needed)
+- Request body: Direct user object with Privy user data
+- Returns: `PrivyAuthResponse` with API key and user details
+- Supports Google, Email, and GitHub authentication methods
+
+**Example Request:**
+```json
+{
+  "id": "did:privy:cmfwykhyu00nrjp0bdn8drfta",
+  "createdAt": "2025-09-23T19:38:46.000Z",
+  "linkedAccounts": [
+    {
+      "subject": "109955238781595640390",
+      "email": "koala1201au@gmail.com",
+      "name": "Koala",
+      "type": "google_oauth",
+      "firstVerifiedAt": "2025-09-23T19:38:46.000Z",
+      "latestVerifiedAt": "2025-09-24T17:00:40.000Z"
+    },
+    {
+      "address": "koala1201au@gmail.com",
+      "type": "email",
+      "firstVerifiedAt": "2025-09-23T19:57:55.000Z",
+      "latestVerifiedAt": "2025-10-01T09:53:23.000Z"
+    }
+  ],
+  "email": {
+    "address": "koala1201au@gmail.com"
+  },
+  "google": {
+    "subject": "109955238781595640390",
+    "email": "koala1201au@gmail.com",
+    "name": "Koala"
+  },
+  "delegatedWallets": [],
+  "mfaMethods": [],
+  "hasAcceptedTerms": false,
+  "isGuest": false
+}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "message": "User created and authenticated successfully",
+  "user_id": 123,
+  "api_key": "abc123...",
+  "auth_method": "google",
+  "privy_user_id": "did:privy:cmfwykhyu00nrjp0bdn8drfta",
+  "is_new_user": true,
+  "display_name": "Koala",
+  "email": "koala1201au@gmail.com",
+  "credits": 10,
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
 **POST** `/create`
 - Create API key for user after dashboard login
 - Automatically sends welcome email with account details
