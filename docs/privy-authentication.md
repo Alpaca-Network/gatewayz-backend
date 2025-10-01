@@ -17,7 +17,68 @@ The frontend uses Privy's authentication SDK to handle user authentication. Afte
 
 ### 2. Backend Endpoints
 
-#### Sign Up - `POST /signup`
+#### Authentication - `POST /auth`
+
+Handles complete Privy authentication response from frontend. This is the main endpoint that processes the full user data from Privy's frontend SDK.
+
+**Request Body:**
+```json
+{
+  "id": "did:privy:cmfwykhyu00nrjp0bdn8drfta",
+  "createdAt": "2025-09-23T19:38:46.000Z",
+  "linkedAccounts": [
+    {
+      "subject": "109955238781595640390",
+      "email": "koala1201au@gmail.com",
+      "name": "Koala",
+      "type": "google_oauth",
+      "firstVerifiedAt": "2025-09-23T19:38:46.000Z",
+      "latestVerifiedAt": "2025-09-24T17:00:40.000Z"
+    },
+    {
+      "address": "koala1201au@gmail.com",
+      "type": "email",
+      "firstVerifiedAt": "2025-09-23T19:57:55.000Z",
+      "latestVerifiedAt": "2025-10-01T09:53:23.000Z"
+    }
+  ],
+  "email": {
+    "address": "koala1201au@gmail.com"
+  },
+  "google": {
+    "subject": "109955238781595640390",
+    "email": "koala1201au@gmail.com",
+    "name": "Koala"
+  },
+  "delegatedWallets": [],
+  "mfaMethods": [],
+  "hasAcceptedTerms": false,
+  "isGuest": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "User created and authenticated successfully",
+  "user_id": 123,
+  "api_key": "abc123...",
+  "auth_method": "google",
+  "privy_user_id": "did:privy:cmfwykhyu00nrjp0bdn8drfta",
+  "is_new_user": true,
+  "display_name": "Koala",
+  "email": "koala1201au@gmail.com",
+  "credits": 10,
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+#### Legacy Endpoints (Deprecated)
+
+**Note**: The following endpoints are deprecated in favor of the new `/auth` endpoint:
+
+##### Sign Up - `POST /signup` (Deprecated)
 
 Creates a new user account with Privy authentication.
 
@@ -34,23 +95,7 @@ Creates a new user account with Privy authentication.
 }
 ```
 
-**Response:**
-```json
-{
-  "user_id": 123,
-  "privy_user_id": "privy_user_12345",
-  "username": "username",
-  "email": "user@example.com",
-  "auth_method": "email",
-  "api_key": "abc123...",
-  "credits": 10,
-  "is_new_user": true,
-  "message": "Account created successfully!",
-  "timestamp": "2024-01-15T10:30:00Z"
-}
-```
-
-#### Sign In - `POST /signin`
+##### Sign In - `POST /signin` (Deprecated)
 
 Authenticates an existing user with Privy ID.
 
