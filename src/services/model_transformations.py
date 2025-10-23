@@ -61,6 +61,33 @@ def transform_model_id(model_id: str, provider: str) -> str:
         logger.debug(f"Model ID already in Portkey format: {model_id}")
         return model_id
 
+    # For AiMo, if the model_id is already in provider_pubkey:model_name format, return as-is
+    # Otherwise, try to find the full model ID in the AiMo catalog
+    if provider.lower() == "aimo":
+        # If already has colon separator (pubkey:model format), use as-is
+        if ":" in model_id:
+            logger.debug(f"Model ID already in AiMo format: {model_id}")
+            return model_id
+
+        # Otherwise, try to find the full model ID from the catalog
+        try:
+            from src.services.models import get_cached_models
+            aimo_models = get_cached_models("aimo") or []
+            for model in aimo_models:
+                model_slug = model.get("id", "")
+                # Check if the base name (after colon) matches the requested model
+                if ":" in model_slug:
+                    base_name = model_slug.split(":", 1)[1]
+                    if model_id.lower() == base_name.lower():
+                        logger.info(f"Transformed AiMo model '{model_id}' to full format '{model_slug}'")
+                        return model_slug.lower()
+        except Exception as e:
+            logger.warning(f"Error looking up AiMo model '{model_id}' in catalog: {e}")
+
+        # If not found in catalog, return as-is and let the API handle it
+        logger.warning(f"Could not find AiMo model '{model_id}' in catalog, using as-is")
+        return model_id
+
     provider_lower = provider.lower()
 
     # Special handling for OpenRouter: strip 'openrouter/' prefix if present
@@ -368,6 +395,18 @@ def detect_provider_from_model_id(model_id: str) -> Optional[str]:
     if model_id.startswith("@"):
         return "portkey"
 
+    # Check for AiMo format: provider_pubkey:model_name
+    # AiMo models contain a colon and the first part looks like a pubkey (alphanumeric)
+    if ":" in model_id:
+        parts = model_id.split(":", 1)
+        if len(parts) == 2:
+            provider_part = parts[0]
+            # If the provider part is a long alphanumeric string (likely a pubkey), it's AiMo
+            # AiMo pubkeys are typically 32+ characters
+            if len(provider_part) >= 20 and provider_part.replace("-", "").replace("_", "").isalnum():
+                logger.info(f"Detected AiMo model format for '{model_id}'")
+                return "aimo"
+
     # Check all mappings to see if this model exists
     for provider in ["fireworks", "openrouter", "featherless", "together", "portkey", "huggingface", "hug"]:
         mapping = get_model_id_mapping(provider)
@@ -399,6 +438,26 @@ def detect_provider_from_model_id(model_id: str) -> Optional[str]:
         # Anthropic models go to OpenRouter
         if org == "anthropic":
             return "openrouter"
+
+    # Check if this is an AiMo model by searching the cached catalog
+    # This handles cases where users request models by name without the provider pubkey
+    try:
+        from src.services.models import get_cached_models
+        aimo_models = get_cached_models("aimo") or []
+        for model in aimo_models:
+            model_slug = model.get("id", "")
+            # Check if the model_id matches either the full slug or just the base model name
+            if model_id.lower() == model_slug.lower():
+                logger.info(f"Found exact match for '{model_id}' in AiMo catalog")
+                return "aimo"
+            # Also check if model_id matches the base model name (after the colon)
+            if ":" in model_slug:
+                base_name = model_slug.split(":", 1)[1]
+                if model_id.lower() == base_name.lower():
+                    logger.info(f"Found model '{model_id}' in AiMo catalog as '{model_slug}'")
+                    return "aimo"
+    except Exception as e:
+        logger.debug(f"Error checking AiMo catalog: {e}")
 
     logger.debug(f"Could not detect provider for model '{model_id}'")
     return None
