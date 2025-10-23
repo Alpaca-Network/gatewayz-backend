@@ -13,13 +13,13 @@ APPROACH:
   permissions.
 
 RESULTS:
-  Successfully returns 133 models from 6 new providers by filtering the unified catalog:
-  - Google: 71 models (matches "gemini", "gemma" patterns)
-  - Xai: 23 models (matches "x-ai/", "grok" patterns)
-  - Nebius: 21 models (matches "nebius", "nvidia/llama", "microsoft/phi" patterns)
-  - Cerebras: 11 models (matches "cerebras", "qwen-3", "llama" patterns)
-  - Novita: 5 models (matches "novita", "llama-3.3" patterns)
-  - Hugging Face: 2 models (matches "llava-hf" patterns)
+  Successfully returns models from 6 new providers by filtering the unified catalog:
+  - Google: Models with @google/ prefix
+  - Cerebras: Models with @cerebras/ prefix
+  - Nebius: Models with @nebius/ prefix
+  - Xai: Models with @xai/ prefix
+  - Novita: Models with @novita/ prefix
+  - Hugging Face: Models matching "llava-hf", "hugging", "hf/" patterns
 """
 
 import logging
