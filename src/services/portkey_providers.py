@@ -1,17 +1,26 @@
 """
 Provider Integration Functions
 
-These functions fetch models from various AI providers using their native APIs.
+These functions fetch models from various AI providers using their native APIs and SDKs.
 
-PROVIDERS WITH DIRECT API INTEGRATION:
-  - Cerebras: OpenAI-compatible API at https://api.cerebras.ai/v1/models
-  - Nebius: OpenAI-compatible API at https://api.studio.nebius.ai/v1/models
-  - xAI: OpenAI-compatible API at https://api.x.ai/v1/models
-  - Novita: OpenAI-compatible API at https://api.novita.ai/v3/openai/models
+PROVIDERS WITH OFFICIAL SDK INTEGRATION:
+  - Cerebras: Uses cerebras-cloud-sdk package
+    - Fallback: Direct HTTP to https://api.cerebras.ai/v1/models
+  - xAI: Uses xai-sdk package
+    - Fallback: OpenAI SDK with base_url="https://api.x.ai/v1"
+
+PROVIDERS USING OPENAI SDK WITH CUSTOM BASE URL:
+  - Nebius: OpenAI SDK with base_url="https://api.studio.nebius.ai/v1/"
+  - Novita: OpenAI SDK with base_url="https://api.novita.ai/v3/openai"
 
 PROVIDERS USING PORTKEY FILTERING:
   - Google: Filters Portkey catalog by patterns "@google/", "google/", "gemini", "gemma"
   - Hugging Face: Filters Portkey catalog by patterns "llava-hf", "hugging", "hf/"
+
+IMPLEMENTATION STRATEGY:
+  - Use official SDKs when available (better type safety, official support)
+  - Use OpenAI SDK for OpenAI-compatible APIs (proven reliability, no extra dependencies)
+  - Use Portkey filtering only when direct API access is not feasible
 
 HISTORICAL NOTE:
   Initially attempted to use pattern-based filtering from Portkey's unified catalog for all
@@ -119,43 +128,88 @@ def fetch_models_from_google():
 
 def fetch_models_from_cerebras():
     """
-    Fetch models from Cerebras API directly.
+    Fetch models from Cerebras using their official SDK.
 
-    Cerebras provides an OpenAI-compatible API at https://api.cerebras.ai/v1/models
+    Uses the cerebras-cloud-sdk package to interact with Cerebras Cloud API.
+    Falls back to direct HTTP call if SDK is not available.
     """
     try:
         from src.config import Config
-        import httpx
 
         if not Config.CEREBRAS_API_KEY:
             logger.warning("Cerebras API key not configured")
             return None
 
-        headers = {
-            "Authorization": f"Bearer {Config.CEREBRAS_API_KEY}",
-            "Content-Type": "application/json",
-        }
+        # Try using the official Cerebras SDK first
+        try:
+            from cerebras.cloud.sdk import Cerebras
 
-        response = httpx.get(
-            "https://api.cerebras.ai/v1/models",
-            headers=headers,
-            timeout=20.0,
-        )
-        response.raise_for_status()
+            client = Cerebras(api_key=Config.CEREBRAS_API_KEY)
 
-        payload = response.json()
-        raw_models = payload.get("data", [])
+            # The SDK's models.list() returns a list of model objects
+            models_response = client.models.list()
 
-        if not raw_models:
-            logger.warning("No models returned from Cerebras API")
-            return None
+            # Convert to list if it's an iterator/generator
+            if hasattr(models_response, '__iter__') and not isinstance(models_response, (list, dict)):
+                raw_models = list(models_response)
+            else:
+                raw_models = models_response if isinstance(models_response, list) else [models_response]
 
-        normalized_models = [normalize_portkey_provider_model(model, "cerebras") for model in raw_models if model]
+            # Extract data array if response is wrapped
+            if raw_models and isinstance(raw_models[0], dict) and 'data' in raw_models[0]:
+                raw_models = raw_models[0].get('data', [])
+
+            # Convert SDK model objects to dicts if needed
+            models_list = []
+            for model in raw_models:
+                if hasattr(model, 'model_dump'):
+                    # Pydantic model
+                    models_list.append(model.model_dump())
+                elif hasattr(model, 'dict'):
+                    # Legacy Pydantic model
+                    models_list.append(model.dict())
+                elif hasattr(model, '__dict__'):
+                    # Regular object
+                    models_list.append(vars(model))
+                elif isinstance(model, dict):
+                    # Already a dict
+                    models_list.append(model)
+                else:
+                    # Try to convert to dict
+                    models_list.append({'id': str(model)})
+
+            logger.info(f"Fetched {len(models_list)} models from Cerebras SDK")
+
+        except ImportError:
+            # Fallback to direct HTTP API call if SDK not installed
+            logger.info("Cerebras SDK not available, using direct HTTP API")
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {Config.CEREBRAS_API_KEY}",
+                "Content-Type": "application/json",
+            }
+
+            response = httpx.get(
+                "https://api.cerebras.ai/v1/models",
+                headers=headers,
+                timeout=20.0,
+            )
+            response.raise_for_status()
+
+            payload = response.json()
+            models_list = payload.get("data", [])
+
+            if not models_list:
+                logger.warning("No models returned from Cerebras API")
+                return None
+
+        normalized_models = [normalize_portkey_provider_model(model, "cerebras") for model in models_list if model]
 
         _cerebras_models_cache["data"] = normalized_models
         _cerebras_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Fetched {len(normalized_models)} Cerebras models from API")
+        logger.info(f"Cached {len(normalized_models)} Cerebras models")
         return _cerebras_models_cache["data"]
 
     except Exception as e:
@@ -165,43 +219,42 @@ def fetch_models_from_cerebras():
 
 def fetch_models_from_nebius():
     """
-    Fetch models from Nebius API directly.
+    Fetch models from Nebius using OpenAI SDK.
 
-    Nebius provides an OpenAI-compatible API at https://api.studio.nebius.ai/v1/models
+    Nebius AI Studio provides an OpenAI-compatible API at https://api.studio.nebius.ai/v1/
+    Uses the OpenAI Python SDK with a custom base URL.
     """
     try:
         from src.config import Config
-        import httpx
+        from openai import OpenAI
 
         if not Config.NEBIUS_API_KEY:
             logger.warning("Nebius API key not configured")
             return None
 
-        headers = {
-            "Authorization": f"Bearer {Config.NEBIUS_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        response = httpx.get(
-            "https://api.studio.nebius.ai/v1/models",
-            headers=headers,
-            timeout=20.0,
+        # Use OpenAI SDK with Nebius base URL
+        client = OpenAI(
+            base_url="https://api.studio.nebius.ai/v1/",
+            api_key=Config.NEBIUS_API_KEY,
         )
-        response.raise_for_status()
 
-        payload = response.json()
-        raw_models = payload.get("data", [])
+        models_response = client.models.list()
 
-        if not raw_models:
+        # Convert model objects to dicts
+        models_list = [model.model_dump() if hasattr(model, 'model_dump') else model.dict() for model in models_response.data]
+
+        if not models_list:
             logger.warning("No models returned from Nebius API")
             return None
 
-        normalized_models = [normalize_portkey_provider_model(model, "nebius") for model in raw_models if model]
+        logger.info(f"Fetched {len(models_list)} models from Nebius API")
+
+        normalized_models = [normalize_portkey_provider_model(model, "nebius") for model in models_list if model]
 
         _nebius_models_cache["data"] = normalized_models
         _nebius_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Fetched {len(normalized_models)} Nebius models from API")
+        logger.info(f"Cached {len(normalized_models)} Nebius models")
         return _nebius_models_cache["data"]
 
     except Exception as e:
@@ -211,43 +264,79 @@ def fetch_models_from_nebius():
 
 def fetch_models_from_xai():
     """
-    Fetch models from xAI API directly.
+    Fetch models from xAI using their official SDK.
 
-    xAI provides an OpenAI-compatible API at https://api.x.ai/v1/models
+    Uses the xai-sdk Python library to interact with xAI's Grok API.
+    Falls back to OpenAI SDK with custom base URL if official SDK is not available.
     """
     try:
         from src.config import Config
-        import httpx
 
         if not Config.XAI_API_KEY:
             logger.warning("xAI API key not configured")
             return None
 
-        headers = {
-            "Authorization": f"Bearer {Config.XAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
+        # Try using the official xAI SDK first
+        try:
+            from xai_sdk import Client
 
-        response = httpx.get(
-            "https://api.x.ai/v1/models",
-            headers=headers,
-            timeout=20.0,
-        )
-        response.raise_for_status()
+            client = Client(api_key=Config.XAI_API_KEY)
 
-        payload = response.json()
-        raw_models = payload.get("data", [])
+            # The SDK's list_models() or models.list() returns a list of model objects
+            try:
+                models_response = client.models.list()
+            except AttributeError:
+                models_response = client.list_models()
 
-        if not raw_models:
-            logger.warning("No models returned from xAI API")
-            return None
+            # Convert to list if it's an iterator/generator
+            if hasattr(models_response, '__iter__') and not isinstance(models_response, (list, dict)):
+                raw_models = list(models_response)
+            else:
+                raw_models = models_response if isinstance(models_response, list) else [models_response]
 
-        normalized_models = [normalize_portkey_provider_model(model, "xai") for model in raw_models if model]
+            # Extract data array if response is wrapped
+            if raw_models and isinstance(raw_models[0], dict) and 'data' in raw_models[0]:
+                raw_models = raw_models[0].get('data', [])
+
+            # Convert SDK model objects to dicts if needed
+            models_list = []
+            for model in raw_models:
+                if hasattr(model, 'model_dump'):
+                    models_list.append(model.model_dump())
+                elif hasattr(model, 'dict'):
+                    models_list.append(model.dict())
+                elif hasattr(model, '__dict__'):
+                    models_list.append(vars(model))
+                elif isinstance(model, dict):
+                    models_list.append(model)
+                else:
+                    models_list.append({'id': str(model)})
+
+            logger.info(f"Fetched {len(models_list)} models from xAI SDK")
+
+        except ImportError:
+            # Fallback to OpenAI SDK with xAI base URL
+            logger.info("xAI SDK not available, using OpenAI SDK with xAI base URL")
+            from openai import OpenAI
+
+            client = OpenAI(
+                base_url="https://api.x.ai/v1",
+                api_key=Config.XAI_API_KEY,
+            )
+
+            models_response = client.models.list()
+            models_list = [model.model_dump() if hasattr(model, 'model_dump') else model.dict() for model in models_response.data]
+
+            if not models_list:
+                logger.warning("No models returned from xAI API")
+                return None
+
+        normalized_models = [normalize_portkey_provider_model(model, "xai") for model in models_list if model]
 
         _xai_models_cache["data"] = normalized_models
         _xai_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Fetched {len(normalized_models)} xAI models from API")
+        logger.info(f"Cached {len(normalized_models)} xAI models")
         return _xai_models_cache["data"]
 
     except Exception as e:
@@ -257,43 +346,42 @@ def fetch_models_from_xai():
 
 def fetch_models_from_novita():
     """
-    Fetch models from Novita API directly.
+    Fetch models from Novita using OpenAI SDK.
 
-    Novita provides an OpenAI-compatible API at https://api.novita.ai/v3/openai/models
+    Novita AI provides an OpenAI-compatible API at https://api.novita.ai/v3/openai
+    Uses the OpenAI Python SDK with a custom base URL.
     """
     try:
         from src.config import Config
-        import httpx
+        from openai import OpenAI
 
         if not Config.NOVITA_API_KEY:
             logger.warning("Novita API key not configured")
             return None
 
-        headers = {
-            "Authorization": f"Bearer {Config.NOVITA_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        response = httpx.get(
-            "https://api.novita.ai/v3/openai/models",
-            headers=headers,
-            timeout=20.0,
+        # Use OpenAI SDK with Novita base URL
+        client = OpenAI(
+            base_url="https://api.novita.ai/v3/openai",
+            api_key=Config.NOVITA_API_KEY,
         )
-        response.raise_for_status()
 
-        payload = response.json()
-        raw_models = payload.get("data", [])
+        models_response = client.models.list()
 
-        if not raw_models:
+        # Convert model objects to dicts
+        models_list = [model.model_dump() if hasattr(model, 'model_dump') else model.dict() for model in models_response.data]
+
+        if not models_list:
             logger.warning("No models returned from Novita API")
             return None
 
-        normalized_models = [normalize_portkey_provider_model(model, "novita") for model in raw_models if model]
+        logger.info(f"Fetched {len(models_list)} models from Novita API")
+
+        normalized_models = [normalize_portkey_provider_model(model, "novita") for model in models_list if model]
 
         _novita_models_cache["data"] = normalized_models
         _novita_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Fetched {len(normalized_models)} Novita models from API")
+        logger.info(f"Cached {len(normalized_models)} Novita models")
         return _novita_models_cache["data"]
 
     except Exception as e:
