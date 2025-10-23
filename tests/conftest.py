@@ -135,8 +135,8 @@ def isolated_test_data(supabase_client, test_prefix):
 @pytest.fixture(autouse=True)
 def skip_if_no_database(request):
     """Skip tests that require database if credentials are not available"""
-    # Check if this is a database test
-    if 'db' in str(request.fspath):
+    # Check if this is a database or integration test
+    if 'db' in str(request.fspath) or 'integration' in str(request.fspath):
         try:
             client = get_supabase_client()
             # Quick connection test
