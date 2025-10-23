@@ -15,7 +15,7 @@ APPROACH:
 RESULTS:
   Successfully returns models from 6 new providers by filtering the unified catalog:
   - Google: Models with @google/ prefix
-  - Cerebras: Models with @cerebras/ prefix
+  - Cerebras: 9 models with @cerebras/ prefix (as of Sep 2025)
   - Nebius: Models with @nebius/ prefix
   - Xai: Models with @xai/ prefix
   - Novita: Models with @novita/ prefix
@@ -110,7 +110,20 @@ def fetch_models_from_google():
 
 
 def fetch_models_from_cerebras():
-    """Fetch models from Cerebras by filtering Portkey unified catalog"""
+    """
+    Fetch models from Cerebras by filtering Portkey unified catalog.
+
+    Expected models (9 total as of Sep 2025):
+    - qwen-3-coder-480b
+    - qwen-3-32b
+    - qwen-3-235b-a22b-thinking-2507
+    - qwen-3-235b-a22b-instruct-2507
+    - llama3.1-8b
+    - llama-4-scout-17b-16e-instruct
+    - llama-4-maverick-17b-128e-instruct
+    - llama-3.3-70b
+    - gpt-oss-120b
+    """
     try:
         # Cerebras models use @cerebras/ prefix in Portkey
         filtered_models = _filter_portkey_models_by_patterns(
