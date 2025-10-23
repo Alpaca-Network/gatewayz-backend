@@ -13,13 +13,13 @@ APPROACH:
   permissions.
 
 RESULTS:
-  Successfully returns models from 6 new providers by filtering the unified catalog:
-  - Google: Models with @google/ prefix
-  - Cerebras: 9 models with @cerebras/ prefix (as of Sep 2025)
-  - Nebius: Models with @nebius/ prefix
-  - Xai: Models with @xai/ prefix
-  - Novita: Models with @novita/ prefix
-  - Hugging Face: Models matching "llava-hf", "hugging", "hf/" patterns
+  Successfully returns models from providers by filtering the unified catalog:
+  - Google: Matches "@google/", "google/", "gemini", "gemma" patterns
+  - Cerebras: 9 models matching "@cerebras/", "cerebras/" patterns (as of Sep 2025)
+  - Nebius: Matches "@nebius/", "nebius/" patterns
+  - Xai: Matches "@xai/", "xai/", "grok" patterns
+  - Novita: Matches "@novita/", "novita/" patterns
+  - Hugging Face: Matches "llava-hf", "hugging", "hf/" patterns
 """
 
 import logging
@@ -61,6 +61,8 @@ def _filter_portkey_models_by_patterns(patterns: list, provider_name: str):
             logger.warning(f"No Portkey models returned for {provider_name}")
             return None
 
+        logger.info(f"Portkey returned {len(all_portkey_models)} total models to filter for {provider_name}")
+
         # Filter by matching any of the patterns
         filtered_models = []
         seen_ids = set()  # Avoid duplicates
@@ -78,7 +80,15 @@ def _filter_portkey_models_by_patterns(patterns: list, provider_name: str):
                         seen_ids.add(model.get("id"))
                     break
 
-        logger.info(f"Filtered {len(filtered_models)} {provider_name} models from Portkey catalog")
+        if filtered_models:
+            logger.info(f"✅ Filtered {len(filtered_models)} {provider_name} models from Portkey catalog")
+        else:
+            logger.warning(f"⚠️  No {provider_name} models matched patterns {patterns} in Portkey catalog of {len(all_portkey_models)} models")
+            # Log sample model IDs to help debug pattern matching
+            if all_portkey_models:
+                sample_ids = [m.get("id", "unknown") for m in all_portkey_models[:5]]
+                logger.warning(f"Sample Portkey model IDs: {sample_ids}")
+
         return filtered_models if filtered_models else None
 
     except Exception as e:
@@ -89,8 +99,8 @@ def _filter_portkey_models_by_patterns(patterns: list, provider_name: str):
 def fetch_models_from_google():
     """Fetch models from Google by filtering Portkey unified catalog"""
     try:
-        # Google models use @google/ prefix in Portkey
-        filtered_models = _filter_portkey_models_by_patterns(["@google/"], "google")
+        # Google models use @google/ prefix in Portkey (also try without @ for compatibility)
+        filtered_models = _filter_portkey_models_by_patterns(["@google/", "google/", "gemini", "gemma"], "google")
 
         if not filtered_models:
             logger.warning("No Google models found in Portkey catalog")
@@ -125,9 +135,9 @@ def fetch_models_from_cerebras():
     - gpt-oss-120b
     """
     try:
-        # Cerebras models use @cerebras/ prefix in Portkey
+        # Cerebras models use @cerebras/ prefix in Portkey (also try without @ for compatibility)
         filtered_models = _filter_portkey_models_by_patterns(
-            ["@cerebras/"],
+            ["@cerebras/", "cerebras/"],
             "cerebras"
         )
 
@@ -151,9 +161,9 @@ def fetch_models_from_cerebras():
 def fetch_models_from_nebius():
     """Fetch models from Nebius by filtering Portkey unified catalog"""
     try:
-        # Nebius models use @nebius/ prefix in Portkey
+        # Nebius models use @nebius/ prefix in Portkey (also try without @ for compatibility)
         filtered_models = _filter_portkey_models_by_patterns(
-            ["@nebius/"],
+            ["@nebius/", "nebius/"],
             "nebius"
         )
 
@@ -177,8 +187,8 @@ def fetch_models_from_nebius():
 def fetch_models_from_xai():
     """Fetch models from Xai by filtering Portkey unified catalog"""
     try:
-        # Xai models use @xai/ prefix in Portkey
-        filtered_models = _filter_portkey_models_by_patterns(["@xai/"], "xai")
+        # Xai models use @xai/ prefix in Portkey (also try without @ and grok for compatibility)
+        filtered_models = _filter_portkey_models_by_patterns(["@xai/", "xai/", "grok"], "xai")
 
         if not filtered_models:
             logger.warning("No Xai models found in Portkey catalog")
@@ -200,9 +210,9 @@ def fetch_models_from_xai():
 def fetch_models_from_novita():
     """Fetch models from Novita by filtering Portkey unified catalog"""
     try:
-        # Novita models use @novita/ prefix in Portkey
+        # Novita models use @novita/ prefix in Portkey (also try without @ for compatibility)
         filtered_models = _filter_portkey_models_by_patterns(
-            ["@novita/"],
+            ["@novita/", "novita/"],
             "novita"
         )
 
