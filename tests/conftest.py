@@ -35,7 +35,13 @@ def test_prefix():
 @pytest.fixture(scope="session")
 def supabase_client():
     """Get Supabase client for tests"""
-    return get_supabase_client()
+    try:
+        client = get_supabase_client()
+        # Test the connection
+        client.table("users").select("id").limit(1).execute()
+        return client
+    except Exception as e:
+        pytest.skip(f"Database not available: {e}")
 
 
 @pytest.fixture(scope="function")
