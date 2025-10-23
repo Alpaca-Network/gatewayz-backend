@@ -247,7 +247,11 @@ def normalize_portkey_provider_model(model: dict, provider: str) -> dict:
             return {"source_gateway": provider, f"raw_{provider}": model}
 
         # Format: @provider/model-id (Portkey compatible format)
-        slug = f"@{provider}/{model_id}"
+        # Check if model_id already has the @provider/ prefix to avoid duplication
+        if model_id.startswith(f"@{provider}/"):
+            slug = model_id
+        else:
+            slug = f"@{provider}/{model_id}"
         display_name = model.get("display_name") or model_id.replace("-", " ").replace("_", " ").title()
         description = model.get("description") or f"{provider.title()} hosted model: {model_id}"
         context_length = model.get("context_length") or 0
