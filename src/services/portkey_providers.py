@@ -1,25 +1,23 @@
 """
-Portkey Provider Filter Functions
+Provider Integration Functions
 
-These functions filter models from the Portkey unified catalog by provider name patterns.
+These functions fetch models from various AI providers using their native APIs.
 
-APPROACH:
-  Initially attempted to use the Portkey /integrations/{slug}/models endpoint documented at:
-  https://portkey.ai/docs/api-reference/admin-api/control-plane/integrations/models/list-model-access
+PROVIDERS WITH DIRECT API INTEGRATION:
+  - Cerebras: OpenAI-compatible API at https://api.cerebras.ai/v1/models
+  - Nebius: OpenAI-compatible API at https://api.studio.nebius.ai/v1/models
+  - xAI: OpenAI-compatible API at https://api.x.ai/v1/models
+  - Novita: OpenAI-compatible API at https://api.novita.ai/v3/openai/models
 
-  However, this endpoint requires workspace admin-level API key scoping that isn't available
-  through standard user-level API keys. Instead, we use pattern-based filtering from the
-  unified Portkey catalog (500 models), which is more reliable and doesn't require elevated
-  permissions.
+PROVIDERS USING PORTKEY FILTERING:
+  - Google: Filters Portkey catalog by patterns "@google/", "google/", "gemini", "gemma"
+  - Hugging Face: Filters Portkey catalog by patterns "llava-hf", "hugging", "hf/"
 
-RESULTS:
-  Successfully returns models from providers by filtering the unified catalog:
-  - Google: Matches "@google/", "google/", "gemini", "gemma" patterns
-  - Cerebras: 9 models matching "@cerebras/", "cerebras/" patterns (as of Sep 2025)
-  - Nebius: Matches "@nebius/", "nebius/" patterns
-  - Xai: Matches "@xai/", "xai/", "grok" patterns
-  - Novita: Matches "@novita/", "novita/" patterns
-  - Hugging Face: Matches "llava-hf", "hugging", "hf/" patterns
+HISTORICAL NOTE:
+  Initially attempted to use pattern-based filtering from Portkey's unified catalog for all
+  providers, but this approach was unreliable as Portkey's /v1/models endpoint doesn't always
+  include models from all integrated providers. Direct API integration provides better
+  reliability and completeness.
 """
 
 import logging
@@ -121,36 +119,43 @@ def fetch_models_from_google():
 
 def fetch_models_from_cerebras():
     """
-    Fetch models from Cerebras by filtering Portkey unified catalog.
+    Fetch models from Cerebras API directly.
 
-    Expected models (9 total as of Sep 2025):
-    - qwen-3-coder-480b
-    - qwen-3-32b
-    - qwen-3-235b-a22b-thinking-2507
-    - qwen-3-235b-a22b-instruct-2507
-    - llama3.1-8b
-    - llama-4-scout-17b-16e-instruct
-    - llama-4-maverick-17b-128e-instruct
-    - llama-3.3-70b
-    - gpt-oss-120b
+    Cerebras provides an OpenAI-compatible API at https://api.cerebras.ai/v1/models
     """
     try:
-        # Cerebras models use @cerebras/ prefix in Portkey (also try without @ for compatibility)
-        filtered_models = _filter_portkey_models_by_patterns(
-            ["@cerebras/", "cerebras/"],
-            "cerebras"
-        )
+        from src.config import Config
+        import httpx
 
-        if not filtered_models:
-            logger.warning("No Cerebras models found in Portkey catalog")
+        if not Config.CEREBRAS_API_KEY:
+            logger.warning("Cerebras API key not configured")
             return None
 
-        normalized_models = [normalize_portkey_provider_model(model, "cerebras") for model in filtered_models if model]
+        headers = {
+            "Authorization": f"Bearer {Config.CEREBRAS_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = httpx.get(
+            "https://api.cerebras.ai/v1/models",
+            headers=headers,
+            timeout=20.0,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        raw_models = payload.get("data", [])
+
+        if not raw_models:
+            logger.warning("No models returned from Cerebras API")
+            return None
+
+        normalized_models = [normalize_portkey_provider_model(model, "cerebras") for model in raw_models if model]
 
         _cerebras_models_cache["data"] = normalized_models
         _cerebras_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Cached {len(normalized_models)} Cerebras models from Portkey catalog")
+        logger.info(f"Fetched {len(normalized_models)} Cerebras models from API")
         return _cerebras_models_cache["data"]
 
     except Exception as e:
@@ -159,24 +164,44 @@ def fetch_models_from_cerebras():
 
 
 def fetch_models_from_nebius():
-    """Fetch models from Nebius by filtering Portkey unified catalog"""
-    try:
-        # Nebius models use @nebius/ prefix in Portkey (also try without @ for compatibility)
-        filtered_models = _filter_portkey_models_by_patterns(
-            ["@nebius/", "nebius/"],
-            "nebius"
-        )
+    """
+    Fetch models from Nebius API directly.
 
-        if not filtered_models:
-            logger.warning("No Nebius models found in Portkey catalog")
+    Nebius provides an OpenAI-compatible API at https://api.studio.nebius.ai/v1/models
+    """
+    try:
+        from src.config import Config
+        import httpx
+
+        if not Config.NEBIUS_API_KEY:
+            logger.warning("Nebius API key not configured")
             return None
 
-        normalized_models = [normalize_portkey_provider_model(model, "nebius") for model in filtered_models if model]
+        headers = {
+            "Authorization": f"Bearer {Config.NEBIUS_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = httpx.get(
+            "https://api.studio.nebius.ai/v1/models",
+            headers=headers,
+            timeout=20.0,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        raw_models = payload.get("data", [])
+
+        if not raw_models:
+            logger.warning("No models returned from Nebius API")
+            return None
+
+        normalized_models = [normalize_portkey_provider_model(model, "nebius") for model in raw_models if model]
 
         _nebius_models_cache["data"] = normalized_models
         _nebius_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Cached {len(normalized_models)} Nebius models from Portkey catalog")
+        logger.info(f"Fetched {len(normalized_models)} Nebius models from API")
         return _nebius_models_cache["data"]
 
     except Exception as e:
@@ -185,47 +210,90 @@ def fetch_models_from_nebius():
 
 
 def fetch_models_from_xai():
-    """Fetch models from Xai by filtering Portkey unified catalog"""
-    try:
-        # Xai models use @xai/ prefix in Portkey (also try without @ and grok for compatibility)
-        filtered_models = _filter_portkey_models_by_patterns(["@xai/", "xai/", "grok"], "xai")
+    """
+    Fetch models from xAI API directly.
 
-        if not filtered_models:
-            logger.warning("No Xai models found in Portkey catalog")
+    xAI provides an OpenAI-compatible API at https://api.x.ai/v1/models
+    """
+    try:
+        from src.config import Config
+        import httpx
+
+        if not Config.XAI_API_KEY:
+            logger.warning("xAI API key not configured")
             return None
 
-        normalized_models = [normalize_portkey_provider_model(model, "xai") for model in filtered_models if model]
+        headers = {
+            "Authorization": f"Bearer {Config.XAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = httpx.get(
+            "https://api.x.ai/v1/models",
+            headers=headers,
+            timeout=20.0,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        raw_models = payload.get("data", [])
+
+        if not raw_models:
+            logger.warning("No models returned from xAI API")
+            return None
+
+        normalized_models = [normalize_portkey_provider_model(model, "xai") for model in raw_models if model]
 
         _xai_models_cache["data"] = normalized_models
         _xai_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Cached {len(normalized_models)} Xai models from Portkey catalog")
+        logger.info(f"Fetched {len(normalized_models)} xAI models from API")
         return _xai_models_cache["data"]
 
     except Exception as e:
-        logger.error(f"Failed to fetch models from Xai: {e}", exc_info=True)
+        logger.error(f"Failed to fetch models from xAI: {e}", exc_info=True)
         return None
 
 
 def fetch_models_from_novita():
-    """Fetch models from Novita by filtering Portkey unified catalog"""
-    try:
-        # Novita models use @novita/ prefix in Portkey (also try without @ for compatibility)
-        filtered_models = _filter_portkey_models_by_patterns(
-            ["@novita/", "novita/"],
-            "novita"
-        )
+    """
+    Fetch models from Novita API directly.
 
-        if not filtered_models:
-            logger.warning("No Novita models found in Portkey catalog")
+    Novita provides an OpenAI-compatible API at https://api.novita.ai/v3/openai/models
+    """
+    try:
+        from src.config import Config
+        import httpx
+
+        if not Config.NOVITA_API_KEY:
+            logger.warning("Novita API key not configured")
             return None
 
-        normalized_models = [normalize_portkey_provider_model(model, "novita") for model in filtered_models if model]
+        headers = {
+            "Authorization": f"Bearer {Config.NOVITA_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = httpx.get(
+            "https://api.novita.ai/v3/openai/models",
+            headers=headers,
+            timeout=20.0,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        raw_models = payload.get("data", [])
+
+        if not raw_models:
+            logger.warning("No models returned from Novita API")
+            return None
+
+        normalized_models = [normalize_portkey_provider_model(model, "novita") for model in raw_models if model]
 
         _novita_models_cache["data"] = normalized_models
         _novita_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Cached {len(normalized_models)} Novita models from Portkey catalog")
+        logger.info(f"Fetched {len(normalized_models)} Novita models from API")
         return _novita_models_cache["data"]
 
     except Exception as e:
@@ -258,11 +326,10 @@ def fetch_models_from_hug():
 
 def normalize_portkey_provider_model(model: dict, provider: str) -> dict:
     """
-    Normalize model from Portkey unified catalog to catalog schema.
+    Normalize model from provider API to catalog schema.
 
-    IMPORTANT: Model IDs are formatted as @provider/model-id to work with Portkey's
-    request interface. When calling Portkey APIs, use the model ID directly - the
-    portkey_client will handle it correctly.
+    Used for both Portkey-filtered models and direct provider API responses.
+    Model IDs are formatted as @provider/model-id for consistency across all providers.
     """
     try:
         model_id = model.get("id") or model.get("name", "")
