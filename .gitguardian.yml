@@ -1,0 +1,22 @@
+# GitGuardian Configuration
+# Documentation: https://docs.gitguardian.com/internal-repositories-monitoring/integrations/git_hooks/pre_commit#configuration
+
+version: 2
+
+# Paths to exclude from scanning
+paths-ignore:
+  - .env.test
+  - "tests/conftest.py"
+  - "**/test*.env"
+  - "**/*.test.env"
+  - "**/mock*.env"
+  - "**/*test*"
+
+# Matches to ignore
+matches-ignore:
+  - name: Test Mock Credentials
+    match: mock-test.*fake.*000
+  - name: Fake Test Patterns
+    match: ".*MOCK.*FAKE.*testing.*"
+  - name: Zero Test Keys
+    match: ".*-000$"
