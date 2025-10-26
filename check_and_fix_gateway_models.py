@@ -479,6 +479,7 @@ def main():
     args = parser.parse_args()
     
     # Filter to specific gateway if requested
+    global GATEWAY_CONFIG
     if args.gateway:
         gateway_name = args.gateway.lower()
         if gateway_name not in GATEWAY_CONFIG:
@@ -487,9 +488,7 @@ def main():
             sys.exit(1)
         
         # Test only the specified gateway
-        temp_config = {gateway_name: GATEWAY_CONFIG[gateway_name]}
-        global GATEWAY_CONFIG
-        GATEWAY_CONFIG = temp_config
+        GATEWAY_CONFIG = {gateway_name: GATEWAY_CONFIG[gateway_name]}
     
     # Run comprehensive check
     results = run_comprehensive_check(
