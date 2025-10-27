@@ -148,24 +148,41 @@ def fetch_models_from_cerebras():
 
             client = Cerebras(api_key=Config.CEREBRAS_API_KEY)
 
-            # The SDK's models.list() returns a list of model objects
+            # The SDK's models.list() typically returns a Pydantic model with a data attribute.
             models_response = client.models.list()
+            raw_models = []
 
-            # Convert to list if it's an iterator/generator
-            if hasattr(models_response, '__iter__') and not isinstance(models_response, (list, dict)):
-                raw_models = list(models_response)
+            # Prefer structured extraction before falling back to generic iteration.
+            response_dict = None
+            if hasattr(models_response, "model_dump"):
+                response_dict = models_response.model_dump()
+            elif hasattr(models_response, "dict"):
+                response_dict = models_response.dict()
+            elif isinstance(models_response, dict):
+                response_dict = models_response
+
+            if isinstance(response_dict, dict):
+                data_field = response_dict.get("data")
+                if data_field is not None:
+                    if isinstance(data_field, (list, tuple)):
+                        raw_models = list(data_field)
+                    else:
+                        raw_models = [data_field]
+                else:
+                    raw_models = [response_dict]
+            elif hasattr(models_response, "data"):
+                data_value = models_response.data
+                if isinstance(data_value, (list, tuple)):
+                    raw_models = list(data_value)
+                elif data_value is not None:
+                    raw_models = [data_value]
+            elif isinstance(models_response, list):
+                raw_models = models_response
             else:
-                raw_models = models_response if isinstance(models_response, list) else [models_response]
-
-            # Extract data array if response is wrapped
-            # Check if ANY element has a 'data' key (not just the first one)
-            if raw_models:
-                # If first element is a dict with 'data' key, unwrap it
-                if isinstance(raw_models[0], dict) and 'data' in raw_models[0]:
-                    raw_models = raw_models[0].get('data', [])
-                # If raw_models is a list with one dict containing 'data', unwrap it
-                elif len(raw_models) == 1 and isinstance(raw_models[0], dict) and 'data' in raw_models[0]:
-                    raw_models = raw_models[0].get('data', [])
+                try:
+                    raw_models = list(models_response)
+                except TypeError:
+                    raw_models = [models_response] if models_response else []
 
             # Convert SDK model objects to dicts if needed
             models_list = []
@@ -184,8 +201,9 @@ def fetch_models_from_cerebras():
                         # Already a dict
                         models_list.append(model)
                     else:
-                        # Try to convert to dict
-                        models_list.append({'id': str(model)})
+                        # Skip unsupported structures instead of stringifying to avoid malformed output
+                        logger.warning(f"Skipping unsupported Cerebras model object of type {type(model)}")
+                        continue
                 except Exception as conversion_error:
                     logger.warning(f"Failed to convert Cerebras model object: {conversion_error}")
                     continue
