@@ -50,7 +50,7 @@ def validate_statsig_configuration():
             has_initialize = 'async def initialize' in content
             has_log_event = 'def log_event' in content
             has_shutdown = 'async def shutdown' in content
-            has_statsig_import = 'from statsig import' in content
+            has_statsig_import = 'from statsig_python_core import' in content
 
             checks = [
                 ("StatsigService class exists", has_class),
@@ -198,13 +198,15 @@ def validate_statsig_configuration():
             else:
                 all_checks_passed = False
 
-            # Try to import statsig
+            # Try to import statsig (note: package is statsig-python-core, import is statsig_python_core)
             try:
-                import statsig
-                print_check("statsig SDK installed and importable", True)
+                from statsig_python_core import Statsig, StatsigUser, StatsigOptions
+                print_check("statsig SDK installed and importable", True,
+                          ["Successfully imported: Statsig, StatsigUser, StatsigOptions"])
             except ImportError:
                 print_check("statsig SDK installed and importable", False,
-                          ["Run: pip install statsig-python-core==0.10.2"])
+                          ["Run: pip install statsig-python-core==0.10.2",
+                           "Note: Package is 'statsig-python-core' but import uses 'statsig_python_core'"])
 
         else:
             print_check("Requirements file exists", False,

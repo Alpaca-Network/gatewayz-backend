@@ -40,9 +40,17 @@ Statsig Cloud (console.statsig.com)
 ```bash
 # Install all Python dependencies including Statsig SDK
 pip install -r requirements.txt
+
+# Or install Statsig SDK directly
+pip3 install statsig-python-core
 ```
 
-This will install `statsig-python-core==0.10.2` and other required packages.
+This will install `statsig-python-core==0.10.2` (Python 3.7+ required).
+
+**Important**: The package name is `statsig-python-core` but you import it as `statsig_python_core`:
+```python
+from statsig_python_core import Statsig, StatsigUser, StatsigOptions
+```
 
 ### 2. Get Statsig API Key
 
@@ -173,6 +181,19 @@ The service determines the user ID in this order:
 
 Located in `src/services/statsig_service.py`
 
+**Initialization**:
+```python
+from statsig_python_core import Statsig, StatsigUser, StatsigOptions
+
+# Create options
+options = StatsigOptions()
+options.environment = "development"  # or "staging", "production"
+
+# Initialize Statsig
+statsig = Statsig("secret-YOUR-SERVER-KEY", options)
+statsig.initialize().wait()
+```
+
 **Methods**:
 
 #### `async def initialize()`
@@ -180,6 +201,21 @@ Initializes the Statsig SDK with the server secret key. Must be called during ap
 
 #### `def log_event(user_id, event_name, value=None, metadata=None) -> bool`
 Logs an event to Statsig. Returns `True` on success.
+
+**Example**:
+```python
+from statsig_python_core import StatsigUser
+
+statsig.log_event(
+    user=StatsigUser("user_id"),
+    event_name="add_to_cart",
+    value="SKU_12345",
+    metadata={
+        "price": "9.99",
+        "item_name": "diet_coke_48_pack"
+    }
+)
+```
 
 #### `def get_feature_flag(flag_name, user_id, default_value=False) -> bool`
 Retrieves a feature flag value for a user.
@@ -300,12 +336,18 @@ This means Statsig SDK is not properly initialized. Check:
 ### Import Error
 
 ```
-ModuleNotFoundError: No module named 'statsig'
+ModuleNotFoundError: No module named 'statsig_python_core'
 ```
 
 Solution:
 ```bash
 pip install statsig-python-core==0.10.2
+```
+
+**Note**: The package name is `statsig-python-core` (with hyphens), but you must import it as `statsig_python_core` (with underscores):
+```python
+from statsig_python_core import Statsig  # ✅ Correct
+from statsig-python-core import Statsig  # ❌ Wrong (hyphens don't work in imports)
 ```
 
 ## Differences from JavaScript Implementation
