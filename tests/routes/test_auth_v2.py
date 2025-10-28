@@ -12,14 +12,6 @@ import pytest
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
-# Mark all tests in this module to run serially (not in parallel)
-# This is needed because the test fixtures use module-level mocking
-# which doesn't work well with pytest-xdist parallel execution
-# Using xdist_group ensures all tests run in the same worker sequentially
-pytestmark = [
-    pytest.mark.xdist_group(name="auth_v2_serial"),
-]
-
 
 # ==================================================
 # IN-MEMORY SUPABASE STUB (Reusing from db tests)
@@ -169,8 +161,6 @@ class SupabaseStub:
 def sb():
     """Provide in-memory Supabase stub with cleanup"""
     stub = SupabaseStub()
-    # Ensure clean state at start
-    stub.tables.clear()
     yield stub
     # Cleanup: Clear all tables after test
     stub.tables.clear()
