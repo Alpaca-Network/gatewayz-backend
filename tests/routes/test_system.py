@@ -640,3 +640,117 @@ class TestSystemIntegration:
         assert 'cache' in data['data']
         assert data['data']['cache']['models_cached'] == 3
         assert data['data']['cache']['has_data'] is True
+
+
+# ============================================================
+# TEST CLASS: Fix Gateway Endpoint
+# ============================================================
+
+class TestFixGatewayEndpoint:
+    """Test the new fix_gateway endpoint"""
+
+    @patch('src.routes.system.get_models_cache')
+    @patch('src.routes.system.fetch_models_from_openrouter')
+    @patch('src.routes.system.clear_models_cache')
+    @patch('src.routes.system.run_comprehensive_check', Mock())
+    def test_fix_gateway_success(
+        self,
+        mock_clear,
+        mock_fetch,
+        mock_get_cache,
+        client
+    ):
+        """Test successful gateway fix"""
+        mock_fetch.return_value = None
+        mock_get_cache.return_value = {
+            "data": [{"id": "model1"}, {"id": "model2"}],
+            "timestamp": datetime.now(timezone.utc)
+        }
+
+        response = client.post('/health/gateways/openrouter/fix')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert data['gateway'] == 'openrouter'
+        assert data['models_count'] == 2
+
+        mock_clear.assert_called_once_with('openrouter')
+        mock_fetch.assert_called_once()
+
+    @patch('src.routes.system.run_comprehensive_check', None)
+    def test_fix_gateway_module_unavailable(self, client):
+        """Test when fix module is unavailable"""
+        response = client.post('/health/gateways/openrouter/fix')
+
+        assert response.status_code == 503
+        assert 'unavailable' in response.json()['detail']
+
+    @patch('src.routes.system.clear_models_cache')
+    @patch('src.routes.system.run_comprehensive_check', Mock())
+    def test_fix_gateway_unknown_gateway(self, mock_clear, client):
+        """Test fixing an unknown gateway"""
+        response = client.post('/health/gateways/unknown_gateway/fix')
+
+        assert response.status_code == 400
+        assert 'Unknown gateway' in response.json()['detail']
+
+
+# ============================================================
+# TEST CLASS: Dashboard with Pricing
+# ============================================================
+
+class TestDashboardPricing:
+    """Test dashboard endpoints with pricing features"""
+
+    @patch('src.routes.system._run_gateway_check')
+    @patch('src.routes.system.load_manual_pricing')
+    @patch('src.routes.system.get_model_pricing')
+    async def test_dashboard_data_with_pricing(
+        self,
+        mock_get_pricing,
+        mock_load_pricing,
+        mock_run_check,
+        client
+    ):
+        """Test dashboard data endpoint includes pricing"""
+        mock_run_check.return_value = (
+            {
+                "timestamp": "2025-01-15T10:00:00Z",
+                "total_gateways": 1,
+                "healthy": 1,
+                "unhealthy": 0,
+                "unconfigured": 0,
+                "fixed": 0,
+                "gateways": {
+                    "openrouter": {
+                        "name": "OpenRouter",
+                        "configured": True,
+                        "cache_test": {
+                            "models": [{"id": "gpt-4"}]
+                        }
+                    }
+                }
+            },
+            "Log output"
+        )
+
+        mock_load_pricing.return_value = {"openrouter": {}}
+        mock_get_pricing.return_value = {
+            "prompt": "0.03",
+            "completion": "0.06"
+        }
+
+        response = client.get('/health/gateways/dashboard/data?include_pricing=true')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+
+    @patch('src.routes.system.run_comprehensive_check', None)
+    async def test_dashboard_unavailable(self, client):
+        """Test dashboard when check module is unavailable"""
+        response = client.get('/health/gateways/dashboard')
+
+        assert response.status_code == 503
+        assert 'unavailable' in response.json()['detail']
