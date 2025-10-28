@@ -21,7 +21,7 @@ from unittest.mock import Mock, patch, AsyncMock
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from src.main import app
+from src.main import create_app
 from src.schemas import MessagesRequest, AnthropicMessage
 from src.services.anthropic_transformer import (
     transform_anthropic_to_openai,
@@ -37,6 +37,7 @@ from src.services.anthropic_transformer import (
 @pytest.fixture
 def client():
     """FastAPI test client"""
+    app = create_app()
     return TestClient(app)
 
 

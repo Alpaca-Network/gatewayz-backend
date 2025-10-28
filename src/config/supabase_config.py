@@ -11,31 +11,53 @@ _supabase_client: Optional[Client] = None
 
 def get_supabase_client() -> Client:
     global _supabase_client
-    
+
     if _supabase_client is not None:
         return _supabase_client
-    
+
     try:
         Config.validate()
-        
-        _supabase_client = create_client(
-            supabase_url=Config.SUPABASE_URL,
-            supabase_key=Config.SUPABASE_KEY
-        )
-        
-        test_connection()
-        
+
+        # Check if we're in test environment with dummy credentials
+        is_test_env = (Config.SUPABASE_URL == "https://test.supabase.co" or
+                      Config.SUPABASE_KEY == "test-key")
+
+        if is_test_env:
+            # For tests, use a mock client that doesn't make network calls
+            from src.config.test_supabase_mock import MockSupabaseClient
+            _supabase_client = MockSupabaseClient(
+                supabase_url=Config.SUPABASE_URL,
+                supabase_key=Config.SUPABASE_KEY
+            )
+            logger.info("Using mock Supabase client for test environment")
+        else:
+            _supabase_client = create_client(
+                supabase_url=Config.SUPABASE_URL,
+                supabase_key=Config.SUPABASE_KEY
+            )
+            # Test the connection for real environments
+            _test_connection_internal(_supabase_client)
+
         return _supabase_client
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize Supabase client: {e}")
         raise RuntimeError(f"Supabase client initialization failed: {e}")
 
-def test_connection() -> bool:
+def _test_connection_internal(client: Client) -> bool:
+    """Internal test connection that takes a client as parameter"""
     try:
-        client = get_supabase_client()
         result = client.table('users').select('*').limit(1).execute()
         return True
+    except Exception as e:
+        logger.error(f"Database connection test failed: {e}")
+        raise RuntimeError(f"Database connection failed: {e}")
+
+def test_connection() -> bool:
+    """Public test connection method"""
+    try:
+        client = get_supabase_client()
+        return _test_connection_internal(client)
     except Exception as e:
         logger.error(f"Database connection test failed: {e}")
         raise RuntimeError(f"Database connection failed: {e}")
