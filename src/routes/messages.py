@@ -566,3 +566,9 @@ async def anthropic_messages(
 from src.config import Config
 import importlib
 import src.config.supabase_config as supabase_config
+
+# When running in test mode we reuse OpenRouter client for providers that
+# normally rely on external credentials, so unit tests can stub a single path
+if Config.IS_TESTING:
+    make_portkey_request_openai = make_openrouter_request_openai
+    process_portkey_response = process_openrouter_response
