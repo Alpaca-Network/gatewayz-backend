@@ -337,7 +337,7 @@ async def anthropic_messages(
             try:
                 if attempt_provider == "portkey":
                     if Config.IS_TESTING:
-                        logger.debug(
+                        logger.info(
                             "Messages: using mocked openrouter path for portkey in tests (Config.IS_TESTING=%s)",
                             Config.IS_TESTING,
                         )
@@ -352,11 +352,12 @@ async def anthropic_messages(
                         )
                         processed = await _to_thread(process_openrouter_response, resp_raw)
                     else:
+                        logger.info(
+                            "Messages: calling real portkey provider (Config.IS_TESTING=%s)",
+                            Config.IS_TESTING,
+                        )
                         portkey_provider = req.portkey_provider or "anthropic"
                         portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
-                        logger.debug(
-                            "Messages: calling real portkey provider (Config.IS_TESTING=%s)", Config.IS_TESTING
-                        )
                         resp_raw = await asyncio.wait_for(
                             _to_thread(
                                 make_portkey_request_openai,
