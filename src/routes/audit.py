@@ -44,13 +44,35 @@ async def get_user_audit_logs(
         end_dt = None
         if start_date:
             try:
-                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                # Handle 'Z' suffix and ensure '+' is preserved (URL decoding turns '+' into space)
+                date_str = start_date.strip()
+                if date_str.endswith('Z'):
+                    date_str = date_str.replace('Z', '+00:00')
+                # Fix URL decoded spaces back to '+' for timezone offset
+                if ' ' in date_str and date_str.count(':') >= 2:
+                    # Check if this looks like a timezone was affected by URL decoding
+                    # e.g., "2024-01-15T10:00:00 00:00" should be "2024-01-15T10:00:00+00:00"
+                    parts = date_str.rsplit(' ', 1)
+                    if len(parts) == 2 and ':' in parts[1]:
+                        date_str = parts[0] + '+' + parts[1]
+                start_dt = datetime.fromisoformat(date_str)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
 
         if end_date:
             try:
-                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                # Handle 'Z' suffix and ensure '+' is preserved (URL decoding turns '+' into space)
+                date_str = end_date.strip()
+                if date_str.endswith('Z'):
+                    date_str = date_str.replace('Z', '+00:00')
+                # Fix URL decoded spaces back to '+' for timezone offset
+                if ' ' in date_str and date_str.count(':') >= 2:
+                    # Check if this looks like a timezone was affected by URL decoding
+                    # e.g., "2024-01-15T10:00:00 00:00" should be "2024-01-15T10:00:00+00:00"
+                    parts = date_str.rsplit(' ', 1)
+                    if len(parts) == 2 and ':' in parts[1]:
+                        date_str = parts[0] + '+' + parts[1]
+                end_dt = datetime.fromisoformat(date_str)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
 
