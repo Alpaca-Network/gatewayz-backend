@@ -213,17 +213,22 @@ def build_headers(gateway_config: dict) -> dict:
 def test_gateway_endpoint(gateway_name: str, config: dict) -> Tuple[bool, str, int]:
     """
     Test a gateway endpoint directly via HTTP
-    
+
     Returns:
         (success: bool, message: str, model_count: int)
     """
     try:
         url = config['url']
+
+        # Skip if URL is None (cache-only gateways)
+        if url is None:
+            return False, "No direct endpoint (cache-only gateway)", 0
+
         headers = build_headers(config)
-        
+
         if not config['api_key']:
             return False, f"API key not configured ({config['api_key_env']})", 0
-        
+
         # Make HTTP request with timeout
         response = httpx.get(url, headers=headers, timeout=30.0)
         
