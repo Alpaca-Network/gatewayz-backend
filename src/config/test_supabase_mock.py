@@ -120,7 +120,35 @@ class MockSupabaseClient:
     def __init__(self, supabase_url: str, supabase_key: str):
         self.supabase_url = supabase_url
         self.supabase_key = supabase_key
-        self._tables = {}
+
+        # Pre-populate with test data
+        self._tables = {
+            'api_keys_new': [{
+                'id': 1,
+                'api_key': 'test_api_key',
+                'user_id': 1,
+                'key_name': 'Test Key',
+                'environment_tag': 'test',
+                'scope_permissions': {'read': True, 'write': True, 'api_keys': True},
+                'is_primary': True
+            }],
+            'users': [{
+                'id': 1,
+                'username': 'testuser',
+                'email': 'test@example.com',
+                'credits': 1000,
+                'created_at': '2024-01-01T00:00:00Z'
+            }],
+            'api_keys': [{
+                'api_key': 'test_api_key',
+                'user_id': 1,
+                'email': 'test@example.com',
+                'username': 'testuser',
+                'credits': 1000
+            }],
+            'api_key_audit_logs': [],
+            'activity_log': []
+        }
 
     def table(self, table_name: str) -> MockQueryBuilder:
         """Return a mock query builder for the table"""
