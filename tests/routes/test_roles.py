@@ -16,7 +16,7 @@ import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
-from src.main import app
+from src.main import create_app
 
 
 # ============================================================
@@ -26,6 +26,7 @@ from src.main import app
 @pytest.fixture
 def client():
     """FastAPI test client"""
+    app = create_app()
     return TestClient(app)
 
 

@@ -241,11 +241,14 @@ def client(sb, monkeypatch):
     import src.enhanced_notification_service as notif_module
 
     class MockNotificationService:
+        def __init__(self):
+            self.supabase = sb  # Use the test stub instead of real client
         def send_welcome_email(self, *args, **kwargs):
             return True
         def send_welcome_email_if_needed(self, *args, **kwargs):
             return True
-        def send_password_reset_email(self, *args, **kwargs):
+        def send_password_reset_email(self, user_id, username, email):
+            # Mock the password reset without database access
             return "reset_token_123"
 
     monkeypatch.setattr(notif_module, "enhanced_notification_service", MockNotificationService())
