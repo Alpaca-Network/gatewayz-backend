@@ -170,6 +170,9 @@ def sb():
 @pytest.fixture
 def client(sb, monkeypatch):
     """FastAPI test client with mocked dependencies"""
+    # CRITICAL: Apply all mocks BEFORE importing anything from src.main or src.routes
+    # This ensures the mocks are in place when routes are loaded
+
     # Mock get_supabase_client to return our stub
     import src.config.supabase_config
     monkeypatch.setattr(src.config.supabase_config, "get_supabase_client", lambda: sb)
@@ -178,12 +181,6 @@ def client(sb, monkeypatch):
     import src.db.users as users_module
     import src.db.api_keys as api_keys_module
     import src.db.activity as activity_module
-
-    # Store original functions
-    original_get_user_by_privy_id = users_module.get_user_by_privy_id
-    original_create_enhanced_user = users_module.create_enhanced_user
-    original_get_user_by_username = users_module.get_user_by_username
-    original_log_activity = activity_module.log_activity
 
     # Replace with stub-aware versions
     def mock_get_user_by_privy_id(privy_id):
@@ -232,11 +229,22 @@ def client(sb, monkeypatch):
         # Just a no-op for tests
         pass
 
-    # Apply mocks
+    # Apply mocks to the modules
     monkeypatch.setattr(users_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
     monkeypatch.setattr(users_module, "create_enhanced_user", mock_create_enhanced_user)
     monkeypatch.setattr(users_module, "get_user_by_username", mock_get_user_by_username)
     monkeypatch.setattr(activity_module, "log_activity", mock_log_activity)
+
+    # IMPORTANT: Also patch the auth route module's imported references
+    # If src.routes.auth has already been imported, we need to patch its module-level imports
+    import sys
+    if 'src.routes.auth' in sys.modules:
+        auth_module = sys.modules['src.routes.auth']
+        monkeypatch.setattr(auth_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
+        monkeypatch.setattr(auth_module, "create_enhanced_user", mock_create_enhanced_user)
+        if hasattr(auth_module, "get_user_by_username"):
+            monkeypatch.setattr(auth_module, "get_user_by_username", mock_get_user_by_username)
+        monkeypatch.setattr(auth_module, "log_activity", mock_log_activity)
 
     # Also mock notification service
     import src.enhanced_notification_service as notif_module
