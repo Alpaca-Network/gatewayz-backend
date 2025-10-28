@@ -253,19 +253,24 @@ def client(sb, monkeypatch):
     import src.enhanced_notification_service as notif_module
 
     class MockNotificationService:
+        def __init__(self):
+            self.supabase = sb  # Use the test stub instead of real client
         def send_welcome_email(self, *args, **kwargs):
             return True
         def send_welcome_email_if_needed(self, *args, **kwargs):
             return True
-        def send_password_reset_email(self, *args, **kwargs):
+        def send_password_reset_email(self, user_id, username, email):
+            # Mock the password reset without database access
             return "reset_token_123"
 
     monkeypatch.setattr(notif_module, "enhanced_notification_service", MockNotificationService())
 
     # Now import and create the app
-    from src.main import app
+    # We need to create a fresh app instance to ensure routes are loaded
+    from src.main import create_app
     from fastapi.testclient import TestClient
 
+    app = create_app()
     return TestClient(app)
 
 
@@ -614,7 +619,7 @@ def test_request_password_reset_success(client, sb):
     response = client.post('/auth/password-reset?email=test@example.com')
 
     assert response.status_code == 200
-    assert 'password reset email sent' in response.json()['message'].lower()
+    assert 'password reset email sent successfully' in response.json()['message'].lower()
 
 
 def test_request_password_reset_user_not_found(client, sb):
@@ -628,8 +633,9 @@ def test_request_password_reset_user_not_found(client, sb):
 
 def test_reset_password_with_valid_token(client, sb):
     """Test resetting password with valid token"""
-    # Create valid token
-    expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59)
+    # Create valid token that expires in the future
+    from datetime import timedelta
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'valid_token_123',
@@ -676,7 +682,8 @@ def test_reset_password_with_expired_token(client, sb):
 
 def test_reset_password_with_used_token(client, sb):
     """Test resetting password with already used token"""
-    expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59)
+    from datetime import timedelta
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'used_token_123',

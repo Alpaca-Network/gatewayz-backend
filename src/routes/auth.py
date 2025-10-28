@@ -1,5 +1,4 @@
 import logging
-import datetime
 import requests
 from datetime import datetime, timezone
 
