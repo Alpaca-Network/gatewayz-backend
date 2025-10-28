@@ -43,13 +43,23 @@ async def get_user_audit_logs(
         end_dt = None
         if start_date:
             try:
-                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                # Handle various ISO formats including milliseconds
+                cleaned_date = start_date.replace('Z', '+00:00')
+                # Handle milliseconds format (e.g., .000Z -> .000+00:00)
+                if '.000+00:00' in cleaned_date:
+                    cleaned_date = cleaned_date.replace('.000+00:00', '+00:00')
+                start_dt = datetime.fromisoformat(cleaned_date)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
 
         if end_date:
             try:
-                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                # Handle various ISO formats including milliseconds
+                cleaned_date = end_date.replace('Z', '+00:00')
+                # Handle milliseconds format (e.g., .000Z -> .000+00:00)
+                if '.000+00:00' in cleaned_date:
+                    cleaned_date = cleaned_date.replace('.000+00:00', '+00:00')
+                end_dt = datetime.fromisoformat(cleaned_date)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
 
