@@ -44,29 +44,43 @@ async def get_user_audit_logs(
         end_dt = None
         if start_date:
             try:
-                # Handle various ISO formats including milliseconds
-                cleaned_date = start_date.replace('Z', '+00:00')
-                # Remove milliseconds if present (handle .000, .123, etc.)
-                cleaned_date = re.sub(r'\.\d{3}\+', '+', cleaned_date)
-                # Also handle case where milliseconds are at the end
-                if cleaned_date.endswith('.000+00:00'):
-                    cleaned_date = cleaned_date[:-10] + '+00:00'
-                start_dt = datetime.fromisoformat(cleaned_date)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
+                # Use dateutil for robust ISO parsing
+                from dateutil import parser
+                start_dt = parser.isoparse(start_date)
+                # Ensure timezone aware
+                if start_dt.tzinfo is None:
+                    from datetime import timezone
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+            except (ValueError, ImportError):
+                # Fallback to manual parsing if dateutil not available
+                try:
+                    # Handle various ISO formats including milliseconds
+                    cleaned_date = start_date.replace('Z', '+00:00')
+                    # Remove milliseconds completely - more robust regex
+                    cleaned_date = re.sub(r'\.\d+', '', cleaned_date)
+                    start_dt = datetime.fromisoformat(cleaned_date)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
 
         if end_date:
             try:
-                # Handle various ISO formats including milliseconds
-                cleaned_date = end_date.replace('Z', '+00:00')
-                # Remove milliseconds if present (handle .000, .123, etc.)
-                cleaned_date = re.sub(r'\.\d{3}\+', '+', cleaned_date)
-                # Also handle case where milliseconds are at the end
-                if cleaned_date.endswith('.000+00:00'):
-                    cleaned_date = cleaned_date[:-10] + '+00:00'
-                end_dt = datetime.fromisoformat(cleaned_date)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
+                # Use dateutil for robust ISO parsing
+                from dateutil import parser
+                end_dt = parser.isoparse(end_date)
+                # Ensure timezone aware
+                if end_dt.tzinfo is None:
+                    from datetime import timezone
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+            except (ValueError, ImportError):
+                # Fallback to manual parsing if dateutil not available
+                try:
+                    # Handle various ISO formats including milliseconds
+                    cleaned_date = end_date.replace('Z', '+00:00')
+                    # Remove milliseconds completely - more robust regex
+                    cleaned_date = re.sub(r'\.\d+', '', cleaned_date)
+                    end_dt = datetime.fromisoformat(cleaned_date)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
 
         # Get audit logs
         logs = get_audit_logs(
