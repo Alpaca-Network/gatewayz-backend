@@ -3,8 +3,12 @@ import types
 
 import pytest
 
-# Provide a lightweight supabase stub so importing Config does not fail when the SDK isn't installed.
-if "supabase" not in sys.modules:
+try:  # pragma: no cover - exercised during local testing environments
+    import supabase  # type: ignore
+    # Some environments ship with a namespace package but no client helpers.
+    getattr(supabase, "create_client")
+    getattr(supabase, "Client")
+except (ImportError, AttributeError):  # pragma: no cover - falls back only when SDK missing
     supabase_stub = types.ModuleType("supabase")
 
     class _StubSupabaseClient:
