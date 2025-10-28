@@ -251,9 +251,11 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(notif_module, "enhanced_notification_service", MockNotificationService())
 
     # Now import and create the app
-    from src.main import app
+    # We need to create a fresh app instance to ensure routes are loaded
+    from src.main import create_app
     from fastapi.testclient import TestClient
 
+    app = create_app()
     return TestClient(app)
 
 
