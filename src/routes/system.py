@@ -204,7 +204,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         <div class="fix-toggle">
             <div class="status-text">{status_text}</div>
             <label class="switch">
-                <input type="checkbox" onchange="handleFixToggle(event, '{gateway_id}', this)" {attributes}>
+                <input type="checkbox" onclick="event.stopPropagation()" onchange="handleFixToggle(event, '{gateway_id}', this)" {attributes}>
                 <span class="slider"></span>
             </label>
             <span class="toggle-hint">{hint}</span>
@@ -726,12 +726,12 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                 }}
 
                 try {{
-                    const response = await fetch(`/health/gateways/${gatewayId}/fix?auto_fix=true`, {{
+                    const response = await fetch('/health/gateways/' + gatewayId + '/fix?auto_fix=true', {{
                         method: 'POST'
                     }});
 
                     if (!response.ok) {{
-                        throw new Error(`HTTP ${{response.status}}`);
+                        throw new Error('HTTP ' + response.status);
                     }}
 
                     const payload = await response.json();
@@ -739,9 +739,9 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                     if (payload && payload.data) {{
                         const resultStatus = payload.data.auto_fix_successful ? 'Succeeded' : 'Failed';
                         if (statusText) {{
-                            statusText.textContent = `Auto-fix ${resultStatus}`;
+                            statusText.textContent = 'Auto-fix ' + resultStatus;
                         }}
-                    } else if (statusText) {{
+                    }} else if (statusText) {{
                         statusText.textContent = 'Fix attempted';
                     }}
 
@@ -807,6 +807,64 @@ async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> Tuple[Dict[
         return results, buffer.getvalue()
 
     return await run_in_threadpool(_runner)
+
+
+@router.post(
+    "/health/gateways/{gateway}/fix",
+    tags=["health"]
+)
+async def trigger_gateway_fix(
+    gateway: str,
+    auto_fix: bool = Query(
+        True,
+        description="Attempt to auto-fix the specified gateway after running diagnostics."
+    )
+):
+    """
+    Trigger a targeted gateway diagnostics run with optional auto-fix.
+
+    Returns structured status along with captured logs so operators can review
+    what happened without leaving the dashboard.
+    """
+    try:
+        results, log_output = await _run_single_gateway_check(gateway=gateway, auto_fix=auto_fix)
+        gateway_key = gateway.lower()
+        gateway_payload = results.get("gateways", {}).get(gateway_key)
+
+        if not gateway_payload:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Gateway '{gateway}' not found in health check results."
+            )
+
+        return {
+            "success": True,
+            "gateway": gateway_key,
+            "auto_fix": auto_fix,
+            "timestamp": results.get("timestamp"),
+            "data": {
+                "final_status": gateway_payload.get("final_status"),
+                "auto_fix_attempted": gateway_payload.get("auto_fix_attempted"),
+                "auto_fix_successful": gateway_payload.get("auto_fix_successful"),
+                "endpoint_test": gateway_payload.get("endpoint_test"),
+                "cache_test": gateway_payload.get("cache_test"),
+            },
+            "summary": {
+                "total_gateways": results.get("total_gateways"),
+                "healthy": results.get("healthy"),
+                "unhealthy": results.get("unhealthy"),
+                "unconfigured": results.get("unconfigured"),
+                "fixed": results.get("fixed"),
+            },
+            "logs": log_output.strip()
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # pragma: no cover - unexpected failures
+        logger.exception("Failed to trigger gateway fix for %s", gateway)
+        raise HTTPException(status_code=500, detail=f"Failed to run gateway fix: {exc}")
 
 
 # ============================================================================
