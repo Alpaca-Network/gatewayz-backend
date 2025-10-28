@@ -5,11 +5,12 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException
 
-from src.db.rate_limits import get_user_rate_limits, check_rate_limit
-from src.db.users import get_user, get_user_usage_metrics, get_user_profile, update_user_profile, delete_user_account
+import src.db.rate_limits as rate_limits_module
+import src.db.users as users_module
 from src.schemas import UserProfileResponse, DeleteAccountResponse, UserProfileUpdate, DeleteAccountRequest
 from src.security.deps import get_api_key
 from fastapi import APIRouter
+import src.services.trial_validation as trial_module
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -337,5 +338,4 @@ async def get_credit_transactions_endpoint(
     except Exception as e:
         logger.error(f"Error getting credit transactions: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
