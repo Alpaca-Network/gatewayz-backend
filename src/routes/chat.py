@@ -325,7 +325,7 @@ async def chat_completions(
     try:
         # === 1) User + plan/trial prechecks (DB calls on thread) ===
         user = await _to_thread(get_user, api_key)
-        if not user and not Config.IS_TESTING:
+        if not user and Config.IS_TESTING:
             logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
             user = await _to_thread(_fallback_get_user, api_key)
         if not user:
