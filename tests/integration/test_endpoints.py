@@ -9,6 +9,8 @@ from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
 
 # Set test environment variables before imports
+os.environ['APP_ENV'] = 'testing'
+os.environ['TESTING'] = 'true'
 os.environ['SUPABASE_URL'] = 'https://test.supabase.co'
 os.environ['SUPABASE_KEY'] = 'test-key'
 os.environ['OPENROUTER_API_KEY'] = 'test-openrouter-key'
