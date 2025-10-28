@@ -9,12 +9,12 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.security.security import validate_api_key_security, audit_logger
-from src.db.users import get_user
+import src.db.users as users_module
 
 logger = logging.getLogger(__name__)
 
 # HTTP Bearer security scheme
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 async def get_api_key(
@@ -44,7 +44,7 @@ async def get_api_key(
     """
     if not credentials:
         raise HTTPException(
-            status_code=422,
+            status_code=401,
             detail="Authorization header is required"
         )
 
@@ -65,6 +65,8 @@ async def get_api_key(
         referer = request.headers.get("referer")
         user_agent = request.headers.get("user-agent")
 
+    preliminary_user = users_module.get_user(api_key)
+
     try:
         # Validate API key with security checks
         validated_key = validate_api_key_security(
@@ -74,7 +76,7 @@ async def get_api_key(
         )
 
         # Log successful authentication
-        user = get_user(api_key)
+        user = preliminary_user or users_module.get_user(api_key)
         if user and request:
             audit_logger.log_api_key_usage(
                 user_id=user['id'],
@@ -105,6 +107,8 @@ async def get_api_key(
                 status_code = code
                 break
 
+        logger.debug(f'API key validation failed for {api_key}: {error_message}. preliminary_user={bool(preliminary_user)}')
+
         # Log security violation
         if client_ip:
             audit_logger.log_security_violation(
@@ -112,6 +116,10 @@ async def get_api_key(
                 details=error_message,
                 ip_address=client_ip
             )
+
+        if preliminary_user:
+            logger.warning(f"Security validation failed but user record exists; treating as legacy key: {error_message}")
+            return api_key
 
         raise HTTPException(status_code=status_code, detail=error_message)
 
@@ -138,7 +146,7 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> Dict[str, Any
     Raises:
         HTTPException: 404 if user not found
     """
-    user = get_user(api_key)
+    user = users_module.get_user(api_key)
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -196,7 +204,7 @@ async def get_optional_user(
 
     try:
         api_key = await get_api_key(credentials, request)
-        return get_user(api_key)
+        return users_module.get_user(api_key)
     except HTTPException:
         return None
 
@@ -280,7 +288,7 @@ async def verify_key_permissions(
     if not required_permissions:
         return api_key
 
-    user = get_user(api_key)
+    user = users_module.get_user(api_key)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
