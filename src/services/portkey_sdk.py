@@ -29,7 +29,7 @@ PROVIDERS = {
     'google': {
         'name': 'Google',
         'provider_slug': 'google',
-        'description': 'Google AI models via Portkey filtering (no direct API access)'
+        'description': 'Google Generative AI models (direct API access)'
     },
     'cerebras': {
         'name': 'Cerebras',
