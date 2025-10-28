@@ -119,14 +119,13 @@ GATEWAY_CONFIG = {
         'header_type': 'bearer'
     },
     'google': {
-        'name': 'Google (Portkey)',
-        'url': None,  # Google models accessed via Portkey filtering, not direct API
-        'api_key_env': 'PORTKEY_API_KEY',
-        'api_key': Config.PORTKEY_API_KEY,
+        'name': 'Google Generative AI',
+        'url': 'https://generativelanguage.googleapis.com/v1beta/models',
+        'api_key_env': 'GOOGLE_API_KEY',
+        'api_key': Config.GOOGLE_API_KEY,
         'cache': _google_models_cache,
         'min_expected_models': 5,
-        'header_type': 'portkey',
-        'use_cache_only': True  # Skip API test, use cache validation only
+        'header_type': 'google'
     },
     'cerebras': {
         'name': 'Cerebras',
@@ -199,13 +198,16 @@ def build_headers(gateway_config: dict) -> dict:
     api_key = gateway_config.get('api_key')
     if not api_key:
         return {}
-    
+
     header_type = gateway_config.get('header_type', 'bearer')
-    
+
     if header_type == 'bearer':
         return {"Authorization": f"Bearer {api_key}"}
     elif header_type == 'portkey':
         return {"x-portkey-api-key": api_key}
+    elif header_type == 'google':
+        # Google uses API key as query parameter, not header
+        return {}
     else:
         return {}
 
@@ -224,31 +226,38 @@ def test_gateway_endpoint(gateway_name: str, config: dict) -> Tuple[bool, str, i
         if url is None:
             return False, "No direct endpoint (cache-only gateway)", 0
 
-        headers = build_headers(config)
-
         if not config['api_key']:
             return False, f"API key not configured ({config['api_key_env']})", 0
 
+        headers = build_headers(config)
+
+        # Google uses API key as query parameter
+        if config.get('header_type') == 'google':
+            url = f"{url}?key={config['api_key']}"
+
         # Make HTTP request with timeout
         response = httpx.get(url, headers=headers, timeout=30.0)
-        
+
         if response.status_code != 200:
             return False, f"HTTP {response.status_code}: {response.text[:100]}", 0
-        
+
         # Parse response
         data = response.json()
-        
+
         # Extract model count (different APIs have different structures)
         if isinstance(data, list):
             model_count = len(data)
         elif isinstance(data, dict) and 'data' in data:
             model_count = len(data.get('data', []))
+        elif isinstance(data, dict) and 'models' in data:
+            # Google API uses 'models' key
+            model_count = len(data.get('models', []))
         else:
             model_count = 0
-        
+
         if model_count == 0:
             return False, "API returned 0 models", 0
-        
+
         return True, f"OK - {model_count} models available", model_count
         
     except httpx.TimeoutException:
@@ -414,29 +423,19 @@ def run_comprehensive_check(
             results['gateways'][gateway_name] = gateway_result
             continue
         
-        # Test 1: Direct endpoint test (skip if use_cache_only is True)
-        if config.get('use_cache_only'):
-            print(f"\n1. Testing API endpoint: Skipped (uses Portkey filtering)")
-            endpoint_success = None  # Neither success nor failure
-            gateway_result['endpoint_test'] = {
-                'success': None,
-                'message': 'Skipped - accessed via Portkey filtering',
-                'model_count': 0
-            }
-            print(f"   ℹ️  Skipped - accessed via Portkey filtering")
-        else:
-            print(f"\n1. Testing API endpoint: {config['url']}")
-            endpoint_success, endpoint_msg, endpoint_count = test_gateway_endpoint(gateway_name, config)
-            gateway_result['endpoint_test'] = {
-                'success': endpoint_success,
-                'message': endpoint_msg,
-                'model_count': endpoint_count
-            }
+        # Test 1: Direct endpoint test
+        print(f"\n1. Testing API endpoint: {config['url']}")
+        endpoint_success, endpoint_msg, endpoint_count = test_gateway_endpoint(gateway_name, config)
+        gateway_result['endpoint_test'] = {
+            'success': endpoint_success,
+            'message': endpoint_msg,
+            'model_count': endpoint_count
+        }
 
-            if endpoint_success:
-                print(f"   ✅ {endpoint_msg}")
-            else:
-                print(f"   ❌ {endpoint_msg}")
+        if endpoint_success:
+            print(f"   ✅ {endpoint_msg}")
+        else:
+            print(f"   ❌ {endpoint_msg}")
         
         # Test 2: Cache test
         print(f"\n2. Testing cached models:")
@@ -454,11 +453,7 @@ def run_comprehensive_check(
             print(f"   ❌ {cache_msg}")
         
         # Determine if gateway is healthy
-        # If endpoint test was skipped (None), rely solely on cache
-        if endpoint_success is None:
-            is_healthy = cache_success
-        else:
-            is_healthy = endpoint_success or cache_success
+        is_healthy = endpoint_success or cache_success
         
         # Auto-fix if needed and enabled
         if not is_healthy and auto_fix:
