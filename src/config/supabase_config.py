@@ -23,15 +23,13 @@ def get_supabase_client() -> Client:
                       Config.SUPABASE_KEY == "test-key")
 
         if is_test_env:
-            # For tests, create a minimal client that won't validate the key
-            # The test suite should mock this client anyway
-            import os
-            os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
-            os.environ.setdefault("SUPABASE_KEY", "test-key-placeholder")
-            _supabase_client = create_client(
-                supabase_url="https://test.supabase.co",
-                supabase_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.test"  # Minimal valid JWT format
+            # For tests, use a mock client that doesn't make network calls
+            from src.config.test_supabase_mock import MockSupabaseClient
+            _supabase_client = MockSupabaseClient(
+                supabase_url=Config.SUPABASE_URL,
+                supabase_key=Config.SUPABASE_KEY
             )
+            logger.info("Using mock Supabase client for test environment")
         else:
             _supabase_client = create_client(
                 supabase_url=Config.SUPABASE_URL,
