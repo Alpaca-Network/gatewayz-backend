@@ -120,12 +120,13 @@ GATEWAY_CONFIG = {
     },
     'google': {
         'name': 'Google (Portkey)',
-        'url': 'https://generativelanguage.googleapis.com/v1beta/models',
+        'url': None,  # Google models accessed via Portkey filtering, not direct API
         'api_key_env': 'PORTKEY_API_KEY',
         'api_key': Config.PORTKEY_API_KEY,
         'cache': _google_models_cache,
         'min_expected_models': 5,
-        'header_type': 'portkey'
+        'header_type': 'portkey',
+        'use_cache_only': True  # Skip API test, use cache validation only
     },
     'cerebras': {
         'name': 'Cerebras',
@@ -408,19 +409,29 @@ def run_comprehensive_check(
             results['gateways'][gateway_name] = gateway_result
             continue
         
-        # Test 1: Direct endpoint test
-        print(f"\n1. Testing API endpoint: {config['url']}")
-        endpoint_success, endpoint_msg, endpoint_count = test_gateway_endpoint(gateway_name, config)
-        gateway_result['endpoint_test'] = {
-            'success': endpoint_success,
-            'message': endpoint_msg,
-            'model_count': endpoint_count
-        }
-        
-        if endpoint_success:
-            print(f"   ✅ {endpoint_msg}")
+        # Test 1: Direct endpoint test (skip if use_cache_only is True)
+        if config.get('use_cache_only'):
+            print(f"\n1. Testing API endpoint: Skipped (uses Portkey filtering)")
+            endpoint_success = None  # Neither success nor failure
+            gateway_result['endpoint_test'] = {
+                'success': None,
+                'message': 'Skipped - accessed via Portkey filtering',
+                'model_count': 0
+            }
+            print(f"   ℹ️  Skipped - accessed via Portkey filtering")
         else:
-            print(f"   ❌ {endpoint_msg}")
+            print(f"\n1. Testing API endpoint: {config['url']}")
+            endpoint_success, endpoint_msg, endpoint_count = test_gateway_endpoint(gateway_name, config)
+            gateway_result['endpoint_test'] = {
+                'success': endpoint_success,
+                'message': endpoint_msg,
+                'model_count': endpoint_count
+            }
+
+            if endpoint_success:
+                print(f"   ✅ {endpoint_msg}")
+            else:
+                print(f"   ❌ {endpoint_msg}")
         
         # Test 2: Cache test
         print(f"\n2. Testing cached models:")
@@ -438,7 +449,11 @@ def run_comprehensive_check(
             print(f"   ❌ {cache_msg}")
         
         # Determine if gateway is healthy
-        is_healthy = endpoint_success or cache_success
+        # If endpoint test was skipped (None), rely solely on cache
+        if endpoint_success is None:
+            is_healthy = cache_success
+        else:
+            is_healthy = endpoint_success or cache_success
         
         # Auto-fix if needed and enabled
         if not is_healthy and auto_fix:

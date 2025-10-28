@@ -137,12 +137,13 @@ GATEWAY_CONFIG = {
     },
     'google': {
         'name': 'Google (Portkey)',
-        'url': 'https://generativelanguage.googleapis.com/v1beta/models',
+        'url': None,  # Google models accessed via Portkey filtering, not direct API
         'api_key_env': 'PORTKEY_API_KEY',
         'api_key': Config.PORTKEY_API_KEY,
         'cache': _google_models_cache,
         'min_expected_models': 5,
-        'header_type': 'portkey'
+        'header_type': 'portkey',
+        'use_cache_only': True  # Skip API test, use cache validation only
     },
     'cerebras': {
         'name': 'Cerebras',
