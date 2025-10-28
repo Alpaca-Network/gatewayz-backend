@@ -1,5 +1,6 @@
 from typing import Optional
 import logging
+import re
 from datetime import datetime
 
 from src.db.api_keys import validate_api_key_permissions
@@ -45,9 +46,11 @@ async def get_user_audit_logs(
             try:
                 # Handle various ISO formats including milliseconds
                 cleaned_date = start_date.replace('Z', '+00:00')
-                # Handle milliseconds format (e.g., .000Z -> .000+00:00)
-                if '.000+00:00' in cleaned_date:
-                    cleaned_date = cleaned_date.replace('.000+00:00', '+00:00')
+                # Remove milliseconds if present (handle .000, .123, etc.)
+                cleaned_date = re.sub(r'\.\d{3}\+', '+', cleaned_date)
+                # Also handle case where milliseconds are at the end
+                if cleaned_date.endswith('.000+00:00'):
+                    cleaned_date = cleaned_date[:-10] + '+00:00'
                 start_dt = datetime.fromisoformat(cleaned_date)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
@@ -56,9 +59,11 @@ async def get_user_audit_logs(
             try:
                 # Handle various ISO formats including milliseconds
                 cleaned_date = end_date.replace('Z', '+00:00')
-                # Handle milliseconds format (e.g., .000Z -> .000+00:00)
-                if '.000+00:00' in cleaned_date:
-                    cleaned_date = cleaned_date.replace('.000+00:00', '+00:00')
+                # Remove milliseconds if present (handle .000, .123, etc.)
+                cleaned_date = re.sub(r'\.\d{3}\+', '+', cleaned_date)
+                # Also handle case where milliseconds are at the end
+                if cleaned_date.endswith('.000+00:00'):
+                    cleaned_date = cleaned_date[:-10] + '+00:00'
                 end_dt = datetime.fromisoformat(cleaned_date)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
