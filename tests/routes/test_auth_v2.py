@@ -616,8 +616,9 @@ def test_request_password_reset_user_not_found(client, sb):
 
 def test_reset_password_with_valid_token(client, sb):
     """Test resetting password with valid token"""
-    # Create valid token
-    expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59)
+    # Create valid token that expires in the future
+    from datetime import timedelta
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'valid_token_123',
@@ -664,7 +665,8 @@ def test_reset_password_with_expired_token(client, sb):
 
 def test_reset_password_with_used_token(client, sb):
     """Test resetting password with already used token"""
-    expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59)
+    from datetime import timedelta
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'used_token_123',
