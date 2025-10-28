@@ -246,6 +246,8 @@ def client(sb, monkeypatch):
         if hasattr(auth_module, "get_user_by_username"):
             monkeypatch.setattr(auth_module, "get_user_by_username", mock_get_user_by_username)
         monkeypatch.setattr(auth_module, "log_activity", mock_log_activity)
+        # CRITICAL: Also patch get_supabase_client in the auth module
+        monkeypatch.setattr(auth_module, "get_supabase_client", lambda: sb)
 
     # Also mock notification service
     import src.enhanced_notification_service as notif_module
