@@ -56,12 +56,17 @@ class TestGatewayHealthChecker:
 
     def test_gateway_config_has_required_fields(self):
         """Test that each gateway config has required fields"""
-        required_fields = ['name', 'url', 'api_key_env', 'cache', 'header_type']
+        # Note: 'url' is not strictly required for cache-only gateways
+        required_fields = ['name', 'api_key_env', 'cache', 'header_type']
 
         for gateway_name, config in check_module.GATEWAY_CONFIG.items():
             for field in required_fields:
                 assert field in config, \
                     f"Gateway '{gateway_name}' missing required field '{field}'"
+
+            # URL field should exist, but can be None for cache-only gateways
+            assert 'url' in config, \
+                f"Gateway '{gateway_name}' missing 'url' field"
 
     @pytest.mark.unit
     def test_build_headers_bearer_token(self):
@@ -164,10 +169,18 @@ class TestGatewayHealthChecker:
         """Test that all gateway URLs are properly formatted"""
         for gateway_name, config in check_module.GATEWAY_CONFIG.items():
             url = config['url']
-            assert isinstance(url, str), \
-                f"Gateway '{gateway_name}' URL should be a string"
-            assert url.startswith('http'), \
-                f"Gateway '{gateway_name}' URL should start with http(s)"
+            # Some gateways (e.g., Google via Portkey filtering) may have None URL
+            # when they're accessed via cache-only mode
+            if config.get('use_cache_only'):
+                # Cache-only gateways can have None URL
+                assert url is None or (isinstance(url, str) and url.startswith('http')), \
+                    f"Cache-only gateway '{gateway_name}' URL should be None or valid HTTP URL"
+            else:
+                # Regular gateways must have valid HTTP URL
+                assert isinstance(url, str), \
+                    f"Gateway '{gateway_name}' URL should be a string"
+                assert url.startswith('http'), \
+                    f"Gateway '{gateway_name}' URL should start with http(s)"
 
 
 class TestGatewayEndpointChecks:
