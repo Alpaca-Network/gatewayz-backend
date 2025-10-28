@@ -32,7 +32,7 @@ class _BaseQuery:
         self.store = store
         self.table = table
         self._filters = []
-        self._order = None
+        self._orders = []  # Changed to list to support multiple order clauses
         self._limit = None
 
     def eq(self, field, value):
@@ -44,7 +44,7 @@ class _BaseQuery:
         return self
 
     def order(self, field, desc=False):
-        self._order = (field, desc)
+        self._orders.append((field, desc))  # Append to list instead of replacing
         return self
 
     def limit(self, n):
@@ -64,9 +64,10 @@ class _BaseQuery:
         rows = self.store.tables.get(self.table, [])
         matched = [r for r in rows if self._match(r)]
 
-        if self._order:
-            field, desc = self._order
-            matched.sort(key=lambda x: x.get(field, 0), reverse=desc)
+        # Apply multiple order clauses in sequence
+        if self._orders:
+            for field, desc in reversed(self._orders):  # Apply in reverse order for stable sort
+                matched.sort(key=lambda x: x.get(field, 0), reverse=desc)
 
         if self._limit:
             matched = matched[:self._limit]
