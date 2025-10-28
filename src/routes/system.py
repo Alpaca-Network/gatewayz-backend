@@ -1218,7 +1218,7 @@ async def fix_gateway(gateway: str):
     try:
         gateway_lower = gateway.lower()
 
-        # Import the fix function from check_and_fix_gateway_models
+        # Check if the fix function from check_and_fix_gateway_models is available
         if run_comprehensive_check is None:
             raise HTTPException(
                 status_code=503,
