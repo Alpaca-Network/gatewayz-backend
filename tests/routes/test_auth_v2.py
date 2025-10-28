@@ -237,6 +237,16 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(users_module, "get_user_by_username", mock_get_user_by_username)
     monkeypatch.setattr(activity_module, "log_activity", mock_log_activity)
 
+    # Ensure all code paths use the in-memory Supabase stub instead of the cached global client
+    import src.config.supabase_config as supabase_config
+    import src.routes.auth as auth_module
+
+    monkeypatch.setattr(supabase_config, "_supabase_client", None, raising=False)
+    monkeypatch.setattr(supabase_config, "get_supabase_client", lambda: sb)
+    monkeypatch.setattr(auth_module, "get_supabase_client", lambda: sb)
+    monkeypatch.setattr(auth_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
+    monkeypatch.setattr(auth_module, "create_enhanced_user", mock_create_enhanced_user)
+
     # Also mock notification service
     import src.enhanced_notification_service as notif_module
 
@@ -248,7 +258,9 @@ def client(sb, monkeypatch):
         def send_password_reset_email(self, *args, **kwargs):
             return "reset_token_123"
 
-    monkeypatch.setattr(notif_module, "enhanced_notification_service", MockNotificationService())
+    mock_notifier = MockNotificationService()
+    monkeypatch.setattr(notif_module, "enhanced_notification_service", mock_notifier)
+    monkeypatch.setattr(auth_module, "enhanced_notification_service", mock_notifier)
 
     # Now import and create the app
     from src.main import app

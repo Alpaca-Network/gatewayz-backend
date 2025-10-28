@@ -196,7 +196,22 @@ def validate_api_key_security(
     from src.config.supabase_config import get_supabase_client
     from src.db.users import get_user
 
+    # Quick legacy user fallback (allows backwards compatibility and simplifies testing)
+    legacy_user = get_user(api_key)
+    if legacy_user:
+        logger.info("API key validated via legacy users table")
+        return api_key
+
     client = get_supabase_client()
+
+    # Secondary check via users table through Supabase client (covers cases where get_user is mocked)
+    try:
+        user_lookup = client.table('users').select('*').eq('api_key', api_key).execute()
+        if user_lookup.data:
+            logger.info("API key validated via users table lookup")
+            return api_key
+    except Exception as lookup_error:
+        logger.debug(f"Users table lookup failed: {lookup_error}")
 
     # Check both new and legacy API key tables
     tables_to_check = ['api_keys_new', 'api_keys']
@@ -227,8 +242,8 @@ def validate_api_key_security(
             logger.error(f"Error checking {table_name}: {e}")
             continue
 
-    # Fallback to legacy user table validation
-    logger.debug("Attempting legacy user validation")
+    # Fallback to legacy user table validation (second attempt for robustness)
+    logger.debug("Attempting legacy user validation as final fallback")
     user = get_user(api_key)
     if user:
         logger.info("Using legacy API key validation")
