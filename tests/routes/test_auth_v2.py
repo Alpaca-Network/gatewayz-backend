@@ -10,7 +10,8 @@ This test file uses proper mocking strategies for FastAPI route testing:
 
 import pytest
 from datetime import datetime, timezone
-from fastapi.testclient import TestClient
+# Note: Do NOT import 'from src.main import app' here!
+# The app must be imported AFTER mocking in the fixture to ensure mocks are applied
 
 
 # ==================================================
