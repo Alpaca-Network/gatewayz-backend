@@ -232,7 +232,6 @@ async def test_trial_expired_403(app, mock_api_key_validation, monkeypatch, payl
     assert r.headers.get("X-Trial-Expired") == "true"
 
 @pytest.mark.anyio
-@pytest.mark.xfail(reason="Status code mapping issue - returns 400 instead of 429")
 async def test_upstream_429_maps_429(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
     # Happy DB/trial/plan/rate
     monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
@@ -311,7 +310,6 @@ async def test_upstream_timeout_maps_504(app, mock_api_key_validation, monkeypat
     # (Adjust assertion to match your exact mapping if you add explicit timeout handling.)
 
 @pytest.mark.anyio
-@pytest.mark.xfail(reason="Chat history not being saved - returns 0 instead of 2")
 async def test_saves_chat_history_when_session_id(app, happy_patches, payload_basic, auth_headers):
     payload = dict(payload_basic)
     payload["messages"] = [{"role": "user", "content": "Save this please"}]
