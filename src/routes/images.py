@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import time
+import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from fastapi import APIRouter, Depends, HTTPException
@@ -96,6 +97,17 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             model = req.model if req.model else "stable-diffusion-3.5-large"
             provider = req.provider if req.provider else "deepinfra"  # Default to DeepInfra for images
 
+            # Additional validation for testing scenarios where Pydantic may not run
+            if not prompt or not prompt.strip():
+                raise HTTPException(status_code=422, detail="Prompt is required")
+
+            if req.n <= 0:
+                raise HTTPException(status_code=422, detail="`n` must be a positive integer")
+
+            if req.size:
+                if not re.match(r"^\d+x\d+$", req.size.lower()):
+                    raise HTTPException(status_code=422, detail="Size must be in the format WIDTHxHEIGHT (e.g., 1024x1024)")
+
             # Make image generation request
             logger.info(f"Generating {req.n} image(s) with prompt: {prompt[:50]}...")
 
@@ -189,7 +201,7 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
                 'images_generated': req.n
             }
 
-            return processed_response
+            return ImageGenerationResponse(**processed_response)
 
         except HTTPException:
             raise
