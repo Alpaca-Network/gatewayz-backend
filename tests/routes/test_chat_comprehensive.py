@@ -407,9 +407,11 @@ def client(sb, monkeypatch):
 
     monkeypatch.setattr(pricing_module, "calculate_cost", mock_calculate_cost)
 
-    # 7) NOW import app (after all mocks are in place)
-    from src.main import app
+    # 7) NOW create app (after all mocks are in place)
+    from src.main import create_app
     from src.security.deps import get_api_key
+
+    app = create_app()
 
     # Override the get_api_key dependency to bypass authentication
     async def override_get_api_key():

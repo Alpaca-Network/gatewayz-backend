@@ -604,7 +604,7 @@ def test_request_password_reset_success(client, sb):
     response = client.post('/auth/password-reset?email=test@example.com')
 
     assert response.status_code == 200
-    assert 'password reset email sent' in response.json()['message'].lower()
+    assert 'password reset email sent successfully' in response.json()['message'].lower()
 
 
 def test_request_password_reset_user_not_found(client, sb):
