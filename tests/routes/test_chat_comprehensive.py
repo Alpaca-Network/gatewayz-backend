@@ -458,7 +458,6 @@ def test_chat_completions_invalid_api_key(client, sb):
 # HAPPY PATH TESTS - NON-STREAMING
 # ==================================================
 
-@pytest.mark.xfail(reason="Authentication issue - returns 401 instead of 200")
 def test_chat_completions_success(client, sb):
     """Test successful chat completion"""
     # Create test user
