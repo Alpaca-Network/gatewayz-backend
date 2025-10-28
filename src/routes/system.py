@@ -31,6 +31,7 @@ from src.services.models import (
 from src.services.huggingface_models import fetch_models_from_hug
 from src.config import Config
 from src.services.modelz_client import refresh_modelz_cache, get_modelz_cache_status as get_modelz_cache_status_func
+from src.services.pricing_lookup import get_model_pricing, load_manual_pricing
 
 try:
     from check_and_fix_gateway_models import run_comprehensive_check  # type: ignore
@@ -74,7 +75,7 @@ def _normalize_timestamp(value: Any) -> Optional[datetime]:
 
 
 def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix: bool) -> str:
-    """Generate a minimal HTML dashboard for gateway health results."""
+    """Generate a minimal HTML dashboard for gateway health results with fix toggles and pricing."""
 
     timestamp = escape(results.get("timestamp", ""))
     summary = {
@@ -84,6 +85,9 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         "unconfigured": results.get("unconfigured", 0),
         "fixed": results.get("fixed", 0),
     }
+
+    # Load pricing data for display
+    pricing_data = load_manual_pricing()
 
     def status_badge(status: str) -> str:
         status_lower = (status or "unknown").lower()
@@ -138,10 +142,30 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                     model_id = model.get("id") or model.get("model") or str(model)
                 else:
                     model_id = str(model)
-                model_items.append(f"<li>{escape(model_id)}</li>")
+
+                # Get pricing for this model (check both from model dict and from pricing_data)
+                pricing = None
+                if isinstance(model, dict) and "pricing" in model:
+                    pricing = model.get("pricing")
+                elif pricing_data:
+                    pricing = get_model_pricing(gateway_id, model_id)
+
+                pricing_text = ""
+                if pricing:
+                    prompt_price = pricing.get("prompt", "N/A")
+                    completion_price = pricing.get("completion", "N/A")
+                    pricing_text = f'<span class="pricing">Input: ${prompt_price}/1M • Output: ${completion_price}/1M</span>'
+
+                model_items.append(f"""
+                    <li>
+                        <span class="model-id">{escape(model_id)}</span>
+                        {pricing_text}
+                    </li>
+                """)
+
             models_html = f"""
             <tr class="model-row" id="models-{escape(gateway_id)}" style="display: none;">
-                <td colspan="6" class="models-cell">
+                <td colspan="7" class="models-cell">
                     <div class="models-container">
                         <strong>Successfully loaded models ({len(models)}):</strong>
                         <ul class="models-list">
@@ -150,6 +174,17 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                     </div>
                 </td>
             </tr>
+            """
+
+        # Create fix button for unhealthy or degraded gateways
+        fix_button_html = ""
+        if configured == "Yes" and final_status.lower() in ["unhealthy", "degraded", "fail"]:
+            fix_button_html = f"""
+                <button class="fix-btn" onclick="fixGateway(event, '{escape(gateway_id)}')"
+                        id="fix-btn-{escape(gateway_id)}"
+                        data-gateway="{escape(gateway_id)}">
+                    Fix Gateway
+                </button>
             """
 
         rows.append(
@@ -161,6 +196,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                 <td>{cache_badge}<div class="details">{cache_details}</div></td>
                 <td>{final_badge}</td>
                 <td>{auto_fix}</td>
+                <td>{fix_button}</td>
             </tr>
             {models_row}
             """.format(
@@ -175,11 +211,12 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                 cache_details=escape(cache_details),
                 final_badge=status_badge(final_status),
                 auto_fix=escape(auto_fix_text),
+                fix_button=fix_button_html,
                 models_row=models_html
             )
         )
 
-    rows_html = "\n".join(rows) or "<tr><td colspan=6>No gateways inspected.</td></tr>"
+    rows_html = "\n".join(rows) or "<tr><td colspan=7>No gateways inspected.</td></tr>"
 
     summary_cards = """
         <div class="card">
@@ -411,6 +448,92 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
             .models-list::-webkit-scrollbar-thumb:hover {{
                 background: rgba(148, 163, 184, 0.5);
             }}
+            .fix-btn {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.85rem;
+                font-weight: 600;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            }}
+            .fix-btn:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 6px 18px rgba(102, 126, 234, 0.4);
+            }}
+            .fix-btn:disabled {{
+                background: rgba(148, 163, 184, 0.3);
+                cursor: not-allowed;
+                box-shadow: none;
+                transform: none;
+            }}
+            .fix-btn.loading {{
+                position: relative;
+                color: transparent;
+            }}
+            .fix-btn.loading:after {{
+                content: "";
+                position: absolute;
+                width: 16px;
+                height: 16px;
+                top: 50%;
+                left: 50%;
+                margin-left: -8px;
+                margin-top: -8px;
+                border: 2px solid #f3f3f3;
+                border-radius: 50%;
+                border-top: 2px solid #fff;
+                animation: spin 1s linear infinite;
+            }}
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+            .pricing {{
+                display: inline-block;
+                margin-left: 12px;
+                padding: 3px 8px;
+                background: rgba(74, 222, 128, 0.1);
+                border: 1px solid rgba(74, 222, 128, 0.3);
+                border-radius: 4px;
+                font-size: 0.75rem;
+                color: #4ade80;
+                font-weight: 500;
+            }}
+            .model-id {{
+                font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            }}
+            .notification {{
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 16px 24px;
+                border-radius: 8px;
+                color: white;
+                font-weight: 600;
+                z-index: 1000;
+                animation: slideIn 0.3s ease;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            }}
+            .notification.success {{
+                background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            }}
+            .notification.error {{
+                background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+            }}
+            @keyframes slideIn {{
+                from {{
+                    transform: translateX(100%);
+                    opacity: 0;
+                }}
+                to {{
+                    transform: translateX(0);
+                    opacity: 1;
+                }}
+            }}
         </style>
     </head>
     <body>
@@ -431,6 +554,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                     <th>Cache Check</th>
                     <th>Final Status</th>
                     <th>Auto-fix</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -468,6 +592,71 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                     }}
                 }}
             }}
+
+            function showNotification(message, type = 'success') {{
+                const notification = document.createElement('div');
+                notification.className = `notification ${{type}}`;
+                notification.textContent = message;
+                document.body.appendChild(notification);
+
+                setTimeout(() => {{
+                    notification.style.animation = 'slideOut 0.3s ease';
+                    setTimeout(() => notification.remove(), 300);
+                }}, 3000);
+            }}
+
+            async function fixGateway(event, gatewayId) {{
+                event.stopPropagation();
+                const button = event.target;
+
+                // Disable button and show loading state
+                button.disabled = true;
+                button.classList.add('loading');
+                const originalText = button.textContent;
+
+                try {{
+                    const response = await fetch(`/health/gateways/${{gatewayId}}/fix`, {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }}
+                    }});
+
+                    const data = await response.json();
+
+                    if (data.success) {{
+                        showNotification(`Gateway ${{gatewayId}} fixed successfully! ${{data.models_count}} models loaded.`, 'success');
+                        // Reload the page after a short delay to show updated status
+                        setTimeout(() => window.location.reload(), 2000);
+                    }} else {{
+                        showNotification(`Failed to fix gateway ${{gatewayId}}: ${{data.message}}`, 'error');
+                        button.disabled = false;
+                        button.classList.remove('loading');
+                        button.textContent = originalText;
+                    }}
+                }} catch (error) {{
+                    showNotification(`Error fixing gateway ${{gatewayId}}: ${{error.message}}`, 'error');
+                    button.disabled = false;
+                    button.classList.remove('loading');
+                    button.textContent = originalText;
+                }}
+            }}
+
+            // Add slideOut animation style
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes slideOut {{
+                    from {{
+                        transform: translateX(0);
+                        opacity: 1;
+                    }}
+                    to {{
+                        transform: translateX(100%);
+                        opacity: 0;
+                    }}
+                }}
+            `;
+            document.head.appendChild(style);
         </script>
     </body>
     </html>
@@ -917,9 +1106,34 @@ async def gateway_health_dashboard(
         description="Attempt to auto-fix failing gateways using the CLI logic before rendering the dashboard."
     )
 ):
-    """Render an HTML dashboard view of the comprehensive gateway health check."""
+    """Render an HTML dashboard view of the comprehensive gateway health check with fix toggles and pricing."""
 
     results, log_output = await _run_gateway_check(auto_fix=auto_fix)
+
+    # Enrich models with pricing data for display
+    pricing_data = load_manual_pricing()
+    for gateway_name, gateway_data in results.get("gateways", {}).items():
+        if gateway_data and "cache_test" in gateway_data:
+            cache_test = gateway_data.get("cache_test", {})
+            models = cache_test.get("models", [])
+            enriched_models = []
+            for model in models:
+                if isinstance(model, dict):
+                    model_id = model.get("id") or model.get("model")
+                    if model_id:
+                        pricing = get_model_pricing(gateway_name, model_id)
+                        if pricing:
+                            model["pricing"] = pricing
+                    enriched_models.append(model)
+                else:
+                    # If model is just a string ID, convert to dict
+                    model_dict = {"id": str(model)}
+                    pricing = get_model_pricing(gateway_name, str(model))
+                    if pricing:
+                        model_dict["pricing"] = pricing
+                    enriched_models.append(model_dict)
+            cache_test["models"] = enriched_models
+
     html = _render_gateway_dashboard(results, log_output, auto_fix)
     return HTMLResponse(content=html)
 
@@ -933,11 +1147,40 @@ async def gateway_health_dashboard_data(
     include_logs: bool = Query(
         False,
         description="Include captured stdout logs from the CLI run in the response."
+    ),
+    include_pricing: bool = Query(
+        True,
+        description="Include pricing data for models where available."
     )
 ):
     """Expose the dashboard data as JSON for programmatic consumption."""
 
     results, log_output = await _run_gateway_check(auto_fix=auto_fix)
+
+    # Enrich with pricing data if requested
+    if include_pricing:
+        pricing_data = load_manual_pricing()
+        for gateway_name, gateway_data in results.get("gateways", {}).items():
+            if gateway_data and "cache_test" in gateway_data:
+                cache_test = gateway_data.get("cache_test", {})
+                models = cache_test.get("models", [])
+                enriched_models = []
+                for model in models:
+                    if isinstance(model, dict):
+                        model_id = model.get("id") or model.get("model")
+                        if model_id:
+                            pricing = get_model_pricing(gateway_name, model_id)
+                            if pricing:
+                                model["pricing"] = pricing
+                        enriched_models.append(model)
+                    else:
+                        # If model is just a string ID
+                        model_dict = {"id": str(model)}
+                        pricing = get_model_pricing(gateway_name, str(model))
+                        if pricing:
+                            model_dict["pricing"] = pricing
+                        enriched_models.append(model_dict)
+                cache_test["models"] = enriched_models
 
     payload: Dict[str, Any] = {
         "success": True,
@@ -957,6 +1200,84 @@ async def gateway_health_dashboard_data(
         payload["logs"] = log_output
 
     return payload
+
+
+@router.post("/health/gateways/{gateway}/fix", tags=["health"])
+async def fix_gateway(gateway: str):
+    """
+    Attempt to fix a specific gateway by clearing cache and refetching models.
+
+    **Parameters:**
+    - `gateway`: Gateway name to fix (openrouter, portkey, featherless, etc.)
+
+    **Returns:**
+    - Status of the fix operation
+    - New model count
+    - Success/failure details
+    """
+    try:
+        gateway_lower = gateway.lower()
+
+        # Check if the fix function from check_and_fix_gateway_models is available
+        if run_comprehensive_check is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Gateway fix functionality is unavailable in this deployment."
+            )
+
+        # Clear cache for the specific gateway
+        clear_models_cache(gateway_lower)
+        logger.info(f"Cleared cache for {gateway}")
+
+        # Fetch fresh models based on gateway
+        fetch_functions = {
+            "openrouter": fetch_models_from_openrouter,
+            "portkey": fetch_models_from_portkey,
+            "featherless": fetch_models_from_featherless,
+            "chutes": fetch_models_from_chutes,
+            "groq": fetch_models_from_groq,
+            "fireworks": fetch_models_from_fireworks,
+            "together": fetch_models_from_together,
+            "huggingface": fetch_models_from_hug
+        }
+
+        fetch_func = fetch_functions.get(gateway_lower)
+        if not fetch_func:
+            raise HTTPException(status_code=400, detail=f"Unknown gateway: {gateway}")
+
+        # Fetch new models
+        try:
+            result = fetch_func()
+            # If it's a coroutine, await it
+            if hasattr(result, '__await__'):
+                await result
+        except Exception as fetch_error:
+            logger.error(f"Failed to fetch models for {gateway}: {fetch_error}")
+            return {
+                "success": False,
+                "gateway": gateway,
+                "message": f"Failed to fetch models: {str(fetch_error)}",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Get the new cache info
+        new_cache_info = get_models_cache(gateway_lower)
+        models_count = len(new_cache_info.get("data", [])) if new_cache_info else 0
+
+        return {
+            "success": True,
+            "gateway": gateway,
+            "message": f"Gateway fixed successfully with {models_count} models",
+            "models_count": models_count,
+            "action": "fixed",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fix gateway {gateway}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix gateway: {str(e)}")
 
 
 @router.get("/health/{gateway}", tags=["health"])
