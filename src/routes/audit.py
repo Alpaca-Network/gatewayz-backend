@@ -44,43 +44,37 @@ async def get_user_audit_logs(
         end_dt = None
         if start_date:
             try:
-                # Use dateutil for robust ISO parsing
-                from dateutil import parser
-                start_dt = parser.isoparse(start_date)
-                # Ensure timezone aware
-                if start_dt.tzinfo is None:
-                    from datetime import timezone
-                    start_dt = start_dt.replace(tzinfo=timezone.utc)
-            except (ValueError, ImportError):
-                # Fallback to manual parsing if dateutil not available
-                try:
-                    # Handle various ISO formats including milliseconds
-                    cleaned_date = start_date.replace('Z', '+00:00')
-                    # Remove milliseconds completely - more robust regex
-                    cleaned_date = re.sub(r'\.\d+', '', cleaned_date)
-                    start_dt = datetime.fromisoformat(cleaned_date)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
+                # Handle various ISO formats including milliseconds
+                cleaned_date = start_date.replace('Z', '+00:00')
+                # Remove milliseconds if present (.000, .123456, etc.)
+                if '.' in cleaned_date and '+' in cleaned_date:
+                    # Split on the period, take the part before, and the timezone part after
+                    base_part = cleaned_date.split('.')[0]
+                    tz_part = '+' + cleaned_date.split('+')[1]
+                    cleaned_date = base_part + tz_part
+                elif '.' in cleaned_date:
+                    # Just remove everything after the period if no timezone
+                    cleaned_date = cleaned_date.split('.')[0]
+                start_dt = datetime.fromisoformat(cleaned_date)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid start_date format. Use ISO format. Error: {e}")
 
         if end_date:
             try:
-                # Use dateutil for robust ISO parsing
-                from dateutil import parser
-                end_dt = parser.isoparse(end_date)
-                # Ensure timezone aware
-                if end_dt.tzinfo is None:
-                    from datetime import timezone
-                    end_dt = end_dt.replace(tzinfo=timezone.utc)
-            except (ValueError, ImportError):
-                # Fallback to manual parsing if dateutil not available
-                try:
-                    # Handle various ISO formats including milliseconds
-                    cleaned_date = end_date.replace('Z', '+00:00')
-                    # Remove milliseconds completely - more robust regex
-                    cleaned_date = re.sub(r'\.\d+', '', cleaned_date)
-                    end_dt = datetime.fromisoformat(cleaned_date)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
+                # Handle various ISO formats including milliseconds
+                cleaned_date = end_date.replace('Z', '+00:00')
+                # Remove milliseconds if present (.000, .123456, etc.)
+                if '.' in cleaned_date and '+' in cleaned_date:
+                    # Split on the period, take the part before, and the timezone part after
+                    base_part = cleaned_date.split('.')[0]
+                    tz_part = '+' + cleaned_date.split('+')[1]
+                    cleaned_date = base_part + tz_part
+                elif '.' in cleaned_date:
+                    # Just remove everything after the period if no timezone
+                    cleaned_date = cleaned_date.split('.')[0]
+                end_dt = datetime.fromisoformat(cleaned_date)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid end_date format. Use ISO format. Error: {e}")
 
         # Get audit logs
         logs = get_audit_logs(

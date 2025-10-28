@@ -25,6 +25,9 @@ class MockQueryBuilder:
 
     def insert(self, data: Dict[str, Any], **kwargs):
         """Mock insert"""
+        # Add auto-generated id if not present
+        if 'id' not in data:
+            data['id'] = len(self.data) + 1
         self.data.append(data)
         return self
 
@@ -96,9 +99,15 @@ class MockQueryBuilder:
 
     def execute(self):
         """Mock execute - return mock response"""
-        # For test environment, return empty data by default
-        # Tests should mock specific responses as needed
-        return MockExecuteResponse(data=self.data)
+        # For test environment, return data based on operation
+        # If we have filters, apply them (simple eq filter support)
+        result_data = self.data
+        for filter_type, column, value in self.filters:
+            if filter_type == 'eq':
+                result_data = [d for d in result_data if d.get(column) == value]
+
+        # Return the filtered or full data
+        return MockExecuteResponse(data=result_data)
 
     def count(self):
         """Mock count"""
