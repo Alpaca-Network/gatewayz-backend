@@ -136,12 +136,28 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                 # Handle different model data structures
                 if isinstance(model, dict):
                     model_id = model.get("id") or model.get("model") or str(model)
+                    # Get pricing information if available
+                    pricing = model.get("pricing", {})
+                    prompt_price = pricing.get("prompt", "N/A")
+                    completion_price = pricing.get("completion", "N/A")
+
+                    # Format pricing display
+                    if prompt_price != "N/A" and completion_price != "N/A":
+                        try:
+                            prompt_val = float(prompt_price)
+                            completion_val = float(completion_price)
+                            pricing_str = f" <span class='model-pricing'>(${prompt_val:.4f}/${completion_val:.4f} per 1M tokens)</span>"
+                        except (ValueError, TypeError):
+                            pricing_str = ""
+                    else:
+                        pricing_str = ""
                 else:
                     model_id = str(model)
-                model_items.append(f"<li>{escape(model_id)}</li>")
+                    pricing_str = ""
+                model_items.append(f"<li>{escape(model_id)}{pricing_str}</li>")
             models_html = f"""
             <tr class="model-row" id="models-{escape(gateway_id)}" style="display: none;">
-                <td colspan="6" class="models-cell">
+                <td colspan="7" class="models-cell">
                     <div class="models-container">
                         <strong>Successfully loaded models ({len(models)}):</strong>
                         <ul class="models-list">
@@ -152,6 +168,11 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
             </tr>
             """
 
+        # Add fix button if gateway is configured
+        fix_button = ""
+        if configured == "Yes":
+            fix_button = f'<button class="fix-btn" onclick="fixGateway(\'{escape(gateway_id)}\', event)">Fix</button>'
+
         rows.append(
             """
             <tr class="gateway-row {clickable_class}" {onclick}>
@@ -161,6 +182,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                 <td>{cache_badge}<div class="details">{cache_details}</div></td>
                 <td>{final_badge}</td>
                 <td>{auto_fix}</td>
+                <td>{fix_button}</td>
             </tr>
             {models_row}
             """.format(
@@ -175,11 +197,12 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                 cache_details=escape(cache_details),
                 final_badge=status_badge(final_status),
                 auto_fix=escape(auto_fix_text),
+                fix_button=fix_button,
                 models_row=models_html
             )
         )
 
-    rows_html = "\n".join(rows) or "<tr><td colspan=6>No gateways inspected.</td></tr>"
+    rows_html = "\n".join(rows) or "<tr><td colspan=7>No gateways inspected.</td></tr>"
 
     summary_cards = """
         <div class="card">
@@ -411,6 +434,60 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
             .models-list::-webkit-scrollbar-thumb:hover {{
                 background: rgba(148, 163, 184, 0.5);
             }}
+            .fix-btn {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.875rem;
+                font-weight: 600;
+                transition: all 0.3s ease;
+                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            }}
+            .fix-btn:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+            }}
+            .fix-btn:active {{
+                transform: translateY(0);
+            }}
+            .fix-btn:disabled {{
+                background: rgba(148, 163, 184, 0.3);
+                cursor: not-allowed;
+                transform: none;
+                box-shadow: none;
+            }}
+            .fix-btn.fixing {{
+                background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            }}
+            .fix-btn.success {{
+                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            }}
+            .fix-btn.error {{
+                background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            }}
+            .model-pricing {{
+                color: #a78bfa;
+                font-size: 0.8rem;
+                font-weight: normal;
+                margin-left: 8px;
+            }}
+            .loading-spinner {{
+                display: inline-block;
+                width: 14px;
+                height: 14px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-top-color: white;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+                margin-right: 6px;
+                vertical-align: middle;
+            }}
+            @keyframes spin {{
+                to {{ transform: rotate(360deg); }}
+            }}
         </style>
     </head>
     <body>
@@ -431,6 +508,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                     <th>Cache Check</th>
                     <th>Final Status</th>
                     <th>Auto-fix</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -466,6 +544,74 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
                         modelsRow.style.display = 'none';
                         if (clickedRow) clickedRow.classList.remove('expanded');
                     }}
+                }}
+            }}
+
+            async function fixGateway(gatewayId, event) {{
+                // Prevent row click event from firing
+                event.stopPropagation();
+
+                const button = event.target;
+                const originalText = button.textContent;
+
+                // Disable button and show loading state
+                button.disabled = true;
+                button.classList.add('fixing');
+                button.innerHTML = '<span class="loading-spinner"></span>Fixing...';
+
+                try {{
+                    const response = await fetch(`/health/gateways/${{gatewayId}}/fix`, {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }}
+                    }});
+
+                    const data = await response.json();
+
+                    if (response.ok && data.success && data.fixed) {{
+                        // Success state
+                        button.classList.remove('fixing');
+                        button.classList.add('success');
+                        button.textContent = '✓ Fixed';
+
+                        // Show success message
+                        alert(`Gateway "${{gatewayId}}" fixed successfully!\\n${{data.message}}\\nModels: ${{data.models_count}}`);
+
+                        // Reload page after 2 seconds to show updated status
+                        setTimeout(() => {{
+                            window.location.reload();
+                        }}, 2000);
+                    }} else {{
+                        // Error state
+                        button.classList.remove('fixing');
+                        button.classList.add('error');
+                        button.textContent = '✗ Failed';
+
+                        const errorMsg = data.message || data.detail || 'Unknown error';
+                        alert(`Failed to fix gateway "${{gatewayId}}":\\n${{errorMsg}}`);
+
+                        // Reset button after 3 seconds
+                        setTimeout(() => {{
+                            button.disabled = false;
+                            button.classList.remove('error');
+                            button.textContent = originalText;
+                        }}, 3000);
+                    }}
+                }} catch (error) {{
+                    // Network error
+                    button.classList.remove('fixing');
+                    button.classList.add('error');
+                    button.textContent = '✗ Error';
+
+                    alert(`Network error while fixing gateway "${{gatewayId}}":\\n${{error.message}}`);
+
+                    // Reset button after 3 seconds
+                    setTimeout(() => {{
+                        button.disabled = false;
+                        button.classList.remove('error');
+                        button.textContent = originalText;
+                    }}, 3000);
                 }}
             }}
         </script>
@@ -1098,12 +1244,12 @@ async def refresh_modelz_cache_endpoint():
 async def clear_modelz_cache_endpoint():
     """
     Clear the Modelz cache.
-    
+
     This endpoint:
     - Removes all cached Modelz data
     - Resets cache timestamps
     - Forces next request to fetch fresh data from API
-    
+
     **Example Response:**
     ```json
     {
@@ -1116,7 +1262,7 @@ async def clear_modelz_cache_endpoint():
     try:
         logger.info("Clearing Modelz cache via API endpoint")
         clear_modelz_cache()
-        
+
         return {
             "success": True,
             "message": "Modelz cache cleared successfully",
@@ -1125,4 +1271,82 @@ async def clear_modelz_cache_endpoint():
     except Exception as e:
         logger.error(f"Failed to clear Modelz cache: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to clear Modelz cache: {str(e)}")
+
+
+@router.post("/health/gateways/{gateway_name}/fix", tags=["health"])
+async def fix_single_gateway(gateway_name: str):
+    """
+    Attempt to auto-fix a specific gateway.
+
+    This endpoint:
+    - Clears the cache for the specified gateway
+    - Forces a fresh fetch of models
+    - Returns the status of the fix attempt
+
+    **Parameters:**
+    - `gateway_name`: The gateway to fix (openrouter, portkey, featherless, etc.)
+
+    **Example Response:**
+    ```json
+    {
+      "success": true,
+      "gateway": "openrouter",
+      "fixed": true,
+      "message": "Gateway fixed successfully",
+      "models_count": 250,
+      "timestamp": "2025-01-15T10:30:45.123Z"
+    }
+    ```
+    """
+    try:
+        if run_comprehensive_check is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Gateway fix functionality is unavailable in this deployment."
+            )
+
+        gateway_name_lower = gateway_name.lower()
+
+        # Import the gateway config from the check script
+        from check_and_fix_gateway_models import GATEWAY_CONFIG, attempt_auto_fix
+
+        if gateway_name_lower not in GATEWAY_CONFIG:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Gateway '{gateway_name}' not found. Available gateways: {', '.join(GATEWAY_CONFIG.keys())}"
+            )
+
+        config = GATEWAY_CONFIG[gateway_name_lower]
+
+        # Check if API key is configured
+        if not config['api_key']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Gateway '{gateway_name}' is not configured. Missing API key: {config['api_key_env']}"
+            )
+
+        # Attempt to fix the gateway
+        def _fix() -> Tuple[bool, str]:
+            return attempt_auto_fix(gateway_name_lower, config)
+
+        fixed, message = await run_in_threadpool(_fix)
+
+        # Get updated cache info
+        cache_info = get_models_cache(gateway_name_lower)
+        models_count = len(cache_info.get("data", [])) if cache_info else 0
+
+        return {
+            "success": True,
+            "gateway": gateway_name_lower,
+            "fixed": fixed,
+            "message": message,
+            "models_count": models_count,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fix gateway {gateway_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix gateway: {str(e)}")
 
