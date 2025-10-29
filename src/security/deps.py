@@ -201,6 +201,21 @@ async def get_optional_user(
         return None
 
 
+async def require_authenticated_api_key(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        request: Request = None
+) -> str:
+    """
+    Wrapper for get_api_key that normalizes missing-credential errors to 401.
+    """
+    try:
+        return await get_api_key(credentials=credentials, request=request)
+    except HTTPException as exc:
+        if exc.status_code == 422:
+            raise HTTPException(status_code=401, detail=exc.detail)
+        raise
+
+
 async def require_active_subscription(
         user: Dict[str, Any] = Depends(get_current_user)
 ) -> Dict[str, Any]:

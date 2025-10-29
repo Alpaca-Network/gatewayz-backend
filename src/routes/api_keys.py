@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException
 
 from src.schemas import CreateApiKeyRequest, UpdateApiKeyRequest, UpdateApiKeyResponse, ApiKeyResponse, \
     DeleteApiKeyRequest
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 
 from src.config.supabase_config import get_supabase_client
 

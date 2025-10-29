@@ -9,7 +9,7 @@ from src.db.api_keys import get_api_key_by_id
 from src.db.rate_limits import get_user_rate_limit_configs, get_rate_limit_usage_stats, update_rate_limit_config, \
     bulk_update_rate_limit_configs, get_rate_limit_config, get_system_rate_limit_stats, get_rate_limit_alerts
 from src.db.users import get_user
-from src.security.deps import get_api_key, require_admin
+from src.security.deps import require_authenticated_api_key as get_api_key, require_admin
 from fastapi import APIRouter
 
 # Initialize logging

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db.api_keys import increment_api_key_usage
 from src.db.users import get_user, deduct_credits, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 from src.services.image_generation_client import make_portkey_image_request, make_deepinfra_image_request, make_google_vertex_image_request, process_image_generation_response
 from src.config import Config
 

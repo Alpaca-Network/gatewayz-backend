@@ -10,7 +10,7 @@ from src.db.plans import get_all_plans, get_plan_by_id, get_user_plan, get_user_
 from src.db.rate_limits import get_environment_usage_summary
 from src.db.users import get_user
 from src.schemas import PlanResponse, UserPlanResponse, PlanUsageResponse, PlanEntitlementsResponse, AssignPlanRequest
-from src.security.deps import get_api_key, require_admin
+from src.security.deps import require_authenticated_api_key as get_api_key, require_admin
 from fastapi import APIRouter
 
 # Initialize logging
