@@ -69,22 +69,33 @@ class StripeService:
             user_email = user.get('email', '')
             if user_email.startswith('did:privy:'):
                 logger.warning(f"User {user_id} has Privy DID as email: {user_email}")
-                # Try to get email from Privy linked accounts via Supabase
-                from src.config.supabase_config import get_supabase_client
-                client = get_supabase_client()
-                user_result = client.table('users').select('privy_user_id').eq('id', user_id).execute()
-                if user_result.data and user_result.data[0].get('privy_user_id'):
-                    privy_user_id = user_result.data[0]['privy_user_id']
-                    logger.info(f"Found privy_user_id for user {user_id}: {privy_user_id}")
-                    # For now, use request.customer_email if available, otherwise generic email
-                    if request.customer_email:
-                        user_email = request.customer_email
-                    else:
-                        # If no customer_email in request, we can't get real email without Privy token
-                        user_email = None
-                        logger.warning(f"No customer_email in request for user {user_id} with Privy DID")
+                if request.customer_email:
+                    user_email = request.customer_email
                 else:
-                    user_email = None
+                    try:
+                        from src.config.supabase_config import get_supabase_client
+
+                        client = get_supabase_client()
+                        user_result = (
+                            client.table('users')
+                            .select('privy_user_id')
+                            .eq('id', user_id)
+                            .execute()
+                        )
+
+                        if user_result.data and user_result.data[0].get('privy_user_id'):
+                            logger.info(
+                                "Privy user %s resolved, but no customer_email provided; continuing without email.",
+                                user_result.data[0]['privy_user_id'],
+                            )
+                        user_email = None
+                    except Exception as lookup_error:
+                        logger.warning(
+                            "Unable to resolve Privy email for user %s: %s",
+                            user_id,
+                            lookup_error,
+                        )
+                        user_email = None
 
             # Create payment record
             payment = create_payment(
@@ -313,9 +324,27 @@ class StripeService:
     def _handle_checkout_completed(self, session):
         """Handle completed checkout session"""
         try:
-            user_id = int(session.metadata.get('user_id'))
-            credits = float(session.metadata.get('credits'))
-            payment_id = int(session.metadata.get('payment_id'))
+            if isinstance(session, dict):
+                raw_metadata = session.get('metadata', {}) or {}
+                session_id = session.get('id')
+                payment_intent = session.get('payment_intent')
+            else:
+                raw_metadata = getattr(session, 'metadata', {}) or {}
+                if not isinstance(raw_metadata, dict):
+                    try:
+                        raw_metadata = dict(raw_metadata)
+                    except Exception:
+                        raw_metadata = {}
+                session_id = getattr(session, 'id', None)
+                payment_intent = getattr(session, 'payment_intent', None)
+
+            required_keys = ('user_id', 'credits', 'payment_id')
+            if any(key not in raw_metadata for key in required_keys):
+                raise ValueError("Checkout session missing required metadata fields")
+
+            user_id = int(raw_metadata.get('user_id'))
+            credits = float(raw_metadata.get('credits'))
+            payment_id = int(raw_metadata.get('payment_id'))
             amount_dollars = credits / 100  # Convert cents to dollars
 
             # Add credits and log transaction
@@ -326,8 +355,8 @@ class StripeService:
                 description=f"Stripe checkout - ${amount_dollars}",
                 payment_id=payment_id,
                 metadata={
-                    'stripe_session_id': session.id,
-                    'stripe_payment_intent_id': session.payment_intent
+                    'stripe_session_id': session_id,
+                    'stripe_payment_intent_id': payment_intent
                 }
             )
 
@@ -335,7 +364,7 @@ class StripeService:
             update_payment_status(
                 payment_id=payment_id,
                 status='completed',
-                stripe_payment_intent_id=session.payment_intent
+                stripe_payment_intent_id=payment_intent
             )
 
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
@@ -387,7 +416,11 @@ class StripeService:
     def _handle_payment_succeeded(self, payment_intent):
         """Handle successful payment"""
         try:
-            payment = get_payment_by_stripe_intent(payment_intent.id)
+            intent_id = payment_intent.get('id') if isinstance(payment_intent, dict) else getattr(payment_intent, 'id', None)
+            if not intent_id:
+                raise ValueError("Payment intent missing id")
+
+            payment = get_payment_by_stripe_intent(intent_id)
             if payment:
                 update_payment_status(
                     payment_id=payment['id'],
@@ -401,22 +434,26 @@ class StripeService:
                     transaction_type='purchase',
                     description=f"Stripe payment - ${amount}",
                     payment_id=payment['id'],
-                    metadata={'stripe_payment_intent_id': payment_intent.id}
+                    metadata={'stripe_payment_intent_id': intent_id}
                 )
-                logger.info(f"Payment succeeded: {payment_intent.id}")
+                logger.info(f"Payment succeeded: {intent_id}")
         except Exception as e:
             logger.error(f"Error handling payment succeeded: {e}")
 
     def _handle_payment_failed(self, payment_intent):
         """Handle failed payment"""
         try:
-            payment = get_payment_by_stripe_intent(payment_intent.id)
+            intent_id = payment_intent.get('id') if isinstance(payment_intent, dict) else getattr(payment_intent, 'id', None)
+            if not intent_id:
+                raise ValueError("Payment intent missing id")
+
+            payment = get_payment_by_stripe_intent(intent_id)
             if payment:
                 update_payment_status(
                     payment_id=payment['id'],
                     status='failed'
                 )
-                logger.info(f"Payment failed: {payment_intent.id}")
+                logger.info(f"Payment failed: {intent_id}")
         except Exception as e:
             logger.error(f"Error handling payment failed: {e}")
 
