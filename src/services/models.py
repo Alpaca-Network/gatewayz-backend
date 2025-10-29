@@ -1859,18 +1859,34 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
         return "openrouter"
 
 
-def fetch_specific_model(provider_name: str, model_name: str, gateway: str = None):
-    """Fetch specific model from the appropriate gateway
-    
-    Args:
-        provider_name: Provider name (e.g., 'openai', 'anthropic')
-        model_name: Model name (e.g., 'gpt-4', 'claude-3')
-        gateway: Optional gateway override. If not provided, auto-detects
-        
-    Returns:
-        Model data dict or None if not found
-    """
+def _normalize_fetch_request(provider_name: str | None, model_name: str | None) -> tuple[str, str] | None:
+    if provider_name is None:
+        logger.debug("fetch_specific_model called with provider_name=None")
+        return None
+
+    provider_value = provider_name.strip()
+    model_value = model_name.strip() if isinstance(model_name, str) else model_name
+
+    if not model_value:
+        if "/" not in provider_value:
+            logger.warning(f"fetch_specific_model invalid identifier: '{provider_value}'")
+            return None
+        provider_value, model_value = provider_value.split("/", 1)
+
+    if not provider_value or not model_value:
+        logger.debug("fetch_specific_model missing provider or model after normalization")
+        return None
+
+    return provider_value, model_value
+
+
+def _fetch_specific_model_internal(provider_name: str | None, model_name: str | None, gateway: str = None):
     try:
+        normalized = _normalize_fetch_request(provider_name, model_name)
+        if not normalized:
+            return None
+
+        provider_name, model_name = normalized
         model_id = f"{provider_name}/{model_name}"
         explicit_gateway = gateway is not None
 
@@ -1937,6 +1953,21 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
     except Exception as e:
         logger.error(f"Failed to fetch specific model {provider_name}/{model_name} (gateways tried: {gateway}): {e}")
         return None
+
+
+def fetch_specific_model(provider_name: str | None, model_name: str | None = None, gateway: str = None):
+    """Fetch specific model from the appropriate gateway.
+
+    Supports both synchronous and coroutine-style usage:
+      await fetch_specific_model("openrouter/gpt-4")
+      fetch_specific_model("openrouter", "gpt-4")
+    """
+    if model_name is None:
+        async def _runner():
+            return _fetch_specific_model_internal(provider_name, model_name, gateway)
+        return _runner()
+
+    return _fetch_specific_model_internal(provider_name, model_name, gateway)
 
 
 def get_cached_huggingface_model(hugging_face_id: str):
@@ -2144,7 +2175,7 @@ def get_model_count_by_provider(
     """
     try:
         # Legacy usage: provider slug string + models list -> integer count
-        if isinstance(provider_or_models, str) or provider_or_models is None:
+        if isinstance(provider_or_models, str):
             provider_slug = (provider_or_models or "").lower().lstrip("@")
             models = models_data or []
             if not provider_slug or not models:
