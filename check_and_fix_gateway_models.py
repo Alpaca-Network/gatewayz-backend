@@ -16,8 +16,10 @@ Features:
 import sys
 import os
 import time
+import json
 import httpx
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 # Add the project root to the path
@@ -75,12 +77,14 @@ GATEWAY_CONFIG = {
     },
     'chutes': {
         'name': 'Chutes',
-        'url': 'https://api.chutes.ai/v1/models',
+        'url': None,  # Uses static catalog, not live API endpoint
         'api_key_env': 'CHUTES_API_KEY',
         'api_key': getattr(Config, 'CHUTES_API_KEY', None),
         'cache': _chutes_models_cache,
         'min_expected_models': 5,
-        'header_type': 'bearer'
+        'header_type': 'bearer',
+        'uses_static_catalog': True,
+        'catalog_path': 'src/data/chutes_catalog.json'
     },
     'groq': {
         'name': 'Groq',
@@ -212,6 +216,48 @@ def build_headers(gateway_config: dict) -> dict:
         return {}
 
 
+def test_static_catalog(gateway_name: str, config: dict) -> Tuple[bool, str, int]:
+    """
+    Test a gateway that uses a static catalog file
+
+    Returns:
+        (success: bool, message: str, model_count: int)
+    """
+    try:
+        catalog_path = config.get('catalog_path')
+        if not catalog_path:
+            return False, "No catalog path configured", 0
+
+        # Resolve path relative to project root
+        full_path = Path(__file__).parent / catalog_path
+
+        if not full_path.exists():
+            return False, f"Catalog file not found: {catalog_path}", 0
+
+        # Try to load and parse the catalog
+        with open(full_path, 'r') as f:
+            models = json.load(f)
+
+        if not isinstance(models, list):
+            return False, "Catalog is not a list of models", 0
+
+        model_count = len(models)
+
+        if model_count == 0:
+            return False, "Catalog contains 0 models", 0
+
+        # Check file size for additional info
+        file_size = full_path.stat().st_size
+        size_kb = file_size / 1024
+
+        return True, f"Static catalog OK - {model_count} models ({size_kb:.1f} KB)", model_count
+
+    except json.JSONDecodeError as e:
+        return False, f"Invalid JSON in catalog: {str(e)[:50]}", 0
+    except Exception as e:
+        return False, f"Error reading catalog: {str(e)[:100]}", 0
+
+
 def test_gateway_endpoint(gateway_name: str, config: dict) -> Tuple[bool, str, int]:
     """
     Test a gateway endpoint directly via HTTP
@@ -222,8 +268,11 @@ def test_gateway_endpoint(gateway_name: str, config: dict) -> Tuple[bool, str, i
     try:
         url = config['url']
 
-        # Skip if URL is None (cache-only gateways)
+        # Skip if URL is None (static catalog or cache-only gateways)
         if url is None:
+            # Check if this uses a static catalog instead
+            if config.get('uses_static_catalog'):
+                return test_static_catalog(gateway_name, config)
             return False, "No direct endpoint (cache-only gateway)", 0
 
         if not config['api_key']:
@@ -407,24 +456,26 @@ def run_comprehensive_check(
         
         gateway_result = {
             'name': gateway_display_name,
-            'configured': bool(config['api_key']),
+            'configured': bool(config['api_key']) or config.get('uses_static_catalog', False),
             'endpoint_test': {},
             'cache_test': {},
             'auto_fix_attempted': False,
             'auto_fix_successful': False,
             'final_status': 'unknown'
         }
-        
-        # Check if API key is configured
-        if not config['api_key']:
+
+        # Check if API key is configured (not required for static catalog gateways)
+        if not config['api_key'] and not config.get('uses_static_catalog'):
             print(f"⚠️  API key not configured: {config['api_key_env']}")
             gateway_result['final_status'] = 'unconfigured'
             results['unconfigured'] += 1
             results['gateways'][gateway_name] = gateway_result
             continue
-        
+
         # Test 1: Direct endpoint test
-        print(f"\n1. Testing API endpoint: {config['url']}")
+        endpoint_url = config.get('catalog_path') if config.get('uses_static_catalog') else config['url']
+        endpoint_type = "static catalog" if config.get('uses_static_catalog') else "API endpoint"
+        print(f"\n1. Testing {endpoint_type}: {endpoint_url}")
         endpoint_success, endpoint_msg, endpoint_count = test_gateway_endpoint(gateway_name, config)
         gateway_result['endpoint_test'] = {
             'success': endpoint_success,
