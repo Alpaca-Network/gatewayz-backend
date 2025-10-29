@@ -340,8 +340,6 @@ def redeem_coupon(
         }
     """
     try:
-        client = get_supabase_client()
-
         # Step 1: Validate coupon
         validation = validate_coupon(code, user_id)
 
@@ -356,6 +354,7 @@ def redeem_coupon(
                 'coupon_code': code
             }
 
+        client = get_supabase_client()
         coupon_id = validation['coupon_id']
         coupon_value = validation['coupon_value']
 

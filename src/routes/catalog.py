@@ -199,7 +199,7 @@ async def get_providers(
         if gateway_value in ("openrouter", "all"):
             raw_providers = get_cached_providers()
             if not raw_providers and gateway_value == "openrouter":
-                raise HTTPException(status_code=503, detail="Provider data unavailable")
+                raise HTTPException(status_code=500, detail="Provider data unavailable")
 
             enhanced_openrouter = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(raw_providers or []),
@@ -212,7 +212,7 @@ async def get_providers(
             portkey_models = get_cached_models("portkey") or []
             provider_groups.append(derive_portkey_providers(portkey_models))
             if gateway_value == "portkey" and not portkey_models:
-                raise HTTPException(status_code=503, detail="Portkey models data unavailable")
+                raise HTTPException(status_code=500, detail="Portkey models data unavailable")
 
         # Add support for other gateways
         other_gateways = ["featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]
@@ -227,10 +227,10 @@ async def get_providers(
                     provider_groups.append(derived_providers)
                 elif gateway_value == gw:
                     # Only raise error if specifically requesting this gateway
-                    raise HTTPException(status_code=503, detail=f"{gw.capitalize()} models data unavailable")
+                    raise HTTPException(status_code=500, detail=f"{gw.capitalize()} models data unavailable")
 
         if not provider_groups:
-            raise HTTPException(status_code=503, detail="Provider data unavailable")
+            raise HTTPException(status_code=500, detail="Provider data unavailable")
 
         combined_providers = merge_provider_lists(*provider_groups)
 
@@ -327,97 +327,97 @@ async def get_models(
             openrouter_models = get_cached_models("openrouter") or []
             if gateway_value == "openrouter" and not openrouter_models:
                 logger.error("No OpenRouter models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("portkey", "all"):
             portkey_models = get_cached_models("portkey") or []
             if gateway_value == "portkey" and not portkey_models:
                 logger.error("No Portkey models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("featherless", "all"):
             featherless_models = get_cached_models("featherless") or []
             if gateway_value == "featherless" and not featherless_models:
                 logger.error("No Featherless models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("deepinfra", "all"):
             deepinfra_models = get_cached_models("deepinfra") or []
             if gateway_value == "deepinfra" and not deepinfra_models:
                 logger.error("No DeepInfra models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("chutes", "all"):
             chutes_models = get_cached_models("chutes") or []
             if gateway_value == "chutes" and not chutes_models:
                 logger.error("No Chutes models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("groq", "all"):
             groq_models = get_cached_models("groq") or []
             if gateway_value == "groq" and not groq_models:
                 logger.error("No Groq models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("fireworks", "all"):
             fireworks_models = get_cached_models("fireworks") or []
             if gateway_value == "fireworks" and not fireworks_models:
                 logger.error("No Fireworks models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("together", "all"):
             together_models = get_cached_models("together") or []
             if gateway_value == "together" and not together_models:
                 logger.error("No Together models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("google", "all"):
             google_models = get_cached_models("google") or []
             if gateway_value == "google" and not google_models:
                 logger.error("No Google models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("cerebras", "all"):
             cerebras_models = get_cached_models("cerebras") or []
             if gateway_value == "cerebras" and not cerebras_models:
                 logger.error("No Cerebras models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("nebius", "all"):
             nebius_models = get_cached_models("nebius") or []
             if gateway_value == "nebius" and not nebius_models:
                 logger.error("No Nebius models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("xai", "all"):
             xai_models = get_cached_models("xai") or []
             if gateway_value == "xai" and not xai_models:
                 logger.error("No Xai models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("novita", "all"):
             novita_models = get_cached_models("novita") or []
             if gateway_value == "novita" and not novita_models:
                 logger.error("No Novita models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("hug", "all"):
             hug_models = get_cached_models("hug") or []
             if gateway_value == "hug" and not hug_models:
                 logger.error("No Hugging Face models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("aimo", "all"):
             aimo_models = get_cached_models("aimo") or []
             if gateway_value == "aimo" and not aimo_models:
                 logger.error("No AIMO models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value in ("near", "all"):
             near_models = get_cached_models("near") or []
             if gateway_value == "near" and not near_models:
                 logger.error("No Near models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+                raise HTTPException(status_code=500, detail="Models data unavailable")
 
         if gateway_value == "openrouter":
             models = openrouter_models
@@ -459,14 +459,14 @@ async def get_models(
 
         if not models:
             logger.error("No models data available after applying gateway selection")
-            raise HTTPException(status_code=503, detail="Models data unavailable")
+            raise HTTPException(status_code=500, detail="Models data unavailable")
 
         provider_groups: List[List[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             providers = get_cached_providers()
             if not providers and gateway_value == "openrouter":
-                raise HTTPException(status_code=503, detail="Provider data unavailable")
+                raise HTTPException(status_code=500, detail="Provider data unavailable")
             enhanced_providers = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(providers or []),
                 "openrouter",
@@ -678,7 +678,7 @@ async def get_specific_model(
 
     try:
         # Fetch model data from appropriate gateway
-        model_data = fetch_specific_model(provider_name, model_name, gateway)
+        model_data = await fetch_specific_model(provider_name, model_name, gateway)
         
         if not model_data:
             gateway_msg = f" from gateway '{gateway}'" if gateway else ""
@@ -775,7 +775,7 @@ async def get_developer_models(
         models = get_cached_models(gateway_value)
 
         if not models:
-            raise HTTPException(status_code=503, detail="Models data unavailable")
+            raise HTTPException(status_code=500, detail="Models data unavailable")
 
         # Filter models by developer/provider
         developer_lower = developer_name.lower()
@@ -1146,7 +1146,7 @@ async def compare_model_across_gateways(
         # Fetch model from each gateway
         for gateway in gateway_list:
             try:
-                model_data = fetch_specific_model(provider_name, model_name, gateway)
+                model_data = await fetch_specific_model(provider_name, model_name, gateway)
                 
                 if model_data:
                     # Extract relevant comparison data
@@ -1262,7 +1262,7 @@ async def batch_compare_models(
                 models_data = []
                 
                 for gateway in all_gateways:
-                    model_data = fetch_specific_model(provider_name, model_name, gateway)
+                    model_data = await fetch_specific_model(provider_name, model_name, gateway)
                     if model_data:
                         models_data.append({
                             "gateway": gateway,
