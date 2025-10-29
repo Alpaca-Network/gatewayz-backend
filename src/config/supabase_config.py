@@ -9,24 +9,70 @@ logger = logging.getLogger(__name__)
 
 _supabase_client: Optional[Client] = None
 
+
+class _TestingTableStub:
+    def select(self, *args, **kwargs):
+        return self
+
+    def insert(self, *args, **kwargs):
+        return self
+
+    def update(self, *args, **kwargs):
+        return self
+
+    def delete(self, *args, **kwargs):
+        return self
+
+    def eq(self, *args, **kwargs):
+        return self
+
+    def in_(self, *args, **kwargs):
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
+    def execute(self):
+        return type("Result", (), {"data": []})()
+
+
+class _TestingRPCStub:
+    def execute(self):
+        return type("Result", (), {"data": []})()
+
+
+class _SupabaseTestingStub:
+    def table(self, *_args, **_kwargs):
+        return _TestingTableStub()
+
+    def rpc(self, *_args, **_kwargs):
+        return _TestingRPCStub()
+
 def get_supabase_client() -> Client:
     global _supabase_client
     
     if _supabase_client is not None:
         return _supabase_client
-    
+
+    if Config.IS_TESTING:
+        _supabase_client = _SupabaseTestingStub()  # type: ignore[assignment]
+        return _supabase_client
+
     try:
         Config.validate()
-        
+
         _supabase_client = create_client(
             supabase_url=Config.SUPABASE_URL,
             supabase_key=Config.SUPABASE_KEY
         )
-        
+
         test_connection()
-        
+
         return _supabase_client
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize Supabase client: {e}")
         raise RuntimeError(f"Supabase client initialization failed: {e}")

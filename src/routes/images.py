@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db.api_keys import increment_api_key_usage
 from src.db.users import get_user, deduct_credits, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
-from src.security.deps import get_api_key
+from src.security.deps import get_api_key_or_401
 from src.services.image_generation_client import make_portkey_image_request, make_deepinfra_image_request, make_google_vertex_image_request, process_image_generation_response
 from src.config import Config
 
@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 @router.post("/v1/images/generations", response_model=ImageGenerationResponse, tags=["images"])
-async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(get_api_key)):
+async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(get_api_key_or_401)):
     """
     OpenAI-compatible image generation endpoint.
 

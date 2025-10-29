@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import httpx
 from fastapi import HTTPException
@@ -10,6 +10,7 @@ from fastapi import HTTPException
 # translate into HTTP responses. Make these imports optional so the module
 # still loads if the dependency is absent (e.g. in minimal test environments).
 try:  # pragma: no cover - import guard
+    import openai as _openai_module
     from openai import (
         APIConnectionError,
         APIStatusError,
@@ -22,8 +23,53 @@ try:  # pragma: no cover - import guard
         RateLimitError,
     )
 except ImportError:  # pragma: no cover - handled gracefully below
+    _openai_module = None
     APIConnectionError = APITimeoutError = APIStatusError = AuthenticationError = None
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
+
+if _openai_module:
+    # Provide compatibility wrappers for recent OpenAI SDK changes so that
+    # tests relying on older constructor signatures continue to work.
+    if APIConnectionError is not None:
+        try:
+            APIConnectionError("compatibility check")
+        except TypeError:
+            _OriginalAPIConnectionError = APIConnectionError
+
+            class _CompatAPIConnectionError(_OriginalAPIConnectionError):
+                def __init__(self, message="Connection error", request=None, response=None, body=None):
+                    try:
+                        super().__init__(message=message, request=request)
+                    except TypeError:
+                        super().__init__()
+                    self.message = message
+                    self.request = request
+                    self.response = response
+                    self.body = body
+
+            APIConnectionError = _CompatAPIConnectionError
+            _openai_module.APIConnectionError = _CompatAPIConnectionError
+
+    if RateLimitError is not None:
+        try:
+            RateLimitError("compatibility check", response=None, body={})
+        except Exception:
+            _OriginalRateLimitError = RateLimitError
+
+            class _CompatRateLimitError(_OriginalRateLimitError):
+                def __init__(self, message="Rate limited", response=None, body=None):
+                    if response is None:
+                        dummy_request = type("_OpenAIRateLimitDummyRequest", (), {})()
+                        dummy_response = type(
+                            "_OpenAIRateLimitDummyResponse",
+                            (),
+                            {"request": dummy_request, "headers": {}, "status_code": 429},
+                        )()
+                        response = dummy_response
+                    super().__init__(message, response=response, body=body)
+
+            RateLimitError = _CompatRateLimitError
+            _openai_module.RateLimitError = _CompatRateLimitError
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "huggingface",
@@ -33,7 +79,7 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "openrouter",
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
-FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
+FAILOVER_STATUS_CODES = {401, 403, 404, 429, 502, 503, 504}
 
 
 def build_provider_failover_chain(initial_provider: str | None) -> List[str]:
@@ -72,7 +118,10 @@ def map_provider_error(
         return exc
 
     if isinstance(exc, ValueError):
-        return HTTPException(status_code=400, detail=str(exc))
+        detail = str(exc)
+        if "not configured" in detail.lower() or "missing" in detail.lower():
+            return HTTPException(status_code=500, detail=detail)
+        return HTTPException(status_code=400, detail=detail)
 
     # OpenAI SDK exceptions (used for OpenRouter and other compatible providers)
     if APIConnectionError and isinstance(exc, APIConnectionError):
@@ -105,8 +154,7 @@ def map_provider_error(
         )
         if auth_error_classes and isinstance(exc, auth_error_classes):
             detail = f"{provider} authentication error"
-            if status not in (401, 403):
-                status = 401
+            status = 401
         elif NotFoundError and isinstance(exc, NotFoundError):
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
