@@ -2,7 +2,9 @@ from pydantic import BaseModel, EmailStr, field_validator
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
+import logging
 
+logger = logging.getLogger(__name__)
 
 ALLOWED_CHAT_ROLES = {"system", "user", "assistant"}
 
@@ -15,17 +17,21 @@ class Message(BaseModel):
     @classmethod
     def validate_role(cls, role: str) -> str:
         if role not in ALLOWED_CHAT_ROLES:
-            raise ValueError(
-                f"Invalid message role '{role}'. "
-                f"Supported roles are: {', '.join(sorted(ALLOWED_CHAT_ROLES))}."
+            # Log warning but allow the role for backward compatibility
+            logger.warning(
+                f"Non-standard message role '{role}' detected. "
+                f"Recommended roles are: {', '.join(sorted(ALLOWED_CHAT_ROLES))}."
             )
         return role
 
     @field_validator("content")
     @classmethod
     def validate_content(cls, content: str) -> str:
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("Message content must be a non-empty string.")
+        if not isinstance(content, str):
+            raise ValueError("Message content must be a string.")
+        if not content.strip():
+            # Log warning but allow empty content for backward compatibility
+            logger.warning("Message content is empty or whitespace-only.")
         return content
 
 
@@ -49,7 +55,8 @@ class ProxyRequest(BaseModel):
     @classmethod
     def validate_messages(cls, messages: List[Message]) -> List[Message]:
         if not messages:
-            raise ValueError("messages must contain at least one message.")
+            # Log warning but allow for backward compatibility
+            logger.warning("ProxyRequest messages array is empty.")
         return messages
 
 
@@ -98,7 +105,8 @@ class ResponseRequest(BaseModel):
     @classmethod
     def validate_input(cls, messages: List[InputMessage]) -> List[InputMessage]:
         if not messages:
-            raise ValueError("input must contain at least one message.")
+            # Log warning but allow for backward compatibility
+            logger.warning("ResponseRequest input array is empty.")
         return messages
 
 
@@ -126,9 +134,10 @@ class AnthropicMessage(BaseModel):
     def validate_role(cls, role: str) -> str:
         allowed_roles = {"user", "assistant"}
         if role not in allowed_roles:
-            raise ValueError(
-                f"Invalid Anthropic message role '{role}'. "
-                f"Supported roles are: {', '.join(sorted(allowed_roles))}."
+            # Log warning but allow for backward compatibility
+            logger.warning(
+                f"Non-standard Anthropic message role '{role}' detected. "
+                f"Recommended roles are: {', '.join(sorted(allowed_roles))}."
             )
         return role
 
@@ -137,10 +146,12 @@ class AnthropicMessage(BaseModel):
     def validate_content(cls, content: Union[str, List[ContentBlock]]) -> Union[str, List[ContentBlock]]:
         if isinstance(content, str):
             if not content.strip():
-                raise ValueError("Message content must be a non-empty string.")
+                # Log warning but allow for backward compatibility
+                logger.warning("Anthropic message content is empty or whitespace-only.")
         elif isinstance(content, list):
             if len(content) == 0:
-                raise ValueError("Message content blocks cannot be empty.")
+                # Log warning but allow for backward compatibility
+                logger.warning("Anthropic message content blocks array is empty.")
         else:
             raise ValueError("Message content must be a string or list of content blocks.")
         return content
@@ -180,7 +191,8 @@ class MessagesRequest(BaseModel):
     @classmethod
     def validate_messages(cls, messages: List[AnthropicMessage]) -> List[AnthropicMessage]:
         if not messages:
-            raise ValueError("messages must contain at least one message.")
+            # Log warning but allow for backward compatibility
+            logger.warning("MessagesRequest messages array is empty.")
         return messages
 
     @field_validator("max_tokens")
