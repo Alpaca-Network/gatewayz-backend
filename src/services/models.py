@@ -4,6 +4,9 @@ import json
 import os
 from pathlib import Path
 import csv
+import time
+from collections import deque
+from threading import Lock
 
 from src.config import Config
 from src.cache import (
@@ -79,6 +82,57 @@ logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_HF_DETAIL_RATE_WINDOW_SECONDS = 60
+_HF_DETAIL_MAX_REQUESTS_WITH_TOKEN = int(os.environ.get("HUGGINGFACE_MAX_DETAIL_REQ_WITH_TOKEN", 120))
+_HF_DETAIL_MAX_REQUESTS_NO_TOKEN = int(os.environ.get("HUGGINGFACE_MAX_DETAIL_REQ_NO_TOKEN", 30))
+_HF_DETAIL_MIN_INTERVAL_WITH_TOKEN = float(os.environ.get("HUGGINGFACE_MIN_INTERVAL_WITH_TOKEN", "0.2"))
+_HF_DETAIL_MIN_INTERVAL_NO_TOKEN = float(os.environ.get("HUGGINGFACE_MIN_INTERVAL_NO_TOKEN", "0.75"))
+
+_hf_detail_requests_lock = Lock()
+_hf_detail_request_timestamps: deque = deque()
+_hf_last_request_ts: float = 0.0
+
+
+def _reserve_hf_detail_request_slot() -> bool:
+    """
+    Simple token bucket to prevent hammering Hugging Face API.
+    Returns True if we are allowed to make a request right now.
+    """
+    max_requests = (
+        _HF_DETAIL_MAX_REQUESTS_WITH_TOKEN if Config.HUG_API_KEY else _HF_DETAIL_MAX_REQUESTS_NO_TOKEN
+    )
+    if max_requests <= 0:
+        return False
+
+    now = time.monotonic()
+    with _hf_detail_requests_lock:
+        while _hf_detail_request_timestamps and now - _hf_detail_request_timestamps[0] > _HF_DETAIL_RATE_WINDOW_SECONDS:
+            _hf_detail_request_timestamps.popleft()
+
+        if len(_hf_detail_request_timestamps) >= max_requests:
+            return False
+
+        _hf_detail_request_timestamps.append(now)
+        return True
+
+
+def _enforce_hf_detail_min_interval():
+    """
+    Ensure a minimum spacing between successive Hugging Face detail requests.
+    """
+    global _hf_last_request_ts
+
+    min_interval = (
+        _HF_DETAIL_MIN_INTERVAL_WITH_TOKEN if Config.HUG_API_KEY else _HF_DETAIL_MIN_INTERVAL_NO_TOKEN
+    )
+    now = time.monotonic()
+    with _hf_detail_requests_lock:
+        elapsed = now - _hf_last_request_ts
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
+            now = time.monotonic()
+        _hf_last_request_ts = now
 
 
 def load_featherless_catalog_export() -> list:
@@ -1901,26 +1955,76 @@ def get_cached_huggingface_model(hugging_face_id: str):
 def fetch_huggingface_model(hugging_face_id: str):
     """Fetch model data from Hugging Face API"""
     try:
+        if not _reserve_hf_detail_request_slot():
+            logger.debug(
+                f"Skipping Hugging Face detail fetch for {hugging_face_id} – rate limit budget exhausted"
+            )
+            return None
+
+        headers = {}
+        if Config.HUG_API_KEY:
+            headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
+
         # Hugging Face API endpoint for model info
         url = f"https://huggingface.co/api/models/{hugging_face_id}"
 
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
+        max_retries = 4
+        backoff = 1.0
 
-        model_data = response.json()
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                _enforce_hf_detail_min_interval()
+                response = httpx.get(url, headers=headers, timeout=10.0)
+                response.raise_for_status()
 
-        # Cache the result
-        _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+                model_data = response.json()
 
-        return model_data
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"Hugging Face model {hugging_face_id} not found")
-            return None
-        else:
-            logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
-            return None
+                # Cache the result
+                _huggingface_cache["data"][hugging_face_id] = model_data
+                _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+
+                return model_data
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                last_exception = e
+
+                if status in {429, 503} and attempt < max_retries - 1:
+                    wait_time = backoff
+                    logger.warning(
+                        f"Hugging Face API returned {status} for {hugging_face_id}; retrying in {wait_time:.1f}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(wait_time)
+                    backoff *= 2
+                    continue
+
+                if status == 404:
+                    logger.warning(f"Hugging Face model {hugging_face_id} not found")
+                    return None
+
+                log_fn = logger.warning if status == 429 else logger.error
+                log_fn(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
+                return None
+            except httpx.RequestError as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    wait_time = backoff
+                    logger.warning(
+                        f"Network error fetching Hugging Face model {hugging_face_id}: {type(e).__name__} {e}. "
+                        f"Retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(wait_time)
+                    backoff *= 2
+                    continue
+                logger.error(f"Failed to fetch Hugging Face model {hugging_face_id}: {e}")
+                return None
+
+        if last_exception:
+            logger.error(
+                f"Unable to fetch Hugging Face model {hugging_face_id} after {max_retries} attempts: {last_exception}"
+            )
+        return None
     except Exception as e:
         logger.error(f"Failed to fetch Hugging Face model {hugging_face_id}: {e}")
         return None
