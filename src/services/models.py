@@ -7,7 +7,7 @@ import csv
 import time
 from collections import deque
 from threading import Lock
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Union
 
 from src.config import Config
 from src.cache import (
