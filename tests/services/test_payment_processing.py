@@ -645,19 +645,21 @@ class TestPaymentIntegration:
         assert session_response.session_id == 'cs_test_123'
 
         # Step 2: Process webhook (customer completed payment)
+        # Create a Mock object instead of dict to support attribute access
+        mock_webhook_session = Mock()
+        mock_webhook_session.id = 'cs_test_123'
+        mock_webhook_session.payment_intent = 'pi_test_123'
+        mock_webhook_session.metadata = {
+            'user_id': '1',
+            'credits': '1000',
+            'payment_id': '1'
+        }
+
         mock_event = {
             'id': 'evt_test_123',
             'type': 'checkout.session.completed',
             'data': {
-                'object': {
-                    'id': 'cs_test_123',
-                    'payment_intent': 'pi_test_123',
-                    'metadata': {
-                        'user_id': '1',
-                        'credits': '1000',
-                        'payment_id': '1'
-                    }
-                }
+                'object': mock_webhook_session
             }
         }
         mock_construct_event.return_value = mock_event
