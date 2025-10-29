@@ -161,9 +161,22 @@ class NotificationService:
     def _has_recent_notification(self, user_id: int, notification_type: str, hours: int = 24) -> bool:
         """Check if user has received a notification of this type recently"""
         try:
-            since = datetime.now(timezone.utc) - timedelta(hours=hours)
-            result = self.supabase.table('notifications').select('id').eq('user_id', user_id).eq('type', notification_type).gte('created_at', since.isoformat()).execute()
-            return len(result.data) > 0
+            result = self.supabase.table('notifications').select('*').eq('user_id', user_id).eq('type', notification_type).execute()
+            if not result.data:
+                return False
+
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            for row in result.data:
+                created_at = row.get('created_at')
+                if not created_at:
+                    return True  # treat missing timestamps as recently sent
+                try:
+                    created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                except Exception:
+                    return True
+                if created_dt >= cutoff:
+                    return True
+            return False
         except Exception as e:
             logger.error(f"Error checking recent notifications: {e}")
             return False
@@ -597,4 +610,3 @@ try:
 except Exception as e:
     logger.warning(f"Failed to initialize notification service during module import: {e}")
     notification_service = None
-
