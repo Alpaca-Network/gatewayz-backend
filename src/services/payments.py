@@ -67,23 +67,27 @@ class StripeService:
 
             # Extract real email if stored email is a Privy DID
             user_email = user.get('email', '')
-            if user_email.startswith('did:privy:'):
+            if user_email and user_email.startswith('did:privy:'):
                 logger.warning(f"User {user_id} has Privy DID as email: {user_email}")
                 # Try to get email from Privy linked accounts via Supabase
-                from src.config.supabase_config import get_supabase_client
-                client = get_supabase_client()
-                user_result = client.table('users').select('privy_user_id').eq('id', user_id).execute()
-                if user_result.data and user_result.data[0].get('privy_user_id'):
-                    privy_user_id = user_result.data[0]['privy_user_id']
+                privy_user_id = None
+                try:
+                    from src.config.supabase_config import get_supabase_client
+                    client = get_supabase_client()
+                    user_result = client.table('users').select('privy_user_id').eq('id', user_id).execute()
+                    if user_result.data:
+                        privy_user_id = user_result.data[0].get('privy_user_id')
+                except Exception as exc:
+                    logger.warning(f"Supabase lookup for Privy email failed: {exc}")
+
+                if privy_user_id:
                     logger.info(f"Found privy_user_id for user {user_id}: {privy_user_id}")
-                    # For now, use request.customer_email if available, otherwise generic email
-                    if request.customer_email:
-                        user_email = request.customer_email
-                    else:
-                        # If no customer_email in request, we can't get real email without Privy token
-                        user_email = None
-                        logger.warning(f"No customer_email in request for user {user_id} with Privy DID")
+
+                # Prefer provided customer_email if available
+                if request.customer_email:
+                    user_email = request.customer_email
                 else:
+                    logger.warning(f"No customer_email provided for Privy DID user {user_id}; proceeding without email")
                     user_email = None
 
             # Create payment record
