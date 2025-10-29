@@ -7,6 +7,7 @@ Handles low balance notifications, trial expiry alerts, and user communication
 import logging
 import datetime
 import os
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import requests
@@ -162,8 +163,36 @@ class NotificationService:
         """Check if user has received a notification of this type recently"""
         try:
             since = datetime.now(timezone.utc) - timedelta(hours=hours)
-            result = self.supabase.table('notifications').select('id').eq('user_id', user_id).eq('type', notification_type).gte('created_at', since.isoformat()).execute()
-            return len(result.data) > 0
+            try:
+                query = self.supabase.table('notifications').select('id').eq('user_id', user_id)
+                query = query.eq('type', notification_type)
+                result = query.gte('created_at', since.isoformat()).execute()
+                data = getattr(result, "data", None)
+                if not isinstance(data, list):
+                    raise ValueError("notifications query returned unexpected format")
+                return len(data) > 0
+            except Exception:
+                try:
+                    result = self.supabase.table('notifications').select('*').eq('user_id', user_id).execute()
+                    rows = result.data or []
+
+                    for row in rows:
+                        if row.get('type') and row.get('type') != notification_type:
+                            continue
+                        created_at = row.get('created_at')
+                        if not created_at:
+                            return True
+                        try:
+                            created_at_dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                        except Exception:
+                            return True
+                        if created_at_dt >= since:
+                            return True
+                except Exception as inner_error:
+                    logger.error(f"Error checking recent notifications fallback: {inner_error}")
+                    return False
+
+            return False
         except Exception as e:
             logger.error(f"Error checking recent notifications: {e}")
             return False
@@ -192,11 +221,16 @@ class NotificationService:
             
             try:
                 trial_end_date = datetime.fromisoformat(trial_end_date_str.replace('Z', '+00:00'))
-                remaining_days = (trial_end_date - datetime.now(timezone.utc)).days
-                
-                # Send reminder exactly 1 day before expiry
+                now = datetime.now(timezone.utc)
+                delta = trial_end_date - now
+
+                if delta <= timedelta(0):
+                    return None
+
+                remaining_days = max(1, math.ceil(delta.total_seconds() / 86400))
+
+                # Send reminder when within 24 hours of expiry
                 if remaining_days == 1:
-                    # Check if we already sent this notification
                     if self._has_recent_notification(user_id, 'trial_expiring', hours=24):
                         return None
                     return TrialExpiryAlert(
@@ -597,4 +631,3 @@ try:
 except Exception as e:
     logger.warning(f"Failed to initialize notification service during module import: {e}")
     notification_service = None
-
