@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 import httpx
 import time
 
-from src.cache import _huggingface_models_cache
+from src.cache import _huggingface_models_cache, _huggingface_cache
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.config import Config
 
@@ -201,6 +201,18 @@ def fetch_models_from_huggingface_api(
             _huggingface_models_cache["data"] = normalized_models
             _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
             logger.info(f"Cached {len(normalized_models)} Hugging Face models with TTL {_huggingface_models_cache['ttl']}s")
+
+            # Warm the individual Hugging Face cache with raw payloads to avoid hammering per-model endpoint.
+            for normalized in normalized_models:
+                hf_id = normalized.get("hugging_face_id")
+                if not hf_id:
+                    continue
+
+                raw_payload = normalized.get("raw_huggingface")
+                if raw_payload:
+                    _huggingface_cache["data"][hf_id] = raw_payload
+            if normalized_models:
+                _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
 
         return normalized_models
 
