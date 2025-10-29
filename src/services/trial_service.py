@@ -10,7 +10,8 @@ from typing import Optional
 from supabase import create_client, Client
 import os
 
-from src.schemas import SubscriptionPlansResponse, SubscriptionPlan, PlanType
+from src.schemas import PlanType
+from src.schemas.plans import SubscriptionPlansResponse, SubscriptionPlan
 from src.schemas.trials import StartTrialRequest, StartTrialResponse, SubscriptionStatus, TrialStatusResponse, \
     TrialStatus, ConvertTrialRequest, ConvertTrialResponse, TrackUsageRequest, TrackUsageResponse, TrialValidationResult
 
@@ -26,6 +27,7 @@ class TrialService:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
         
         self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
+        self._api_key_lookup_error: Optional[str] = None
     
     async def start_trial(self, request: StartTrialRequest) -> StartTrialResponse:
         """Start a free trial for an API key"""
@@ -33,6 +35,8 @@ class TrialService:
             # Get API key ID
             api_key_id = await self._get_api_key_id(request.api_key)
             if not api_key_id:
+                if self._api_key_lookup_error:
+                    raise RuntimeError(self._api_key_lookup_error)
                 return StartTrialResponse(
                     success=False,
                     trial_start_date=datetime.now(),
@@ -107,6 +111,8 @@ class TrialService:
         try:
             api_key_id = await self._get_api_key_id(api_key)
             if not api_key_id:
+                if self._api_key_lookup_error:
+                    raise RuntimeError(self._api_key_lookup_error)
                 return TrialStatusResponse(
                     success=False,
                     trial_status=TrialStatus(is_trial=False),
@@ -132,7 +138,7 @@ class TrialService:
                     trial_used_credits=trial_data.get('trial_used_credits', 0.00),
                     trial_converted=trial_data['trial_converted'],
                     subscription_status=SubscriptionStatus(trial_data['subscription_status']),
-                    subscription_plan=trial_data['subscription_plan'],
+                    subscription_plan=trial_data.get('subscription_plan') or "free_trial",
                     trial_active=trial_data['trial_active'],
                     trial_expired=trial_data['trial_expired'],
                     trial_remaining_tokens=trial_data['trial_remaining_tokens'],
@@ -166,6 +172,8 @@ class TrialService:
         try:
             api_key_id = await self._get_api_key_id(request.api_key)
             if not api_key_id:
+                if self._api_key_lookup_error:
+                    raise RuntimeError(self._api_key_lookup_error)
                 return ConvertTrialResponse(
                     success=False,
                     converted_plan="",
@@ -218,6 +226,8 @@ class TrialService:
         try:
             api_key_id = await self._get_api_key_id(request.api_key)
             if not api_key_id:
+                if self._api_key_lookup_error:
+                    raise RuntimeError(self._api_key_lookup_error)
                 return TrackUsageResponse(
                     success=False,
                     daily_requests_used=0,
@@ -289,10 +299,15 @@ class TrialService:
             if result.data:
                 plans = []
                 for plan_data in result.data:
+                    try:
+                        plan_type = PlanType(plan_data['plan_type']) if plan_data.get('plan_type') else PlanType.CUSTOMIZE
+                    except ValueError:
+                        logger.warning(f"Unknown plan_type '{plan_data['plan_type']}' encountered; defaulting to CUSTOMIZE")
+                        plan_type = PlanType.CUSTOMIZE
                     plan = SubscriptionPlan(
                         id=plan_data['id'],
                         plan_name=plan_data['plan_name'],
-                        plan_type=PlanType(plan_data['plan_type']),
+                        plan_type=plan_type,
                         monthly_price=plan_data['monthly_price'],
                         yearly_price=plan_data['yearly_price'],
                         max_requests_per_month=plan_data['max_requests_per_month'],
@@ -338,10 +353,14 @@ class TrialService:
                     is_expired=False,
                     remaining_tokens=0,
                     remaining_requests=0,
+                    remaining_credits=0.0,
                     error_message="Failed to get trial status"
                 )
             
             status = trial_status.trial_status
+            remaining_credits_value = getattr(status, 'trial_remaining_credits', 0.0)
+            if not isinstance(remaining_credits_value, (int, float)):
+                remaining_credits_value = 0.0
             
             # Check if it's a trial
             if not status.is_trial:
@@ -351,6 +370,7 @@ class TrialService:
                     is_expired=False,
                     remaining_tokens=0,
                     remaining_requests=0,
+                    remaining_credits=remaining_credits_value,
                     error_message="Not a trial account"
                 )
             
@@ -362,11 +382,26 @@ class TrialService:
                     is_expired=True,
                     remaining_tokens=0,
                     remaining_requests=0,
+                    remaining_credits=remaining_credits_value,
                     trial_end_date=status.trial_end_date,
                     error_message="Trial has expired"
                 )
-            
-            # Check if trial has remaining tokens/requests/credits
+
+            # Check credit limit (standard pricing: $20 for 1M tokens = $0.00002 per token)
+            estimated_credit_cost = tokens_used * 0.00002
+            if remaining_credits_value < estimated_credit_cost:
+                return TrialValidationResult(
+                    is_valid=False,
+                    is_trial=True,
+                    is_expired=False,
+                    remaining_tokens=status.trial_remaining_tokens,
+                    remaining_requests=status.trial_remaining_requests,
+                    remaining_credits=remaining_credits_value,
+                    trial_end_date=status.trial_end_date,
+                    error_message="Trial credit limit exceeded"
+                )
+
+            # Check if trial has remaining tokens/requests
             if status.trial_remaining_tokens < tokens_used:
                 return TrialValidationResult(
                     is_valid=False,
@@ -374,11 +409,11 @@ class TrialService:
                     is_expired=False,
                     remaining_tokens=status.trial_remaining_tokens,
                     remaining_requests=status.trial_remaining_requests,
-                    remaining_credits=status.trial_remaining_credits,
+                    remaining_credits=remaining_credits_value,
                     trial_end_date=status.trial_end_date,
                     error_message="Trial token limit exceeded"
                 )
-            
+
             if status.trial_remaining_requests < requests_used:
                 return TrialValidationResult(
                     is_valid=False,
@@ -386,23 +421,9 @@ class TrialService:
                     is_expired=False,
                     remaining_tokens=status.trial_remaining_tokens,
                     remaining_requests=status.trial_remaining_requests,
-                    remaining_credits=status.trial_remaining_credits,
+                    remaining_credits=remaining_credits_value,
                     trial_end_date=status.trial_end_date,
                     error_message="Trial request limit exceeded"
-                )
-            
-            # Check credit limit (standard pricing: $20 for 1M tokens = $0.00002 per token)
-            estimated_credit_cost = tokens_used * 0.00002
-            if status.trial_remaining_credits < estimated_credit_cost:
-                return TrialValidationResult(
-                    is_valid=False,
-                    is_trial=True,
-                    is_expired=False,
-                    remaining_tokens=status.trial_remaining_tokens,
-                    remaining_requests=status.trial_remaining_requests,
-                    remaining_credits=status.trial_remaining_credits,
-                    trial_end_date=status.trial_end_date,
-                    error_message="Trial credit limit exceeded"
                 )
             
             return TrialValidationResult(
@@ -411,7 +432,7 @@ class TrialService:
                 is_expired=False,
                 remaining_tokens=status.trial_remaining_tokens,
                 remaining_requests=status.trial_remaining_requests,
-                remaining_credits=status.trial_remaining_credits,
+                remaining_credits=remaining_credits_value,
                 trial_end_date=status.trial_end_date
             )
             
@@ -430,12 +451,14 @@ class TrialService:
     async def _get_api_key_id(self, api_key: str) -> Optional[int]:
         """Get API key ID from the key string"""
         try:
+            self._api_key_lookup_error = None
             result = self.supabase.table('api_keys').select('id').eq('key', api_key).execute()
             if result.data and len(result.data) > 0:
                 return result.data[0]['id']
             return None
         except Exception as e:
             logger.error(f"Error getting API key ID: {e}")
+            self._api_key_lookup_error = str(e)
             return None
 
 # Global trial service instance

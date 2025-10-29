@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import csv
+from typing import Any, Dict, Optional, Union
 
 from src.config import Config
 from src.cache import (
@@ -79,6 +80,22 @@ logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class _AwaitableModelResult(dict):
+    """Wrapper that behaves like a dict but can also be awaited for async callers."""
+
+    __slots__ = ("_awaited_value",)
+
+    def __init__(self, value: Optional[dict], awaited_value: Optional[dict]):
+        super().__init__(value or {})
+        self._awaited_value = awaited_value
+
+    def __await__(self):
+        async def _coro():
+            return self._awaited_value
+
+        return _coro().__await__()
 
 
 def load_featherless_catalog_export() -> list:
@@ -1804,22 +1821,42 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
         return "openrouter"
 
 
-def fetch_specific_model(provider_name: str, model_name: str, gateway: str = None):
+def fetch_specific_model(provider_or_model: Optional[str], model_name: Optional[str] = None, gateway: str = None):
     """Fetch specific model from the appropriate gateway
     
     Args:
-        provider_name: Provider name (e.g., 'openai', 'anthropic')
-        model_name: Model name (e.g., 'gpt-4', 'claude-3')
+        provider_or_model: Provider name (e.g., 'openai') or full model id ('openai/gpt-4')
+        model_name: Optional model name (e.g., 'gpt-4'). When provided, provider_or_model must be a provider slug.
         gateway: Optional gateway override. If not provided, auto-detects
         
     Returns:
-        Model data dict or None if not found
+        Model data dict (awaitable) or None-equivalent if not found
     """
     try:
-        model_id = f"{provider_name}/{model_name}"
+        if provider_or_model is None and model_name is None:
+            return _AwaitableModelResult({}, None)
+
+        parsed_provider = provider_or_model or ""
+        parsed_model = model_name or ""
+
+        if model_name is None:
+            model_id = str(parsed_provider).strip()
+            if not model_id or "/" not in model_id:
+                return _AwaitableModelResult({}, None)
+            provider_name, parsed_model = model_id.split("/", 1)
+        else:
+            provider_name = str(parsed_provider).strip()
+
+        provider_name = (provider_name or "").strip()
+        parsed_model = (parsed_model or "").strip()
+
+        if not provider_name or not parsed_model:
+            return _AwaitableModelResult({}, None)
+
+        model_id = f"{provider_name}/{parsed_model}"
         explicit_gateway = gateway is not None
 
-        detected_gateway = (gateway or detect_model_gateway(provider_name, model_name) or "openrouter")
+        detected_gateway = (gateway or detect_model_gateway(provider_name, parsed_model) or "openrouter")
         detected_gateway = detected_gateway.lower()
 
         override_gateway = detect_provider_from_model_id(model_id)
@@ -1871,17 +1908,21 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
                 continue
 
             fetcher = fetchers.get(candidate, fetch_specific_model_from_openrouter)
-            model_data = fetcher(provider_name, model_name)
+            model_data = fetcher(provider_name, parsed_model)
             if model_data:
                 if candidate == "huggingface":
                     model_data.setdefault("source_gateway", "hug")
-                return model_data
+                return _AwaitableModelResult(model_data, model_data)
 
         logger.warning(f"Model {model_id} not found after checking gateways: {candidate_gateways}")
-        return None
+        return _AwaitableModelResult({}, None)
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} (gateways tried: {gateway}): {e}")
-        return None
+        try:
+            err_model_id = model_id  # type: ignore[name-defined]
+        except Exception:
+            err_model_id = f"{provider_or_model}/{model_name}"
+        logger.error(f"Failed to fetch specific model {err_model_id} (gateways tried: {gateway}): {e}")
+        return _AwaitableModelResult({}, None)
 
 
 def get_cached_huggingface_model(hugging_face_id: str):
@@ -2038,12 +2079,15 @@ def get_model_count_by_provider(
     2. get_model_count_by_provider(models_list, providers_list) -> dict
     """
     try:
+        if provider_or_models is None and models_data is None:
+            return {}
+
         # Legacy usage: provider slug string + models list -> integer count
         if isinstance(provider_or_models, str) or provider_or_models is None:
             provider_slug = (provider_or_models or "").lower().lstrip("@")
             models = models_data or []
             if not provider_slug or not models:
-                return 0
+                return {} if provider_or_models is None else 0
 
             count = 0
             for model in models:

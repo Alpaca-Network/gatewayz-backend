@@ -123,7 +123,30 @@ async def get_api_key(
         )
 
 
-async def get_current_user(api_key: str = Depends(get_api_key)) -> Dict[str, Any]:
+async def get_api_key_or_401(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        request: Request = None
+) -> str:
+    """
+    Wrapper around get_api_key that normalizes missing headers to 401.
+
+    FastAPI dependencies execute before route handlers, so routes that need
+    the legacy 401 behavior for missing Authorization headers should depend on
+    this function instead of get_api_key directly.
+    """
+    try:
+        return await get_api_key(credentials, request)
+    except HTTPException as exc:
+        if exc.status_code == 422 and exc.detail == "Authorization header is required":
+            raise HTTPException(status_code=401, detail=exc.detail)
+        raise
+
+
+async def get_current_user(
+        api_key: Optional[str] = None,
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+        request: Request = None
+) -> Dict[str, Any]:
     """
     Get the current authenticated user
 
@@ -138,6 +161,14 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> Dict[str, Any
     Raises:
         HTTPException: 404 if user not found
     """
+    if api_key is None:
+        try:
+            api_key = await get_api_key(credentials, request)
+        except HTTPException as exc:
+            if exc.status_code == 422 and "Authorization header" in exc.detail:
+                raise HTTPException(status_code=401, detail=exc.detail)
+            raise
+
     user = get_user(api_key)
 
     if not user:
