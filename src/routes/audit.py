@@ -44,15 +44,13 @@ async def get_user_audit_logs(
         end_dt = None
         if start_date:
             try:
-                normalized_start = start_date.replace(' ', '+').replace('Z', '+00:00')
-                start_dt = datetime.fromisoformat(normalized_start)
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
 
         if end_date:
             try:
-                normalized_end = end_date.replace(' ', '+').replace('Z', '+00:00')
-                end_dt = datetime.fromisoformat(normalized_end)
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
 
