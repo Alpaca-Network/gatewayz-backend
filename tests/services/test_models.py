@@ -304,26 +304,26 @@ class TestGetModelCountByProvider:
 class TestFetchSpecificModel:
     """Test fetching specific model"""
 
-    @pytest.mark.asyncio
-    async def test_fetch_model_not_found(self):
+    def test_fetch_model_not_found(self):
         """Test fetching non-existent model"""
         # fetch_specific_model now requires provider_name and model_name as separate args
-        result = await fetch_specific_model("nonexistent-provider", "xyz-123")
+        # It's a regular function, not async
+        result = fetch_specific_model("nonexistent-provider", "xyz-123")
         # Should return None or empty
         assert result is None or isinstance(result, dict)
 
-    @pytest.mark.asyncio
-    async def test_fetch_model_invalid_format(self):
+    def test_fetch_model_invalid_format(self):
         """Test with invalid model format"""
         # fetch_specific_model now requires provider_name and model_name as separate args
-        result = await fetch_specific_model("", "")
+        # It's a regular function, not async
+        result = fetch_specific_model("", "")
         assert result is None or isinstance(result, dict)
 
-    @pytest.mark.asyncio
-    async def test_fetch_model_none(self):
+    def test_fetch_model_none(self):
         """Test with None input"""
         # fetch_specific_model now requires provider_name and model_name as separate args
-        result = await fetch_specific_model(None, None)
+        # It's a regular function, not async
+        result = fetch_specific_model(None, None)
         assert result is None or isinstance(result, dict)
 
     def test_fetch_openrouter_auto(self):
