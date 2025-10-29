@@ -17,7 +17,7 @@ from src.schemas.notification import (
     NotificationChannel, NotificationStatus, SendNotificationRequest
 )
 from src.services.professional_email_templates import email_templates
-import src.config.supabase_config as supabase_config
+from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +25,7 @@ class EnhancedNotificationService:
     """Enhanced notification service with professional email templates"""
     
     def __init__(self):
-        try:
-            self.supabase = supabase_config.get_supabase_client()
-        except Exception as exc:
-            logger.warning(
-                "Supabase client unavailable during notification service init: %s", exc
-            )
-            self.supabase = None
+        self.supabase = get_supabase_client()
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
         self.from_email = os.environ.get("FROM_EMAIL", "noreply@yourdomain.com")
         self.app_name = os.environ.get("APP_NAME", "AI Gateway")
@@ -89,8 +83,7 @@ class EnhancedNotificationService:
         """Send welcome email only if the user hasn't received one yet"""
         try:
             # Check if user has already received a welcome email
-            client = self.supabase or supabase_config.get_supabase_client()
-            user_result = client.table('users').select('welcome_email_sent').eq('id', user_id).execute()
+            user_result = self.supabase.table('users').select('welcome_email_sent').eq('id', user_id).execute()
             
             if not user_result.data:
                 logger.warning(f"User {user_id} not found, skipping welcome email")
@@ -126,8 +119,7 @@ class EnhancedNotificationService:
             
             # Store token in database with expiration
             expires_at = datetime.utcnow() + timedelta(hours=1)
-            client = self.supabase or supabase_config.get_supabase_client()
-            client.table('password_reset_tokens').insert({
+            self.supabase.table('password_reset_tokens').insert({
                 'user_id': user_id,
                 'token': reset_token,
                 'expires_at': expires_at.isoformat(),
@@ -387,8 +379,7 @@ The {self.app_name} Team
                 'metadata': json.dumps(request.metadata) if request.metadata else None
             }
             
-            client = self.supabase or supabase_config.get_supabase_client()
-            result = client.table('notifications').insert(notification_data).execute()
+            result = self.supabase.table('notifications').insert(notification_data).execute()
             return bool(result.data)
         except Exception as e:
             logger.error(f"Error creating notification: {e}")
@@ -397,8 +388,7 @@ The {self.app_name} Team
     def get_user_preferences(self, user_id: int) -> Optional[NotificationPreferences]:
         """Get user notification preferences"""
         try:
-            client = self.supabase or supabase_config.get_supabase_client()
-            result = client.table('notification_preferences').select('*').eq('user_id', user_id).execute()
+            result = self.supabase.table('notification_preferences').select('*').eq('user_id', user_id).execute()
             
             if result.data:
                 data = result.data[0]
