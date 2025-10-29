@@ -241,13 +241,18 @@ def client(sb, monkeypatch):
     import sys
     if 'src.routes.auth' in sys.modules:
         auth_module = sys.modules['src.routes.auth']
-        monkeypatch.setattr(auth_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
-        monkeypatch.setattr(auth_module, "create_enhanced_user", mock_create_enhanced_user)
+        # Only patch attributes that exist in auth_module
+        if hasattr(auth_module, "get_user_by_privy_id"):
+            monkeypatch.setattr(auth_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
+        if hasattr(auth_module, "create_enhanced_user"):
+            monkeypatch.setattr(auth_module, "create_enhanced_user", mock_create_enhanced_user)
         if hasattr(auth_module, "get_user_by_username"):
             monkeypatch.setattr(auth_module, "get_user_by_username", mock_get_user_by_username)
-        monkeypatch.setattr(auth_module, "log_activity", mock_log_activity)
+        if hasattr(auth_module, "log_activity"):
+            monkeypatch.setattr(auth_module, "log_activity", mock_log_activity)
         # CRITICAL: Also patch get_supabase_client in the auth module
-        monkeypatch.setattr(auth_module, "get_supabase_client", lambda: sb)
+        if hasattr(auth_module, "get_supabase_client"):
+            monkeypatch.setattr(auth_module, "get_supabase_client", lambda: sb)
 
     # Also mock notification service
     import src.enhanced_notification_service as notif_module
