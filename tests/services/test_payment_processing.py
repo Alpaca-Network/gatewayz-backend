@@ -421,11 +421,15 @@ class TestWebhooks:
             'status': 'pending'
         }
 
+        # Create a Mock object instead of dict to support attribute access
+        mock_payment_intent = Mock()
+        mock_payment_intent.id = 'pi_test_123'
+
         mock_event = {
             'id': 'evt_test_123',
             'type': 'payment_intent.succeeded',
             'data': {
-                'object': {'id': 'pi_test_123'}
+                'object': mock_payment_intent
             }
         }
         mock_construct_event.return_value = mock_event
@@ -458,11 +462,15 @@ class TestWebhooks:
             'status': 'pending'
         }
 
+        # Create a Mock object instead of dict to support attribute access
+        mock_payment_intent = Mock()
+        mock_payment_intent.id = 'pi_test_123'
+
         mock_event = {
             'id': 'evt_test_123',
             'type': 'payment_intent.payment_failed',
             'data': {
-                'object': {'id': 'pi_test_123'}
+                'object': mock_payment_intent
             }
         }
         mock_construct_event.return_value = mock_event
