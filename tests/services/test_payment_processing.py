@@ -367,14 +367,14 @@ class TestWebhooks:
     ):
         """Test checkout completed webhook adds credits to user"""
 
-        mock_session = {
-            'id': 'cs_test_123',
-            'payment_intent': 'pi_test_123',
-            'metadata': {
-                'user_id': '1',
-                'credits': '1000',  # 1000 cents = $10
-                'payment_id': '1'
-            }
+        # Create a Mock object instead of dict to support attribute access
+        mock_session = Mock()
+        mock_session.id = 'cs_test_123'
+        mock_session.payment_intent = 'pi_test_123'
+        mock_session.metadata = {
+            'user_id': '1',
+            'credits': '1000',  # 1000 cents = $10
+            'payment_id': '1'
         }
 
         mock_event = {
