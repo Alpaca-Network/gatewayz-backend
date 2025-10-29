@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import csv
+import time
 
 from src.config import Config
 from src.cache import (
@@ -171,6 +172,68 @@ def load_featherless_catalog_export() -> list:
     except Exception as exc:
         logger.error(f"Failed to load Featherless catalog export: {exc}", exc_info=True)
         return None
+
+
+def _build_huggingface_lookup(models: list) -> dict:
+    """Create a case-insensitive lookup map for Hugging Face models."""
+    lookup = {}
+    for model in models or []:
+        if not isinstance(model, dict):
+            continue
+
+        candidates = {
+            (model.get("id") or "").lower(),
+            (model.get("slug") or "").lower(),
+            (model.get("canonical_slug") or "").lower(),
+            (model.get("hugging_face_id") or "").lower(),
+        }
+
+        for key in filter(None, candidates):
+            lookup.setdefault(key, model)
+
+    return lookup
+
+
+def _get_huggingface_catalog_lookup():
+    """
+    Return cached Hugging Face catalog lookup, fetching the catalog if needed.
+    The lookup allows fast enrichment without per-model API calls.
+    """
+    cache = _huggingface_models_cache
+    now = datetime.now(timezone.utc)
+
+    data = cache.get("data")
+    timestamp = cache.get("timestamp")
+    ttl = cache.get("ttl", 3600)
+
+    if data and timestamp:
+        cache_age = (now - timestamp).total_seconds()
+        if cache_age <= ttl:
+            lookup_info = cache.setdefault("_lookup", {})
+            if lookup_info.get("source_marker") == id(data):
+                return lookup_info.get("map")
+
+            lookup_map = _build_huggingface_lookup(data)
+            cache["_lookup"] = {
+                "source_marker": id(data),
+                "map": lookup_map,
+                "built_at": now,
+            }
+            return lookup_map
+
+    # Cache miss or stale data – refresh catalog
+    models = fetch_models_from_hug()
+    if not models:
+        return None
+
+    refreshed_data = cache.get("data") or models
+    lookup_map = _build_huggingface_lookup(refreshed_data)
+    cache["_lookup"] = {
+        "source_marker": id(refreshed_data),
+        "map": lookup_map,
+        "built_at": cache.get("timestamp") or now,
+    }
+    return lookup_map
 
 
 def get_cached_models(gateway: str = "openrouter"):
@@ -1887,9 +1950,29 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
 def get_cached_huggingface_model(hugging_face_id: str):
     """Get cached Hugging Face model data or fetch if not cached"""
     try:
+        if not hugging_face_id:
+            return None
+
+        normalized_id = hugging_face_id.lower()
+
+        # Try the bulk Hugging Face catalog cache first to avoid per-model calls
+        catalog_lookup = _get_huggingface_catalog_lookup()
+        if catalog_lookup:
+            catalog_entry = catalog_lookup.get(normalized_id)
+            if catalog_entry:
+                return catalog_entry
+
         # Check if we have cached data for this specific model
-        if hugging_face_id in _huggingface_cache["data"]:
-            return _huggingface_cache["data"][hugging_face_id]
+        cache_entry = _huggingface_cache["data"].get(hugging_face_id)
+        timestamp = _huggingface_cache.get("timestamp")
+        ttl = _huggingface_cache.get("ttl", 3600)
+
+        if cache_entry and timestamp:
+            cache_age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+            if cache_age <= ttl:
+                return cache_entry
+            # Expire stale entry
+            _huggingface_cache["data"].pop(hugging_face_id, None)
 
         # Fetch from Hugging Face API
         return fetch_huggingface_model(hugging_face_id)
@@ -1904,8 +1987,45 @@ def fetch_huggingface_model(hugging_face_id: str):
         # Hugging Face API endpoint for model info
         url = f"https://huggingface.co/api/models/{hugging_face_id}"
 
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
+        headers = {}
+        if Config.HUG_API_KEY:
+            headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
+
+        max_retries = 5
+        backoff = 1.0
+        response = None
+
+        for attempt in range(max_retries):
+            try:
+                response = httpx.get(url, headers=headers, timeout=10.0)
+                response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code
+                retryable = status_code in (429, 500, 502, 503, 504)
+                if retryable and attempt < max_retries - 1:
+                    retry_after = e.response.headers.get("Retry-After")
+                    delay = backoff
+                    if retry_after:
+                        try:
+                            delay = max(delay, float(retry_after))
+                        except ValueError:
+                            pass
+                    logger.warning(
+                        "Rate/availability issue fetching Hugging Face model %s (status %s). Retrying in %.1fs (%d/%d)...",
+                        hugging_face_id,
+                        status_code,
+                        delay,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    time.sleep(delay)
+                    backoff = min(backoff * 2, 30.0)
+                    continue
+                raise
+
+        if response is None:
+            return None
 
         model_data = response.json()
 
@@ -1938,41 +2058,63 @@ def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
         if not hf_data:
             return openrouter_model
 
+        metrics_block = {}
+        raw_source = hf_data
+
+        if isinstance(hf_data, dict) and "huggingface_metrics" in hf_data:
+            metrics_block = hf_data.get("huggingface_metrics") or {}
+            raw_source = hf_data.get("raw_huggingface") or hf_data
+
+        downloads = metrics_block.get("downloads", raw_source.get("downloads", 0))
+        likes = metrics_block.get("likes", raw_source.get("likes", 0))
+        pipeline_tag = metrics_block.get("pipeline_tag", raw_source.get("pipeline_tag"))
+        num_parameters = metrics_block.get("num_parameters", raw_source.get("numParameters"))
+        gated = metrics_block.get("gated", raw_source.get("gated", False))
+        private = metrics_block.get("private", raw_source.get("private", False))
+        last_modified = metrics_block.get("last_modified", raw_source.get("lastModified"))
+        author = metrics_block.get("author", raw_source.get("author"))
+        available_inference = (
+            metrics_block.get("available_inference_providers")
+            or raw_source.get("availableInferenceProviders")
+            or []
+        )
+        widget_output_urls = metrics_block.get("widget_output_urls", raw_source.get("widgetOutputUrls", []))
+        is_liked_by_user = metrics_block.get("is_liked_by_user", raw_source.get("isLikedByUser", False))
+
         # Extract author data more robustly
-        author_data = None
-        if hf_data.get('author_data'):
+        author_data = metrics_block.get("author_data")
+        if not author_data and isinstance(raw_source.get("author_data"), dict):
+            raw_author = raw_source["author_data"]
             author_data = {
-                "name": hf_data['author_data'].get('name'),
-                "fullname": hf_data['author_data'].get('fullname'),
-                "avatar_url": hf_data['author_data'].get('avatarUrl'),
-                "follower_count": hf_data['author_data'].get('followerCount', 0)
+                "name": raw_author.get("name"),
+                "fullname": raw_author.get("fullname"),
+                "avatar_url": raw_author.get("avatarUrl"),
+                "follower_count": raw_author.get("followerCount", 0),
             }
-        elif hf_data.get('author'):
-            # Fallback: create basic author data from author field
+        elif not author_data and author:
             author_data = {
-                "name": hf_data.get('author'),
-                "fullname": hf_data.get('author'),
+                "name": author,
+                "fullname": author,
                 "avatar_url": None,
-                "follower_count": 0
+                "follower_count": 0,
             }
 
-        # Create enhanced model data
         enhanced_model = {
             **openrouter_model,
             "huggingface_metrics": {
-                "downloads": hf_data.get('downloads', 0),
-                "likes": hf_data.get('likes', 0),
-                "pipeline_tag": hf_data.get('pipeline_tag'),
-                "num_parameters": hf_data.get('numParameters'),
-                "gated": hf_data.get('gated', False),
-                "private": hf_data.get('private', False),
-                "last_modified": hf_data.get('lastModified'),
-                "author": hf_data.get('author'),
+                "downloads": downloads,
+                "likes": likes,
+                "pipeline_tag": pipeline_tag,
+                "num_parameters": num_parameters,
+                "gated": gated,
+                "private": private,
+                "last_modified": last_modified,
+                "author": author,
                 "author_data": author_data,
-                "available_inference_providers": hf_data.get('availableInferenceProviders', []),
-                "widget_output_urls": hf_data.get('widgetOutputUrls', []),
-                "is_liked_by_user": hf_data.get('isLikedByUser', False)
-            }
+                "available_inference_providers": available_inference,
+                "widget_output_urls": widget_output_urls,
+                "is_liked_by_user": is_liked_by_user,
+            },
         }
 
         return enhanced_model
