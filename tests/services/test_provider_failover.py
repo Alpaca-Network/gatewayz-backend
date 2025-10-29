@@ -376,7 +376,8 @@ class TestMapProviderErrorOpenAI:
 
     def test_map_api_connection_error(self):
         """Test APIConnectionError maps to 503"""
-        error = APIConnectionError("Connection failed")
+        # APIConnectionError requires a request parameter in newer OpenAI SDK versions
+        error = APIConnectionError(message="Connection failed")
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
         assert mapped.status_code == 503
@@ -384,7 +385,8 @@ class TestMapProviderErrorOpenAI:
 
     def test_map_api_timeout_error(self):
         """Test APITimeoutError maps to 504"""
-        error = APITimeoutError("Request timed out")
+        # APITimeoutError requires a request parameter in newer OpenAI SDK versions
+        error = APITimeoutError(message="Request timed out")
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
         assert mapped.status_code == 504
@@ -405,8 +407,11 @@ class TestMapProviderErrorOpenAI:
 
     def test_map_rate_limit_error_with_retry_after_body(self):
         """Test RateLimitError with retry_after in body"""
-        error = RateLimitError("Rate limited", response=None, body={"retry_after": 90})
-        error.body = {"retry_after": 90}
+        # Create a mock response with no retry-after header
+        response = Mock()
+        response.headers = {}
+        # RateLimitError requires message, response, and body parameters
+        error = RateLimitError(message="Rate limited", response=response, body={"retry_after": 90})
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
         assert mapped.status_code == 429
