@@ -100,6 +100,14 @@ def create_app() -> FastAPI:
     logger.info("🚀 Loading application routes...")
     print("🚀 Loading application routes...", flush=True)  # Force output for debugging
 
+    # Write to file for debugging in CI
+    try:
+        with open("/tmp/route_loading_debug.txt", "w") as f:
+            f.write("Starting route loading...\n")
+            f.flush()
+    except:
+        pass
+
     # Define all routes to load
     # IMPORTANT: chat & messages must be before catalog to avoid /v1/* being caught by /model/{provider}/{model}
     routes_to_load = [
