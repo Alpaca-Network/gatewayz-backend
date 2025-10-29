@@ -3,6 +3,7 @@ import logging
 import json
 import os
 from pathlib import Path
+from typing import Any, Dict, Optional, Union
 import csv
 
 from src.config import Config
@@ -2038,6 +2039,9 @@ def get_model_count_by_provider(
     2. get_model_count_by_provider(models_list, providers_list) -> dict
     """
     try:
+        if provider_or_models is None and models_data is None:
+            return {}
+
         # Legacy usage: provider slug string + models list -> integer count
         if isinstance(provider_or_models, str) or provider_or_models is None:
             provider_slug = (provider_or_models or "").lower().lstrip("@")

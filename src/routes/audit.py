@@ -10,7 +10,7 @@ from datetime import datetime
 
 from fastapi import Depends, HTTPException
 
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

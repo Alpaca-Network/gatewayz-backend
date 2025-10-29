@@ -11,7 +11,7 @@ from src.schemas.chat import (
     ChatSessionsListResponse, ChatSessionStatsResponse, SearchChatSessionsRequest,
     SaveChatMessageRequest
 )
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 from src.db.users import get_user
 from src.db.activity import log_activity
 

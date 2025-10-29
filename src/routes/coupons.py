@@ -36,7 +36,7 @@ from src.schemas.coupons import (
     CouponStatsResponse,
     ListCouponsResponse
 )
-from src.security.deps import get_api_key, get_current_user, require_admin
+from src.security.deps import require_authenticated_api_key as get_api_key, get_current_user, require_admin
 
 logger = logging.getLogger(__name__)
 

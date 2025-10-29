@@ -27,7 +27,7 @@ from src.models.health_models import (
 )
 from src.services.model_health_monitor import health_monitor
 from src.services.model_availability import availability_service
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
