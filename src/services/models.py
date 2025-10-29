@@ -1899,13 +1899,39 @@ def get_cached_huggingface_model(hugging_face_id: str):
 
 
 def fetch_huggingface_model(hugging_face_id: str):
-    """Fetch model data from Hugging Face API"""
+    """Fetch model data from Hugging Face API with 429 rate limit handling"""
+    import time
+
     try:
         # Hugging Face API endpoint for model info
         url = f"https://huggingface.co/api/models/{hugging_face_id}"
 
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
+        # Add authentication headers if HF token is available
+        headers = {}
+        if Config.HUG_API_KEY:
+            headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
+
+        # Retry logic for rate limiting
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second delay
+
+        for attempt in range(max_retries):
+            try:
+                response = httpx.get(url, headers=headers, timeout=10.0)
+                response.raise_for_status()
+                break  # Success, exit retry loop
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:  # Rate limited
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Rate limited (429) fetching Hugging Face model {hugging_face_id}, attempt {attempt + 1}/{max_retries}. Waiting {retry_delay}s before retry...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"Rate limited (429) fetching Hugging Face model {hugging_face_id} after {max_retries} attempts. The Hugging Face API is experiencing high load. Please try again later.")
+                        return None
+                else:
+                    raise
 
         model_data = response.json()
 
@@ -1917,6 +1943,9 @@ def fetch_huggingface_model(hugging_face_id: str):
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             logger.warning(f"Hugging Face model {hugging_face_id} not found")
+            return None
+        elif e.response.status_code == 429:
+            logger.error(f"Rate limited (429) fetching Hugging Face model {hugging_face_id}. The Hugging Face API is experiencing high load. Please try again later.")
             return None
         else:
             logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
