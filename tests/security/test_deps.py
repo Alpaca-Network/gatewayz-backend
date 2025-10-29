@@ -52,7 +52,7 @@ class FakeAuditLogger:
 async def test_get_api_key_missing_credentials(mod):
     with pytest.raises(HTTPException) as ei:
         await mod.get_api_key(credentials=None, request=None)
-    assert ei.value.status_code == 422
+    assert ei.value.status_code == 401
     assert "Authorization header" in ei.value.detail
 
 
