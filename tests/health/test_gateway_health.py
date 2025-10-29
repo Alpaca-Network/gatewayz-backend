@@ -164,10 +164,18 @@ class TestGatewayHealthChecker:
         """Test that all gateway URLs are properly formatted"""
         for gateway_name, config in check_module.GATEWAY_CONFIG.items():
             url = config['url']
-            assert isinstance(url, str), \
-                f"Gateway '{gateway_name}' URL should be a string"
-            assert url.startswith('http'), \
-                f"Gateway '{gateway_name}' URL should start with http(s)"
+
+            # Allow None for gateways using static catalogs
+            if config.get('uses_static_catalog'):
+                assert url is None, \
+                    f"Gateway '{gateway_name}' with static catalog should have URL=None"
+                assert 'catalog_path' in config, \
+                    f"Gateway '{gateway_name}' using static catalog must have catalog_path"
+            else:
+                assert isinstance(url, str), \
+                    f"Gateway '{gateway_name}' URL should be a string"
+                assert url.startswith('http'), \
+                    f"Gateway '{gateway_name}' URL should start with http(s)"
 
 
 class TestGatewayEndpointChecks:
