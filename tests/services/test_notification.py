@@ -386,7 +386,7 @@ class TestTrialExpiryAlerts:
         assert alert is not None
         assert isinstance(alert, TrialExpiryAlert)
         assert alert.user_id == 1
-        assert alert.days_remaining == 1
+        assert alert.remaining_days == 1
 
     @patch('src.services.notification.validate_trial_access')
     def test_check_trial_expiry_alert_not_trial_user(
