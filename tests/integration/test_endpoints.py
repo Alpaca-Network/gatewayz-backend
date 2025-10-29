@@ -31,13 +31,21 @@ def mock_user():
     """Mock user data for testing"""
     return {
         'id': 1,
+        'user_id': 1,
         'email': 'test@example.com',
+        'username': 'testuser',
         'credits': 100.0,
         'api_key': 'gw_test_key_123456789',
         'environment_tag': 'live',
         'is_admin': False,
+        'is_active': True,
         'role': 'user',
-        'subscription_status': 'active'
+        'auth_method': 'api_key',
+        'subscription_status': 'active',
+        'trial_expires_at': None,
+        'registration_date': '2025-01-01T00:00:00Z',
+        'created_at': '2025-01-01T00:00:00Z',
+        'updated_at': '2025-01-01T00:00:00Z'
     }
 
 
