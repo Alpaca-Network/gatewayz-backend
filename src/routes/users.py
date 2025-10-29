@@ -9,7 +9,7 @@ import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 import src.db.credit_transactions as credit_transactions_module
 from src.schemas import UserProfileResponse, DeleteAccountResponse, UserProfileUpdate, DeleteAccountRequest
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 from fastapi import APIRouter
 import src.services.trial_validation as trial_module
 

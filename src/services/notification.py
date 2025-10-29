@@ -7,6 +7,7 @@ Handles low balance notifications, trial expiry alerts, and user communication
 import logging
 import datetime
 import os
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import requests
@@ -159,11 +160,50 @@ class NotificationService:
             return None
     
     def _has_recent_notification(self, user_id: int, notification_type: str, hours: int = 24) -> bool:
-        """Check if user has received a notification of this type recently"""
+        """Check if user has received a notification of this type recently."""
         try:
             since = datetime.now(timezone.utc) - timedelta(hours=hours)
-            result = self.supabase.table('notifications').select('id').eq('user_id', user_id).eq('type', notification_type).gte('created_at', since.isoformat()).execute()
-            return len(result.data) > 0
+            base_query = (
+                self.supabase
+                .table('notifications')
+                .select('*')
+                .eq('user_id', user_id)
+            )
+
+            try:
+                typed_query = base_query.eq('type', notification_type)
+            except AttributeError:
+                typed_query = base_query
+
+            try:
+                query_for_execution = typed_query.gte('created_at', since.isoformat())
+            except AttributeError:
+                query_for_execution = typed_query
+
+            result = query_for_execution.execute()
+            data = getattr(result, 'data', None)
+
+            if not isinstance(data, list):
+                # Fallback for mocked clients that do not support chaining
+                result = base_query.execute()
+                data = getattr(result, 'data', None)
+
+            for record in (data or []):
+                record_type = record.get('type')
+                if record_type and record_type != notification_type:
+                    continue
+                created_at = record.get('created_at')
+                if not created_at:
+                    # Without timestamp, assume recent to avoid duplicate emails.
+                    return True
+                try:
+                    created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                except ValueError:
+                    logger.debug("Invalid created_at value on notification %s", record.get('id'))
+                    continue
+                if created_dt >= since:
+                    return True
+            return False
         except Exception as e:
             logger.error(f"Error checking recent notifications: {e}")
             return False
@@ -192,11 +232,15 @@ class NotificationService:
             
             try:
                 trial_end_date = datetime.fromisoformat(trial_end_date_str.replace('Z', '+00:00'))
-                remaining_days = (trial_end_date - datetime.now(timezone.utc)).days
-                
-                # Send reminder exactly 1 day before expiry
-                if remaining_days == 1:
-                    # Check if we already sent this notification
+                remaining = trial_end_date - datetime.now(timezone.utc)
+                remaining_seconds = remaining.total_seconds()
+
+                if remaining_seconds <= 0:
+                    return None
+
+                if remaining_seconds <= 86400:
+                    remaining_days = max(1, math.ceil(remaining_seconds / 86400))
+
                     if self._has_recent_notification(user_id, 'trial_expiring', hours=24):
                         return None
                     return TrialExpiryAlert(
@@ -597,4 +641,3 @@ try:
 except Exception as e:
     logger.warning(f"Failed to initialize notification service during module import: {e}")
     notification_service = None
-

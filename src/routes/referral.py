@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 from src.db.users import get_user
 from src.services.referral import (
     validate_referral_code,

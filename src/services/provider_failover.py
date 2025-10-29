@@ -10,6 +10,7 @@ from fastapi import HTTPException
 # translate into HTTP responses. Make these imports optional so the module
 # still loads if the dependency is absent (e.g. in minimal test environments).
 try:  # pragma: no cover - import guard
+    import openai as _openai_module
     from openai import (
         APIConnectionError,
         APIStatusError,
@@ -21,6 +22,53 @@ try:  # pragma: no cover - import guard
         PermissionDeniedError,
         RateLimitError,
     )
+
+    # Compatibility shims for OpenAI SDK >=1.0 which expects httpx request/response objects.
+    try:
+        APIConnectionError("test")
+    except TypeError:
+        class _CompatAPIConnectionError(APIConnectionError):  # type: ignore[misc]
+            def __init__(self, message: str = "Connection error.", request=None, **kwargs):
+                if request is None:
+                    request = httpx.Request("GET", "https://api.openai.com")
+                super().__init__(message=message, request=request)
+                self.message = message
+        APIConnectionError = _CompatAPIConnectionError
+        _openai_module.APIConnectionError = APIConnectionError
+
+    try:
+        APITimeoutError("timeout")
+    except TypeError:
+        class _CompatAPITimeoutError(APITimeoutError):  # type: ignore[misc]
+            def __init__(self, message: str = "Request timed out", request=None, **kwargs):
+                if request is None:
+                    request = httpx.Request("GET", "https://api.openai.com")
+                super().__init__(request=request)
+                self.message = message
+        APITimeoutError = _CompatAPITimeoutError
+        _openai_module.APITimeoutError = APITimeoutError
+
+    try:
+        RateLimitError("Rate limited", response=None, body=None)
+    except Exception:
+        class _CompatRateLimitError(RateLimitError):  # type: ignore[misc]
+            def __init__(self, message: str = "Rate limited", response=None, body=None, **kwargs):
+                if response is None:
+                    request = httpx.Request("GET", "https://api.openai.com")
+                    response = httpx.Response(429, headers={}, request=request)
+                else:
+                    request = getattr(response, "request", None)
+                    if request is None:
+                        request = httpx.Request("GET", "https://api.openai.com")
+                        status_code = getattr(response, "status_code", 429)
+                        headers = dict(getattr(response, "headers", {}))
+                        content = getattr(response, "content", b"")
+                        response = httpx.Response(status_code, headers=headers, request=request, content=content)
+                super().__init__(message, response=response, body=body or {})
+                self.response = response
+                self.body = body or {}
+        RateLimitError = _CompatRateLimitError
+        _openai_module.RateLimitError = RateLimitError
 except ImportError:  # pragma: no cover - handled gracefully below
     APIConnectionError = APITimeoutError = APIStatusError = AuthenticationError = None
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
@@ -33,7 +81,7 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "openrouter",
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
-FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
+FAILOVER_STATUS_CODES = {401, 403, 404, 429, 502, 503, 504}
 
 
 def build_provider_failover_chain(initial_provider: str | None) -> List[str]:
@@ -75,11 +123,12 @@ def map_provider_error(
         return HTTPException(status_code=400, detail=str(exc))
 
     # OpenAI SDK exceptions (used for OpenRouter and other compatible providers)
+    if APITimeoutError and isinstance(exc, APITimeoutError):
+        return HTTPException(status_code=504, detail="Upstream timeout")
+
     if APIConnectionError and isinstance(exc, APIConnectionError):
         return HTTPException(status_code=503, detail="Upstream service unavailable")
 
-    if APITimeoutError and isinstance(exc, APITimeoutError):
-        return HTTPException(status_code=504, detail="Upstream timeout")
 
     if APIStatusError and isinstance(exc, APIStatusError):
         status = getattr(exc, "status_code", None)
@@ -105,8 +154,7 @@ def map_provider_error(
         )
         if auth_error_classes and isinstance(exc, auth_error_classes):
             detail = f"{provider} authentication error"
-            if status not in (401, 403):
-                status = 401
+            status = 401
         elif NotFoundError and isinstance(exc, NotFoundError):
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404

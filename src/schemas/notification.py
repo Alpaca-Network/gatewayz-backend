@@ -120,3 +120,7 @@ class TrialExpiryAlert(BaseModel):
     remaining_tokens: int
     remaining_requests: int
 
+    @property
+    def days_remaining(self) -> int:
+        """Backwards-compatible alias used in older code/tests."""
+        return self.remaining_days

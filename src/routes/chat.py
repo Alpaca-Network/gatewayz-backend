@@ -35,18 +35,18 @@ import src.db.users as users_module
 import src.db.chat_history as chat_history_module
 import src.db.activity as activity_module
 from src.schemas import ProxyRequest, ResponseRequest, InputMessage, MessagesRequest
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 from src.config import Config
 import importlib
 import src.config.supabase_config as supabase_config
-from src.services.openrouter_client import make_openrouter_request_openai, process_openrouter_response, make_openrouter_request_openai_stream
-from src.services.portkey_client import make_portkey_request_openai, process_portkey_response, make_portkey_request_openai_stream
-from src.services.featherless_client import make_featherless_request_openai, process_featherless_response, make_featherless_request_openai_stream
-from src.services.fireworks_client import make_fireworks_request_openai, process_fireworks_response, make_fireworks_request_openai_stream
-from src.services.together_client import make_together_request_openai, process_together_response, make_together_request_openai_stream
-from src.services.huggingface_client import make_huggingface_request_openai, process_huggingface_response, make_huggingface_request_openai_stream
-from src.services.aimo_client import make_aimo_request_openai, process_aimo_response, make_aimo_request_openai_stream
-from src.services.xai_client import make_xai_request_openai, process_xai_response, make_xai_request_openai_stream
+import src.services.openrouter_client as openrouter_client
+import src.services.portkey_client as portkey_client
+import src.services.featherless_client as featherless_client
+import src.services.fireworks_client as fireworks_client
+import src.services.together_client as together_client
+import src.services.huggingface_client as huggingface_client
+import src.services.aimo_client as aimo_client
+import src.services.xai_client as xai_client
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.provider_failover import build_provider_failover_chain, map_provider_error, should_failover
 import src.services.rate_limiting as rate_limiting_service
@@ -112,6 +112,102 @@ def validate_trial_access(*args, **kwargs):
 
 def track_trial_usage(*args, **kwargs):
     return trial_module.track_trial_usage(*args, **kwargs)
+
+
+def make_openrouter_request_openai(*args, **kwargs):
+    return openrouter_client.make_openrouter_request_openai(*args, **kwargs)
+
+
+def process_openrouter_response(*args, **kwargs):
+    return openrouter_client.process_openrouter_response(*args, **kwargs)
+
+
+def make_openrouter_request_openai_stream(*args, **kwargs):
+    return openrouter_client.make_openrouter_request_openai_stream(*args, **kwargs)
+
+
+def make_portkey_request_openai(*args, **kwargs):
+    return portkey_client.make_portkey_request_openai(*args, **kwargs)
+
+
+def process_portkey_response(*args, **kwargs):
+    return portkey_client.process_portkey_response(*args, **kwargs)
+
+
+def make_portkey_request_openai_stream(*args, **kwargs):
+    return portkey_client.make_portkey_request_openai_stream(*args, **kwargs)
+
+
+def make_featherless_request_openai(*args, **kwargs):
+    return featherless_client.make_featherless_request_openai(*args, **kwargs)
+
+
+def process_featherless_response(*args, **kwargs):
+    return featherless_client.process_featherless_response(*args, **kwargs)
+
+
+def make_featherless_request_openai_stream(*args, **kwargs):
+    return featherless_client.make_featherless_request_openai_stream(*args, **kwargs)
+
+
+def make_fireworks_request_openai(*args, **kwargs):
+    return fireworks_client.make_fireworks_request_openai(*args, **kwargs)
+
+
+def process_fireworks_response(*args, **kwargs):
+    return fireworks_client.process_fireworks_response(*args, **kwargs)
+
+
+def make_fireworks_request_openai_stream(*args, **kwargs):
+    return fireworks_client.make_fireworks_request_openai_stream(*args, **kwargs)
+
+
+def make_together_request_openai(*args, **kwargs):
+    return together_client.make_together_request_openai(*args, **kwargs)
+
+
+def process_together_response(*args, **kwargs):
+    return together_client.process_together_response(*args, **kwargs)
+
+
+def make_together_request_openai_stream(*args, **kwargs):
+    return together_client.make_together_request_openai_stream(*args, **kwargs)
+
+
+def make_huggingface_request_openai(*args, **kwargs):
+    return huggingface_client.make_huggingface_request_openai(*args, **kwargs)
+
+
+def process_huggingface_response(*args, **kwargs):
+    return huggingface_client.process_huggingface_response(*args, **kwargs)
+
+
+def make_huggingface_request_openai_stream(*args, **kwargs):
+    return huggingface_client.make_huggingface_request_openai_stream(*args, **kwargs)
+
+
+def make_aimo_request_openai(*args, **kwargs):
+    return aimo_client.make_aimo_request_openai(*args, **kwargs)
+
+
+def process_aimo_response(*args, **kwargs):
+    return aimo_client.process_aimo_response(*args, **kwargs)
+
+
+def make_aimo_request_openai_stream(*args, **kwargs):
+    return aimo_client.make_aimo_request_openai_stream(*args, **kwargs)
+
+
+def make_xai_request_openai(*args, **kwargs):
+    return xai_client.make_xai_request_openai(*args, **kwargs)
+
+
+def process_xai_response(*args, **kwargs):
+    return xai_client.process_xai_response(*args, **kwargs)
+
+
+def make_xai_request_openai_stream(*args, **kwargs):
+    return xai_client.make_xai_request_openai_stream(*args, **kwargs)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -577,6 +673,9 @@ async def chat_completions(
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
+                    if http_exc.status_code == 429:
+                        raise http_exc
+
                     last_http_exc = http_exc
                     if idx < len(provider_chain) - 1 and should_failover(http_exc):
                         next_provider = provider_chain[idx + 1]
@@ -684,6 +783,9 @@ async def chat_completions(
                 else:
                     logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
                 http_exc = map_provider_error(attempt_provider, request_model, exc)
+
+                if http_exc.status_code == 429:
+                    raise http_exc
 
                 last_http_exc = http_exc
                 if idx < len(provider_chain) - 1 and should_failover(http_exc):

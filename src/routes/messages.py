@@ -17,7 +17,7 @@ import src.db.users as users_module
 import src.db.chat_history as chat_history_module
 import src.db.activity as activity_module
 from src.schemas import MessagesRequest
-from src.security.deps import get_api_key
+from src.security.deps import require_authenticated_api_key as get_api_key
 from src.services.openrouter_client import make_openrouter_request_openai, process_openrouter_response
 from src.services.portkey_client import make_portkey_request_openai, process_portkey_response
 from src.services.featherless_client import make_featherless_request_openai, process_featherless_response

@@ -9,7 +9,7 @@ from src.enhanced_notification_service import enhanced_notification_service
 from fastapi import APIRouter, Query
 from datetime import datetime, timezone
 from fastapi import Depends, HTTPException
-from src.security.deps import get_api_key, require_admin
+from src.security.deps import require_authenticated_api_key as get_api_key, require_admin
 from src.schemas.notification import NotificationPreferences, UpdateNotificationPreferencesRequest, \
     NotificationType, SendNotificationRequest, NotificationChannel, NotificationStats
 from src.services.notification import notification_service
