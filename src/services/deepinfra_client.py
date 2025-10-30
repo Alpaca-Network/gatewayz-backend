@@ -13,19 +13,8 @@ def get_deepinfra_client():
     DeepInfra provides OpenAI-compatible API endpoints for various models
     """
     try:
-        if not Config.DEEPINFRA_API_KEY:
-            raise ValueError("DeepInfra API key not configured")
-
-        # Try connection pooling, fallback to direct client if import fails (for tests)
-        try:
-            from src.services.connection_pool import get_deepinfra_pooled_client
-            return get_deepinfra_pooled_client()
-        except (ImportError, Exception):
-            # Fallback for tests or if connection_pool isn't available
-            return OpenAI(
-                base_url="https://api.deepinfra.com/v1/openai",
-                api_key=Config.DEEPINFRA_API_KEY
-            )
+        from src.services.connection_pool import get_deepinfra_pooled_client
+        return get_deepinfra_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize DeepInfra client: {e}")
         raise
