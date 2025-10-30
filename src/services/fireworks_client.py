@@ -12,19 +12,8 @@ def get_fireworks_client():
     Fireworks.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
-        if not Config.FIREWORKS_API_KEY:
-            raise ValueError("Fireworks API key not configured")
-
-        # Try connection pooling, fallback to direct client if import fails (for tests)
-        try:
-            from src.services.connection_pool import get_fireworks_pooled_client
-            return get_fireworks_pooled_client()
-        except (ImportError, Exception):
-            # Fallback for tests or if connection_pool isn't available
-            return OpenAI(
-                base_url="https://api.fireworks.ai/inference/v1",
-                api_key=Config.FIREWORKS_API_KEY
-            )
+        from src.services.connection_pool import get_fireworks_pooled_client
+        return get_fireworks_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize Fireworks client: {e}")
         raise
