@@ -508,18 +508,16 @@ class TestUserProfile:
         mock_get_user,
         client,
         mock_api_key,
-        mock_user
+        mock_user,
+        mock_user_profile
     ):
         """Test that tier display names are correctly mapped for all tiers"""
         # Test MAX tier
         mock_user_max = {**mock_user, 'tier': 'max'}
         mock_profile_max = {
-            'user_id': 1,
-            'api_key': 'sk-test-key-12345',
-            'credits': 100,
+            **mock_user_profile,
             'tier': 'max',
-            'tier_display_name': 'MAX',
-            'subscription_status': 'active'
+            'tier_display_name': 'MAX'
         }
         mock_get_user.return_value = mock_user_max
         mock_get_profile.return_value = mock_profile_max
@@ -535,7 +533,7 @@ class TestUserProfile:
         assert data['tier_display_name'] == 'MAX'
 
         # Test Pro tier
-        mock_profile_pro = {**mock_profile_max, 'tier': 'pro', 'tier_display_name': 'Pro'}
+        mock_profile_pro = {**mock_user_profile, 'tier': 'pro', 'tier_display_name': 'Pro'}
         mock_get_profile.return_value = mock_profile_pro
 
         response = client.get(
@@ -549,7 +547,7 @@ class TestUserProfile:
         assert data['tier_display_name'] == 'Pro'
 
         # Test Basic tier
-        mock_profile_basic = {**mock_profile_max, 'tier': 'basic', 'tier_display_name': 'Basic'}
+        mock_profile_basic = {**mock_user_profile, 'tier': 'basic', 'tier_display_name': 'Basic'}
         mock_get_profile.return_value = mock_profile_basic
 
         response = client.get(
