@@ -177,8 +177,10 @@ class TestCheckoutSession:
     @patch('src.services.payments.get_user_by_id')
     @patch('src.services.payments.create_payment')
     @patch('stripe.checkout.Session.create')
+    @patch('src.config.supabase_config.get_supabase_client')
     def test_create_checkout_session_with_privy_did(
         self,
+        mock_get_supabase_client,
         mock_stripe_create,
         mock_create_payment,
         mock_get_user,
@@ -193,6 +195,13 @@ class TestCheckoutSession:
             'email': 'did:privy:abc123',
             'credits': 100.0
         }
+
+        # Mock Supabase client for Privy DID lookup
+        mock_supabase_client = Mock()
+        mock_supabase_client.table().select().eq().execute.return_value = Mock(
+            data=[{'privy_user_id': 'privy_123'}]
+        )
+        mock_get_supabase_client.return_value = mock_supabase_client
 
         mock_get_user.return_value = privy_user
         mock_create_payment.return_value = mock_payment
