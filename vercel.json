@@ -3,60 +3,19 @@
   "builds": [
     {
       "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+      "use": "@vercel/python"
     }
   ],
   "routes": [
-    {
-      "src": "/v1/chat/completions",
-      "dest": "api/index.py",
-      "methods": ["POST", "OPTIONS"]
-    },
-    {
-      "src": "/v1/responses",
-      "dest": "api/index.py",
-      "methods": ["POST", "OPTIONS"]
-    },
     {
       "src": "/(.*)",
       "dest": "api/index.py"
     }
   ],
-  "regions": ["iad1", "sfo1", "lhr1", "hnd1", "sin1"],
-  "env": {
-    "VERCEL": "1"
-  },
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
-      "memory": 1024,
-      "runtime": "python3.12"
+      "memory": 1024
     }
-  },
-  "headers": [
-    {
-      "source": "/v1/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
-        },
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "X-Frame-Options",
-          "value": "DENY"
-        },
-        {
-          "key": "X-XSS-Protection",
-          "value": "1; mode=block"
-        }
-      ]
-    }
-  ]
+  }
 }

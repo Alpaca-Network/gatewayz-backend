@@ -14,8 +14,19 @@ def get_chutes_client():
     API endpoint: https://llm.chutes.ai/v1/chat/completions
     """
     try:
-        from src.services.connection_pool import get_chutes_pooled_client
-        return get_chutes_pooled_client()
+        if not Config.CHUTES_API_KEY:
+            raise ValueError("Chutes API key not configured")
+
+        # Try connection pooling, fallback to direct client if import fails (for tests)
+        try:
+            from src.services.connection_pool import get_chutes_pooled_client
+            return get_chutes_pooled_client()
+        except (ImportError, Exception):
+            # Fallback for tests or if connection_pool isn't available
+            return OpenAI(
+                base_url="https://llm.chutes.ai/v1",
+                api_key=Config.CHUTES_API_KEY
+            )
     except Exception as e:
         logger.error(f"Failed to initialize Chutes client: {e}")
         raise

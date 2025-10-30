@@ -53,13 +53,31 @@ def _format_portkey_model(model: str, slug: Optional[str]) -> str:
 
 
 def get_portkey_client(provider: Optional[str] = None, virtual_key: Optional[str] = None) -> OpenAI:
-    from src.services.connection_pool import get_portkey_pooled_client
+    if not Config.PORTKEY_API_KEY:
+        raise ValueError("Portkey API key not configured")
 
+    # Try connection pooling, fallback to direct client if import fails (for tests)
     try:
+        from src.services.connection_pool import get_portkey_pooled_client
         return get_portkey_pooled_client(provider=provider, virtual_key=virtual_key)
-    except Exception as e:
-        logger.error(f"Failed to initialize Portkey client: {e}")
-        raise
+    except (ImportError, Exception):
+        # Fallback for tests or if connection_pool isn't available
+        headers = {
+            "x-portkey-api-key": Config.PORTKEY_API_KEY,
+        }
+
+        resolved_virtual_key = virtual_key or Config.get_portkey_virtual_key(provider)
+        if resolved_virtual_key:
+            headers["x-portkey-virtual-key"] = resolved_virtual_key
+
+        if provider:
+            headers["x-portkey-provider"] = provider
+
+        return OpenAI(
+            base_url=PORTKEY_BASE_URL,
+            api_key=Config.PORTKEY_API_KEY,
+            default_headers=headers,
+        )
 
 
 def make_portkey_request_openai(messages, model, provider: Optional[str] = None, virtual_key: Optional[str] = None, **kwargs):
