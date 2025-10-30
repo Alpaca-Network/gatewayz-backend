@@ -291,19 +291,21 @@ class TrialService:
                 plans = []
                 for plan_data in result.data:
                     plan = SubscriptionPlan(
-                        id=plan_data['id'],
+                        id=plan_data.get('id'),
                         plan_name=plan_data['plan_name'],
                         plan_type=PlanType(plan_data['plan_type']),
                         description=plan_data.get('description', ''),
-                        monthly_price=plan_data['monthly_price'],
+                        monthly_price=plan_data.get('monthly_price', 0.0),
                         yearly_price=plan_data.get('yearly_price'),
-                        monthly_request_limit=plan_data.get('monthly_request_limit', plan_data.get('max_requests_per_month', 1000)),
-                        monthly_token_limit=plan_data.get('monthly_token_limit', plan_data.get('max_tokens_per_month', 100000)),
-                        daily_request_limit=plan_data.get('daily_request_limit', plan_data.get('max_requests_per_day', 1000)),
-                        daily_token_limit=plan_data.get('daily_token_limit', plan_data.get('max_tokens_per_day', 100000)),
+                        monthly_request_limit=plan_data.get('max_requests_per_month', plan_data.get('monthly_request_limit', 1000)),
+                        monthly_token_limit=plan_data.get('max_tokens_per_month', plan_data.get('monthly_token_limit', 100000)),
+                        daily_request_limit=plan_data.get('max_requests_per_day', plan_data.get('daily_request_limit', 1000)),
+                        daily_token_limit=plan_data.get('max_tokens_per_day', plan_data.get('daily_token_limit', 100000)),
                         max_concurrent_requests=plan_data.get('max_concurrent_requests', 5),
+                        price_per_token=plan_data.get('price_per_token'),
                         features=plan_data.get('features', []),
                         is_active=plan_data.get('is_active', True),
+                        is_pay_as_you_go=plan_data.get('is_pay_as_you_go', False),
                         created_at=datetime.fromisoformat(plan_data['created_at'].replace('Z', '+00:00')) if plan_data.get('created_at') else None,
                         updated_at=datetime.fromisoformat(plan_data['updated_at'].replace('Z', '+00:00')) if plan_data.get('updated_at') else None
                     )
