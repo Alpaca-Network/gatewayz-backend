@@ -456,13 +456,14 @@ class TestGetSubscriptionPlans:
             {
                 'id': 1,
                 'plan_name': 'starter',
-                'plan_type': 'monthly',
+                'plan_type': 'dev',  # Use valid PlanType enum value
+                'description': 'Starter plan for developers',
                 'monthly_price': 9.99,
                 'yearly_price': 99.99,
-                'max_requests_per_month': 10000,
-                'max_tokens_per_month': 1000000,
-                'max_requests_per_day': 500,
-                'max_tokens_per_day': 50000,
+                'monthly_request_limit': 10000,
+                'monthly_token_limit': 1000000,
+                'daily_request_limit': 500,
+                'daily_token_limit': 50000,
                 'max_concurrent_requests': 5,
                 'features': ['feature1', 'feature2'],
                 'is_active': True,
@@ -630,14 +631,14 @@ class TestValidateTrialAccess:
                 trial_status=Mock(
                     is_trial=True,
                     trial_expired=False,
-                    trial_remaining_tokens=500000,
+                    trial_remaining_tokens=2000000,  # Plenty of tokens
                     trial_remaining_requests=500,
                     trial_remaining_credits=0.01,  # Very low credits
                     trial_end_date=datetime.now() + timedelta(days=2)
                 )
             )
 
-            # Request 1M tokens (estimated cost: $0.02)
+            # Request 1M tokens (estimated cost: $20, but only have $0.01)
             result = await trial_service.validate_trial_access('test_key', tokens_used=1000000)
 
             assert result.is_valid is False
