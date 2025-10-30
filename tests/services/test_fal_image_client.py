@@ -1,4 +1,3 @@
-import pytest
 from src.services.fal_image_client import (
     load_fal_models_catalog,
     get_fal_models,
