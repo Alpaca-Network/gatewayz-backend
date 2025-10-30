@@ -8,13 +8,18 @@ logger = logging.getLogger(__name__)
 
 
 def get_deepinfra_client():
-    """Get DeepInfra client using OpenAI-compatible interface with connection pooling
-
+    """Get DeepInfra client using OpenAI-compatible interface
+    
     DeepInfra provides OpenAI-compatible API endpoints for various models
     """
     try:
-        from src.services.connection_pool import get_deepinfra_pooled_client
-        return get_deepinfra_pooled_client()
+        if not Config.DEEPINFRA_API_KEY:
+            raise ValueError("DeepInfra API key not configured")
+        
+        return OpenAI(
+            base_url="https://api.deepinfra.com/v1/openai",
+            api_key=Config.DEEPINFRA_API_KEY
+        )
     except Exception as e:
         logger.error(f"Failed to initialize DeepInfra client: {e}")
         raise

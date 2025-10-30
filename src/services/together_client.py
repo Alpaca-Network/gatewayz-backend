@@ -8,13 +8,18 @@ logger = logging.getLogger(__name__)
 
 
 def get_together_client():
-    """Get Together.ai client using OpenAI-compatible interface with connection pooling
-
+    """Get Together.ai client using OpenAI-compatible interface
+    
     Together.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
-        from src.services.connection_pool import get_together_pooled_client
-        return get_together_pooled_client()
+        if not Config.TOGETHER_API_KEY:
+            raise ValueError("Together API key not configured")
+        
+        return OpenAI(
+            base_url="https://api.together.xyz/v1",
+            api_key=Config.TOGETHER_API_KEY
+        )
     except Exception as e:
         logger.error(f"Failed to initialize Together client: {e}")
         raise

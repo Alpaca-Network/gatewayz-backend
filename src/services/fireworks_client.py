@@ -7,13 +7,18 @@ logger = logging.getLogger(__name__)
 
 
 def get_fireworks_client():
-    """Get Fireworks.ai client using OpenAI-compatible interface with connection pooling
-
+    """Get Fireworks.ai client using OpenAI-compatible interface
+    
     Fireworks.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
-        from src.services.connection_pool import get_fireworks_pooled_client
-        return get_fireworks_pooled_client()
+        if not Config.FIREWORKS_API_KEY:
+            raise ValueError("Fireworks API key not configured")
+        
+        return OpenAI(
+            base_url="https://api.fireworks.ai/inference/v1",
+            api_key=Config.FIREWORKS_API_KEY
+        )
     except Exception as e:
         logger.error(f"Failed to initialize Fireworks client: {e}")
         raise

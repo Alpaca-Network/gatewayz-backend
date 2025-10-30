@@ -8,13 +8,18 @@ logger = logging.getLogger(__name__)
 
 
 def get_featherless_client():
-    """Get Featherless.ai client using OpenAI-compatible interface with connection pooling
+    """Get Featherless.ai client using OpenAI-compatible interface
 
     Featherless.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
-        from src.services.connection_pool import get_featherless_pooled_client
-        return get_featherless_pooled_client()
+        if not Config.FEATHERLESS_API_KEY:
+            raise ValueError("Featherless API key not configured")
+
+        return OpenAI(
+            base_url="https://api.featherless.ai/v1",
+            api_key=Config.FEATHERLESS_API_KEY
+        )
     except Exception as e:
         logger.error(f"Failed to initialize Featherless client: {e}")
         raise
