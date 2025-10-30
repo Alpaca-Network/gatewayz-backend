@@ -8,14 +8,19 @@ logger = logging.getLogger(__name__)
 
 
 def get_chutes_client():
-    """Get Chutes.ai client using OpenAI-compatible interface with connection pooling
+    """Get Chutes.ai client using OpenAI-compatible interface
 
     Chutes.ai provides OpenAI-compatible API endpoints for various models
     API endpoint: https://llm.chutes.ai/v1/chat/completions
     """
     try:
-        from src.services.connection_pool import get_chutes_pooled_client
-        return get_chutes_pooled_client()
+        if not Config.CHUTES_API_KEY:
+            raise ValueError("Chutes API key not configured")
+
+        return OpenAI(
+            base_url="https://llm.chutes.ai/v1",
+            api_key=Config.CHUTES_API_KEY
+        )
     except Exception as e:
         logger.error(f"Failed to initialize Chutes client: {e}")
         raise
