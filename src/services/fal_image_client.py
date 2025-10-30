@@ -32,7 +32,12 @@ def load_fal_models_catalog() -> List[Dict[str, Any]]:
         if catalog_path.exists():
             logger.info(f"Loading Fal.ai models from catalog: {catalog_path}")
             with open(catalog_path, 'r') as f:
-                _fal_models_cache = json.load(f)
+                raw_data = json.load(f)
+            
+            # Filter out metadata objects and only keep actual model objects
+            # Model objects must have an "id" field
+            _fal_models_cache = [item for item in raw_data if isinstance(item, dict) and "id" in item]
+            
             logger.info(f"Loaded {len(_fal_models_cache)} Fal.ai models from catalog")
             return _fal_models_cache
         else:
