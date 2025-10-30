@@ -3,6 +3,7 @@ import logging
 from openai import OpenAI
 
 from src.config import Config
+from src.services.connection_pool import get_openrouter_pooled_client
 
 from fastapi import APIRouter
 
@@ -14,19 +15,9 @@ router = APIRouter()
 
 
 def get_openrouter_client():
-    """Get OpenRouter client with proper configuration"""
+    """Get OpenRouter client with proper configuration and connection pooling"""
     try:
-        if not Config.OPENROUTER_API_KEY:
-            raise ValueError("OpenRouter API key not configured")
-
-        return OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=Config.OPENROUTER_API_KEY,
-            default_headers={
-                "HTTP-Referer": Config.OPENROUTER_SITE_URL,
-                "X-TitleSection": Config.OPENROUTER_SITE_NAME
-            }
-        )
+        return get_openrouter_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize OpenRouter client: {e}")
         raise

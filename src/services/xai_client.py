@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_xai_client():
-    """Get xAI client using official xai-sdk
+    """Get xAI client using official xai-sdk with connection pooling
 
     xAI provides Grok models through their official SDK.
     Falls back to OpenAI SDK with custom base URL if official SDK is not available.
@@ -23,14 +23,11 @@ def get_xai_client():
 
             return Client(api_key=Config.XAI_API_KEY)
         except ImportError:
-            # Fallback to OpenAI SDK with xAI base URL
+            # Fallback to OpenAI SDK with xAI base URL and connection pooling
             logger.info("xAI SDK not available, using OpenAI SDK with xAI base URL")
-            from openai import OpenAI
+            from src.services.connection_pool import get_xai_pooled_client
 
-            return OpenAI(
-                base_url="https://api.x.ai/v1",
-                api_key=Config.XAI_API_KEY
-            )
+            return get_xai_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize xAI client: {e}")
         raise
