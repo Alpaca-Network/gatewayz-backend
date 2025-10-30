@@ -311,10 +311,13 @@ class TestSubscriptionCreditsIntegration:
         # Step 1: Subscription created
         stripe_service._handle_subscription_created(mock_pro_subscription)
 
-        # Verify subscription status updated
+        # Verify both users and api_keys_new tables were updated
         assert mock_client.table.called
-        table_call = mock_client.table.call_args[0][0]
-        assert table_call == 'users'
+        assert mock_client.table.call_count >= 2
+        # Check that both 'users' and 'api_keys_new' were called
+        table_calls = [call[0][0] for call in mock_client.table.call_args_list]
+        assert 'users' in table_calls
+        assert 'api_keys_new' in table_calls
 
         # Step 2: First invoice paid
         stripe_service._handle_invoice_paid(mock_pro_invoice)
