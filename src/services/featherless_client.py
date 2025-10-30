@@ -13,8 +13,19 @@ def get_featherless_client():
     Featherless.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
-        from src.services.connection_pool import get_featherless_pooled_client
-        return get_featherless_pooled_client()
+        if not Config.FEATHERLESS_API_KEY:
+            raise ValueError("Featherless API key not configured")
+
+        # Try connection pooling, fallback to direct client if import fails (for tests)
+        try:
+            from src.services.connection_pool import get_featherless_pooled_client
+            return get_featherless_pooled_client()
+        except (ImportError, Exception):
+            # Fallback for tests or if connection_pool isn't available
+            return OpenAI(
+                base_url="https://api.featherless.ai/v1",
+                api_key=Config.FEATHERLESS_API_KEY
+            )
     except Exception as e:
         logger.error(f"Failed to initialize Featherless client: {e}")
         raise

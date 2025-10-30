@@ -23,11 +23,17 @@ def get_xai_client():
 
             return Client(api_key=Config.XAI_API_KEY)
         except ImportError:
-            # Fallback to OpenAI SDK with xAI base URL and connection pooling
+            # Fallback to OpenAI SDK with xAI base URL
             logger.info("xAI SDK not available, using OpenAI SDK with xAI base URL")
-            from src.services.connection_pool import get_xai_pooled_client
-
-            return get_xai_pooled_client()
+            try:
+                from src.services.connection_pool import get_xai_pooled_client
+                return get_xai_pooled_client()
+            except (ImportError, Exception):
+                from openai import OpenAI
+                return OpenAI(
+                    base_url="https://api.x.ai/v1",
+                    api_key=Config.XAI_API_KEY
+                )
     except Exception as e:
         logger.error(f"Failed to initialize xAI client: {e}")
         raise
