@@ -140,13 +140,22 @@ class PaymentRecord(BaseModel):
 
 class CreateCheckoutSessionRequest(BaseModel):
     """Request to create a Stripe checkout session"""
-    amount: int = Field(..., description="Amount in cents (e.g., 2999 for $29.99)")
+    amount: int = Field(..., description="Amount in cents (e.g., 2999 for $29.99)", gt=0)
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
     success_url: Optional[str] = Field(None, description="URL to redirect on success")
     cancel_url: Optional[str] = Field(None, description="URL to redirect on cancel")
     customer_email: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     description: Optional[str] = "Gatewayz Credits Purchase"
+
+    @field_validator('amount')
+    @classmethod
+    def validate_amount(cls, v):
+        if v < 50:  # Minimum $0.50
+            raise ValueError('Amount must be at least $0.50 (50 cents)')
+        if v > 99999999:  # Maximum ~$1M
+            raise ValueError('Amount exceeds maximum allowed')
+        return v
 
 
 class CheckoutSessionResponse(BaseModel):
@@ -339,6 +348,35 @@ class SubscriptionResponse(BaseModel):
     payment_method: PaymentMethod
     amount_paid_usd: float
     amount_paid_paca: Optional[float]
+
+
+# ==================== Stripe Subscription Checkout Models ====================
+
+class CreateSubscriptionCheckoutRequest(BaseModel):
+    """Request to create a Stripe subscription checkout session"""
+    price_id: str = Field(..., description="Stripe price ID (e.g., price_1SNk2KLVT8n4vaEn7lHNPYWB)")
+    product_id: str = Field(..., description="Stripe product ID (e.g., prod_TKOqQPhVRxNp4Q)")
+    customer_email: Optional[str] = Field(None, description="Customer email address")
+    success_url: str = Field(..., description="URL to redirect on successful subscription")
+    cancel_url: str = Field(..., description="URL to redirect on canceled subscription")
+    mode: str = Field(default="subscription", description="Checkout mode (subscription, payment, or setup)")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
+
+    @field_validator('mode')
+    @classmethod
+    def validate_mode(cls, v):
+        allowed_modes = ['subscription', 'payment', 'setup']
+        if v not in allowed_modes:
+            raise ValueError(f'Mode must be one of: {", ".join(allowed_modes)}')
+        return v
+
+
+class SubscriptionCheckoutResponse(BaseModel):
+    """Response from creating a subscription checkout session"""
+    session_id: str = Field(..., description="Stripe checkout session ID")
+    url: str = Field(..., description="Stripe checkout URL to redirect user to")
+    customer_id: Optional[str] = Field(None, description="Stripe customer ID if created")
+    status: str = Field(default="open", description="Checkout session status")
 
 
 # ==================== Product and Price Models ====================
