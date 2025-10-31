@@ -1,4 +1,5 @@
 import datetime
+import asyncio
 import logging
 from typing import Dict, List, Optional, Any
 
@@ -324,107 +325,78 @@ async def get_models(
         near_models: List[dict] = []
         fal_models: List[dict] = []
 
-        if gateway_value in ("openrouter", "all"):
-            openrouter_models = get_cached_models("openrouter") or []
-            if gateway_value == "openrouter" and not openrouter_models:
-                logger.error("No OpenRouter models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        known_gateways = [
+            "openrouter", "portkey", "featherless", "deepinfra",
+            "chutes", "groq", "fireworks", "together",
+            "google", "cerebras", "nebius", "xai", "novita",
+            "hug", "aimo", "near", "fal",
+        ]
 
-        if gateway_value in ("portkey", "all"):
-            portkey_models = get_cached_models("portkey") or []
-            if gateway_value == "portkey" and not portkey_models:
-                logger.error("No Portkey models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        requested_gateways = [gw for gw in known_gateways if gateway_value in (gw, "all")]
 
-        if gateway_value in ("featherless", "all"):
-            featherless_models = get_cached_models("featherless") or []
-            if gateway_value == "featherless" and not featherless_models:
-                logger.error("No Featherless models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        async def fetch_gateway_models(gw: str) -> List[dict]:
+            try:
+                result = await asyncio.to_thread(get_cached_models, gw)
+                return result or []
+            except Exception as exc:
+                logger.warning(f"Failed to fetch models from {gw}: {exc}")
+                return []
 
-        if gateway_value in ("deepinfra", "all"):
-            deepinfra_models = get_cached_models("deepinfra") or []
-            if gateway_value == "deepinfra" and not deepinfra_models:
-                logger.error("No DeepInfra models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        models_by_gateway: Dict[str, List[dict]] = {gw: [] for gw in known_gateways}
 
-        if gateway_value in ("chutes", "all"):
-            chutes_models = get_cached_models("chutes") or []
-            if gateway_value == "chutes" and not chutes_models:
-                logger.error("No Chutes models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        if "openrouter" in requested_gateways:
+            models_by_gateway["openrouter"] = await fetch_gateway_models("openrouter")
+            requested_gateways = [gw for gw in requested_gateways if gw != "openrouter"]
 
-        if gateway_value in ("groq", "all"):
-            groq_models = get_cached_models("groq") or []
-            if gateway_value == "groq" and not groq_models:
-                logger.error("No Groq models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        fetch_tasks = {
+            gw: asyncio.create_task(fetch_gateway_models(gw))
+            for gw in requested_gateways
+        }
 
-        if gateway_value in ("fireworks", "all"):
-            fireworks_models = get_cached_models("fireworks") or []
-            if gateway_value == "fireworks" and not fireworks_models:
-                logger.error("No Fireworks models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        for gw, task in fetch_tasks.items():
+            models_by_gateway[gw] = await task
 
-        if gateway_value in ("together", "all"):
-            together_models = get_cached_models("together") or []
-            if gateway_value == "together" and not together_models:
-                logger.error("No Together models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        openrouter_models = models_by_gateway["openrouter"]
+        portkey_models = models_by_gateway["portkey"]
+        featherless_models = models_by_gateway["featherless"]
+        deepinfra_models = models_by_gateway["deepinfra"]
+        chutes_models = models_by_gateway["chutes"]
+        groq_models = models_by_gateway["groq"]
+        fireworks_models = models_by_gateway["fireworks"]
+        together_models = models_by_gateway["together"]
+        google_models = models_by_gateway["google"]
+        cerebras_models = models_by_gateway["cerebras"]
+        nebius_models = models_by_gateway["nebius"]
+        xai_models = models_by_gateway["xai"]
+        novita_models = models_by_gateway["novita"]
+        hug_models = models_by_gateway["hug"]
+        aimo_models = models_by_gateway["aimo"]
+        near_models = models_by_gateway["near"]
+        fal_models = models_by_gateway["fal"]
 
-        if gateway_value in ("google", "all"):
-            google_models = get_cached_models("google") or []
-            if gateway_value == "google" and not google_models:
-                logger.error("No Google models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        error_messages = {
+            "openrouter": "No OpenRouter models data available from cache",
+            "portkey": "No Portkey models data available from cache",
+            "featherless": "No Featherless models data available from cache",
+            "deepinfra": "No DeepInfra models data available from cache",
+            "chutes": "No Chutes models data available from cache",
+            "groq": "No Groq models data available from cache",
+            "fireworks": "No Fireworks models data available from cache",
+            "together": "No Together models data available from cache",
+            "google": "No Google models data available from cache",
+            "cerebras": "No Cerebras models data available from cache",
+            "nebius": "No Nebius models data available from cache",
+            "xai": "No Xai models data available from cache",
+            "novita": "No Novita models data available from cache",
+            "hug": "No Hugging Face models data available from cache",
+            "aimo": "No AIMO models data available from cache",
+            "near": "No Near models data available from cache",
+            "fal": "No Fal models data available from cache",
+        }
 
-        if gateway_value in ("cerebras", "all"):
-            cerebras_models = get_cached_models("cerebras") or []
-            if gateway_value == "cerebras" and not cerebras_models:
-                logger.error("No Cerebras models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("nebius", "all"):
-            nebius_models = get_cached_models("nebius") or []
-            if gateway_value == "nebius" and not nebius_models:
-                logger.error("No Nebius models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("xai", "all"):
-            xai_models = get_cached_models("xai") or []
-            if gateway_value == "xai" and not xai_models:
-                logger.error("No Xai models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("novita", "all"):
-            novita_models = get_cached_models("novita") or []
-            if gateway_value == "novita" and not novita_models:
-                logger.error("No Novita models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("hug", "all"):
-            hug_models = get_cached_models("hug") or []
-            if gateway_value == "hug" and not hug_models:
-                logger.error("No Hugging Face models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("aimo", "all"):
-            aimo_models = get_cached_models("aimo") or []
-            if gateway_value == "aimo" and not aimo_models:
-                logger.error("No AIMO models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("near", "all"):
-            near_models = get_cached_models("near") or []
-            if gateway_value == "near" and not near_models:
-                logger.error("No Near models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
-
-        if gateway_value in ("fal", "all"):
-            fal_models = get_cached_models("fal") or []
-            if gateway_value == "fal" and not fal_models:
-                logger.error("No Fal models data available from cache")
-                raise HTTPException(status_code=503, detail="Models data unavailable")
+        if gateway_value != "all" and not models_by_gateway.get(gateway_value, []):
+            logger.error(error_messages.get(gateway_value, "Models data unavailable"))
+            raise HTTPException(status_code=503, detail="Models data unavailable")
 
         if gateway_value == "openrouter":
             models = openrouter_models
