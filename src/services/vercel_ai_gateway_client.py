@@ -17,12 +17,16 @@ def get_vercel_ai_gateway_client():
     Documentation: https://vercel.com/docs/ai-gateway
     """
     try:
-        if not Config.VERCEL_AI_GATEWAY_API_KEY:
-            raise ValueError("Vercel AI Gateway API key not configured")
+        api_key = Config.VERCEL_AI_GATEWAY_API_KEY
+        if not api_key:
+            # If no API key is configured, create a client with a placeholder
+            # The actual error will be caught at request time if needed
+            api_key = "placeholder-key"
+            logger.warning("Vercel AI Gateway API key not configured, using placeholder")
 
         return OpenAI(
             base_url="https://ai-gateway.vercel.sh/v1",
-            api_key=Config.VERCEL_AI_GATEWAY_API_KEY
+            api_key=api_key
         )
     except Exception as e:
         logger.error(f"Failed to initialize Vercel AI Gateway client: {e}")
