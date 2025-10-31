@@ -300,6 +300,57 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "google/gemini-1.5-flash": "gemini-1.5-flash",
             "gemini-2.0": "gemini-2.0-flash",
             "gemini-1.5": "gemini-1.5-pro",
+        },
+        "vercel-ai-gateway": {
+            # Vercel AI Gateway uses standard model identifiers
+            # The gateway automatically routes requests to the appropriate provider
+            # Support for common models across OpenAI, Anthropic, Google, and other providers
+
+            # OpenAI models
+            "openai/gpt-4": "gpt-4",
+            "openai/gpt-4-turbo": "gpt-4-turbo",
+            "openai/gpt-4o": "gpt-4o",
+            "openai/gpt-4o-mini": "gpt-4o-mini",
+            "openai/gpt-3.5-turbo": "gpt-3.5-turbo",
+            "gpt-4": "gpt-4",
+            "gpt-4-turbo": "gpt-4-turbo",
+            "gpt-4o": "gpt-4o",
+            "gpt-4o-mini": "gpt-4o-mini",
+            "gpt-3.5-turbo": "gpt-3.5-turbo",
+
+            # Anthropic Claude models
+            "anthropic/claude-3-opus": "claude-3-opus-20240229",
+            "anthropic/claude-3-sonnet": "claude-3-sonnet-20240229",
+            "anthropic/claude-3-haiku": "claude-3-haiku-20240307",
+            "anthropic/claude-3.5-sonnet": "claude-3-5-sonnet-20241022",
+            "claude-opus": "claude-3-opus-20240229",
+            "claude-sonnet": "claude-3-sonnet-20240229",
+            "claude-haiku": "claude-3-haiku-20240307",
+            "claude-3.5-sonnet": "claude-3-5-sonnet-20241022",
+
+            # Google Gemini models
+            "google/gemini-2.0-flash": "gemini-2.0-flash",
+            "google/gemini-1.5-pro": "gemini-1.5-pro",
+            "google/gemini-1.5-flash": "gemini-1.5-flash",
+            "gemini-2.0-flash": "gemini-2.0-flash",
+            "gemini-1.5-pro": "gemini-1.5-pro",
+            "gemini-1.5-flash": "gemini-1.5-flash",
+
+            # DeepSeek models
+            "deepseek-ai/deepseek-chat": "deepseek-chat",
+            "deepseek-ai/deepseek-coder": "deepseek-coder",
+            "deepseek-chat": "deepseek-chat",
+            "deepseek-coder": "deepseek-coder",
+
+            # Meta Llama models
+            "meta-llama/llama-3.1-70b": "llama-3.1-70b",
+            "meta-llama/llama-3-70b": "llama-3-70b",
+            "llama-3.1-70b": "llama-3.1-70b",
+            "llama-3-70b": "llama-3-70b",
+
+            # Mistral models
+            "mistral/mistral-7b": "mistral-7b",
+            "mistral-7b": "mistral-7b",
         }
     }
 
@@ -416,7 +467,7 @@ def detect_provider_from_model_id(model_id: str) -> Optional[str]:
         return "google-vertex"
 
     # Check all mappings to see if this model exists
-    for provider in ["fireworks", "openrouter", "featherless", "together", "portkey", "huggingface", "hug", "chutes", "google-vertex", "fal"]:
+    for provider in ["fireworks", "openrouter", "featherless", "together", "portkey", "huggingface", "hug", "chutes", "google-vertex", "vercel-ai-gateway", "fal"]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
             logger.info(f"Detected provider '{provider}' for model '{model_id}'")
