@@ -194,9 +194,10 @@ class TestProcessGoogleVertexResponse:
 class TestMakeGoogleVertexRequest:
     """Tests for making requests to Google Vertex"""
 
+    @patch("src.services.google_vertex_client.PredictRequest")
     @patch("src.services.google_vertex_client.MessageToDict")
     @patch("src.services.google_vertex_client.get_google_vertex_client")
-    def test_make_request_with_parameters(self, mock_get_client, mock_message_to_dict):
+    def test_make_request_with_parameters(self, mock_get_client, mock_message_to_dict, mock_predict_request):
         """Test making a request with various parameters"""
         # Mock the MessageToDict conversion
         mock_message_to_dict.return_value = {
@@ -226,6 +227,9 @@ class TestMakeGoogleVertexRequest:
         mock_client.predict = MagicMock(return_value=mock_response)
         mock_get_client.return_value = mock_client
 
+        # Mock PredictRequest constructor to accept any arguments
+        mock_predict_request.return_value = MagicMock()
+
         messages = [
             {"role": "user", "content": "Hello"}
         ]
@@ -242,9 +246,10 @@ class TestMakeGoogleVertexRequest:
         assert result["model"] == "gemini-2.0-flash"
         assert "usage" in result
 
+    @patch("src.services.google_vertex_client.PredictRequest")
     @patch("src.services.google_vertex_client.MessageToDict")
     @patch("src.services.google_vertex_client.get_google_vertex_client")
-    def test_make_streaming_request(self, mock_get_client, mock_message_to_dict):
+    def test_make_streaming_request(self, mock_get_client, mock_message_to_dict, mock_predict_request):
         """Test making a streaming request"""
         # Mock the MessageToDict conversion
         mock_message_to_dict.return_value = {
@@ -273,6 +278,9 @@ class TestMakeGoogleVertexRequest:
         mock_response = MagicMock()
         mock_client.predict = MagicMock(return_value=mock_response)
         mock_get_client.return_value = mock_client
+
+        # Mock PredictRequest constructor to accept any arguments
+        mock_predict_request.return_value = MagicMock()
 
         messages = [
             {"role": "user", "content": "Hello"}
