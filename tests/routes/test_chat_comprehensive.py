@@ -282,32 +282,55 @@ def client(sb, monkeypatch):
 
     # 3) Mock external service clients
     def mock_openrouter_request(messages, model, **kwargs):
-        return {
-            "id": "chatcmpl-test123",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "This is a test response from OpenRouter mock."
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 15,
-                "total_tokens": 25
-            }
-        }
+        usage_obj = MagicMock()
+        usage_obj.prompt_tokens = 10
+        usage_obj.completion_tokens = 15
+        usage_obj.total_tokens = 25
+
+        message_obj = MagicMock()
+        message_obj.role = "assistant"
+        message_obj.content = "This is a test response from OpenRouter mock."
+
+        choice_obj = MagicMock()
+        choice_obj.index = 0
+        choice_obj.message = message_obj
+        choice_obj.finish_reason = "stop"
+
+        response_obj = MagicMock()
+        response_obj.id = "chatcmpl-test123"
+        response_obj.object = "chat.completion"
+        response_obj.created = 1234567890
+        response_obj.model = model
+        response_obj.choices = [choice_obj]
+        response_obj.usage = usage_obj
+
+        return response_obj
 
     monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai", mock_openrouter_request)
 
     def mock_process_openrouter_response(response):
-        return response
+        return {
+            "id": response.id,
+            "object": response.object,
+            "created": response.created,
+            "model": response.model,
+            "choices": [
+                {
+                    "index": choice.index,
+                    "message": {
+                        "role": choice.message.role,
+                        "content": choice.message.content
+                    },
+                    "finish_reason": choice.finish_reason
+                }
+                for choice in response.choices
+            ],
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        }
 
     monkeypatch.setattr(openrouter_module, "process_openrouter_response", mock_process_openrouter_response)
 
@@ -343,6 +366,11 @@ def client(sb, monkeypatch):
 
     # 3b) Mock Vercel AI Gateway (for failover compatibility)
     def mock_vercel_request(messages, model, **kwargs):
+        usage_obj = MagicMock()
+        usage_obj.prompt_tokens = 10
+        usage_obj.completion_tokens = 15
+        usage_obj.total_tokens = 25
+
         return MagicMock(
             id="chatcmpl-vercel123",
             object="chat.completion",
@@ -355,15 +383,32 @@ def client(sb, monkeypatch):
                     finish_reason="stop"
                 )
             ],
-            usage=MagicMock(
-                prompt_tokens=10,
-                completion_tokens=15,
-                total_tokens=25
-            )
+            usage=usage_obj
         )
 
     def mock_process_vercel_response(response):
-        return response
+        return {
+            "id": response.id,
+            "object": response.object,
+            "created": response.created,
+            "model": response.model,
+            "choices": [
+                {
+                    "index": choice.index,
+                    "message": {
+                        "role": choice.message.role,
+                        "content": choice.message.content
+                    },
+                    "finish_reason": choice.finish_reason
+                }
+                for choice in response.choices
+            ],
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        }
 
     monkeypatch.setattr(vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai", mock_vercel_request)
     monkeypatch.setattr(vercel_ai_gateway_module, "process_vercel_ai_gateway_response", mock_process_vercel_response)
