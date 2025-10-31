@@ -2,7 +2,7 @@
 
 import pytest
 import sys
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 # Mock Google Cloud dependencies before importing our module
 # This allows tests to run even if google-cloud-aiplatform isn't installed
