@@ -392,6 +392,10 @@ def _process_google_vertex_response(response: Any, model: str) -> dict:
 
         logger.info(f"Extracted text content length: {len(text_content)} characters")
 
+        # Warn if content is empty - this might indicate an issue with the model or request
+        if not text_content:
+            logger.warning(f"Received empty text content from Vertex AI for model {model}. Candidate: {json.dumps(candidate, default=str)}")
+
         # Extract usage information
         usage_metadata = candidate.get("usageMetadata", {})
         prompt_tokens = int(usage_metadata.get("promptTokenCount", 0))
