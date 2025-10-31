@@ -28,6 +28,7 @@ import src.db.chat_history as chat_history_module
 import src.db.activity as activity_module
 import src.services.openrouter_client as openrouter_module
 import src.services.portkey_client as portkey_module
+import src.services.vercel_ai_gateway_client as vercel_ai_gateway_module
 import src.services.rate_limiting as rate_limiting_module
 import src.services.trial_validation as trial_module
 import src.services.pricing as pricing_module
@@ -340,6 +341,43 @@ def client(sb, monkeypatch):
 
     monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream", mock_openrouter_stream)
 
+    # 3b) Mock Vercel AI Gateway (for failover compatibility)
+    def mock_vercel_request(messages, model, **kwargs):
+        return MagicMock(
+            id="chatcmpl-vercel123",
+            object="chat.completion",
+            created=1234567890,
+            model=model,
+            choices=[
+                MagicMock(
+                    index=0,
+                    message=MagicMock(role="assistant", content="This is a test response from Vercel AI Gateway mock."),
+                    finish_reason="stop"
+                )
+            ],
+            usage=MagicMock(
+                prompt_tokens=10,
+                completion_tokens=15,
+                total_tokens=25
+            )
+        )
+
+    def mock_process_vercel_response(response):
+        return response
+
+    monkeypatch.setattr(vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai", mock_vercel_request)
+    monkeypatch.setattr(vercel_ai_gateway_module, "process_vercel_ai_gateway_response", mock_process_vercel_response)
+
+    def mock_vercel_stream(messages, model, **kwargs):
+        chunks = [
+            MockStreamChunk("Hello"),
+            MockStreamChunk(" from"),
+            MockStreamChunk(" Vercel", finish_reason="stop")
+        ]
+        return iter(chunks)
+
+    monkeypatch.setattr(vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream)
+
     # 4) Mock rate limiting
     class MockRateLimitManager:
         async def check_rate_limit(self, api_key, tokens_used=0):
@@ -416,6 +454,9 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(chat_module, "make_openrouter_request_openai", mock_openrouter_request)
     monkeypatch.setattr(chat_module, "process_openrouter_response", mock_process_openrouter_response)
     monkeypatch.setattr(chat_module, "make_openrouter_request_openai_stream", mock_openrouter_stream)
+    monkeypatch.setattr(chat_module, "make_vercel_ai_gateway_request_openai", mock_vercel_request)
+    monkeypatch.setattr(chat_module, "process_vercel_ai_gateway_response", mock_process_vercel_response)
+    monkeypatch.setattr(chat_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream)
 
     # Override the get_api_key dependency to bypass authentication
     async def override_get_api_key():
