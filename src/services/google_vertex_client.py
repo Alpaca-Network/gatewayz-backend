@@ -33,22 +33,51 @@ logger = logging.getLogger(__name__)
 def get_google_vertex_credentials():
     """Get Google Cloud credentials for Vertex AI
 
-    Uses service account credentials if GOOGLE_APPLICATION_CREDENTIALS is set,
-    otherwise falls back to default application credentials.
+    Tries multiple credential sources in order:
+    1. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (for Vercel/serverless)
+    2. GOOGLE_APPLICATION_CREDENTIALS file path (for development)
+    3. Application Default Credentials (ADC) from google.auth.default()
     """
     try:
+        # First, try to get credentials from JSON environment variable (Vercel/serverless)
+        import os
+        creds_json_env = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
+        if creds_json_env:
+            logger.info("Loading Google Vertex credentials from GOOGLE_VERTEX_CREDENTIALS_JSON environment variable")
+            import json as json_module
+            try:
+                creds_dict = json_module.loads(creds_json_env)
+                credentials = Credentials.from_service_account_info(creds_dict)
+                credentials.refresh(Request())
+                logger.info("Successfully loaded Google Vertex credentials from JSON environment variable")
+                return credentials
+            except Exception as e:
+                logger.warning(f"Failed to load credentials from JSON env var: {e}")
+                # Fall through to next method
+
+        # Second, try file-based credentials (development)
         if Config.GOOGLE_APPLICATION_CREDENTIALS:
+            logger.info(f"Loading Google Vertex credentials from file: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
             credentials = Credentials.from_service_account_file(
                 Config.GOOGLE_APPLICATION_CREDENTIALS
             )
             credentials.refresh(Request())
-        else:
-            credentials, _ = google.auth.default()
-            if not credentials.valid:
-                credentials.refresh(Request())
+            logger.info("Successfully loaded Google Vertex credentials from file")
+            return credentials
+
+        # Third, try Application Default Credentials (ADC)
+        logger.info("Attempting to use Application Default Credentials (ADC)")
+        credentials, _ = google.auth.default()
+        if not credentials.valid:
+            credentials.refresh(Request())
+        logger.info("Successfully loaded Application Default Credentials")
         return credentials
     except Exception as e:
-        logger.error(f"Failed to get Google Cloud credentials: {e}")
+        logger.error(f"Failed to get Google Cloud credentials: {e}", exc_info=True)
+        logger.error("Please set one of:")
+        logger.error("  1. GOOGLE_VERTEX_CREDENTIALS_JSON (base64 or JSON string for serverless)")
+        logger.error("  2. GOOGLE_APPLICATION_CREDENTIALS (file path for development)")
+        logger.error("  3. Configure Application Default Credentials via gcloud")
         raise
 
 
@@ -125,11 +154,14 @@ def make_google_vertex_request_openai(
         OpenAI-compatible response object
     """
     try:
+        logger.info(f"Making Google Vertex request for model: {model}")
         client = get_google_vertex_client()
         model_resource = transform_google_vertex_model_id(model)
+        logger.debug(f"Transformed model resource: {model_resource}")
 
         # Build request content
         content = _build_vertex_content(messages)
+        logger.debug(f"Built content with {len(content)} messages")
 
         # Build generation config
         generation_config = {}
@@ -140,6 +172,8 @@ def make_google_vertex_request_openai(
         if top_p is not None:
             generation_config["top_p"] = top_p
 
+        logger.debug(f"Generation config: {generation_config}")
+
         # Prepare the predict request
         request_body = {
             "contents": content,
@@ -148,6 +182,8 @@ def make_google_vertex_request_openai(
         # Add generation config if provided
         if generation_config:
             request_body["generation_config"] = generation_config
+
+        logger.debug(f"Request body: {json.dumps(request_body, indent=2, default=str)}")
 
         # Create PredictRequest and add instances using direct assignment
         # This is the correct way to create a PredictRequest with instances
@@ -182,13 +218,15 @@ def make_google_vertex_request_openai(
                 request.instances = [request_body]
 
         # Make the request
+        logger.info(f"Calling Vertex AI predict API")
         response = client.predict(request=request)
+        logger.info(f"Received raw response from Vertex AI")
 
         # Process and normalize response
         return _process_google_vertex_response(response, model)
 
     except Exception as e:
-        logger.error(f"Google Vertex AI request failed: {e}")
+        logger.error(f"Google Vertex AI request failed: {e}", exc_info=True)
         raise
 
 
@@ -218,6 +256,7 @@ def make_google_vertex_request_openai_stream(
         SSE-formatted stream chunks
     """
     try:
+        logger.info(f"Starting streaming request for model {model}")
         # Get non-streaming response
         response = make_google_vertex_request_openai(
             messages=messages,
@@ -227,6 +266,19 @@ def make_google_vertex_request_openai_stream(
             top_p=top_p,
             **kwargs
         )
+
+        logger.info(f"Received response: {json.dumps(response, indent=2, default=str)}")
+
+        # Extract content safely
+        choices = response.get("choices", [])
+        if not choices:
+            logger.error(f"No choices in response: {response}")
+            raise ValueError("No choices in response")
+
+        content = choices[0].get("message", {}).get("content", "")
+        finish_reason = choices[0].get("finish_reason", "stop")
+
+        logger.info(f"Content length: {len(content)}, finish_reason: {finish_reason}")
 
         # Convert to streaming format by yielding complete response as single chunk
         # This maintains compatibility with streaming clients
@@ -240,13 +292,14 @@ def make_google_vertex_request_openai_stream(
                     "index": 0,
                     "delta": {
                         "role": "assistant",
-                        "content": response["choices"][0]["message"]["content"]
+                        "content": content
                     },
                     "finish_reason": None
                 }
             ]
         }
 
+        logger.debug(f"Yielding chunk: {json.dumps(chunk, indent=2, default=str)}")
         yield f"data: {json.dumps(chunk)}\n\n"
 
         # Final chunk with finish_reason
@@ -259,16 +312,17 @@ def make_google_vertex_request_openai_stream(
                 {
                     "index": 0,
                     "delta": {"content": None},
-                    "finish_reason": response["choices"][0].get("finish_reason", "stop")
+                    "finish_reason": finish_reason
                 }
             ]
         }
 
+        logger.debug(f"Yielding finish chunk: {json.dumps(finish_chunk, indent=2, default=str)}")
         yield f"data: {json.dumps(finish_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
     except Exception as e:
-        logger.error(f"Google Vertex AI streaming request failed: {e}")
+        logger.error(f"Google Vertex AI streaming request failed: {e}", exc_info=True)
         raise
 
 
@@ -331,29 +385,45 @@ def _process_google_vertex_response(response: Any, model: str) -> dict:
     try:
         # Convert protobuf response to dictionary
         response_dict = MessageToDict(response)
+        logger.debug(f"Google Vertex response dict: {json.dumps(response_dict, indent=2, default=str)}")
 
         # Extract predictions
         predictions = response_dict.get("predictions", [])
+        logger.debug(f"Predictions count: {len(predictions)}")
 
         if not predictions:
+            logger.error(f"No predictions in Vertex AI response. Full response: {response_dict}")
             raise ValueError("No predictions in Vertex AI response")
 
         # Get the first prediction
         prediction = predictions[0]
+        logger.debug(f"First prediction: {json.dumps(prediction, indent=2, default=str)}")
 
         # Extract content from candidates
         candidates = prediction.get("candidates", [])
+        logger.debug(f"Candidates count: {len(candidates)}")
+
         if not candidates:
+            logger.error(f"No candidates in Vertex AI prediction. Prediction: {prediction}")
             raise ValueError("No candidates in Vertex AI prediction")
 
         candidate = candidates[0]
+        logger.debug(f"First candidate: {json.dumps(candidate, indent=2, default=str)}")
+
         content_parts = candidate.get("content", {}).get("parts", [])
+        logger.debug(f"Content parts count: {len(content_parts)}")
 
         # Extract text from parts
         text_content = ""
         for part in content_parts:
             if "text" in part:
                 text_content += part["text"]
+
+        logger.info(f"Extracted text content length: {len(text_content)} characters")
+
+        # Warn if content is empty - this might indicate an issue with the model or request
+        if not text_content:
+            logger.warning(f"Received empty text content from Vertex AI for model {model}. Candidate: {json.dumps(candidate, default=str)}")
 
         # Extract usage information
         usage_metadata = candidate.get("usageMetadata", {})
@@ -392,7 +462,7 @@ def _process_google_vertex_response(response: Any, model: str) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"Failed to process Google Vertex AI response: {e}")
+        logger.error(f"Failed to process Google Vertex AI response: {e}", exc_info=True)
         raise
 
 
