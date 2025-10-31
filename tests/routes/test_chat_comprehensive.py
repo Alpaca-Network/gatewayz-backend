@@ -503,6 +503,9 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(chat_module, "process_vercel_ai_gateway_response", mock_process_vercel_response)
     monkeypatch.setattr(chat_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream)
 
+    # Also patch pricing module in chat_module since it's imported directly
+    monkeypatch.setattr(chat_module, "calculate_cost", mock_calculate_cost)
+
     # Override the get_api_key dependency to bypass authentication
     async def override_get_api_key():
         return "test-key-123"
