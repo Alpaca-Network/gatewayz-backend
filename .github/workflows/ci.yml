@@ -203,7 +203,11 @@ jobs:
       - name: Save timings for next run
         if: always()
         run: |
-          [ -f .pytest-split-durations ] && echo "Timings saved"
+          if [ -f .pytest-split-durations ]; then
+            echo "Timings saved"
+          else
+            echo "No timing file generated yet"
+          fi
         shell: bash
 
       - name: Upload timings artifact
