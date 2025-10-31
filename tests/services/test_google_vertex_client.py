@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch, MagicMock
 from src.services.google_vertex_client import (
     make_google_vertex_request_openai,
     make_google_vertex_request_openai_stream,
-    process_google_vertex_response,
     transform_google_vertex_model_id,
     _build_vertex_content,
     _process_google_vertex_response,
@@ -80,43 +79,48 @@ class TestBuildVertexContent:
         assert len(result[0]["parts"]) >= 2
 
     def test_build_system_message(self):
-        """Test that system messages are treated as user messages"""
+        """Test that system messages are mapped to model role"""
         messages = [
             {"role": "system", "content": "You are a helpful assistant"},
             {"role": "user", "content": "Hello"},
         ]
         result = _build_vertex_content(messages)
 
-        # System messages should be treated as user messages
-        assert result[0]["role"] == "user"
+        # System messages are not user messages, so they map to "model"
+        # In Vertex AI, only "user" and "model" roles exist
+        assert result[0]["role"] == "model"
         assert result[1]["role"] == "user"
 
 
 class TestProcessGoogleVertexResponse:
     """Tests for response processing"""
 
-    def test_process_successful_response(self):
+    @patch("src.services.google_vertex_client.MessageToDict")
+    def test_process_successful_response(self, mock_message_to_dict):
         """Test processing a successful response"""
-        mock_response = MagicMock()
-        mock_response.predictions = [
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "parts": [
-                                {"text": "This is a response"}
-                            ]
-                        },
-                        "usageMetadata": {
-                            "promptTokenCount": 10,
-                            "candidatesTokenCount": 5,
-                        },
-                        "finishReason": "STOP",
-                    }
-                ]
-            }
-        ]
+        # Mock the MessageToDict conversion
+        mock_message_to_dict.return_value = {
+            "predictions": [
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "This is a response"}
+                                ]
+                            },
+                            "usageMetadata": {
+                                "promptTokenCount": 10,
+                                "candidatesTokenCount": 5,
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                }
+            ]
+        }
 
+        mock_response = MagicMock()
         result = _process_google_vertex_response(mock_response, "gemini-2.0-flash")
 
         assert result["model"] == "gemini-2.0-flash"
@@ -126,29 +130,33 @@ class TestProcessGoogleVertexResponse:
         assert result["usage"]["completion_tokens"] == 5
         assert result["usage"]["total_tokens"] == 15
 
-    def test_process_multiple_content_parts(self):
+    @patch("src.services.google_vertex_client.MessageToDict")
+    def test_process_multiple_content_parts(self, mock_message_to_dict):
         """Test processing response with multiple content parts"""
-        mock_response = MagicMock()
-        mock_response.predictions = [
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "parts": [
-                                {"text": "Part 1 "},
-                                {"text": "Part 2"}
-                            ]
-                        },
-                        "usageMetadata": {
-                            "promptTokenCount": 10,
-                            "candidatesTokenCount": 5,
-                        },
-                        "finishReason": "STOP",
-                    }
-                ]
-            }
-        ]
+        # Mock the MessageToDict conversion
+        mock_message_to_dict.return_value = {
+            "predictions": [
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "Part 1 "},
+                                    {"text": "Part 2"}
+                                ]
+                            },
+                            "usageMetadata": {
+                                "promptTokenCount": 10,
+                                "candidatesTokenCount": 5,
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                }
+            ]
+        }
 
+        mock_response = MagicMock()
         result = _process_google_vertex_response(mock_response, "gemini-1.5-pro")
 
         assert result["choices"][0]["message"]["content"] == "Part 1 Part 2"
@@ -157,33 +165,35 @@ class TestProcessGoogleVertexResponse:
 class TestMakeGoogleVertexRequest:
     """Tests for making requests to Google Vertex"""
 
+    @patch("src.services.google_vertex_client.MessageToDict")
     @patch("src.services.google_vertex_client.get_google_vertex_client")
-    def test_make_request_with_parameters(self, mock_get_client):
+    def test_make_request_with_parameters(self, mock_get_client, mock_message_to_dict):
         """Test making a request with various parameters"""
+        # Mock the MessageToDict conversion
+        mock_message_to_dict.return_value = {
+            "predictions": [
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "Response"}
+                                ]
+                            },
+                            "usageMetadata": {
+                                "promptTokenCount": 5,
+                                "candidatesTokenCount": 10,
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                }
+            ]
+        }
+
         # Mock the client
         mock_client = MagicMock()
-        mock_predict = MagicMock()
-
         mock_response = MagicMock()
-        mock_response.predictions = [
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "parts": [
-                                {"text": "Response"}
-                            ]
-                        },
-                        "usageMetadata": {
-                            "promptTokenCount": 5,
-                            "candidatesTokenCount": 10,
-                        },
-                        "finishReason": "STOP",
-                    }
-                ]
-            }
-        ]
-
         mock_client.predict = MagicMock(return_value=mock_response)
         mock_get_client.return_value = mock_client
 
@@ -203,32 +213,35 @@ class TestMakeGoogleVertexRequest:
         assert result["model"] == "gemini-2.0-flash"
         assert "usage" in result
 
+    @patch("src.services.google_vertex_client.MessageToDict")
     @patch("src.services.google_vertex_client.get_google_vertex_client")
-    def test_make_streaming_request(self, mock_get_client):
+    def test_make_streaming_request(self, mock_get_client, mock_message_to_dict):
         """Test making a streaming request"""
+        # Mock the MessageToDict conversion
+        mock_message_to_dict.return_value = {
+            "predictions": [
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "Streaming response"}
+                                ]
+                            },
+                            "usageMetadata": {
+                                "promptTokenCount": 5,
+                                "candidatesTokenCount": 10,
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                }
+            ]
+        }
+
         # Mock the client
         mock_client = MagicMock()
-
         mock_response = MagicMock()
-        mock_response.predictions = [
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "parts": [
-                                {"text": "Streaming response"}
-                            ]
-                        },
-                        "usageMetadata": {
-                            "promptTokenCount": 5,
-                            "candidatesTokenCount": 10,
-                        },
-                        "finishReason": "STOP",
-                    }
-                ]
-            }
-        ]
-
         mock_client.predict = MagicMock(return_value=mock_response)
         mock_get_client.return_value = mock_client
 
