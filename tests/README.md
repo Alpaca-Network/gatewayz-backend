@@ -118,12 +118,19 @@ def mock_supabase_client():
 
 ## 📝 Writing Tests
 
+### ⚠️ Location Requirements
+**ALL test files MUST be placed in the `tests/` directory**. Test files in the root directory will NOT be discovered by pytest.
+
+Proper file location is enforced by the pytest configuration (`testpaths = tests` in `pytest.ini`).
+
 ### Location Guide
 - `tests/db/` - Database CRUD
 - `tests/routes/` - API endpoints
 - `tests/services/` - Business logic
-- `tests/integration/` - Multi-component
+- `tests/integration/` - Multi-component, provider-specific, and ad-hoc integration tests
 - `tests/security/` - Security features
+- `tests/health/` - Health check tests
+- `tests/smoke/` - Post-deployment validation tests
 
 ### Test Structure
 ```python
