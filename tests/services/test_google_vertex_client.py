@@ -1,16 +1,41 @@
 """Tests for Google Vertex AI client"""
 
 import pytest
+import sys
 from unittest.mock import Mock, patch, MagicMock
-from src.services.google_vertex_client import (
-    make_google_vertex_request_openai,
-    make_google_vertex_request_openai_stream,
-    transform_google_vertex_model_id,
-    _build_vertex_content,
-    _process_google_vertex_response,
-)
+
+# Mock Google Cloud dependencies before importing our module
+# This allows tests to run even if google-cloud-aiplatform isn't installed
+sys.modules['google'] = MagicMock()
+sys.modules['google.auth'] = MagicMock()
+sys.modules['google.auth.transport'] = MagicMock()
+sys.modules['google.auth.transport.requests'] = MagicMock()
+sys.modules['google.oauth2'] = MagicMock()
+sys.modules['google.oauth2.service_account'] = MagicMock()
+sys.modules['google.cloud'] = MagicMock()
+sys.modules['google.cloud.aiplatform'] = MagicMock()
+sys.modules['google.cloud.aiplatform_v1'] = MagicMock()
+sys.modules['google.cloud.aiplatform_v1.services'] = MagicMock()
+sys.modules['google.cloud.aiplatform_v1.services.prediction_service'] = MagicMock()
+sys.modules['google.cloud.aiplatform_v1.types'] = MagicMock()
+sys.modules['google.protobuf'] = MagicMock()
+sys.modules['google.protobuf.json_format'] = MagicMock()
+
+# Now import our module (which will use the mocked dependencies)
+try:
+    from src.services.google_vertex_client import (
+        make_google_vertex_request_openai,
+        make_google_vertex_request_openai_stream,
+        transform_google_vertex_model_id,
+        _build_vertex_content,
+        _process_google_vertex_response,
+    )
+    GOOGLE_VERTEX_AVAILABLE = True
+except ImportError:
+    GOOGLE_VERTEX_AVAILABLE = False
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
 class TestTransformGoogleVertexModelId:
     """Tests for model ID transformation"""
 
@@ -41,6 +66,7 @@ class TestTransformGoogleVertexModelId:
             assert "projects/" in result
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
 class TestBuildVertexContent:
     """Tests for content building"""
 
@@ -92,6 +118,7 @@ class TestBuildVertexContent:
         assert result[1]["role"] == "user"
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
 class TestProcessGoogleVertexResponse:
     """Tests for response processing"""
 
@@ -162,6 +189,7 @@ class TestProcessGoogleVertexResponse:
         assert result["choices"][0]["message"]["content"] == "Part 1 Part 2"
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
 class TestMakeGoogleVertexRequest:
     """Tests for making requests to Google Vertex"""
 
@@ -264,6 +292,7 @@ class TestMakeGoogleVertexRequest:
         assert any("[DONE]" in chunk for chunk in chunks)
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
 class TestGoogleVertexModelIntegration:
     """Integration tests for model detection and transformation"""
 
