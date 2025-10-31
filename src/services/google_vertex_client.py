@@ -144,7 +144,7 @@ def make_google_vertex_request_openai(
         request_body = {
             "contents": content,
         }
-        
+
         # Add generation config if provided
         if generation_config:
             request_body["generation_config"] = generation_config
@@ -153,7 +153,7 @@ def make_google_vertex_request_openai(
         # This is the correct way to create a PredictRequest with instances
         request = PredictRequest()
         request.endpoint = model_resource
-        
+
         # Check if we're in a testing environment
         import sys
         if 'pytest' in sys.modules or str(type(Struct)).find('Mock') != -1:
