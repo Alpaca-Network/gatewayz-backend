@@ -20,6 +20,7 @@ sys.modules['google.cloud.aiplatform_v1.services.prediction_service'] = MagicMoc
 sys.modules['google.cloud.aiplatform_v1.types'] = MagicMock()
 sys.modules['google.protobuf'] = MagicMock()
 sys.modules['google.protobuf.json_format'] = MagicMock()
+sys.modules['google.protobuf.struct_pb2'] = MagicMock()
 
 # Now import our module (which will use the mocked dependencies)
 try:
