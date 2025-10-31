@@ -123,14 +123,20 @@ def mock_supabase_client():
 
 Proper file location is enforced by the pytest configuration (`testpaths = tests` in `pytest.ini`).
 
+### Important: Ad-hoc Testing Scripts vs. Automated Tests
+- **Automated tests** (pytest): Should be in `tests/` directory with proper test structure
+- **Ad-hoc scripts** (manual testing): Should be in `scripts/integration-tests/` for manual provider validation
+  - See `/scripts/integration-tests/README.md` for details
+
 ### Location Guide
 - `tests/db/` - Database CRUD
 - `tests/routes/` - API endpoints
 - `tests/services/` - Business logic
-- `tests/integration/` - Multi-component, provider-specific, and ad-hoc integration tests
+- `tests/integration/` - Multi-component integration tests (proper pytest tests only)
 - `tests/security/` - Security features
 - `tests/health/` - Health check tests
 - `tests/smoke/` - Post-deployment validation tests
+- `scripts/integration-tests/` - Manual ad-hoc testing scripts (NOT run by pytest)
 
 ### Test Structure
 ```python
