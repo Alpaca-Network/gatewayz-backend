@@ -665,7 +665,7 @@ async def get_models(
             media_type="application/json",
             headers={
                 "Cache-Control": "public, max-age=300",  # 5 minute browser cache
-                "ETag": f'"{hash(json.dumps(enhanced_models[:5]))}',  # Simple ETag for validation
+                "ETag": f'"{hash(json.dumps(enhanced_models[:5]))}"',  # Simple ETag for validation
             }
         )
 
