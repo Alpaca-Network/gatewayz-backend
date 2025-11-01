@@ -198,6 +198,26 @@ def verify_webhook_signature(
         return False
 
 
+def sanitize_for_logging(value: str) -> str:
+    """Sanitize user-controlled strings for safe logging.
+    
+    Prevents log injection attacks by removing newlines and other control characters
+    that could be used to forge log entries.
+    
+    Args:
+        value: String value to sanitize (can be None)
+        
+    Returns:
+        Sanitized string with newlines replaced by spaces
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    # Replace newlines and carriage returns with spaces to prevent log injection
+    return value.replace("\n", " ").replace("\r", " ").replace("\x00", "")
+
+
 def sanitize_pii_for_logging(data: dict, pii_fields: Optional[list] = None) -> dict:
     """Remove or mask personally identifiable information from logging data.
 
