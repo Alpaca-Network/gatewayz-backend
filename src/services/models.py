@@ -46,6 +46,7 @@ from src.services.portkey_providers import (
 )
 from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
+from src.utils.security_validators import sanitize_for_logging
 
 import httpx
 
@@ -83,7 +84,7 @@ def sanitize_pricing(pricing: dict) -> dict:
                     float_value = float(value)
                     if float_value < 0:
                         sanitized[key] = "0"
-                        logger.debug(f"Converted negative pricing {key}={value} to 0")
+                        logger.debug("Converted negative pricing %s=%s to 0", sanitize_for_logging(key), sanitize_for_logging(str(value)))
             except (ValueError, TypeError):
                 # Keep the original value if conversion fails
                 pass
@@ -185,7 +186,7 @@ def load_featherless_catalog_export() -> list:
             return normalized
         return None
     except Exception as exc:
-        logger.error(f"Failed to load Featherless catalog export: {exc}", exc_info=True)
+        logger.error("Failed to load Featherless catalog export: %s", sanitize_for_logging(str(exc)), exc_info=True)
         return None
 
 
@@ -201,7 +202,7 @@ def revalidate_cache_in_background(gateway: str, fetch_function):
             fetch_function()
             logger.info(f"Background revalidation completed for {gateway}")
         except Exception as e:
-            logger.warning(f"Background revalidation failed for {gateway}: {e}")
+            logger.warning("Background revalidation failed for %s: %s", sanitize_for_logging(gateway), sanitize_for_logging(str(e)))
 
     _revalidation_executor.submit(_revalidate)
 
@@ -229,11 +230,11 @@ def get_all_models_parallel():
                         all_models.extend(models)
                 except Exception as e:
                     gateway_name = futures[future]
-                    logger.warning(f"Failed to fetch models from {gateway_name}: {e}")
+                    logger.warning("Failed to fetch models from %s: %s", sanitize_for_logging(gateway_name), sanitize_for_logging(str(e)))
 
             return all_models
     except Exception as e:
-        logger.error(f"Error in parallel model fetching: {e}")
+        logger.error("Error in parallel model fetching: %s", sanitize_for_logging(str(e)))
         # Fallback to sequential fetching
         return get_all_models_sequential()
 
@@ -454,7 +455,7 @@ def get_cached_models(gateway: str = "openrouter"):
         # Cache expired or empty, fetch fresh data synchronously
         return fetch_models_from_openrouter()
     except Exception as e:
-        logger.error(f"Error getting cached models for gateway '{gateway}': {e}")
+        logger.error("Error getting cached models for gateway '%s': %s", sanitize_for_logging(gateway), sanitize_for_logging(str(e)))
         return None
 
 
@@ -485,7 +486,7 @@ def fetch_models_from_openrouter():
 
         return _models_cache["data"]
     except Exception as e:
-        logger.error(f"Failed to fetch models from OpenRouter: {e}")
+        logger.error("Failed to fetch models from OpenRouter: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -526,10 +527,10 @@ def fetch_models_from_portkey():
         logger.info(f"Cached {len(normalized_models)} Portkey models with pricing cross-reference")
         return _portkey_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"Portkey HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("Portkey HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from Portkey: {e}", exc_info=True)
+        logger.error("Failed to fetch models from Portkey: %s", sanitize_for_logging(str(e)), exc_info=True)
         return None
 
 
@@ -576,10 +577,10 @@ def fetch_models_from_deepinfra():
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
         return _deepinfra_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"DeepInfra HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("DeepInfra HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from DeepInfra: {e}", exc_info=True)
+        logger.error("Failed to fetch models from DeepInfra: %s", sanitize_for_logging(str(e)), exc_info=True)
         return None
 
 
@@ -721,10 +722,10 @@ def fetch_models_from_featherless():
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
         return _featherless_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"Featherless HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("Featherless HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from Featherless: {e}")
+        logger.error("Failed to fetch models from Featherless: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -815,7 +816,7 @@ def fetch_models_from_chutes():
         return None
 
     except Exception as e:
-        logger.error(f"Failed to fetch models from Chutes: {e}")
+        logger.error("Failed to fetch models from Chutes: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -832,7 +833,7 @@ def fetch_models_from_chutes_api():
         return None
 
     except Exception as e:
-        logger.error(f"Failed to fetch models from Chutes API: {e}")
+        logger.error("Failed to fetch models from Chutes API: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -865,10 +866,10 @@ def fetch_models_from_groq():
         logger.info(f"Fetched {len(normalized_models)} Groq models")
         return _groq_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"Groq HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("Groq HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from Groq: {e}")
+        logger.error("Failed to fetch models from Groq: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -1046,10 +1047,10 @@ def fetch_models_from_fireworks():
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
         return _fireworks_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"Fireworks HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("Fireworks HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from Fireworks: {e}")
+        logger.error("Failed to fetch models from Fireworks: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -1138,10 +1139,10 @@ def fetch_specific_model_from_openrouter(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id_lower:
                     return model
 
-        logger.warning(f"Model {model_id} not found in OpenRouter catalog")
+        logger.warning("Model %s not found in OpenRouter catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from OpenRouter: {e}")
+        logger.error("Failed to fetch specific model %s/%s from OpenRouter: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -1176,10 +1177,10 @@ def fetch_models_from_together():
         logger.info(f"Fetched {len(normalized_models)} Together models")
         return _together_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"Together HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("Together HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from Together: {e}")
+        logger.error("Failed to fetch models from Together: %s", sanitize_for_logging(str(e)))
         return None
 
 
@@ -1820,10 +1821,10 @@ def fetch_specific_model_from_together(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning(f"Model {model_id} not found in Together catalog")
+        logger.warning("Model %s not found in Together catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Together: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Together: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 def fetch_specific_model_from_portkey(provider_name: str, model_name: str):
     """Fetch specific model data from Portkey by searching cached models"""
@@ -1845,10 +1846,10 @@ def fetch_specific_model_from_portkey(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning(f"Model {model_id} not found in Portkey catalog")
+        logger.warning("Model %s not found in Portkey catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Portkey: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Portkey: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -1872,10 +1873,10 @@ def fetch_specific_model_from_featherless(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning(f"Model {model_id} not found in Featherless catalog")
+        logger.warning("Model %s not found in Featherless catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Featherless: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Featherless: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -1907,10 +1908,10 @@ def fetch_specific_model_from_deepinfra(provider_name: str, model_name: str):
                 # Normalize to our schema
                 return normalize_deepinfra_model(model)
 
-        logger.warning(f"Model {model_id} not found in DeepInfra catalog")
+        logger.warning("Model %s not found in DeepInfra catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from DeepInfra: {e}")
+        logger.error("Failed to fetch specific model %s/%s from DeepInfra: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -2030,10 +2031,10 @@ def fetch_specific_model_from_chutes(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning(f"Model {model_id} not found in Chutes catalog")
+        logger.warning("Model %s not found in Chutes catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Chutes: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Chutes: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -2054,10 +2055,10 @@ def fetch_specific_model_from_groq(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning(f"Model {model_id} not found in Groq catalog")
+        logger.warning("Model %s not found in Groq catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Groq: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Groq: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -2078,10 +2079,10 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning(f"Model {model_id} not found in Fireworks catalog")
+        logger.warning("Model %s not found in Fireworks catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Fireworks: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Fireworks: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -2104,10 +2105,10 @@ def fetch_specific_model_from_huggingface(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id_lower:
                     return model
 
-        logger.warning(f"Model {model_id} not found in Hugging Face catalog")
+        logger.warning("Model %s not found in Hugging Face catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Hugging Face: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Hugging Face: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -2124,10 +2125,10 @@ def fetch_specific_model_from_fal(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id_lower:
                     return model
 
-        logger.warning(f"Model {model_id} not found in Fal.ai catalog")
+        logger.warning("Model %s not found in Fal.ai catalog", sanitize_for_logging(model_id))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} from Fal.ai: {e}")
+        logger.error("Failed to fetch specific model %s/%s from Fal.ai: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         return None
 
 
@@ -2247,10 +2248,10 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
                     model_data.setdefault("source_gateway", "hug")
                 return model_data
 
-        logger.warning(f"Model {model_id} not found after checking gateways: {candidate_gateways}")
+        logger.warning("Model %s not found after checking gateways: %s", sanitize_for_logging(model_id), sanitize_for_logging(str(candidate_gateways)))
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch specific model {provider_name}/{model_name} (gateways tried: {gateway}): {e}")
+        logger.error("Failed to fetch specific model %s/%s (gateways tried: %s): %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(gateway)), sanitize_for_logging(str(e)))
         return None
 
 
