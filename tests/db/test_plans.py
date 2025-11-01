@@ -135,7 +135,14 @@ class FakeSupabase:
 
 @pytest.fixture
 def fake_supabase():
-    return FakeSupabase()
+    sb = FakeSupabase()
+    yield sb
+    # Clean up after test completes
+    sb.store["plans"].clear()
+    sb.store["user_plans"].clear()
+    sb.store["usage_records"].clear()
+    sb.store["users"].clear()
+    sb.store["subscription_plans"].clear()
 
 
 @pytest.fixture
