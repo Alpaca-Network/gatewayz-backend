@@ -328,7 +328,8 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
     ]).execute()
 
     # earlier this month (should count toward monthly but not daily)
-    earlier = now.replace(day=1, hour=2, minute=0, second=0, microsecond=0)
+    # Ensure it's on a different day than today by subtracting days (at least 1 day ago)
+    earlier = (now - timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
     fake_supabase.table("usage_records").insert([
         {"user_id": 9, "timestamp": earlier.isoformat(), "tokens_used": 300},
     ]).execute()
