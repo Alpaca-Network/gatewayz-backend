@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/create", response_model=UserRegistrationResponse, tags=["authentication"])
+@router.post("/admin/create", response_model=UserRegistrationResponse, tags=["authentication"])
 async def create_api_key(request: UserRegistrationRequest):
     """Create an API key for the user after dashboard login"""
     try:
@@ -70,6 +70,8 @@ async def create_api_key(request: UserRegistrationRequest):
             timestamp=datetime.now(timezone.utc)
         )
 
+    except HTTPException:
+        raise  # Re-raise HTTPException as-is
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
