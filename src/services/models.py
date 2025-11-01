@@ -198,9 +198,9 @@ def revalidate_cache_in_background(gateway: str, fetch_function):
     """Trigger background revalidation of cache"""
     def _revalidate():
         try:
-            logger.info(f"Background revalidation started for {gateway}")
+            logger.info("Background revalidation started for %s", sanitize_for_logging(gateway))
             fetch_function()
-            logger.info(f"Background revalidation completed for {gateway}")
+            logger.info("Background revalidation completed for %s", sanitize_for_logging(gateway))
         except Exception as e:
             logger.warning("Background revalidation failed for %s: %s", sanitize_for_logging(gateway), sanitize_for_logging(str(e)))
 
@@ -505,7 +505,7 @@ def fetch_models_from_portkey():
 
         # Portkey API returns all models in a single request (no pagination support)
         url = "https://api.portkey.ai/v1/models"
-        logger.info(f"Fetching Portkey models from {url}")
+        logger.info("Fetching Portkey models from %s", sanitize_for_logging(str(url)))
 
         response = httpx.get(url, headers=headers, timeout=20.0)
         response.raise_for_status()
@@ -552,7 +552,7 @@ def fetch_models_from_deepinfra():
 
         # DeepInfra API - use /models/list endpoint which has better model data
         url = "https://api.deepinfra.com/models/list"
-        logger.info(f"Fetching DeepInfra models from {url}")
+        logger.info("Fetching DeepInfra models from %s", sanitize_for_logging(str(url)))
 
         response = httpx.get(url, headers=headers, timeout=20.0)
 
