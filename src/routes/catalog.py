@@ -43,6 +43,41 @@ DESC_GATEWAY_WITH_ALL = (
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
+ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
+
+# Query parameter description constants
+DESC_LIMIT_NUMBER_OF_RESULTS = "Limit number of results"
+DESC_OFFSET_FOR_PAGINATION = "Offset for pagination"
+DESC_TIME_RANGE_ALL = "Time range: '1h', '24h', '7d', '30d', 'all'"
+DESC_TIME_RANGE_NO_ALL = "Time range: '1h', '24h', '7d', '30d'"
+DESC_NUMBER_OF_MODELS_TO_RETURN = "Number of models to return"
+
+# Model filter description constants
+DESC_ALL_MODELS = "All models"
+DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
+DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
+
+
+def _get_graduated_filter_description(is_graduated: Optional[bool]) -> str:
+    """Get description text for graduated filter based on value"""
+    if is_graduated is None:
+        return DESC_ALL_MODELS
+    if is_graduated:
+        return DESC_GRADUATED_MODELS_ONLY
+    return DESC_NON_GRADUATED_MODELS_ONLY
+
+
+def _extract_provider_slug(model: dict) -> Optional[str]:
+    """Extract provider slug from model dict"""
+    for key in ("provider_slug", "provider"):
+        val = model.get(key)
+        if val:
+            return val
+    for key in ("id", "name"):
+        val = model.get(key, "")
+        if "/" in val:
+            return val.split("/")[0]
+    return None
 
 
 def normalize_developer_segment(value: Optional[str]) -> Optional[str]:
