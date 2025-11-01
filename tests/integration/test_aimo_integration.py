@@ -3,7 +3,7 @@
 Test script for AIMO Network integration
 """
 import os
-import sys
+import pytest
 
 # Manually load .env file if dotenv not available
 if os.path.exists('.env'):
@@ -15,16 +15,9 @@ if os.path.exists('.env'):
                 os.environ[key] = value
 
 # Test 1: Check API key is loaded
-print("=" * 60)
-print("Test 1: API Key Configuration")
-print("=" * 60)
 api_key = os.environ.get("AIMO_API_KEY")
-if api_key:
-    masked_key = f"...{api_key[-20:]}" if len(api_key) >= 20 else "****"
-    print(f"✓ AIMO_API_KEY is set: {masked_key}")
-else:
-    print("✗ AIMO_API_KEY is not set")
-    sys.exit(1)
+if not api_key:
+    pytest.skip("AIMO_API_KEY is not set", allow_module_level=True)
 
 # Test 2: Import AIMO client
 print("\n" + "=" * 60)
@@ -35,7 +28,7 @@ try:
     print("✓ Successfully imported AIMO client functions")
 except ImportError as e:
     print(f"✗ Failed to import AIMO client: {e}")
-    sys.exit(1)
+    pytest.fail(f"Failed to import AIMO client: {e}")
 
 # Test 3: Initialize AIMO client
 print("\n" + "=" * 60)
@@ -47,7 +40,7 @@ try:
     print(f"  Base URL: {client.base_url}")
 except Exception as e:
     print(f"✗ Failed to initialize AIMO client: {e}")
-    sys.exit(1)
+    pytest.fail(f"Failed to initialize AIMO client: {e}")
 
 # Test 4: Fetch available models
 print("\n" + "=" * 60)
