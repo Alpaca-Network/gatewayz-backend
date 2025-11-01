@@ -1295,10 +1295,10 @@ def fetch_models_from_aimo():
         logger.info(f"Fetched {len(normalized_models)} AIMO models")
         return _aimo_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(f"AIMO HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error("AIMO HTTP error: %s - %s", e.response.status_code, sanitize_for_logging(e.response.text))
         return []
     except Exception as e:
-        logger.error(f"Failed to fetch models from AIMO: {e}")
+        logger.error("Failed to fetch models from AIMO: %s", sanitize_for_logging(str(e)))
         return []
 
 
@@ -1313,13 +1313,13 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     """
     model_name = aimo_model.get("name")
     if not model_name:
-        logger.warning(f"AIMO model missing 'name' field: {aimo_model}")
+        logger.warning("AIMO model missing 'name' field: %s", sanitize_for_logging(str(aimo_model)))
         return None
 
     # Get provider information (use first provider if multiple)
     providers = aimo_model.get("providers", [])
     if not providers:
-        logger.warning(f"AIMO model '{model_name}' has no providers")
+        logger.warning("AIMO model '%s' has no providers", sanitize_for_logging(model_name))
         return None
 
     # For now, use the first provider
@@ -1447,7 +1447,7 @@ def fetch_models_from_near():
                 logger.info(f"Fetched {len(normalized_models)} Near AI models from API")
                 return _near_models_cache["data"]
         except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            logger.warning(f"Near AI API request failed: {e}. Using fallback model list.")
+            logger.warning("Near AI API request failed: %s. Using fallback model list.", sanitize_for_logging(str(e)))
 
         # Fallback to known Near AI models if API doesn't return results
         logger.info("Using fallback Near AI model list")
@@ -1483,7 +1483,7 @@ def normalize_near_model(near_model: dict) -> dict:
     """
     model_id = near_model.get("id")
     if not model_id:
-        logger.warning(f"Near AI model missing 'id' field: {near_model}")
+        logger.warning("Near AI model missing 'id' field: %s", sanitize_for_logging(str(near_model)))
         return None
 
     slug = f"near/{model_id}"
@@ -1597,7 +1597,7 @@ def normalize_fal_model(fal_model: dict) -> dict:
     """
     model_id = fal_model.get("id")
     if not model_id:
-        logger.warning(f"Fal.ai model missing 'id' field: {fal_model}")
+        logger.warning("Fal.ai model missing 'id' field: %s", sanitize_for_logging(str(fal_model)))
         return None
 
     # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")
@@ -1699,7 +1699,7 @@ def fetch_models_from_vercel_ai_gateway():
         logger.info(f"Fetched {len(normalized_models)} models from Vercel AI Gateway")
         return _vercel_ai_gateway_models_cache["data"]
     except Exception as e:
-        logger.error(f"Failed to fetch models from Vercel AI Gateway: {e}")
+        logger.error("Failed to fetch models from Vercel AI Gateway: %s", sanitize_for_logging(str(e)))
         return []
 
 
@@ -1793,7 +1793,7 @@ def get_vercel_model_pricing(model_id: str) -> dict:
                 "image": str(pricing_data.get("image", "0")),
             }
     except Exception as e:
-        logger.debug(f"Failed to fetch Vercel pricing for {model_id}: {e}")
+        logger.debug("Failed to fetch Vercel pricing for %s: %s", sanitize_for_logging(model_id), sanitize_for_logging(str(e)))
 
     # Fallback: return default zero pricing
     return {
