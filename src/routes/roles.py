@@ -3,7 +3,6 @@ API routes for role management (Admin only)
 """
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel

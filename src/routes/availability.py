@@ -12,10 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.security.deps import get_api_key
-from src.services.model_availability import (
-    ModelAvailability,
-    availability_service,
-)
+from src.services.model_availability import ModelAvailability, availability_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

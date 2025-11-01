@@ -45,7 +45,6 @@ import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 import src.services.rate_limiting as rate_limiting_service
-import src.services.trial_validation as trial_module
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
@@ -116,6 +115,7 @@ from src.services.xai_client import (
     make_xai_request_openai_stream,
     process_xai_response,
 )
+from src.utils.trial_utils import track_trial_usage, validate_trial_access
 
 
 # Backwards compatibility wrappers for test patches
@@ -169,10 +169,6 @@ def get_provider_from_model(*args, **kwargs):
 
 def get_rate_limit_manager(*args, **kwargs):
     return rate_limiting_service.get_rate_limit_manager(*args, **kwargs)
-
-
-# Import shared trial utilities to avoid code duplication
-from src.utils.trial_utils import track_trial_usage, validate_trial_access
 
 
 logger = logging.getLogger(__name__)
@@ -755,7 +751,7 @@ async def chat_completions(
                         media_type="text/event-stream",
                     )
                 except Exception as exc:
-                    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -908,7 +904,7 @@ async def chat_completions(
                 model = request_model
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)

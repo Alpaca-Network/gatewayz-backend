@@ -36,12 +36,7 @@ from src.schemas.auth import (
 )
 
 # Common enums
-from src.schemas.common import (
-    AuthMethod,
-    PaymentMethod,
-    PlanType,
-    SubscriptionStatus,
-)
+from src.schemas.common import AuthMethod, PaymentMethod, PlanType, SubscriptionStatus
 
 # Coupon models
 from src.schemas.coupons import (
@@ -93,10 +88,7 @@ from src.schemas.payments import (
 from src.schemas.payments import (
     SubscriptionPlan as PaymentSubscriptionPlan,  # Stripe-specific models; Rename to avoid conflict
 )
-from src.schemas.payments import (
-    SubscriptionResponse,
-    WebhookProcessingResult,
-)
+from src.schemas.payments import SubscriptionResponse, WebhookProcessingResult
 
 # Plan models
 from src.schemas.plans import SubscriptionPlan  # This is the correct one for trial service

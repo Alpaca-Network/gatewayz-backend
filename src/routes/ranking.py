@@ -2,10 +2,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.db.ranking import (
-    get_all_latest_apps,
-    get_all_latest_models,
-)
+from src.db.ranking import get_all_latest_apps, get_all_latest_models
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)

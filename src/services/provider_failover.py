@@ -132,7 +132,7 @@ def map_provider_error(
     if OpenAIError and isinstance(exc, OpenAIError):
         return HTTPException(status_code=502, detail=str(exc))
 
-    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
         return HTTPException(status_code=504, detail="Upstream timeout")
 
     if isinstance(exc, httpx.HTTPStatusError):

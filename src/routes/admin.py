@@ -597,9 +597,7 @@ async def test_openrouter_providers():
 async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)):
     """Clear rate limit configuration cache to force reload from database"""
     try:
-        from src.services.rate_limiting import (
-            get_rate_limit_manager,
-        )
+        from src.services.rate_limiting import get_rate_limit_manager
 
         # Clear the cached rate limit manager
         manager = get_rate_limit_manager()

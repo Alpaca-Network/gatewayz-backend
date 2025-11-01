@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException
 import src.db.credit_transactions as credit_transactions_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
-import src.services.trial_validation as trial_module
 from src.schemas import (
     DeleteAccountRequest,
     DeleteAccountResponse,
@@ -14,6 +13,7 @@ from src.schemas import (
     UserProfileUpdate,
 )
 from src.security.deps import get_api_key
+from src.utils.trial_utils import validate_trial_access
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -49,10 +49,6 @@ def get_user_rate_limits(*args, **kwargs):
 
 def check_rate_limit(*args, **kwargs):
     return rate_limits_module.check_rate_limit(*args, **kwargs)
-
-
-# Import shared trial utilities to avoid code duplication
-from src.utils.trial_utils import validate_trial_access
 
 
 def get_user_transactions(*args, **kwargs):

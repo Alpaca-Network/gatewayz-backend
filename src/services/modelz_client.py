@@ -54,7 +54,6 @@ async def fetch_modelz_tokens(
             and cache["timestamp"] is not None
             and (current_time - cache["timestamp"]) < cache["ttl"]
         ):
-
             logger.info(f"Using cached Modelz data (age: {current_time - cache['timestamp']:.1f}s)")
             cached_tokens = cache["data"]
 
