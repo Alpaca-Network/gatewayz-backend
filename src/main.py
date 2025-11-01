@@ -1,17 +1,16 @@
-import os
 import logging
+import os
 import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from src.services.startup import lifespan
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-# Import configuration
 from src.config import Config
-from src.utils.validators import ensure_non_empty_string, ensure_api_key_like
+from src.services.startup import lifespan
+from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
