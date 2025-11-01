@@ -366,7 +366,7 @@ def record_usage(user_id: int, api_key: str, model: str, tokens_used: int, cost:
         result = client.table('usage_records').insert(usage_data).execute()
 
         logger.info(
-            f"Usage recorded successfully: user_id={user_id}, api_key={api_key[:20]}..., model={model}, tokens={tokens_used}, cost={cost}")
+            "Usage recorded successfully: user_id=%s, api_key=%s, model=%s, tokens=%s, cost=%s", sanitize_for_logging(str(user_id)), sanitize_for_logging(api_key[:20] + "..."), sanitize_for_logging(model), sanitize_for_logging(str(tokens_used)), sanitize_for_logging(str(cost)))
 
     except Exception as e:
         logger.error("Failed to record usage: %s", sanitize_for_logging(str(e)))
