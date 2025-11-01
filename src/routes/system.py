@@ -3,34 +3,41 @@ System endpoints for cache management and gateway health monitoring
 Phase 2 implementation
 """
 
-import os
 import io
 import json
 import logging
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, date, timezone, timedelta
+import os
 from contextlib import redirect_stdout
+from datetime import date, datetime, timedelta, timezone
 from html import escape
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi.concurrency import run_in_threadpool
-
-from fastapi import APIRouter, Query, HTTPException
-from fastapi.responses import HTMLResponse
 import httpx
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import HTMLResponse
 
-from src.cache import get_models_cache, get_providers_cache, clear_models_cache, clear_providers_cache, get_modelz_cache, clear_modelz_cache
+from src.cache import (
+    clear_models_cache,
+    clear_modelz_cache,
+    clear_providers_cache,
+    get_models_cache,
+    get_modelz_cache,
+    get_providers_cache,
+)
+from src.config import Config
+from src.services.huggingface_models import fetch_models_from_hug
 from src.services.models import (
+    fetch_models_from_chutes,
+    fetch_models_from_featherless,
+    fetch_models_from_fireworks,
+    fetch_models_from_groq,
     fetch_models_from_openrouter,
     fetch_models_from_portkey,
-    fetch_models_from_featherless,
-    fetch_models_from_chutes,
-    fetch_models_from_groq,
-    fetch_models_from_fireworks,
-    fetch_models_from_together
+    fetch_models_from_together,
 )
-from src.services.huggingface_models import fetch_models_from_hug
-from src.config import Config
-from src.services.modelz_client import refresh_modelz_cache, get_modelz_cache_status as get_modelz_cache_status_func
+from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
+from src.services.modelz_client import refresh_modelz_cache
 from src.services.pricing_lookup import get_model_pricing
 
 try:

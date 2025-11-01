@@ -10,7 +10,7 @@ Documentation: https://docs.statsig.com/server/pythonSDK
 
 import logging
 import os
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class StatsigService:
         try:
             # Import Statsig Python Core SDK
             # Note: Package is statsig-python-core, but import uses underscores
-            from statsig_python_core import Statsig, StatsigUser, StatsigOptions
+            from statsig_python_core import Statsig, StatsigOptions, StatsigUser
 
             # Store reference to SDK classes
             self._Statsig = Statsig

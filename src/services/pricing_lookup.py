@@ -6,7 +6,7 @@ Provides manual pricing lookup for providers that don't expose pricing via API
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -5,13 +5,13 @@ This module provides intelligent caching for chat completion responses,
 including semantic caching to match similar queries.
 """
 
-import logging
 import hashlib
 import json
+import logging
 import time
-from typing import Optional, Dict, Any, List, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

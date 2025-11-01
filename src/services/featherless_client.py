@@ -1,5 +1,7 @@
 import logging
+
 from openai import OpenAI
+
 from src.config import Config
 
 # Initialize logging

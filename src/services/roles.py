@@ -4,11 +4,12 @@ FastAPI dependencies for role and permission checking
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from fastapi import Depends, HTTPException
 
+from src.db.roles import UserRole, check_user_permission, get_user_role
 from src.security.deps import get_current_user
-from src.db.roles import check_user_permission, get_user_role, UserRole
 
 logger = logging.getLogger(__name__)
 

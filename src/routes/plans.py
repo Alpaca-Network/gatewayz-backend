@@ -1,17 +1,28 @@
-import logging
 import datetime
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.db.plans import get_all_plans, get_plan_by_id, get_user_plan, get_user_usage_within_plan_limits, \
-    check_plan_entitlements, assign_user_plan
+from src.db.plans import (
+    assign_user_plan,
+    check_plan_entitlements,
+    get_all_plans,
+    get_plan_by_id,
+    get_user_plan,
+    get_user_usage_within_plan_limits,
+)
 from src.db.rate_limits import get_environment_usage_summary
 from src.db.users import get_user
-from src.schemas import PlanResponse, UserPlanResponse, PlanUsageResponse, PlanEntitlementsResponse, AssignPlanRequest
+from src.schemas import (
+    AssignPlanRequest,
+    PlanEntitlementsResponse,
+    PlanResponse,
+    PlanUsageResponse,
+    UserPlanResponse,
+)
 from src.security.deps import get_api_key, require_admin
-from fastapi import APIRouter
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

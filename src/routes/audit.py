@@ -1,15 +1,13 @@
 import datetime
-from typing import Optional
 import logging
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.api_keys import validate_api_key_permissions
 from src.db.users import get_user
 from src.db_security import get_audit_logs
-from fastapi import APIRouter
-from datetime import datetime
-
-from fastapi import Depends, HTTPException
-
 from src.security.deps import get_api_key
 
 # Initialize logging

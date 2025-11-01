@@ -6,10 +6,11 @@ keepalive, and optimized timeout settings to improve chat streaming performance.
 """
 
 import logging
-from typing import Optional, Dict
-import httpx
-from openai import OpenAI, AsyncOpenAI
 from threading import Lock
+from typing import Dict, Optional
+
+import httpx
+from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 

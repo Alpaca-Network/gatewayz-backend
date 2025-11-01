@@ -3,8 +3,9 @@
 Professional Email Templates for AI Gateway
 """
 
-from typing import Dict, Any
 import os
+from typing import Any, Dict
+
 
 class ProfessionalEmailTemplates:
     """Professional email templates with modern design"""

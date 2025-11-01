@@ -1,23 +1,35 @@
 import datetime
 import logging
-
-from src.config import Config
-
-from src.db.rate_limits import set_user_rate_limits, get_user_rate_limits
-from src.db.trials import get_trial_analytics
-from src.db.users import create_enhanced_user, get_user, add_credits_to_user, get_all_users, get_admin_monitor_data
-from src.enhanced_notification_service import enhanced_notification_service
-from src.cache import _provider_cache, _huggingface_cache, _models_cache
-from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 
 import httpx
+from fastapi import APIRouter, Depends, HTTPException
 
-from src.schemas import UserRegistrationResponse, UserRegistrationRequest, AddCreditsRequest, SetRateLimitRequest
-from src.security.deps import require_admin, get_current_user
-
-from src.services.models import fetch_huggingface_model, get_cached_models, enhance_model_with_provider_info
-from src.services.providers import get_cached_providers, fetch_providers_from_openrouter
+from src.cache import _huggingface_cache, _models_cache, _provider_cache
+from src.config import Config
+from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
+from src.db.trials import get_trial_analytics
+from src.db.users import (
+    add_credits_to_user,
+    create_enhanced_user,
+    get_admin_monitor_data,
+    get_all_users,
+    get_user,
+)
+from src.enhanced_notification_service import enhanced_notification_service
+from src.schemas import (
+    AddCreditsRequest,
+    SetRateLimitRequest,
+    UserRegistrationRequest,
+    UserRegistrationResponse,
+)
+from src.security.deps import get_current_user, require_admin
+from src.services.models import (
+    enhance_model_with_provider_info,
+    fetch_huggingface_model,
+    get_cached_models,
+)
+from src.services.providers import fetch_providers_from_openrouter, get_cached_providers
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)
@@ -550,7 +562,11 @@ async def test_openrouter_providers():
 async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)):
     """Clear rate limit configuration cache to force reload from database"""
     try:
-        from src.services.rate_limiting import get_rate_limit_manager, _rate_limit_manager, _rate_limiter
+        from src.services.rate_limiting import (
+            _rate_limit_manager,
+            _rate_limiter,
+            get_rate_limit_manager,
+        )
 
         # Clear the cached rate limit manager
         manager = get_rate_limit_manager()

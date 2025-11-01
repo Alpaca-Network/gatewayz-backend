@@ -4,20 +4,24 @@ Enhanced Notification Service with Professional Email Templates
 Adds welcome emails, password reset, usage reports, and more
 """
 
+import json
 import logging
 import os
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
-import json
-import resend
 import secrets
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
+import resend
+
+import src.config.supabase_config as supabase_config
 from src.schemas.notification import (
-    NotificationPreferences, NotificationType,
-    NotificationChannel, NotificationStatus, SendNotificationRequest
+    NotificationChannel,
+    NotificationPreferences,
+    NotificationStatus,
+    NotificationType,
+    SendNotificationRequest,
 )
 from src.services.professional_email_templates import email_templates
-import src.config.supabase_config as supabase_config
 
 logger = logging.getLogger(__name__)
 

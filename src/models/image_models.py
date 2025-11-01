@@ -2,8 +2,10 @@
 Image generation models
 """
 
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional, Literal, Dict, Any
+
 
 class ImageGenerationRequest(BaseModel):
     """Request model for image generation"""

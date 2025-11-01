@@ -4,15 +4,15 @@ Database Configuration
 PostgreSQL connection management for Docker-based database
 """
 
-import os
 import logging
-from typing import Optional, TYPE_CHECKING
+import os
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Optional
 
 # Conditional imports
 try:
     import psycopg2
-    from psycopg2 import pool, extras
+    from psycopg2 import extras, pool
 
     PSYCOPG2_AVAILABLE = True
 except ImportError:

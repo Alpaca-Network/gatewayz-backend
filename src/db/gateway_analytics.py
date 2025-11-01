@@ -5,7 +5,8 @@ Provides functions to analyze usage across different gateways and providers
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)

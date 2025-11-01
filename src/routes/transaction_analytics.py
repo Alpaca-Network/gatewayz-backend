@@ -4,8 +4,9 @@ Endpoints for fetching transaction analytics from OpenRouter
 """
 
 import logging
-import httpx
 from typing import Optional
+
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from src.config import Config

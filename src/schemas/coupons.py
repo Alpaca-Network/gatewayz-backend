@@ -3,9 +3,10 @@ Pydantic schemas for coupon system
 """
 
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field, validator
 from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, validator
 
 
 class CouponScope(str, Enum):

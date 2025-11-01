@@ -263,8 +263,8 @@ def create_app() -> FastAPI:
 
             # Set default admin user
             try:
-                from src.db.roles import update_user_role, get_user_role, UserRole
                 from src.config.supabase_config import get_supabase_client
+                from src.db.roles import UserRole, get_user_role, update_user_role
 
                 ADMIN_EMAIL = Config.ADMIN_EMAIL
 

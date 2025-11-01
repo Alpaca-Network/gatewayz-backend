@@ -1,10 +1,9 @@
 import logging
 
+from fastapi import APIRouter
 from openai import OpenAI
 
 from src.config import Config
-
-from fastapi import APIRouter
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

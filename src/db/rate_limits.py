@@ -1,10 +1,10 @@
-import logging
 import datetime
-from typing import Optional, Dict, Any, List
+import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
-from src.db.users import get_user
 from src.config.supabase_config import get_supabase_client
+from src.db.users import get_user
 
 logger = logging.getLogger(__name__)
 

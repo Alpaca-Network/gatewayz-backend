@@ -3,38 +3,38 @@ API routes for coupon system
 """
 
 import logging
-from typing import Optional, List
 from datetime import datetime, timezone
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.db.coupons import (
     create_coupon,
+    deactivate_coupon,
+    get_all_coupons_stats,
+    get_available_coupons_for_user,
+    get_coupon_analytics,
     get_coupon_by_code,
     get_coupon_by_id,
-    list_coupons,
-    update_coupon,
-    deactivate_coupon,
-    redeem_coupon,
-    get_available_coupons_for_user,
     get_user_redemption_history,
-    get_coupon_analytics,
-    get_all_coupons_stats
+    list_coupons,
+    redeem_coupon,
+    update_coupon,
 )
 from src.db.users import get_user
 from src.schemas.coupons import (
-    CreateCouponRequest,
-    RedeemCouponRequest,
-    UpdateCouponRequest,
-    CouponResponse,
     AvailableCouponResponse,
-    RedemptionResponse,
-    RedemptionHistoryResponse,
-    RedemptionHistoryItem,
     CouponAnalyticsResponse,
+    CouponResponse,
     CouponStatsResponse,
-    ListCouponsResponse
+    CreateCouponRequest,
+    ListCouponsResponse,
+    RedeemCouponRequest,
+    RedemptionHistoryItem,
+    RedemptionHistoryResponse,
+    RedemptionResponse,
+    UpdateCouponRequest,
 )
 from src.security.deps import get_api_key, get_current_user, require_admin
 

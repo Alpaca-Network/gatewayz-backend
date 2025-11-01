@@ -33,13 +33,13 @@ import logging
 from datetime import datetime, timezone
 
 from src.cache import (
+    _cerebras_models_cache,
     _google_models_cache,
     _google_vertex_models_cache,
-    _cerebras_models_cache,
-    _nebius_models_cache,
-    _xai_models_cache,
-    _novita_models_cache,
     _huggingface_models_cache,
+    _nebius_models_cache,
+    _novita_models_cache,
+    _xai_models_cache,
 )
 from src.services.pricing_lookup import enrich_model_with_pricing
 
@@ -111,8 +111,9 @@ def fetch_models_from_google():
     Uses the Google Generative AI API to list available models (Gemini, etc.)
     """
     try:
-        from src.config import Config
         import httpx
+
+        from src.config import Config
 
         if not Config.GOOGLE_API_KEY:
             logger.warning("Google API key not configured")
@@ -380,8 +381,9 @@ def fetch_models_from_nebius():
     Uses the OpenAI Python SDK with a custom base URL.
     """
     try:
-        from src.config import Config
         from openai import OpenAI
+
+        from src.config import Config
 
         if not Config.NEBIUS_API_KEY:
             logger.warning("Nebius API key not configured")
@@ -560,8 +562,9 @@ def fetch_models_from_novita():
     Uses the OpenAI Python SDK with a custom base URL.
     """
     try:
-        from src.config import Config
         from openai import OpenAI
+
+        from src.config import Config
 
         if not Config.NOVITA_API_KEY:
             logger.warning("Novita API key not configured")
@@ -707,11 +710,12 @@ def fetch_models_from_google_vertex():
         List of normalized model dictionaries, or None if fetch fails
     """
     try:
-        from src.config import Config
-        from google.cloud import aiplatform
-        from google.auth.transport.requests import Request
-        from google.oauth2.service_account import Credentials
         import google.auth
+        from google.auth.transport.requests import Request
+        from google.cloud import aiplatform
+        from google.oauth2.service_account import Credentials
+
+        from src.config import Config
 
         logger.info("Fetching models from Google Vertex AI Model Registry")
 

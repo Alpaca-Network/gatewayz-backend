@@ -5,6 +5,7 @@ HTTP endpoints for ping operations
 """
 
 import logging
+
 from fastapi import APIRouter, HTTPException
 
 from src.services.ping import get_ping_service

@@ -4,21 +4,26 @@ Notification Service
 Handles low balance notifications, trial expiry alerts, and user communication
 """
 
-import logging
 import datetime
+import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 import requests
 import resend
 
-from src.schemas.notification import (
-    NotificationPreferences, NotificationType,
-    NotificationChannel, NotificationStatus, SendNotificationRequest,
-    LowBalanceAlert, TrialExpiryAlert
-)
-from src.db.plans import get_user_plan
 from src.config.supabase_config import get_supabase_client
+from src.db.plans import get_user_plan
+from src.schemas.notification import (
+    LowBalanceAlert,
+    NotificationChannel,
+    NotificationPreferences,
+    NotificationStatus,
+    NotificationType,
+    SendNotificationRequest,
+    TrialExpiryAlert,
+)
 from src.services.trial_validation import validate_trial_access
 
 logger = logging.getLogger(__name__)

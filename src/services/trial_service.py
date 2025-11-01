@@ -5,15 +5,25 @@ Handles free trial logic, expiration, and conversion to paid subscriptions
 """
 
 import logging
+import os
 from datetime import datetime
 from typing import Optional
-from supabase import create_client, Client
-import os
 
-from src.schemas import SubscriptionPlansResponse, PlanType
+from src.schemas import PlanType, SubscriptionPlansResponse
 from src.schemas.plans import SubscriptionPlan
-from src.schemas.trials import StartTrialRequest, StartTrialResponse, SubscriptionStatus, TrialStatusResponse, \
-    TrialStatus, ConvertTrialRequest, ConvertTrialResponse, TrackUsageRequest, TrackUsageResponse, TrialValidationResult
+from src.schemas.trials import (
+    ConvertTrialRequest,
+    ConvertTrialResponse,
+    StartTrialRequest,
+    StartTrialResponse,
+    SubscriptionStatus,
+    TrackUsageRequest,
+    TrackUsageResponse,
+    TrialStatus,
+    TrialStatusResponse,
+    TrialValidationResult,
+)
+from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 

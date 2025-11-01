@@ -5,18 +5,19 @@ Implements sliding-window rate limiting, burst controls, and configurable limits
 Updated: 2025-10-12 - Force restart to clear LRU cache
 """
 
-import time
-import logging
 import datetime
-from typing import Dict, Optional, Any
+import logging
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from collections import defaultdict, deque
 from functools import lru_cache
+from typing import Any, Dict, Optional
+
 import redis
 
-from src.db.rate_limits import update_rate_limit_config, get_rate_limit_config
 from src.config.redis_config import get_redis_client, is_redis_available
+from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
 from src.services.rate_limiting_fallback import get_fallback_rate_limit_manager
 
 logger = logging.getLogger(__name__)

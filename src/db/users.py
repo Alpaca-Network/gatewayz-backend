@@ -1,11 +1,11 @@
-import logging
 import datetime
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta, timezone
-
-from src.db.api_keys import create_api_key
-from src.config.supabase_config import get_supabase_client
+import logging
 import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import create_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +266,7 @@ def deduct_credits(api_key: str, tokens: float, description: str = "API usage", 
         return
 
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:

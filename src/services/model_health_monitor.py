@@ -6,15 +6,16 @@ and health status across all providers and gateways.
 """
 
 import asyncio
-import httpx
-import time
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
-from enum import Enum
-import logging
-from pathlib import Path
 import json
+import logging
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ class ModelHealthMonitor:
         try:
             # Import here to avoid circular imports
             from src.services.models import get_cached_models
-            
+
             # Get models from different gateways
             gateways = ["openrouter", "portkey", "featherless", "deepinfra", "huggingface", "groq", "fireworks", "together", "xai", "novita", "chutes", "aimo", "near"]
             
@@ -233,9 +234,10 @@ class ModelHealthMonitor:
     async def _perform_model_request(self, model_id: str, gateway: str) -> Dict[str, Any]:
         """Perform a real test request to a model"""
         try:
-            import httpx
             import json
-            
+
+            import httpx
+
             # Create a simple test request based on the gateway
             test_payload = {
                 "model": model_id,

@@ -4,12 +4,12 @@ Fallback Rate Limiting System
 Works without Redis using in-memory storage
 """
 
-import time
 import asyncio
-from collections import defaultdict, deque
-from typing import Optional
-from dataclasses import dataclass
 import logging
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from typing import Optional
 
 from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
 

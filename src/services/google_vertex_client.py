@@ -4,16 +4,17 @@ This module provides integration with Google Vertex AI generative models
 using the official google-cloud-aiplatform SDK.
 """
 
+import json
 import logging
+import time
 from typing import Any, Iterator, Optional
+
 import google.auth
 from google.auth.transport.requests import Request
-from google.oauth2.service_account import Credentials
 from google.cloud.aiplatform_v1.services.prediction_service import PredictionServiceClient
 from google.cloud.aiplatform_v1.types import PredictRequest
+from google.oauth2.service_account import Credentials
 from google.protobuf.json_format import MessageToDict
-import json
-import time
 
 # Import Struct with fallback for testing
 try:
@@ -41,8 +42,8 @@ def get_google_vertex_credentials():
     """
     try:
         # First, try to get credentials from JSON environment variable (Vercel/serverless)
-        import os
         import base64
+        import os
         creds_json_env = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
         if creds_json_env:
             logger.info("Loading Google Vertex credentials from GOOGLE_VERTEX_CREDENTIALS_JSON environment variable")

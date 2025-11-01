@@ -1,8 +1,9 @@
-from datetime import datetime
-from flask_sqlalchemy import SQLAlchemy
-import uuid
-import string
 import random
+import string
+import uuid
+from datetime import datetime
+
+from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 

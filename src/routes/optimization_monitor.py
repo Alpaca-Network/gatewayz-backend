@@ -5,12 +5,13 @@ This module provides endpoints to monitor connection pools, caching, and request
 """
 
 import logging
+from typing import Any, Dict
+
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
 
 from src.services.connection_pool import get_pool_stats
-from src.services.response_cache import get_cache_stats
 from src.services.request_prioritization import get_priority_stats
+from src.services.response_cache import get_cache_stats
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

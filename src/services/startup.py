@@ -6,9 +6,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from src.services.model_health_monitor import health_monitor
-from src.services.model_availability import availability_service
 from src.services.connection_pool import clear_connection_pools, get_pool_stats
+from src.services.model_availability import availability_service
+from src.services.model_health_monitor import health_monitor
 from src.services.response_cache import get_cache
 
 logger = logging.getLogger(__name__)

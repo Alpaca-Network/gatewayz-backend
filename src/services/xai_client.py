@@ -1,4 +1,5 @@
 import logging
+
 from src.config import Config
 
 # Initialize logging

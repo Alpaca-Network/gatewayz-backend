@@ -6,7 +6,6 @@ from openai import OpenAI
 
 from src.config import Config
 
-
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 

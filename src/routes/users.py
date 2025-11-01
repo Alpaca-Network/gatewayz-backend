@@ -1,17 +1,20 @@
-import logging
 import datetime
-
+import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+import src.db.credit_transactions as credit_transactions_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
-import src.db.credit_transactions as credit_transactions_module
-from src.schemas import UserProfileResponse, DeleteAccountResponse, UserProfileUpdate, DeleteAccountRequest
-from src.security.deps import get_api_key
-from fastapi import APIRouter
 import src.services.trial_validation as trial_module
+from src.schemas import (
+    DeleteAccountRequest,
+    DeleteAccountResponse,
+    UserProfileResponse,
+    UserProfileUpdate,
+)
+from src.security.deps import get_api_key
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)

@@ -4,10 +4,11 @@ Simplified Trial Validation
 Direct trial validation without complex service layer
 """
 
-import logging
 import datetime
+import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict
+
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)

@@ -4,7 +4,7 @@ Converts between Anthropic Messages API format and OpenAI Chat Completions forma
 """
 
 import time
-from typing import List, Dict, Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 def transform_anthropic_to_openai(

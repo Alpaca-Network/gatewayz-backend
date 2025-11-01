@@ -3,9 +3,10 @@ PostHog Analytics Service
 Server-side PostHog integration to avoid ad-blocker issues
 """
 
-import os
 import logging
-from typing import Optional, Dict, Any
+import os
+from typing import Any, Dict, Optional
+
 from posthog import Posthog
 
 logger = logging.getLogger(__name__)

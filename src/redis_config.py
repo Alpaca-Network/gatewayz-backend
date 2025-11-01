@@ -5,9 +5,10 @@ Redis Configuration
 Redis client configuration and utilities for caching and rate limiting.
 """
 
-import os
 import logging
-from typing import Optional, Any
+import os
+from typing import Any, Optional
+
 import redis
 from redis.exceptions import ConnectionError, RedisError
 

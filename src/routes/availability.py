@@ -5,18 +5,23 @@ Provides enhanced model availability checking with fallback mechanisms,
 circuit breakers, and reliability features.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
-from typing import Optional, List, Dict, Any
 import logging
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from src.models.health_models import (
     ModelHealthResponse,
     ProviderHealthResponse,
-    SystemHealthResponse
+    SystemHealthResponse,
 )
-from src.services.model_availability import availability_service, ModelAvailability, AvailabilityStatus
 from src.security.deps import get_api_key
+from src.services.model_availability import (
+    AvailabilityStatus,
+    ModelAvailability,
+    availability_service,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
