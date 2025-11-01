@@ -94,8 +94,10 @@ class TestAdminAuthentication:
         })
         assert response.status_code == 401
 
-    def test_admin_endpoint_rejects_invalid_auth(self, client):
+    @patch('src.security.deps.validate_api_key_security')
+    def test_admin_endpoint_rejects_invalid_auth(self, mock_validate, client):
         """Admin endpoint rejects invalid authentication"""
+        mock_validate.side_effect = ValueError("Invalid API key")  # Simulate invalid key
         headers = {'Authorization': 'Bearer invalid_admin_key'}
         response = client.post(
             '/admin/add_credits',
@@ -104,10 +106,12 @@ class TestAdminAuthentication:
         )
         assert response.status_code == 401
 
-    @patch('src.security.deps.get_user_by_api_key')
-    def test_admin_endpoint_rejects_non_admin_user(self, mock_get_user, client, regular_user, user_headers):
+    @patch('src.security.deps.get_user')
+    @patch('src.routes.admin.get_user')
+    def test_admin_endpoint_rejects_non_admin_user(self, mock_admin_get_user, mock_security_get_user, client, regular_user, user_headers):
         """Regular user cannot access admin endpoints"""
-        mock_get_user.return_value = regular_user
+        mock_security_get_user.return_value = regular_user  # For authentication
+        mock_admin_get_user.return_value = regular_user  # For admin route
 
         response = client.post(
             '/admin/add_credits',
@@ -116,11 +120,13 @@ class TestAdminAuthentication:
         )
         assert response.status_code == 403
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.add_credits_to_user')
-    def test_admin_endpoint_accepts_valid_admin(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
+    @patch('src.security.deps.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.add_credits_to_user')
+    def test_admin_endpoint_accepts_valid_admin(self, mock_add_credits, mock_get_user, mock_get_admin, mock_security_get_user, client, admin_user, admin_headers):
         """Admin user can access admin endpoints"""
+        mock_security_get_user.return_value = admin_user  # For authentication
         mock_get_admin.return_value = admin_user
         mock_get_user.side_effect = [
             regular_user := {'id': 2, 'username': 'testuser', 'credits': 100},
@@ -141,8 +147,8 @@ class TestAdminAuthentication:
 class TestUserCreation:
     """Test user creation endpoint"""
 
-    @patch('src.db.users.create_enhanced_user')
-    @patch('src.enhanced_notification_service.enhanced_notification_service.send_welcome_email')
+    @patch('src.routes.admin.create_enhanced_user')
+    @patch('src.routes.admin.enhanced_notification_service.send_welcome_email')
     def test_create_user_success(self, mock_send_email, mock_create_user, client):
         """Successfully create a new user"""
         mock_create_user.return_value = {
@@ -157,7 +163,7 @@ class TestUserCreation:
         response = client.post('/admin/create', json={
             'username': 'newuser',
             'email': 'newuser@example.com',
-            'auth_method': 'privy',
+            'auth_method': 'email',
             'environment_tag': 'live'
         })
 
@@ -174,7 +180,7 @@ class TestUserCreation:
         response = client.post('/admin/create', json={
             'username': 'newuser',
             'email': 'newuser@example.com',
-            'auth_method': 'privy',
+            'auth_method': 'email',
             'environment_tag': 'invalid_env'
         })
 
@@ -189,7 +195,7 @@ class TestUserCreation:
 
         assert response.status_code == 422  # Validation error
 
-    @patch('src.db.users.create_enhanced_user')
+    @patch('src.routes.admin.create_enhanced_user')
     def test_create_user_database_error(self, mock_create_user, client):
         """Create user handles database errors"""
         mock_create_user.side_effect = Exception('Database error')
@@ -197,14 +203,14 @@ class TestUserCreation:
         response = client.post('/admin/create', json={
             'username': 'newuser',
             'email': 'newuser@example.com',
-            'auth_method': 'privy',
+            'auth_method': 'email',
             'environment_tag': 'live'
         })
 
         assert response.status_code == 500
 
-    @patch('src.db.users.create_enhanced_user')
-    @patch('src.enhanced_notification_service.enhanced_notification_service.send_welcome_email')
+    @patch('src.routes.admin.create_enhanced_user')
+    @patch('src.routes.admin.enhanced_notification_service.send_welcome_email')
     def test_create_user_email_failure_continues(self, mock_send_email, mock_create_user, client):
         """User creation continues even if welcome email fails"""
         mock_create_user.return_value = {
@@ -219,7 +225,7 @@ class TestUserCreation:
         response = client.post('/admin/create', json={
             'username': 'newuser',
             'email': 'newuser@example.com',
-            'auth_method': 'privy',
+            'auth_method': 'email',
             'environment_tag': 'live'
         })
 
@@ -230,9 +236,9 @@ class TestUserCreation:
 class TestCreditManagement:
     """Test credit management operations"""
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.add_credits_to_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.add_credits_to_user')
     def test_add_credits_success(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
         """Admin can add credits to user"""
         mock_get_admin.return_value = admin_user
@@ -253,8 +259,8 @@ class TestCreditManagement:
             assert data['status'] == 'success'
             assert data['new_balance'] == 150
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_user')
     def test_add_credits_user_not_found(self, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
         """Add credits fails when user not found"""
         mock_get_admin.return_value = admin_user
@@ -269,9 +275,9 @@ class TestCreditManagement:
         # Should return 404 or 401 depending on auth
         assert response.status_code in [404, 401, 403]
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.add_credits_to_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.add_credits_to_user')
     def test_add_negative_credits(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
         """Admin can add negative credits (deduct)"""
         mock_get_admin.return_value = admin_user
@@ -295,8 +301,8 @@ class TestCreditManagement:
 class TestRateLimitManagement:
     """Test rate limit management"""
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_user')
     @patch('src.db.rate_limits.set_user_rate_limits')
     def test_set_rate_limits_success(self, mock_set_limits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
         """Admin can set user rate limits"""
@@ -321,7 +327,7 @@ class TestRateLimitManagement:
 class TestSystemOperations:
     """Test system operations"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.routes.admin.get_user')
     def test_clear_cache_success(self, mock_get_admin, client, admin_user, admin_headers):
         """Admin can clear system caches"""
         mock_get_admin.return_value = admin_user
@@ -331,7 +337,7 @@ class TestSystemOperations:
         # Should succeed or return not found if endpoint doesn't exist
         assert response.status_code in [200, 404, 401, 403]
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.routes.admin.get_user')
     def test_refresh_models_success(self, mock_get_admin, client, admin_user, admin_headers):
         """Admin can trigger model refresh"""
         mock_get_admin.return_value = admin_user
@@ -341,8 +347,8 @@ class TestSystemOperations:
         # Should succeed or return not found if endpoint doesn't exist
         assert response.status_code in [200, 404, 401, 403]
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_all_users')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_all_users')
     def test_get_all_users(self, mock_get_all_users, mock_get_admin, client, admin_user, admin_headers):
         """Admin can view all users"""
         mock_get_admin.return_value = admin_user
@@ -364,7 +370,7 @@ class TestAdminSecurity:
         """Admin key is loaded from environment variable"""
         assert os.getenv('ADMIN_API_KEY') is not None
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.routes.admin.get_user')
     def test_admin_operations_logged(self, mock_get_admin, client, admin_user, admin_headers):
         """Admin operations should be logged (audit trail)"""
         mock_get_admin.return_value = admin_user
@@ -396,8 +402,10 @@ class TestAdminSecurity:
 class TestAdminValidation:
     """Test input validation for admin endpoints"""
 
-    def test_add_credits_requires_api_key(self, client, admin_headers):
+    @patch('src.security.deps.get_user')
+    def test_add_credits_requires_api_key(self, mock_get_user, client, admin_user, admin_headers):
         """Add credits requires api_key parameter"""
+        mock_get_user.return_value = admin_user  # For authentication
         response = client.post(
             '/admin/add_credits',
             json={'credits': 50},  # Missing api_key
@@ -406,8 +414,10 @@ class TestAdminValidation:
 
         assert response.status_code in [422, 400, 401, 403]
 
-    def test_add_credits_requires_credits_amount(self, client, admin_headers):
+    @patch('src.security.deps.get_user')
+    def test_add_credits_requires_credits_amount(self, mock_get_user, client, admin_user, admin_headers):
         """Add credits requires credits parameter"""
+        mock_get_user.return_value = admin_user  # For authentication
         response = client.post(
             '/admin/add_credits',
             json={'api_key': 'gw_test_key'},  # Missing credits
@@ -421,7 +431,7 @@ class TestAdminValidation:
         response = client.post('/admin/create', json={
             'username': 'newuser',
             'email': 'invalid-email',  # Invalid format
-            'auth_method': 'privy',
+            'auth_method': 'email',
             'environment_tag': 'live'
         })
 
@@ -431,11 +441,13 @@ class TestAdminValidation:
 class TestAdminEdgeCases:
     """Test edge cases and error handling"""
 
-    @patch('src.security.deps.get_user_by_api_key')
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.add_credits_to_user')
-    def test_add_zero_credits(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
+    @patch('src.security.deps.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.get_user')
+    @patch('src.routes.admin.add_credits_to_user')
+    def test_add_zero_credits(self, mock_add_credits, mock_get_user, mock_get_admin, mock_security_get_user, client, admin_user, admin_headers):
         """Adding zero credits should work"""
+        mock_security_get_user.return_value = admin_user  # For authentication
         mock_get_admin.return_value = admin_user
         mock_get_user.side_effect = [
             {'id': 2, 'username': 'testuser', 'credits': 100},
@@ -451,7 +463,7 @@ class TestAdminEdgeCases:
 
         assert response.status_code in [200, 401, 403]
 
-    @patch('src.db.users.create_enhanced_user')
+    @patch('src.routes.admin.create_enhanced_user')
     def test_create_duplicate_username(self, mock_create_user, client):
         """Creating user with duplicate username should fail"""
         mock_create_user.side_effect = ValueError('Username already exists')
@@ -459,7 +471,7 @@ class TestAdminEdgeCases:
         response = client.post('/admin/create', json={
             'username': 'existinguser',
             'email': 'new@example.com',
-            'auth_method': 'privy',
+            'auth_method': 'email',
             'environment_tag': 'live'
         })
 

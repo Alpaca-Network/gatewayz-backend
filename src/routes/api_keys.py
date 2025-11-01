@@ -21,6 +21,9 @@ from src.config.supabase_config import get_supabase_client
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
+# Constants
+ERROR_INVALID_API_KEY = "Invalid API key"
+ERROR_INTERNAL_SERVER = "Internal server error"
 
 router = APIRouter()
 
@@ -35,7 +38,7 @@ async def create_user_api_key(
     try:
         user = get_user(api_key)
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+            raise HTTPException(status_code=401, detail=ERROR_INVALID_API_KEY)
 
         # Validate permissions - check if the user can create keys
         if not validate_api_key_permissions(api_key, "write", "api_keys"):
@@ -141,7 +144,7 @@ async def update_user_api_key_endpoint(
     try:
         user = get_user(api_key)
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+            raise HTTPException(status_code=401, detail=ERROR_INVALID_API_KEY)
 
         # Validate permissions - check if the user can update keys
         if not validate_api_key_permissions(api_key, "write", "api_keys"):
@@ -259,7 +262,7 @@ async def update_user_api_key_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error updating API key: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=ERROR_INTERNAL_SERVER)
 
 
 @router.get("/user/api-keys", tags=["authentication"])
@@ -268,7 +271,7 @@ async def list_user_api_keys(api_key: str = Depends(get_api_key)):
     try:
         user = get_user(api_key)
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+            raise HTTPException(status_code=401, detail=ERROR_INVALID_API_KEY)
 
         # Validate permissions - check if a user can read their keys
         if not validate_api_key_permissions(api_key, "read", "api_keys"):
@@ -305,7 +308,7 @@ async def list_user_api_keys(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error listing API keys: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=ERROR_INTERNAL_SERVER)
 
 
 @router.delete("/user/api-keys/{key_id}", tags=["authentication"])
@@ -318,7 +321,7 @@ async def delete_user_api_key(
     try:
         user = get_user(api_key)
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+            raise HTTPException(status_code=401, detail=ERROR_INVALID_API_KEY)
 
         # Verify confirmation
         if confirmation.confirmation != "DELETE_KEY":
@@ -353,7 +356,7 @@ async def delete_user_api_key(
         raise
     except Exception as e:
         logger.error(f"Error deleting API key: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=ERROR_INTERNAL_SERVER)
 
 
 @router.get("/user/api-keys/usage", tags=["authentication"])
@@ -362,7 +365,7 @@ async def get_user_api_key_usage(api_key: str = Depends(get_api_key)):
     try:
         user = get_user(api_key)
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+            raise HTTPException(status_code=401, detail=ERROR_INVALID_API_KEY)
 
         usage_stats = get_user_all_api_keys_usage(user["id"])
 
@@ -385,4 +388,4 @@ async def get_user_api_key_usage(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting API key usage: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=ERROR_INTERNAL_SERVER)
