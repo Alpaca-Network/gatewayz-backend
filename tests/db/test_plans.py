@@ -328,12 +328,21 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
     ]).execute()
 
     # earlier this month (should count toward monthly but not daily)
-    # Create record on a different day but still in the same month
-    # If today is the 1st, use the 2nd; otherwise use the 1st
+    # Create a record on a different day but in the same month
+    # Strategy: try to use day 1 or day 2 depending on what day today is
+    # Goal: find ANY day in this month that's not today
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Start with day 1 of the month
+    test_day = 1
+    # If today is day 1, use day 2
     if now.day == 1:
-        earlier = now.replace(day=2, hour=2, minute=0, second=0, microsecond=0)
-    else:
-        earlier = now.replace(day=1, hour=2, minute=0, second=0, microsecond=0)
+        test_day = 2
+    # If today is day 2, use day 1
+    elif now.day == 2:
+        test_day = 1
+    # Otherwise use day 1
+
+    earlier = now.replace(day=test_day, hour=2, minute=0, second=0, microsecond=0)
     fake_supabase.table("usage_records").insert([
         {"user_id": 9, "timestamp": earlier.isoformat(), "tokens_used": 300},
     ]).execute()
