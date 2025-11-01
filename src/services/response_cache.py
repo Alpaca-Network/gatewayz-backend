@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Try to import Redis for distributed caching
 try:
     import redis
+
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
@@ -26,6 +27,7 @@ except ImportError:
 @dataclass
 class CachedResponse:
     """Container for cached responses"""
+
     response: dict[str, Any]
     model: str
     created_at: float
@@ -326,11 +328,7 @@ class ResponseCache:
     def get_stats(self) -> dict[str, Any]:
         """Get cache statistics"""
         total_requests = self._stats["hits"] + self._stats["misses"]
-        hit_rate = (
-            (self._stats["hits"] / total_requests * 100)
-            if total_requests > 0
-            else 0
-        )
+        hit_rate = (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0
 
         return {
             "hits": self._stats["hits"],
@@ -344,11 +342,7 @@ class ResponseCache:
 
     def cleanup_expired(self):
         """Remove expired entries from memory cache"""
-        expired_keys = [
-            key
-            for key, cached in self._memory_cache.items()
-            if cached.is_expired()
-        ]
+        expired_keys = [key for key, cached in self._memory_cache.items() if cached.is_expired()]
 
         for key in expired_keys:
             del self._memory_cache[key]

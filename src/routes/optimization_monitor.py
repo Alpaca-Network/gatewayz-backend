@@ -92,6 +92,7 @@ async def clear_cache() -> dict[str, str]:
     """
     try:
         from src.services.response_cache import clear_response_cache
+
         clear_response_cache()
         logger.info("Response cache cleared via API")
         return {"status": "success", "message": "Cache cleared"}

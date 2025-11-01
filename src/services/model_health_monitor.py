@@ -15,25 +15,31 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 class HealthStatus(str, Enum):
     """Health status enumeration"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
     UNKNOWN = "unknown"
     MAINTENANCE = "maintenance"
 
+
 class ProviderStatus(str, Enum):
     """Provider status enumeration"""
+
     ONLINE = "online"
     OFFLINE = "offline"
     DEGRADED = "degraded"
     MAINTENANCE = "maintenance"
     UNKNOWN = "unknown"
 
+
 @dataclass
 class ModelHealthMetrics:
     """Health metrics for a specific model"""
+
     model_id: str
     provider: str
     gateway: str
@@ -49,9 +55,11 @@ class ModelHealthMetrics:
     uptime_percentage: float = 0.0
     error_message: str | None = None
 
+
 @dataclass
 class ProviderHealthMetrics:
     """Health metrics for a provider"""
+
     provider: str
     gateway: str
     status: ProviderStatus
@@ -64,9 +72,11 @@ class ProviderHealthMetrics:
     last_checked: datetime | None = None
     error_message: str | None = None
 
+
 @dataclass
 class SystemHealthMetrics:
     """Overall system health metrics"""
+
     overall_status: HealthStatus
     total_providers: int = 0
     healthy_providers: int = 0
@@ -78,6 +88,7 @@ class SystemHealthMetrics:
     unhealthy_models: int = 0
     system_uptime: float = 0.0
     last_updated: datetime | None = None
+
 
 class ModelHealthMonitor:
     """Main health monitoring service"""
@@ -94,11 +105,9 @@ class ModelHealthMonitor:
 
         # Test payload for health checks
         self.test_payload = {
-            "messages": [
-                {"role": "user", "content": "Health check - respond with 'OK'"}
-            ],
+            "messages": [{"role": "user", "content": "Health check - respond with 'OK'"}],
             "max_tokens": 10,
-            "temperature": 0.1
+            "temperature": 0.1,
         }
 
     async def start_monitoring(self):
@@ -166,19 +175,37 @@ class ModelHealthMonitor:
             from src.services.models import get_cached_models
 
             # Get models from different gateways
-            gateways = ["openrouter", "portkey", "featherless", "deepinfra", "huggingface", "groq", "fireworks", "together", "xai", "novita", "chutes", "aimo", "near"]
+            gateways = [
+                "openrouter",
+                "portkey",
+                "featherless",
+                "deepinfra",
+                "huggingface",
+                "groq",
+                "fireworks",
+                "together",
+                "xai",
+                "novita",
+                "chutes",
+                "aimo",
+                "near",
+            ]
 
             for gateway in gateways:
                 try:
                     gateway_models = get_cached_models(gateway)
                     if gateway_models:
-                        for model in gateway_models[:5]:  # Limit to top 5 models per gateway for health checking
-                            models.append({
-                                "id": model.get("id"),
-                                "provider": model.get("provider_slug", "unknown"),
-                                "gateway": gateway,
-                                "name": model.get("name", model.get("id"))
-                            })
+                        for model in gateway_models[
+                            :5
+                        ]:  # Limit to top 5 models per gateway for health checking
+                            models.append(
+                                {
+                                    "id": model.get("id"),
+                                    "provider": model.get("provider_slug", "unknown"),
+                                    "gateway": gateway,
+                                    "name": model.get("name", model.get("id")),
+                                }
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to get models from {gateway}: {e}")
 
@@ -222,7 +249,7 @@ class ModelHealthMonitor:
             status=status,
             response_time_ms=response_time_ms,
             last_checked=datetime.now(UTC),
-            error_message=error_message
+            error_message=error_message,
         )
 
         return health_metrics
@@ -236,11 +263,9 @@ class ModelHealthMonitor:
             # Create a simple test request based on the gateway
             test_payload = {
                 "model": model_id,
-                "messages": [
-                    {"role": "user", "content": "Hello"}
-                ],
+                "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": 10,
-                "temperature": 0.1
+                "temperature": 0.1,
             }
 
             # Get the appropriate endpoint URL based on gateway
@@ -254,7 +279,7 @@ class ModelHealthMonitor:
                 "fireworks": "https://api.fireworks.ai/inference/v1/chat/completions",
                 "together": "https://api.together.xyz/v1/chat/completions",
                 "xai": "https://api.x.ai/v1/chat/completions",
-                "novita": "https://api.novita.ai/v3/openai/chat/completions"
+                "novita": "https://api.novita.ai/v3/openai/chat/completions",
             }
 
             url = endpoint_urls.get(gateway)
@@ -262,23 +287,17 @@ class ModelHealthMonitor:
                 return {
                     "success": False,
                     "error": f"Unknown gateway: {gateway}",
-                    "status_code": 400
+                    "status_code": 400,
                 }
 
             # Set up headers based on gateway
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "HealthMonitor/1.0"
-            }
+            headers = {"Content-Type": "application/json", "User-Agent": "HealthMonitor/1.0"}
 
             # For HuggingFace, use a different payload format
             if gateway == "huggingface":
                 test_payload = {
                     "inputs": "Hello",
-                    "parameters": {
-                        "max_new_tokens": 10,
-                        "temperature": 0.1
-                    }
+                    "parameters": {"max_new_tokens": 10, "temperature": 0.1},
                 }
 
             # Perform the actual HTTP request
@@ -286,11 +305,7 @@ class ModelHealthMonitor:
                 start_time = time.time()
 
                 try:
-                    response = await client.post(
-                        url,
-                        headers=headers,
-                        json=test_payload
-                    )
+                    response = await client.post(url, headers=headers, json=test_payload)
 
                     response_time = (time.time() - start_time) * 1000
 
@@ -299,14 +314,14 @@ class ModelHealthMonitor:
                             "success": True,
                             "response_time": response_time,
                             "status_code": response.status_code,
-                            "response_data": response.json() if response.content else None
+                            "response_data": response.json() if response.content else None,
                         }
                     else:
                         return {
                             "success": False,
                             "error": f"HTTP {response.status_code}: {response.text[:200]}",
                             "status_code": response.status_code,
-                            "response_time": response_time
+                            "response_time": response_time,
                         }
 
                 except httpx.TimeoutException:
@@ -314,23 +329,19 @@ class ModelHealthMonitor:
                         "success": False,
                         "error": "Request timeout",
                         "status_code": 408,
-                        "response_time": (time.time() - start_time) * 1000
+                        "response_time": (time.time() - start_time) * 1000,
                     }
                 except httpx.RequestError as e:
                     return {
                         "success": False,
                         "error": f"Request error: {str(e)}",
                         "status_code": 500,
-                        "response_time": (time.time() - start_time) * 1000
+                        "response_time": (time.time() - start_time) * 1000,
                     }
 
         except Exception as e:
             logger.error(f"Health check request failed for {model_id} via {gateway}: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "status_code": 500
-            }
+            return {"success": False, "error": str(e), "status_code": 500}
 
     def _update_health_data(self, health_metrics: ModelHealthMetrics):
         """Update health data for a model"""
@@ -360,7 +371,9 @@ class ModelHealthMonitor:
 
             # Calculate success rate
             if existing.total_requests > 0:
-                existing.success_rate = (existing.total_requests - existing.error_count) / existing.total_requests
+                existing.success_rate = (
+                    existing.total_requests - existing.error_count
+                ) / existing.total_requests
 
             # Calculate uptime percentage
             existing.uptime_percentage = existing.success_rate * 100
@@ -368,7 +381,9 @@ class ModelHealthMonitor:
             # Update average response time
             if health_metrics.response_time_ms:
                 if existing.avg_response_time_ms:
-                    existing.avg_response_time_ms = (existing.avg_response_time_ms + health_metrics.response_time_ms) / 2
+                    existing.avg_response_time_ms = (
+                        existing.avg_response_time_ms + health_metrics.response_time_ms
+                    ) / 2
                 else:
                     existing.avg_response_time_ms = health_metrics.response_time_ms
 
@@ -394,7 +409,7 @@ class ModelHealthMonitor:
                     "degraded_models": 0,
                     "unhealthy_models": 0,
                     "response_times": [],
-                    "success_rates": []
+                    "success_rates": [],
                 }
 
             stats = provider_stats[provider_key]
@@ -442,7 +457,7 @@ class ModelHealthMonitor:
                 unhealthy_models=stats["unhealthy_models"],
                 avg_response_time_ms=avg_response_time,
                 overall_uptime=overall_uptime,
-                last_checked=datetime.now(UTC)
+                last_checked=datetime.now(UTC),
             )
 
             self.provider_data[provider_key] = provider_metrics
@@ -450,14 +465,26 @@ class ModelHealthMonitor:
     async def _update_system_metrics(self):
         """Update system-level health metrics"""
         total_providers = len(self.provider_data)
-        healthy_providers = sum(1 for p in self.provider_data.values() if p.status == ProviderStatus.ONLINE)
-        degraded_providers = sum(1 for p in self.provider_data.values() if p.status == ProviderStatus.DEGRADED)
-        unhealthy_providers = sum(1 for p in self.provider_data.values() if p.status == ProviderStatus.OFFLINE)
+        healthy_providers = sum(
+            1 for p in self.provider_data.values() if p.status == ProviderStatus.ONLINE
+        )
+        degraded_providers = sum(
+            1 for p in self.provider_data.values() if p.status == ProviderStatus.DEGRADED
+        )
+        unhealthy_providers = sum(
+            1 for p in self.provider_data.values() if p.status == ProviderStatus.OFFLINE
+        )
 
         total_models = len(self.health_data)
-        healthy_models = sum(1 for m in self.health_data.values() if m.status == HealthStatus.HEALTHY)
-        degraded_models = sum(1 for m in self.health_data.values() if m.status == HealthStatus.DEGRADED)
-        unhealthy_models = sum(1 for m in self.health_data.values() if m.status == HealthStatus.UNHEALTHY)
+        healthy_models = sum(
+            1 for m in self.health_data.values() if m.status == HealthStatus.HEALTHY
+        )
+        degraded_models = sum(
+            1 for m in self.health_data.values() if m.status == HealthStatus.DEGRADED
+        )
+        unhealthy_models = sum(
+            1 for m in self.health_data.values() if m.status == HealthStatus.UNHEALTHY
+        )
 
         # Calculate overall system status
         if unhealthy_providers == 0:
@@ -483,7 +510,7 @@ class ModelHealthMonitor:
             degraded_models=degraded_models,
             unhealthy_models=unhealthy_models,
             system_uptime=system_uptime,
-            last_updated=datetime.now(UTC)
+            last_updated=datetime.now(UTC),
         )
 
     def get_model_health(self, model_id: str, gateway: str = None) -> ModelHealthMetrics | None:
@@ -498,7 +525,9 @@ class ModelHealthMonitor:
                     return health_data
             return None
 
-    def get_provider_health(self, provider: str, gateway: str = None) -> ProviderHealthMetrics | None:
+    def get_provider_health(
+        self, provider: str, gateway: str = None
+    ) -> ProviderHealthMetrics | None:
         """Get health metrics for a specific provider"""
         if gateway:
             provider_key = f"{gateway}:{provider}"
@@ -535,8 +564,9 @@ class ModelHealthMonitor:
             "providers": [asdict(p) for p in self.provider_data.values()],
             "models": [asdict(m) for m in self.health_data.values()],
             "monitoring_active": self.monitoring_active,
-            "last_check": datetime.now(UTC).isoformat()
+            "last_check": datetime.now(UTC).isoformat(),
         }
+
 
 # Global health monitor instance
 health_monitor = ModelHealthMonitor()

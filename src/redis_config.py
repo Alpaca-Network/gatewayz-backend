@@ -21,13 +21,11 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 # Global Redis client
 _redis_client: redis.Redis | None = None
 
+
 def get_redis_config() -> dict:
     """Get Redis configuration"""
-    return {
-        "url": REDIS_URL,
-        "password": REDIS_PASSWORD,
-        "db": REDIS_DB
-    }
+    return {"url": REDIS_URL, "password": REDIS_PASSWORD, "db": REDIS_DB}
+
 
 def get_redis_client() -> redis.Redis | None:
     """Get Redis client instance"""
@@ -42,7 +40,7 @@ def get_redis_client() -> redis.Redis | None:
                 decode_responses=True,
                 socket_connect_timeout=5,
                 socket_timeout=5,
-                retry_on_timeout=True
+                retry_on_timeout=True,
             )
 
             # Test connection
@@ -55,6 +53,7 @@ def get_redis_client() -> redis.Redis | None:
 
     return _redis_client
 
+
 def is_redis_available() -> bool:
     """Check if Redis is available"""
     try:
@@ -65,6 +64,7 @@ def is_redis_available() -> bool:
     except Exception:
         pass
     return False
+
 
 def clear_redis_cache() -> bool:
     """Clear all Redis cache"""
@@ -78,6 +78,7 @@ def clear_redis_cache() -> bool:
         logger.error(f"Failed to clear Redis cache: {e}")
     return False
 
+
 def get_redis_info() -> dict:
     """Get Redis server information"""
     try:
@@ -89,12 +90,9 @@ def get_redis_info() -> dict:
                 "version": info.get("redis_version"),
                 "memory_used": info.get("used_memory_human"),
                 "connected_clients": info.get("connected_clients"),
-                "total_commands_processed": info.get("total_commands_processed")
+                "total_commands_processed": info.get("total_commands_processed"),
             }
     except Exception as e:
         logger.error(f"Failed to get Redis info: {e}")
 
-    return {
-        "connected": False,
-        "error": "Redis not available"
-    }
+    return {"connected": False, "error": "Redis not available"}

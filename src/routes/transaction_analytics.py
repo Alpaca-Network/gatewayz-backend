@@ -50,7 +50,7 @@ async def get_transaction_analytics(
             "Cookie": cookie,
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.9"
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
         logger.info(f"Fetching transaction analytics with window={window}")
@@ -64,48 +64,36 @@ async def get_transaction_analytics(
                 data = response.json()
                 logger.info("Successfully fetched transaction analytics")
 
-                return {
-                    "success": True,
-                    "window": window,
-                    "data": data
-                }
+                return {"success": True, "window": window, "data": data}
 
             elif response.status_code == 401:
                 logger.error("OpenRouter authentication failed - cookie may be expired")
                 raise HTTPException(
                     status_code=502,
-                    detail="Failed to authenticate with OpenRouter. Session may be expired."
+                    detail="Failed to authenticate with OpenRouter. Session may be expired.",
                 )
 
             else:
                 logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
                 raise HTTPException(
-                    status_code=502,
-                    detail=f"OpenRouter API returned error: {response.status_code}"
+                    status_code=502, detail=f"OpenRouter API returned error: {response.status_code}"
                 )
 
     except httpx.TimeoutException:
         logger.error("Timeout while fetching transaction analytics")
-        raise HTTPException(
-            status_code=504,
-            detail="Request to OpenRouter API timed out"
-        ) from None
+        raise HTTPException(status_code=504, detail="Request to OpenRouter API timed out") from None
 
     except httpx.RequestError as e:
         logger.error(f"Request error: {e}")
         raise HTTPException(
-            status_code=502,
-            detail=f"Failed to connect to OpenRouter API: {str(e)}"
+            status_code=502, detail=f"Failed to connect to OpenRouter API: {str(e)}"
         ) from e
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error fetching transaction analytics: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
 
 
 @router.get("/transactions/summary")
@@ -146,12 +134,22 @@ async def get_transaction_summary(
                 model_stats[model] = {
                     "requests": 0,
                     "tokens": {
-                        "prompt": {"sum": 0, "min": float('inf'), "max": float('-inf'), "count": 0},
-                        "completion": {"sum": 0, "min": float('inf'), "max": float('-inf'), "count": 0},
-                        "reasoning": {"sum": 0, "min": float('inf'), "max": float('-inf'), "count": 0},
-                        "total": {"sum": 0, "min": float('inf'), "max": float('-inf'), "count": 0},
+                        "prompt": {"sum": 0, "min": float("inf"), "max": float("-inf"), "count": 0},
+                        "completion": {
+                            "sum": 0,
+                            "min": float("inf"),
+                            "max": float("-inf"),
+                            "count": 0,
+                        },
+                        "reasoning": {
+                            "sum": 0,
+                            "min": float("inf"),
+                            "max": float("-inf"),
+                            "count": 0,
+                        },
+                        "total": {"sum": 0, "min": float("inf"), "max": float("-inf"), "count": 0},
                     },
-                    "usage": {"sum": 0, "min": float('inf'), "max": float('-inf'), "count": 0}
+                    "usage": {"sum": 0, "min": float("inf"), "max": float("-inf"), "count": 0},
                 }
 
             m = model_stats[model]
@@ -207,10 +205,10 @@ async def get_transaction_summary(
                     return {"sum": 0, "min": 0, "max": 0, "avg": 0, "count": 0}
                 return {
                     "sum": round(stat["sum"], 2),
-                    "min": round(stat["min"], 2) if stat["min"] != float('inf') else 0,
-                    "max": round(stat["max"], 2) if stat["max"] != float('-inf') else 0,
+                    "min": round(stat["min"], 2) if stat["min"] != float("inf") else 0,
+                    "max": round(stat["max"], 2) if stat["max"] != float("-inf") else 0,
                     "avg": round(stat["sum"] / stat["count"], 2),
-                    "count": stat["count"]
+                    "count": stat["count"],
                 }
 
             m["tokens"]["prompt"] = normalize_stat(m["tokens"]["prompt"])
@@ -224,10 +222,10 @@ async def get_transaction_summary(
             else:
                 m["usage"] = {
                     "sum": round(m["usage"]["sum"], 6),
-                    "min": round(m["usage"]["min"], 6) if m["usage"]["min"] != float('inf') else 0,
-                    "max": round(m["usage"]["max"], 6) if m["usage"]["max"] != float('-inf') else 0,
+                    "min": round(m["usage"]["min"], 6) if m["usage"]["min"] != float("inf") else 0,
+                    "max": round(m["usage"]["max"], 6) if m["usage"]["max"] != float("-inf") else 0,
                     "avg": round(m["usage"]["sum"] / m["usage"]["count"], 6),
-                    "count": m["usage"]["count"]
+                    "count": m["usage"]["count"],
                 }
 
         # Calculate overall totals
@@ -240,19 +238,13 @@ async def get_transaction_summary(
             "total_requests": total_requests,
             "total_cost": round(total_cost, 6),
             "models_count": len(model_stats),
-            "models_stats": model_stats
+            "models_stats": model_stats,
         }
 
-        return {
-            "success": True,
-            "summary": summary
-        }
+        return {"success": True, "summary": summary}
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating transaction summary: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create summary: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Failed to create summary: {str(e)}") from e

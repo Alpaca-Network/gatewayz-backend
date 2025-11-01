@@ -7,18 +7,17 @@ logger = logging.getLogger(__name__)
 
 
 def get_all_latest_models(
-    limit: int | None = None,
-    offset: int | None = None
+    limit: int | None = None, offset: int | None = None
 ) -> list[dict[str, Any]]:
     """Get all data from latest_models table for ranking page with logo URLs"""
     try:
         client = get_supabase_client()
 
         # Build query with optional pagination
-        query = client.table('latest_models').select('*')
+        query = client.table("latest_models").select("*")
 
         # Apply ordering by rank (ascending order - rank 1 first)
-        query = query.order('rank', desc=False)
+        query = query.order("rank", desc=False)
 
         # Apply pagination if specified
         if offset:
@@ -38,14 +37,16 @@ def get_all_latest_models(
             enhanced_model = model.copy()
 
             # Generate logo URL if not present
-            if 'logo_url' not in model or not model.get('logo_url'):
-                logo_url = generate_logo_url_from_author(model.get('author', ''))
+            if "logo_url" not in model or not model.get("logo_url"):
+                logo_url = generate_logo_url_from_author(model.get("author", ""))
                 if logo_url:
-                    enhanced_model['logo_url'] = logo_url
+                    enhanced_model["logo_url"] = logo_url
 
             enhanced_models.append(enhanced_model)
 
-        logger.info(f"Retrieved {len(enhanced_models)} models from latest_models table with logo URLs")
+        logger.info(
+            f"Retrieved {len(enhanced_models)} models from latest_models table with logo URLs"
+        )
         return enhanced_models
 
     except Exception as e:
@@ -60,30 +61,30 @@ def generate_logo_url_from_author(author: str) -> str:
 
     # Map author names to domains
     author_domain_map = {
-        'openai': 'openai.com',
-        'anthropic': 'anthropic.com',
-        'google': 'google.com',
-        'x-ai': 'x.ai',
-        'deepseek': 'deepseek.com',
-        'z-ai': 'zhipuai.cn',
-        'meta': 'meta.com',
-        'microsoft': 'microsoft.com',
-        'cohere': 'cohere.com',
-        'mistralai': 'mistral.ai',
-        'perplexity': 'perplexity.ai',
-        'amazon': 'aws.amazon.com',
-        'baidu': 'baidu.com',
-        'tencent': 'tencent.com',
-        'alibaba': 'alibaba.com',
-        'ai21': 'ai21.com',
-        'inflection': 'inflection.ai'
+        "openai": "openai.com",
+        "anthropic": "anthropic.com",
+        "google": "google.com",
+        "x-ai": "x.ai",
+        "deepseek": "deepseek.com",
+        "z-ai": "zhipuai.cn",
+        "meta": "meta.com",
+        "microsoft": "microsoft.com",
+        "cohere": "cohere.com",
+        "mistralai": "mistral.ai",
+        "perplexity": "perplexity.ai",
+        "amazon": "aws.amazon.com",
+        "baidu": "baidu.com",
+        "tencent": "tencent.com",
+        "alibaba": "alibaba.com",
+        "ai21": "ai21.com",
+        "inflection": "inflection.ai",
     }
 
     # Get domain for author
     domain = author_domain_map.get(author.lower())
     if not domain:
         # Try to use author as domain if it looks like a domain
-        if '.' in author:
+        if "." in author:
             domain = author
         else:
             return None
@@ -97,7 +98,7 @@ def get_all_latest_apps() -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
 
-        result = client.table('latest_apps').select('*').execute()
+        result = client.table("latest_apps").select("*").execute()
 
         if not result.data:
             logger.info("No apps found in latest_apps table")

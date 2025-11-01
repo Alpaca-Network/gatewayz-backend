@@ -12,6 +12,7 @@ from redis.connection import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
+
 class RedisConfig:
     """Redis configuration and connection management"""
 
@@ -24,7 +25,9 @@ class RedisConfig:
         self.redis_max_connections = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
         self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
         self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
-        self.redis_retry_on_timeout = os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
+        self.redis_retry_on_timeout = (
+            os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
+        )
 
         self._client: redis.Redis | None = None
         self._pool: ConnectionPool | None = None
@@ -41,7 +44,7 @@ class RedisConfig:
                     socket_timeout=self.redis_socket_timeout,
                     socket_connect_timeout=self.redis_socket_connect_timeout,
                     retry_on_timeout=self.redis_retry_on_timeout,
-                    decode_responses=True
+                    decode_responses=True,
                 )
             else:
                 # Use individual parameters for local Redis
@@ -54,7 +57,7 @@ class RedisConfig:
                     socket_timeout=self.redis_socket_timeout,
                     socket_connect_timeout=self.redis_socket_connect_timeout,
                     retry_on_timeout=self.redis_retry_on_timeout,
-                    decode_responses=True
+                    decode_responses=True,
                 )
         return self._pool
 
@@ -63,8 +66,7 @@ class RedisConfig:
         if self._client is None:
             try:
                 self._client = redis.Redis(
-                    connection_pool=self.get_connection_pool(),
-                    decode_responses=True
+                    connection_pool=self.get_connection_pool(), decode_responses=True
                 )
                 # Test connection
                 self._client.ping()
@@ -248,8 +250,10 @@ class RedisConfig:
             logger.warning(f"Failed to cleanup expired keys {pattern}: {e}")
         return 0
 
+
 # Global Redis configuration instance
 _redis_config = None
+
 
 def get_redis_config() -> RedisConfig:
     """Get global Redis configuration instance"""
@@ -258,10 +262,12 @@ def get_redis_config() -> RedisConfig:
         _redis_config = RedisConfig()
     return _redis_config
 
+
 def get_redis_client() -> redis.Redis | None:
     """Get Redis client instance"""
     config = get_redis_config()
     return config.get_client()
+
 
 def is_redis_available() -> bool:
     """Check if Redis is available"""

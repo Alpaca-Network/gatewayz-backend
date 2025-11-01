@@ -30,9 +30,7 @@ class HFStreamChoice:
     def __init__(self, data: dict[str, Any]):
         self.index = data.get("index", 0)
         self.delta = SimpleNamespace(**(data.get("delta") or {}))
-        self.message = (
-            SimpleNamespace(**data["message"]) if data.get("message") else None
-        )
+        self.message = SimpleNamespace(**data["message"]) if data.get("message") else None
         self.finish_reason = data.get("finish_reason")
 
 
@@ -165,9 +163,7 @@ def make_huggingface_request_openai_stream(
                         logger.warning("Failed to decode Hugging Face stream chunk: %s", err)
                         continue
     except Exception as e:
-        logger.error(
-            "Hugging Face streaming request failed for model '%s': %s", model, e
-        )
+        logger.error("Hugging Face streaming request failed for model '%s': %s", model, e)
         raise
     finally:
         client.close()

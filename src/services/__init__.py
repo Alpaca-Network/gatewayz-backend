@@ -7,6 +7,7 @@ def __getattr__(name):
     if name == "rate_limiting":
         # Import the module dynamically to avoid circular reference
         import importlib
+
         module = importlib.import_module(f"{__name__}.{name}")
         # Cache it in the module's namespace to avoid recursion
         setattr(sys.modules[__name__], name, module)

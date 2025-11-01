@@ -83,5 +83,3 @@ def sha256_key_hash(plaintext: str) -> str:
 
 def last4(plaintext: str) -> str:
     return plaintext[-4:] if len(plaintext) >= 4 else plaintext
-
-

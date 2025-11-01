@@ -20,23 +20,11 @@ logger = logging.getLogger(__name__)
 ERROR_INVALID_ADMIN_API_KEY = "Invalid admin API key"
 
 # Cache dictionaries for models and providers
-_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600  # 1 hour TTL
-}
+_models_cache = {"data": None, "timestamp": None, "ttl": 3600}  # 1 hour TTL
 
-_huggingface_cache = {
-    "data": {},
-    "timestamp": None,
-    "ttl": 3600  # 1 hour TTL
-}
+_huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600}  # 1 hour TTL
 
-_provider_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600  # 1 hour TTL
-}
+_provider_cache = {"data": None, "timestamp": None, "ttl": 3600}  # 1 hour TTL
 
 
 # Admin key validation
@@ -71,7 +59,7 @@ def create_app() -> FastAPI:
         title="Gatewayz Universal Inference API",
         description="Gateway for AI model access powered by Gatewayz",
         version="2.0.3",  # Multi-sort strategy for 1204 HuggingFace models + auto :hf-inference suffix
-        lifespan=lifespan
+        lifespan=lifespan,
     )
 
     # Add CORS middleware
@@ -149,7 +137,10 @@ def create_app() -> FastAPI:
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
         ("system", "System & Health"),  # Cache management and health monitoring
-        ("optimization_monitor", "Optimization Monitoring"),  # Connection pool, cache, and priority stats
+        (
+            "optimization_monitor",
+            "Optimization Monitoring",
+        ),  # Connection pool, cache, and priority stats
         ("root", "Root/Home"),
         ("auth", "Authentication"),
         ("users", "User Management"),
@@ -168,7 +159,6 @@ def create_app() -> FastAPI:
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
-
     ]
 
     loaded_count = 0
@@ -177,7 +167,7 @@ def create_app() -> FastAPI:
     for module_name, display_name in routes_to_load:
         try:
             # Import the route module
-            module = __import__(f"src.routes.{module_name}", fromlist=['router'])
+            module = __import__(f"src.routes.{module_name}", fromlist=["router"])
             router = module.router
 
             # Include the router (all routes now follow clean REST patterns)
@@ -196,6 +186,7 @@ def create_app() -> FastAPI:
             logger.error(f"       Full error details: {repr(e)}")
             print(f"       Full error details: {repr(e)}", flush=True)
             import traceback
+
             tb = traceback.format_exc()
             logger.error(f"       Traceback:\n{tb}")
             print(f"       Traceback:\n{tb}", flush=True)
@@ -212,6 +203,7 @@ def create_app() -> FastAPI:
             logger.error(error_msg)
             print(error_msg, flush=True)  # Force output for debugging
             import traceback
+
             print(f"       Traceback:\n{traceback.format_exc()}", flush=True)
             failed_count += 1
 
@@ -227,10 +219,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"}
-        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     # ==================== Startup Event ====================
 
@@ -255,6 +244,7 @@ def create_app() -> FastAPI:
             try:
                 logger.info("  🗄️  Initializing database...")
                 from src.config.supabase_config import init_db
+
                 init_db()
                 logger.info("  ✅ Database initialized")
 
@@ -272,17 +262,19 @@ def create_app() -> FastAPI:
                     logger.warning("  ⚠️  ADMIN_EMAIL not configured in environment variables")
                 else:
                     client = get_supabase_client()
-                    result = client.table('users').select('id, role').eq('email', ADMIN_EMAIL).execute()
+                    result = (
+                        client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
+                    )
 
                     if result.data:
                         user = result.data[0]
-                        current_role = user.get('role', 'user')
+                        current_role = user.get("role", "user")
 
                         if current_role != UserRole.ADMIN:
                             update_user_role(
-                                user_id=user['id'],
+                                user_id=user["id"],
                                 new_role=UserRole.ADMIN,
-                                reason="Default admin setup on startup"
+                                reason="Default admin setup on startup",
                             )
                             logger.info(f"  ✅ Set {ADMIN_EMAIL} as admin")
                         else:
@@ -297,17 +289,20 @@ def create_app() -> FastAPI:
 
                 # Initialize Statsig
                 from src.services.statsig_service import statsig_service
+
                 await statsig_service.initialize()
                 logger.info("  ✅ Statsig analytics initialized")
 
                 # Initialize PostHog
                 from src.services.posthog_service import posthog_service
+
                 posthog_service.initialize()
                 logger.info("  ✅ PostHog analytics initialized")
 
                 # Initialize Braintrust
                 try:
                     from braintrust import init_logger
+
                     init_logger(project="Gatewayz Backend")
                     logger.info("  ✅ Braintrust tracing initialized")
                 except Exception as bt_e:
@@ -344,6 +339,7 @@ def create_app() -> FastAPI:
         # Shutdown analytics services gracefully
         try:
             from src.services.statsig_service import statsig_service
+
             await statsig_service.shutdown()
             logger.info("  ✅ Statsig shutdown complete")
         except Exception as e:
@@ -351,6 +347,7 @@ def create_app() -> FastAPI:
 
         try:
             from src.services.posthog_service import posthog_service
+
             posthog_service.shutdown()
             logger.info("  ✅ PostHog shutdown complete")
         except Exception as e:

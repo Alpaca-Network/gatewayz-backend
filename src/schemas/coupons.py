@@ -10,30 +10,35 @@ from pydantic import BaseModel, Field, validator
 
 class CouponScope(str, Enum):
     """Coupon scope types"""
-    USER_SPECIFIC = 'user_specific'
-    GLOBAL = 'global'
+
+    USER_SPECIFIC = "user_specific"
+    GLOBAL = "global"
 
 
 class CouponType(str, Enum):
     """Coupon type categories"""
-    PROMOTIONAL = 'promotional'
-    REFERRAL = 'referral'
-    COMPENSATION = 'compensation'
-    PARTNERSHIP = 'partnership'
+
+    PROMOTIONAL = "promotional"
+    REFERRAL = "referral"
+    COMPENSATION = "compensation"
+    PARTNERSHIP = "partnership"
 
 
 class CreatorType(str, Enum):
     """Who created the coupon"""
-    ADMIN = 'admin'
-    SYSTEM = 'system'
+
+    ADMIN = "admin"
+    SYSTEM = "system"
 
 
 # ============================================
 # Request Schemas
 # ============================================
 
+
 class CreateCouponRequest(BaseModel):
     """Request to create a new coupon"""
+
     code: str = Field(..., min_length=3, max_length=50, description="Unique coupon code")
     value_usd: float = Field(..., gt=0, le=1000, description="Dollar value of the coupon")
     coupon_scope: CouponScope = Field(..., description="Scope: user_specific or global")
@@ -44,39 +49,41 @@ class CreateCouponRequest(BaseModel):
     description: str | None = Field(None, max_length=500, description="Internal description")
     valid_from: datetime | None = Field(None, description="Start date (defaults to now)")
 
-    @validator('code')
+    @validator("code")
     def code_must_be_alphanumeric(cls, v):
         """Validate coupon code format"""
-        if not v.replace('_', '').replace('-', '').isalnum():
-            raise ValueError('Code must be alphanumeric (hyphens and underscores allowed)')
+        if not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Code must be alphanumeric (hyphens and underscores allowed)")
         return v.upper()
 
-    @validator('assigned_to_user_id', always=True)
+    @validator("assigned_to_user_id", always=True)
     def validate_user_assignment(cls, v, values):
         """Validate user assignment based on scope"""
-        scope = values.get('coupon_scope')
+        scope = values.get("coupon_scope")
         if scope == CouponScope.USER_SPECIFIC and not v:
-            raise ValueError('User-specific coupons must have assigned_to_user_id')
+            raise ValueError("User-specific coupons must have assigned_to_user_id")
         if scope == CouponScope.GLOBAL and v:
-            raise ValueError('Global coupons cannot have assigned_to_user_id')
+            raise ValueError("Global coupons cannot have assigned_to_user_id")
         return v
 
-    @validator('max_uses')
+    @validator("max_uses")
     def validate_max_uses(cls, v, values):
         """Validate max_uses based on scope"""
-        scope = values.get('coupon_scope')
+        scope = values.get("coupon_scope")
         if scope == CouponScope.USER_SPECIFIC and v != 1:
-            raise ValueError('User-specific coupons must have max_uses = 1')
+            raise ValueError("User-specific coupons must have max_uses = 1")
         return v
 
 
 class RedeemCouponRequest(BaseModel):
     """Request to redeem a coupon"""
+
     code: str = Field(..., min_length=3, max_length=50, description="Coupon code to redeem")
 
 
 class UpdateCouponRequest(BaseModel):
     """Request to update a coupon"""
+
     valid_until: datetime | None = Field(None, description="New expiration date")
     max_uses: int | None = Field(None, gt=0, description="New max uses")
     is_active: bool | None = Field(None, description="Active status")
@@ -87,8 +94,10 @@ class UpdateCouponRequest(BaseModel):
 # Response Schemas
 # ============================================
 
+
 class CouponResponse(BaseModel):
     """Coupon details response"""
+
     id: int
     code: str
     value_usd: float
@@ -111,6 +120,7 @@ class CouponResponse(BaseModel):
 
 class AvailableCouponResponse(BaseModel):
     """Available coupon for user response"""
+
     coupon_id: int
     code: str
     value_usd: float
@@ -123,6 +133,7 @@ class AvailableCouponResponse(BaseModel):
 
 class RedemptionResponse(BaseModel):
     """Coupon redemption response"""
+
     success: bool
     message: str
     coupon_code: str | None = None
@@ -134,6 +145,7 @@ class RedemptionResponse(BaseModel):
 
 class RedemptionHistoryItem(BaseModel):
     """Single redemption history item"""
+
     id: int
     coupon_code: str
     coupon_scope: str
@@ -146,6 +158,7 @@ class RedemptionHistoryItem(BaseModel):
 
 class RedemptionHistoryResponse(BaseModel):
     """User redemption history response"""
+
     redemptions: list[RedemptionHistoryItem]
     total_redemptions: int
     total_value_redeemed: float
@@ -153,6 +166,7 @@ class RedemptionHistoryResponse(BaseModel):
 
 class CouponAnalyticsResponse(BaseModel):
     """Coupon analytics response"""
+
     coupon: CouponResponse
     total_redemptions: int
     unique_users: int
@@ -164,6 +178,7 @@ class CouponAnalyticsResponse(BaseModel):
 
 class CouponStatsResponse(BaseModel):
     """System-wide coupon statistics"""
+
     total_coupons: int
     active_coupons: int
     user_specific_coupons: int
@@ -176,6 +191,7 @@ class CouponStatsResponse(BaseModel):
 
 class ListCouponsResponse(BaseModel):
     """List of coupons response"""
+
     coupons: list[CouponResponse]
     total: int
     offset: int

@@ -11,10 +11,11 @@ from posthog import Posthog
 
 logger = logging.getLogger(__name__)
 
+
 class PostHogService:
     """Singleton service for PostHog analytics"""
 
-    _instance: Optional['PostHogService'] = None
+    _instance: Optional["PostHogService"] = None
     _initialized: bool = False
 
     def __new__(cls):
@@ -30,19 +31,21 @@ class PostHogService:
     def initialize(self):
         """Initialize PostHog with API key and host"""
         try:
-            api_key = os.getenv('POSTHOG_API_KEY')
-            host = os.getenv('POSTHOG_HOST', 'https://us.i.posthog.com')
+            api_key = os.getenv("POSTHOG_API_KEY")
+            host = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com")
 
             if not api_key:
-                logger.warning("POSTHOG_API_KEY not found in environment variables. PostHog analytics will be disabled.")
+                logger.warning(
+                    "POSTHOG_API_KEY not found in environment variables. PostHog analytics will be disabled."
+                )
                 return
 
             # Initialize PostHog client
             self.client = Posthog(
                 api_key,
                 host=host,
-                debug=os.getenv('POSTHOG_DEBUG', 'false').lower() == 'true',
-                sync_mode=False  # Use async mode for better performance
+                debug=os.getenv("POSTHOG_DEBUG", "false").lower() == "true",
+                sync_mode=False,  # Use async mode for better performance
             )
 
             logger.info(f"PostHog initialized successfully (host: {host})")
@@ -65,7 +68,7 @@ class PostHogService:
         distinct_id: str,
         event: str,
         properties: dict[str, Any] | None = None,
-        groups: dict[str, str] | None = None
+        groups: dict[str, str] | None = None,
     ):
         """
         Capture an analytics event in PostHog
@@ -82,21 +85,14 @@ class PostHogService:
 
         try:
             self.client.capture(
-                distinct_id=distinct_id,
-                event=event,
-                properties=properties or {},
-                groups=groups
+                distinct_id=distinct_id, event=event, properties=properties or {}, groups=groups
             )
             logger.debug(f"Captured event '{event}' for user '{distinct_id}'")
 
         except Exception as e:
             logger.error(f"Failed to capture PostHog event '{event}': {e}")
 
-    def identify(
-        self,
-        distinct_id: str,
-        properties: dict[str, Any] | None = None
-    ):
+    def identify(self, distinct_id: str, properties: dict[str, Any] | None = None):
         """
         Identify a user and set their properties in PostHog
 
@@ -109,10 +105,7 @@ class PostHogService:
             return
 
         try:
-            self.client.identify(
-                distinct_id=distinct_id,
-                properties=properties or {}
-            )
+            self.client.identify(distinct_id=distinct_id, properties=properties or {})
             logger.debug(f"Identified user '{distinct_id}'")
 
         except Exception as e:

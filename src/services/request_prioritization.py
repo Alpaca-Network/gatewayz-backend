@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class RequestPriority(IntEnum):
     """Priority levels for requests (lower number = higher priority)"""
+
     CRITICAL = 0  # System-critical requests
     HIGH = 1  # Premium users, paid plans
     MEDIUM = 2  # Standard users
@@ -25,6 +26,7 @@ class RequestPriority(IntEnum):
 @dataclass
 class PriorityRequest:
     """Container for prioritized requests"""
+
     priority: RequestPriority
     request_id: str
     user_id: str | None

@@ -12,6 +12,7 @@ from src.services.response_cache import get_cache
 
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app):
     """
@@ -66,6 +67,7 @@ async def lifespan(app):
     except Exception as e:
         logger.error(f"Error stopping monitoring services: {e}")
 
+
 async def initialize_services():
     """
     Initialize all monitoring services
@@ -84,6 +86,7 @@ async def initialize_services():
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
+
 
 async def shutdown_services():
     """

@@ -5,13 +5,14 @@ from pydantic import BaseModel
 
 class CreateApiKeyRequest(BaseModel):
     key_name: str
-    environment_tag: str = 'live'
+    environment_tag: str = "live"
     scope_permissions: dict[str, list[str]] | None = None
     expiration_days: int | None = None
     max_requests: int | None = None
     ip_allowlist: list[str] | None = None
     domain_referrers: list[str] | None = None
-    action: str = 'create'
+    action: str = "create"
+
 
 class ApiKeyResponse(BaseModel):
     id: int
@@ -33,19 +34,23 @@ class ApiKeyResponse(BaseModel):
     updated_at: str | None = None
     last_used_at: str | None = None
 
+
 class ListApiKeysResponse(BaseModel):
     status: str
     total_keys: int
     keys: list[ApiKeyResponse]
 
+
 class DeleteApiKeyRequest(BaseModel):
     confirmation: str = "DELETE"
+
 
 class DeleteApiKeyResponse(BaseModel):
     status: str
     message: str
     deleted_key_id: int
     timestamp: str
+
 
 class UpdateApiKeyRequest(BaseModel):
     key_name: str | None = None
@@ -58,11 +63,13 @@ class UpdateApiKeyRequest(BaseModel):
     action: str | None = None
     environment_tag: str | None = None
 
+
 class UpdateApiKeyResponse(BaseModel):
     status: str
     message: str
     updated_key: ApiKeyResponse
     timestamp: datetime
+
 
 class ApiKeyUsageResponse(BaseModel):
     api_key: str

@@ -14,6 +14,7 @@ class PrivyLinkedAccount(BaseModel):
     first_verified_at: int | None = None
     latest_verified_at: int | None = None
 
+
 class PrivyUserData(BaseModel):
     id: str
     created_at: int
@@ -21,6 +22,7 @@ class PrivyUserData(BaseModel):
     mfa_methods: list[str] = []
     has_accepted_terms: bool = False
     is_guest: bool = False
+
 
 class PrivySignupRequest(BaseModel):
     privy_user_id: str
@@ -31,9 +33,11 @@ class PrivySignupRequest(BaseModel):
     gmail_address: EmailStr | None = None
     github_username: str | None = None
 
+
 class PrivySigninRequest(BaseModel):
     privy_user_id: str
     auth_method: AuthMethod
+
 
 class PrivyAuthRequest(BaseModel):
     user: PrivyUserData
@@ -44,6 +48,7 @@ class PrivyAuthRequest(BaseModel):
     session_update_action: str | None = None
     is_new_user: bool | None = None
     referral_code: str | None = None  # Referral code if user signed up with one
+
 
 class PrivyAuthResponse(BaseModel):
     success: bool

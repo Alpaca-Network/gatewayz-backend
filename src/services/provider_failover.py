@@ -99,7 +99,9 @@ def map_provider_error(
                 retry_after = exc.body.get("retry_after")
             if retry_after:
                 headers = {"Retry-After": str(retry_after)}
-            return HTTPException(status_code=429, detail="Upstream rate limit exceeded", headers=headers)
+            return HTTPException(
+                status_code=429, detail="Upstream rate limit exceeded", headers=headers
+            )
 
         auth_error_classes = tuple(
             err for err in (AuthenticationError, PermissionDeniedError) if err is not None
@@ -139,7 +141,9 @@ def map_provider_error(
 
         if status == 429:
             headers = {"Retry-After": retry_after} if retry_after else None
-            return HTTPException(status_code=429, detail="Upstream rate limit exceeded", headers=headers)
+            return HTTPException(
+                status_code=429, detail="Upstream rate limit exceeded", headers=headers
+            )
         if status in (401, 403):
             return HTTPException(status_code=500, detail=f"{provider} authentication error")
         if status == 404:

@@ -80,8 +80,7 @@ def validate_webhook_url(url: str, allowed_domains: list | None = None) -> bool:
         # If domain whitelist is provided, check against it
         if allowed_domains:
             domain_match = any(
-                hostname == domain or hostname.endswith(f".{domain}")
-                for domain in allowed_domains
+                hostname == domain or hostname.endswith(f".{domain}") for domain in allowed_domains
             )
             if not domain_match:
                 logger.warning(
@@ -140,8 +139,7 @@ def validate_redirect_url(url: str, allowed_origins: list | None = None) -> bool
             origin = f"{parsed.scheme}://{parsed.netloc}"
             if origin not in allowed_origins:
                 logger.warning(
-                    f"Redirect URL origin not whitelisted: {origin}. "
-                    f"Allowed: {allowed_origins}"
+                    f"Redirect URL origin not whitelisted: {origin}. " f"Allowed: {allowed_origins}"
                 )
                 return False
 
@@ -162,18 +160,11 @@ def generate_webhook_signature(payload: str, secret: str) -> str:
     Returns:
         Hex-encoded HMAC-SHA256 signature
     """
-    return hmac.new(
-        secret.encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def verify_webhook_signature(
-    payload: str,
-    signature: str,
-    secret: str,
-    header_name: str = "X-Webhook-Signature"
+    payload: str, signature: str, secret: str, header_name: str = "X-Webhook-Signature"
 ) -> bool:
     """Verify webhook signature using constant-time comparison.
 
@@ -191,6 +182,7 @@ def verify_webhook_signature(
 
         # Use constant-time comparison to prevent timing attacks
         import secrets as secrets_module
+
         if secrets_module.compare_digest(signature, expected):
             return True
 

@@ -100,9 +100,9 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
 
             if not user:
                 if (
-                    (Config.IS_TESTING or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"})
-                    and api_key.lower().startswith("test")
-                ):
+                    Config.IS_TESTING
+                    or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+                ) and api_key.lower().startswith("test"):
                     user = {
                         "id": 0,
                         "credits": 1_000_000.0,
@@ -117,7 +117,9 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
 
             # Validate requested image count
             if req.n <= 0:
-                raise HTTPException(status_code=422, detail="Parameter 'n' must be a positive integer")
+                raise HTTPException(
+                    status_code=422, detail="Parameter 'n' must be a positive integer"
+                )
 
             # Validate size format (e.g., 512x512)
             if req.size:
@@ -130,23 +132,25 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
                 except ValueError:
                     raise HTTPException(
                         status_code=400,
-                        detail="Image size must be formatted as WIDTHxHEIGHT with positive integers"
+                        detail="Image size must be formatted as WIDTHxHEIGHT with positive integers",
                     ) from None
 
             # Image generation is more expensive - estimate ~100 tokens per image
             estimated_tokens = 100 * req.n
 
             # Check if user has enough credits
-            if user['credits'] < estimated_tokens:
+            if user["credits"] < estimated_tokens:
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Insufficient credits. Image generation requires ~{estimated_tokens} credits. Available: {user['credits']}"
+                    detail=f"Insufficient credits. Image generation requires ~{estimated_tokens} credits. Available: {user['credits']}",
                 )
 
             # Prepare request parameters
             prompt = req.prompt
             model = req.model if req.model else "stable-diffusion-3.5-large"
-            provider = req.provider if req.provider else "deepinfra"  # Default to DeepInfra for images
+            provider = (
+                req.provider if req.provider else "deepinfra"
+            )  # Default to DeepInfra for images
 
             # Make image generation request
             logger.info(f"Generating {req.n} image(s) with prompt: {prompt[:50]}...")
@@ -157,17 +161,15 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             if provider == "deepinfra":
                 # Direct DeepInfra request
                 make_request_func = partial(
-                    make_deepinfra_image_request,
-                    prompt=prompt,
-                    model=model,
-                    size=req.size,
-                    n=req.n
+                    make_deepinfra_image_request, prompt=prompt, model=model, size=req.size, n=req.n
                 )
                 actual_provider = "deepinfra"
             elif provider == "portkey":
                 # Portkey request
                 portkey_provider = req.portkey_provider if req.portkey_provider else "stability-ai"
-                portkey_virtual_key = req.portkey_virtual_key if hasattr(req, 'portkey_virtual_key') else None
+                portkey_virtual_key = (
+                    req.portkey_virtual_key if hasattr(req, "portkey_virtual_key") else None
+                )
 
                 make_request_func = partial(
                     make_portkey_image_request,
@@ -178,14 +180,18 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
                     size=req.size,
                     n=req.n,
                     quality=req.quality,
-                    style=req.style
+                    style=req.style,
                 )
                 actual_provider = portkey_provider
             elif provider == "google-vertex":
                 # Google Vertex AI request
-                google_project_id = req.google_project_id if hasattr(req, 'google_project_id') else None
-                google_location = req.google_location if hasattr(req, 'google_location') else None
-                google_endpoint_id = req.google_endpoint_id if hasattr(req, 'google_endpoint_id') else None
+                google_project_id = (
+                    req.google_project_id if hasattr(req, "google_project_id") else None
+                )
+                google_location = req.google_location if hasattr(req, "google_location") else None
+                google_endpoint_id = (
+                    req.google_endpoint_id if hasattr(req, "google_endpoint_id") else None
+                )
 
                 make_request_func = partial(
                     make_google_vertex_image_request,
@@ -195,32 +201,24 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
                     n=req.n,
                     project_id=google_project_id,
                     location=google_location,
-                    endpoint_id=google_endpoint_id
+                    endpoint_id=google_endpoint_id,
                 )
                 actual_provider = "google-vertex"
             elif provider == "fal":
                 # Fal.ai request
                 make_request_func = partial(
-                    make_fal_image_request,
-                    prompt=prompt,
-                    model=model,
-                    size=req.size,
-                    n=req.n
+                    make_fal_image_request, prompt=prompt, model=model, size=req.size, n=req.n
                 )
                 actual_provider = "fal"
             else:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Provider '{provider}' is not supported for image generation. Use 'deepinfra', 'portkey', 'google-vertex', or 'fal'"
+                    detail=f"Provider '{provider}' is not supported for image generation. Use 'deepinfra', 'portkey', 'google-vertex', or 'fal'",
                 )
 
             response = await loop.run_in_executor(executor, make_request_func)
             processed_response = await loop.run_in_executor(
-                executor,
-                process_image_generation_response,
-                response,
-                actual_provider,
-                model
+                executor, process_image_generation_response, response, actual_provider, model
             )
 
             # Calculate inference latency
@@ -232,7 +230,16 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             try:
                 await loop.run_in_executor(executor, deduct_credits, api_key, tokens_charged)
                 cost = tokens_charged * 0.02 / 1000
-                await loop.run_in_executor(executor, record_usage, user['id'], api_key, model, tokens_charged, cost, int(elapsed * 1000))
+                await loop.run_in_executor(
+                    executor,
+                    record_usage,
+                    user["id"],
+                    api_key,
+                    model,
+                    tokens_charged,
+                    cost,
+                    int(elapsed * 1000),
+                )
 
                 # Increment API key usage count
                 await loop.run_in_executor(executor, increment_api_key_usage, api_key)
@@ -243,12 +250,12 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
                 logger.error(f"Error in usage recording process: {e}")
 
             # Add gateway usage info
-            processed_response['gateway_usage'] = {
-                'tokens_charged': tokens_charged,
-                'request_ms': int(elapsed * 1000),
-                'user_balance_after': user['credits'] - tokens_charged,
-                'user_api_key': f"{api_key[:10]}...",
-                'images_generated': req.n
+            processed_response["gateway_usage"] = {
+                "tokens_charged": tokens_charged,
+                "request_ms": int(elapsed * 1000),
+                "user_balance_after": user["credits"] - tokens_charged,
+                "user_api_key": f"{api_key[:10]}...",
+                "images_generated": req.n,
             }
 
             return processed_response

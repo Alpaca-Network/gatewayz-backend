@@ -18,23 +18,29 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 class AvailabilityStatus(str, Enum):
     """Model availability status"""
+
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
     DEGRADED = "degraded"
     MAINTENANCE = "maintenance"
     UNKNOWN = "unknown"
 
+
 class CircuitBreakerState(str, Enum):
     """Circuit breaker states"""
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"          # Failing, requests blocked
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, requests blocked
     HALF_OPEN = "half_open"  # Testing if service recovered
+
 
 @dataclass
 class ModelAvailability:
     """Model availability information"""
+
     model_id: str
     provider: str
     gateway: str
@@ -48,9 +54,11 @@ class ModelAvailability:
     maintenance_until: datetime | None = None
     error_message: str | None = None
 
+
 @dataclass
 class AvailabilityConfig:
     """Configuration for availability monitoring"""
+
     check_interval: int = 60  # seconds
     failure_threshold: int = 5  # failures before circuit opens
     recovery_timeout: int = 300  # seconds before trying half-open
@@ -58,10 +66,13 @@ class AvailabilityConfig:
     response_timeout: int = 30  # seconds
     cache_ttl: int = 300  # seconds
 
+
 class CircuitBreaker:
     """Circuit breaker implementation for model availability"""
 
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 300, success_threshold: int = 3):
+    def __init__(
+        self, failure_threshold: int = 5, recovery_timeout: int = 300, success_threshold: int = 3
+    ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.success_threshold = success_threshold
@@ -76,7 +87,10 @@ class CircuitBreaker:
         if self.state == CircuitBreakerState.CLOSED:
             return True
         elif self.state == CircuitBreakerState.OPEN:
-            if self.last_failure_time and (time.time() - self.last_failure_time) > self.recovery_timeout:
+            if (
+                self.last_failure_time
+                and (time.time() - self.last_failure_time) > self.recovery_timeout
+            ):
                 self.state = CircuitBreakerState.HALF_OPEN
                 self.success_count = 0
                 return True
@@ -105,6 +119,7 @@ class CircuitBreaker:
         elif self.state == CircuitBreakerState.HALF_OPEN:
             self.state = CircuitBreakerState.OPEN
 
+
 class ModelAvailabilityService:
     """Enhanced model availability service"""
 
@@ -128,7 +143,7 @@ class ModelAvailabilityService:
             "claude-3-opus": ["gpt-4", "claude-3-sonnet", "gpt-4-turbo"],
             "claude-3-sonnet": ["claude-3-opus", "gpt-3.5-turbo", "gpt-4"],
             "llama-3-70b": ["llama-3-8b", "claude-3-sonnet", "gpt-3.5-turbo"],
-            "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"]
+            "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"],
         }
 
     async def start_monitoring(self):
@@ -162,6 +177,7 @@ class ModelAvailabilityService:
         try:
             # Get models from health monitor
             from src.services.model_health_monitor import health_monitor
+
             models_health = health_monitor.get_all_models_health()
 
             for model_health in models_health:
@@ -189,7 +205,7 @@ class ModelAvailabilityService:
             self.circuit_breakers[model_key] = CircuitBreaker(
                 failure_threshold=self.config.failure_threshold,
                 recovery_timeout=self.config.recovery_timeout,
-                success_threshold=self.config.success_threshold
+                success_threshold=self.config.success_threshold,
             )
 
         circuit_breaker = self.circuit_breakers[model_key]
@@ -215,12 +231,14 @@ class ModelAvailabilityService:
             error_count=model_health.error_count,
             circuit_breaker_state=circuit_breaker.state,
             fallback_models=fallback_models,
-            error_message=model_health.error_message
+            error_message=model_health.error_message,
         )
 
         self.availability_cache[model_key] = availability
 
-    def get_model_availability(self, model_id: str, gateway: str = None) -> ModelAvailability | None:
+    def get_model_availability(
+        self, model_id: str, gateway: str = None
+    ) -> ModelAvailability | None:
         """Get availability for a specific model"""
         if gateway:
             model_key = f"{gateway}:{model_id}"
@@ -232,7 +250,9 @@ class ModelAvailabilityService:
                     return availability
             return None
 
-    def get_available_models(self, gateway: str = None, provider: str = None) -> list[ModelAvailability]:
+    def get_available_models(
+        self, gateway: str = None, provider: str = None
+    ) -> list[ModelAvailability]:
         """Get all available models"""
         available = []
 
@@ -291,16 +311,35 @@ class ModelAvailabilityService:
     def get_availability_summary(self) -> dict[str, Any]:
         """Get availability summary"""
         total_models = len(self.availability_cache)
-        available_models = len([a for a in self.availability_cache.values() if a.status == AvailabilityStatus.AVAILABLE])
-        degraded_models = len([a for a in self.availability_cache.values() if a.status == AvailabilityStatus.DEGRADED])
-        unavailable_models = len([a for a in self.availability_cache.values() if a.status == AvailabilityStatus.UNAVAILABLE])
+        available_models = len(
+            [
+                a
+                for a in self.availability_cache.values()
+                if a.status == AvailabilityStatus.AVAILABLE
+            ]
+        )
+        degraded_models = len(
+            [a for a in self.availability_cache.values() if a.status == AvailabilityStatus.DEGRADED]
+        )
+        unavailable_models = len(
+            [
+                a
+                for a in self.availability_cache.values()
+                if a.status == AvailabilityStatus.UNAVAILABLE
+            ]
+        )
 
         # Group by gateway
         gateway_stats = {}
         for availability in self.availability_cache.values():
             gateway = availability.gateway
             if gateway not in gateway_stats:
-                gateway_stats[gateway] = {"total": 0, "available": 0, "degraded": 0, "unavailable": 0}
+                gateway_stats[gateway] = {
+                    "total": 0,
+                    "available": 0,
+                    "degraded": 0,
+                    "unavailable": 0,
+                }
 
             gateway_stats[gateway]["total"] += 1
             if availability.status == AvailabilityStatus.AVAILABLE:
@@ -315,10 +354,12 @@ class ModelAvailabilityService:
             "available_models": available_models,
             "degraded_models": degraded_models,
             "unavailable_models": unavailable_models,
-            "availability_percentage": (available_models / total_models * 100) if total_models > 0 else 0,
+            "availability_percentage": (
+                (available_models / total_models * 100) if total_models > 0 else 0
+            ),
             "gateway_stats": gateway_stats,
             "monitoring_active": self.monitoring_active,
-            "last_updated": datetime.now(UTC).isoformat()
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     def set_maintenance_mode(self, model_id: str, gateway: str, until: datetime):
@@ -334,6 +375,7 @@ class ModelAvailabilityService:
         if model_key in self.availability_cache:
             self.availability_cache[model_key].maintenance_until = None
             # Status will be updated by next health check
+
 
 # Global availability service instance
 availability_service = ModelAvailabilityService()
