@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, EmailStr
 
-from src.schemas import AuthMethod, SubscriptionStatus
+from src.schemas.common import AuthMethod, SubscriptionStatus
 
 
 class UserRegistrationRequest(BaseModel):

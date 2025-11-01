@@ -36,10 +36,10 @@ from src.schemas.auth import (
 )
 
 # Common enums
-from src.schemas.common import PlanType  # Added
 from src.schemas.common import (
     AuthMethod,
     PaymentMethod,
+    PlanType,
     SubscriptionStatus,
 )
 
