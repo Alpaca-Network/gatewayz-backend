@@ -84,6 +84,7 @@ def create_app() -> FastAPI:
     base_origins = [
         "https://beta.gatewayz.ai",
         "https://staging.gatewayz.ai",
+        "https://api.gatewayz.ai",  # Added for chat API access from frontend
     ]
     
     if Config.IS_PRODUCTION:
