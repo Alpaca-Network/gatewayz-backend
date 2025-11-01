@@ -374,7 +374,7 @@ def normalize_huggingface_model(hf_model: dict) -> dict:
 
 def search_huggingface_models(query: str, limit: int = 50) -> list:
     """
-    Search for Hugging Face models by name or description.
+    Search for Hugging Face models by name or description with 429 rate limit handling.
 
     Args:
         query: Search query
@@ -399,8 +399,28 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
             headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
 
         url = "https://huggingface.co/api/models"
-        response = httpx.get(url, params=params, headers=headers, timeout=30.0)
-        response.raise_for_status()
+
+        # Retry logic for rate limiting
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second delay
+
+        for attempt in range(max_retries):
+            try:
+                response = httpx.get(url, params=params, headers=headers, timeout=30.0)
+                response.raise_for_status()
+                break  # Success, exit retry loop
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:  # Rate limited
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Rate limited (429) searching Hugging Face models for '{query}', attempt {attempt + 1}/{max_retries}. Waiting {retry_delay}s before retry...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"Rate limited (429) searching Hugging Face models for '{query}' after {max_retries} attempts. The Hugging Face API is experiencing high load.")
+                        return []
+                else:
+                    raise
 
         models = response.json()
         logger.info(f"Found {len(models)} models matching '{query}'")
@@ -409,6 +429,12 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
         normalized_models = [normalize_huggingface_model(model) for model in models if model]
         return [m for m in normalized_models if m]
 
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            logger.error(f"Rate limited (429) searching Hugging Face models for '{query}'. The Hugging Face API is experiencing high load.")
+        else:
+            logger.error(f"HTTP error searching Hugging Face models for '{query}': {e}")
+        return []
     except Exception as e:
         logger.error(f"Failed to search Hugging Face models for '{query}': {e}")
         return []
@@ -416,7 +442,7 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
 
 def get_huggingface_model_info(model_id: str) -> dict:
     """
-    Get detailed information about a specific Hugging Face model.
+    Get detailed information about a specific Hugging Face model with 429 rate limit handling.
 
     Args:
         model_id: Hugging Face model repository ID (e.g., "meta-llama/Llama-2-7b")
@@ -433,8 +459,28 @@ def get_huggingface_model_info(model_id: str) -> dict:
             headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
 
         url = f"https://huggingface.co/api/models/{model_id}"
-        response = httpx.get(url, headers=headers, timeout=10.0)
-        response.raise_for_status()
+
+        # Retry logic for rate limiting
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second delay
+
+        for attempt in range(max_retries):
+            try:
+                response = httpx.get(url, headers=headers, timeout=10.0)
+                response.raise_for_status()
+                break  # Success, exit retry loop
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:  # Rate limited
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Rate limited (429) fetching Hugging Face model {model_id}, attempt {attempt + 1}/{max_retries}. Waiting {retry_delay}s before retry...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"Rate limited (429) fetching Hugging Face model {model_id} after {max_retries} attempts. The Hugging Face API is experiencing high load.")
+                        return None
+                else:
+                    raise
 
         model_data = response.json()
         logger.info(f"Retrieved model info for {model_id}")
@@ -444,6 +490,8 @@ def get_huggingface_model_info(model_id: str) -> dict:
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             logger.warning(f"Hugging Face model {model_id} not found")
+        elif e.response.status_code == 429:
+            logger.error(f"Rate limited (429) fetching Hugging Face model {model_id}. The Hugging Face API is experiencing high load.")
         else:
             logger.error(f"HTTP error fetching Hugging Face model {model_id}: {e}")
         return None
