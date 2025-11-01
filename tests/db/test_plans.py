@@ -308,15 +308,31 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
     # Create a fixed "now" for testing (day 15 to avoid edge cases)
     # This ensures the function's datetime.now() matches our test data
     fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=timezone.utc)
-
-    # Create a mock datetime class that inherits the real one but overrides now()
-    class MockDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
-    # Mock datetime in the module to use our version
-    monkeypatch.setattr("src.db.plans.datetime", MockDateTime)
+    
+    # Mock datetime.now() using a proper mock object that preserves datetime functionality
+    # This avoids subclassing datetime which causes reliability issues
+    original_datetime = mod.datetime
+    
+    class MockDateTimeModule:
+        """Mock datetime module that preserves all datetime functionality except now()"""
+        def __init__(self, original_dt, fixed_now_value):
+            self._original = original_dt
+            self._fixed_now = fixed_now_value
+            # Copy all attributes from original datetime
+            for attr in dir(original_dt):
+                if not attr.startswith('_') and attr != 'now':
+                    setattr(self, attr, getattr(original_dt, attr))
+        
+        def now(self, tz=None):
+            return self._fixed_now
+        
+        def __call__(self, *args, **kwargs):
+            # Allow datetime() constructor calls
+            return original_dt(*args, **kwargs)
+    
+    # Replace datetime in the module with our mock
+    mock_dt_module = MockDateTimeModule(original_datetime, fixed_now)
+    monkeypatch.setattr(mod, "datetime", mock_dt_module)
 
     # plan + user_plan
     fake_supabase.table("plans").insert({
