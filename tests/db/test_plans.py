@@ -340,6 +340,7 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
         "daily_token_limit": 1000, "monthly_token_limit": 10000,
         "price_per_month": 19, "features": ["basic_models"]
     }).execute()
+
     now = datetime.now(timezone.utc)
     fake_supabase.table("user_plans").insert({
         "id": 900, "user_id": 9, "plan_id": 9,
@@ -357,16 +358,17 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
     ]).execute()
 
     # earlier this month (should count toward monthly but not daily)
-    # If today is day 1, use day 2 instead to ensure it's a different day
-    earlier_day = 1 if now.day > 1 else 2
-    earlier = now.replace(day=earlier_day, hour=2, minute=0, second=0, microsecond=0)
+    # Use a timestamp from 2 days ago to ensure it's a different day
+    earlier = (now - timedelta(days=2)).replace(hour=2, minute=0, second=0, microsecond=0)
     fake_supabase.table("usage_records").insert([
         {"user_id": 9, "timestamp": earlier.isoformat(), "tokens_used": 300},
     ]).execute()
 
     out = mod.get_user_usage_within_plan_limits(9)
+    # We should have exactly 3 "today" records (different from other days)
     assert out["usage"]["daily_requests"] == 3
     assert out["usage"]["daily_tokens"] == 350
+    # And 4 records total in the month
     assert out["usage"]["monthly_requests"] == 4
     assert out["usage"]["monthly_tokens"] == 650
     # remaining
