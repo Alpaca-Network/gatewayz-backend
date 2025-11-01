@@ -23,7 +23,7 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
-from src.security.deps import get_current_user, require_admin
+from src.security.deps import require_admin
 from src.services.models import (
     enhance_model_with_provider_info,
     fetch_huggingface_model,
