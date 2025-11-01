@@ -153,6 +153,12 @@ def mod(fake_supabase, monkeypatch):
 # ------------------------ Tests ------------------------
 
 def test_get_all_plans_returns_active_sorted(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     fake_supabase.table("plans").insert([
         {"id": 1, "name": "Basic", "price_per_month": 10, "is_active": True},
         {"id": 2, "name": "Pro", "price_per_month": 25, "is_active": True},
@@ -165,6 +171,12 @@ def test_get_all_plans_returns_active_sorted(mod, fake_supabase):
 
 
 def test_get_plan_by_id_converts_features_dict_to_list(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     fake_supabase.table("plans").insert({
         "id": 7,
         "name": "Team",
@@ -185,6 +197,12 @@ def test_get_plan_by_id_converts_features_dict_to_list(mod, fake_supabase):
 
 
 def test_get_user_plan_combines_user_and_plan(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     fake_supabase.table("plans").insert({
         "id": 42, "name": "Pro", "description": "Pro plan",
         "daily_request_limit": 2000, "monthly_request_limit": 50000,
@@ -206,6 +224,12 @@ def test_get_user_plan_combines_user_and_plan(mod, fake_supabase):
 
 
 def test_assign_user_plan_deactivates_existing_and_updates_user(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     # existing plan
     fake_supabase.table("user_plans").insert({
         "id": 1, "user_id": 5, "plan_id": 1,
@@ -253,6 +277,12 @@ def test_check_plan_entitlements_no_plan_defaults(mod, fake_supabase):
 
 
 def test_check_plan_entitlements_expired_plan_marks_inactive_and_user_expired(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     # plan + expired user_plan
     fake_supabase.table("plans").insert({
         "id": 55, "name": "Basic", "is_active": True,
@@ -281,6 +311,12 @@ def test_check_plan_entitlements_expired_plan_marks_inactive_and_user_expired(mo
 
 
 def test_check_plan_entitlements_active_plan_allows_feature(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     fake_supabase.table("plans").insert({
         "id": 7, "name": "Pro", "is_active": True,
         "daily_request_limit": 1000, "monthly_request_limit": 30000,
@@ -304,6 +340,12 @@ def test_check_plan_entitlements_active_plan_allows_feature(mod, fake_supabase):
 
 
 def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+
     # plan + user_plan
     fake_supabase.table("plans").insert({
         "id": 9, "name": "Team", "is_active": True,
@@ -396,6 +438,13 @@ def test_enforce_plan_limits_checks_and_env_multiplier(mod, fake_supabase):
 
 
 def test_get_subscription_plans_active_only(mod, fake_supabase):
+    # Ensure database is clean (no leftover data from other tests)
+    fake_supabase.store["plans"].clear()
+    fake_supabase.store["user_plans"].clear()
+    fake_supabase.store["usage_records"].clear()
+    fake_supabase.store["users"].clear()
+    fake_supabase.store["subscription_plans"].clear()
+
     fake_supabase.table("subscription_plans").insert([
         {"id": 1, "name": "SubA", "is_active": True},
         {"id": 2, "name": "SubB", "is_active": False},
