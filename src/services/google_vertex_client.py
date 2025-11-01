@@ -51,13 +51,13 @@ def get_google_vertex_credentials():
                 credentials.refresh(Request())
                 logger.info("Successfully loaded Google Vertex credentials from JSON environment variable")
                 return credentials
-            except Exception as e:
+            except (ValueError, KeyError, TypeError) as e:
                 logger.warning(f"Failed to load credentials from JSON env var: {e}")
                 # Fall through to next method
 
         # Second, try file-based credentials (development)
         if Config.GOOGLE_APPLICATION_CREDENTIALS:
-            logger.info(f"Loading Google Vertex credentials from file: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
+            logger.info("Loading Google Vertex credentials from file: %s", Config.GOOGLE_APPLICATION_CREDENTIALS)
             credentials = Credentials.from_service_account_file(
                 Config.GOOGLE_APPLICATION_CREDENTIALS
             )
@@ -218,9 +218,9 @@ def make_google_vertex_request_openai(
                 request.instances = [request_body]
 
         # Make the request
-        logger.info(f"Calling Vertex AI predict API")
+        logger.info("Calling Vertex AI predict API")
         response = client.predict(request=request)
-        logger.info(f"Received raw response from Vertex AI")
+        logger.info("Received raw response from Vertex AI")
 
         # Process and normalize response
         return _process_google_vertex_response(response, model)

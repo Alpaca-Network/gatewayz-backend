@@ -69,14 +69,9 @@ def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bo
             return False
 
         # Try to resolve and check if it's a private IP
-        try:
-            ip_obj = ipaddress.ip_address(hostname)
-            if is_private_ip(hostname):
-                logger.warning(f"Webhook URL points to private IP: {url}")
-                return False
-        except ValueError:
-            # Not an IP address, this is fine (it's a domain)
-            pass
+        if is_private_ip(hostname):
+            logger.warning(f"Webhook URL points to private IP: {url}")
+            return False
 
         # If domain whitelist is provided, check against it
         if allowed_domains:

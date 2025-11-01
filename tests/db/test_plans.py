@@ -328,7 +328,7 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
         
         def __call__(self, *args, **kwargs):
             # Allow datetime() constructor calls
-            return original_dt(*args, **kwargs)
+            return self._original(*args, **kwargs)
     
     # Replace datetime in the module with our mock
     mock_dt_module = MockDateTimeModule(original_datetime, fixed_now)
@@ -436,7 +436,9 @@ def test_get_subscription_plans_active_only(mod, fake_supabase):
 
 def test_get_all_plans_error_returns_empty(monkeypatch):
     # Force get_supabase_client to raise
-    bad_supabase_mod = types.SimpleNamespace(get_supabase_client=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    def raise_error():
+        raise RuntimeError("boom")
+    bad_supabase_mod = types.SimpleNamespace(get_supabase_client=raise_error)
     monkeypatch.setitem(sys.modules, "src.config.supabase_config", bad_supabase_mod)
 
     m = importlib.import_module(MODULE_PATH)
