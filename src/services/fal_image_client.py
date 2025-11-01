@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -13,10 +13,10 @@ logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Cache for Fal.ai models catalog
-_fal_models_cache: Optional[List[Dict[str, Any]]] = None
+_fal_models_cache: list[dict[str, Any]] | None = None
 
 
-def load_fal_models_catalog() -> List[Dict[str, Any]]:
+def load_fal_models_catalog() -> list[dict[str, Any]]:
     """Load Fal.ai models catalog from the static JSON file
 
     Returns:
@@ -32,13 +32,13 @@ def load_fal_models_catalog() -> List[Dict[str, Any]]:
 
         if catalog_path.exists():
             logger.info(f"Loading Fal.ai models from catalog: {catalog_path}")
-            with open(catalog_path, 'r') as f:
+            with open(catalog_path) as f:
                 raw_data = json.load(f)
-            
+
             # Filter out metadata objects and only keep actual model objects
             # Model objects must have an "id" field
             _fal_models_cache = [item for item in raw_data if isinstance(item, dict) and "id" in item]
-            
+
             logger.info(f"Loaded {len(_fal_models_cache)} Fal.ai models from catalog")
             return _fal_models_cache
         else:
@@ -49,7 +49,7 @@ def load_fal_models_catalog() -> List[Dict[str, Any]]:
         return []
 
 
-def get_fal_models() -> List[Dict[str, Any]]:
+def get_fal_models() -> list[dict[str, Any]]:
     """Get list of all available Fal.ai models
 
     Returns:
@@ -58,7 +58,7 @@ def get_fal_models() -> List[Dict[str, Any]]:
     return load_fal_models_catalog()
 
 
-def get_fal_models_by_type(model_type: str) -> List[Dict[str, Any]]:
+def get_fal_models_by_type(model_type: str) -> list[dict[str, Any]]:
     """Get Fal.ai models filtered by type
 
     Args:
@@ -90,7 +90,7 @@ def make_fal_image_request(
     size: str = "1024x1024",
     n: int = 1,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request to Fal.ai
 
     This endpoint supports ALL 839+ models available on Fal.ai!

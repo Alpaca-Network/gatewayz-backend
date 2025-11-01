@@ -6,8 +6,8 @@ Handles all Stripe payment operations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import stripe
 
@@ -114,13 +114,13 @@ class StripeService:
             success_url = request.success_url if request.success_url else f"{self.frontend_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
             cancel_url = request.cancel_url if request.cancel_url else f"{self.frontend_url}/payment/cancel"
 
-            logger.info(f"=== CHECKOUT SESSION URL DEBUG ===")
+            logger.info("=== CHECKOUT SESSION URL DEBUG ===")
             logger.info(f"Frontend URL from env: {self.frontend_url}")
             logger.info(f"Request success_url: {request.success_url}")
             logger.info(f"Request cancel_url: {request.cancel_url}")
             logger.info(f"Final success_url being sent to Stripe: {success_url}")
             logger.info(f"Final cancel_url being sent to Stripe: {cancel_url}")
-            logger.info(f"=== END URL DEBUG ===")
+            logger.info("=== END URL DEBUG ===")
 
             # Calculate credits
             credits = request.amount
@@ -150,7 +150,7 @@ class StripeService:
                     'credits': str(credits),
                     **(request.metadata or {})
                 },
-                expires_at=int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+                expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
             )
 
             # Update payment with session ID
@@ -169,18 +169,18 @@ class StripeService:
                 status=PaymentStatus.PENDING,
                 amount=request.amount,
                 currency=request.currency.value,
-                expires_at=datetime.fromtimestamp(session.expires_at, tz=timezone.utc)
+                expires_at=datetime.fromtimestamp(session.expires_at, tz=UTC)
             )
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating checkout session: {e}")
-            raise Exception(f"Payment processing error: {str(e)}")
+            raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
             logger.error(f"Error creating checkout session: {e}")
             raise
 
-    def retrieve_checkout_session(self, session_id: str) -> Dict[str, Any]:
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         """Retrieve checkout session details"""
         try:
             session = stripe.checkout.Session.retrieve(session_id)
@@ -196,7 +196,7 @@ class StripeService:
             }
         except stripe.StripeError as e:
             logger.error(f"Error retrieving checkout session: {e}")
-            raise Exception(f"Failed to retrieve session: {str(e)}")
+            raise Exception(f"Failed to retrieve session: {str(e)}") from e
 
     # ==================== Payment Intents ====================
 
@@ -261,13 +261,13 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating payment intent: {e}")
-            raise Exception(f"Payment processing error: {str(e)}")
+            raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
             logger.error(f"Error creating payment intent: {e}")
             raise
 
-    def retrieve_payment_intent(self, payment_intent_id: str) -> Dict[str, Any]:
+    def retrieve_payment_intent(self, payment_intent_id: str) -> dict[str, Any]:
         """Retrieve payment intent details"""
         try:
             intent = stripe.PaymentIntent.retrieve(payment_intent_id)
@@ -282,7 +282,7 @@ class StripeService:
             }
         except stripe.StripeError as e:
             logger.error(f"Error retrieving payment intent: {e}")
-            raise Exception(f"Failed to retrieve payment intent: {str(e)}")
+            raise Exception(f"Failed to retrieve payment intent: {str(e)}") from e
 
     # ==================== Webhooks ====================
 
@@ -320,7 +320,7 @@ class StripeService:
                 event_type=event['type'],
                 event_id=event['id'],
                 message=f"Event {event['type']} processed successfully",
-                processed_at=datetime.now(timezone.utc)
+                processed_at=datetime.now(UTC)
             )
 
         except ValueError as e:
@@ -491,12 +491,12 @@ class StripeService:
                 currency=refund.currency,
                 status=refund.status,
                 reason=refund.reason,
-                created_at=datetime.fromtimestamp(refund.created, tz=timezone.utc)
+                created_at=datetime.fromtimestamp(refund.created, tz=UTC)
             )
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating refund: {e}")
-            raise Exception(f"Refund failed: {str(e)}")
+            raise Exception(f"Refund failed: {str(e)}") from e
 
     # ==================== Subscription Checkout ====================
 
@@ -551,7 +551,7 @@ class StripeService:
                 client = get_supabase_client()
                 client.table('users').update({
                     'stripe_customer_id': stripe_customer_id,
-                    'updated_at': datetime.now(timezone.utc).isoformat()
+                    'updated_at': datetime.now(UTC).isoformat()
                 }).eq('id', user_id).execute()
 
                 logger.info(f"Stripe customer created: {stripe_customer_id} for user {user_id}")
@@ -608,7 +608,7 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating subscription checkout: {e}")
-            raise Exception(f"Payment processing error: {str(e)}")
+            raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
             logger.error(f"Error creating subscription checkout: {e}")
@@ -635,7 +635,7 @@ class StripeService:
                 'stripe_subscription_id': subscription.id,
                 'stripe_product_id': product_id,
                 'stripe_customer_id': subscription.customer,
-                'updated_at': datetime.now(timezone.utc).isoformat()
+                'updated_at': datetime.now(UTC).isoformat()
             }
 
             # Add subscription end date if available
@@ -674,7 +674,7 @@ class StripeService:
             update_data = {
                 'subscription_status': status,
                 'tier': tier,
-                'updated_at': datetime.now(timezone.utc).isoformat()
+                'updated_at': datetime.now(UTC).isoformat()
             }
 
             if subscription.current_period_end:
@@ -718,7 +718,7 @@ class StripeService:
                 'subscription_status': 'canceled',
                 'tier': 'basic',
                 'stripe_subscription_id': None,
-                'updated_at': datetime.now(timezone.utc).isoformat()
+                'updated_at': datetime.now(UTC).isoformat()
             }).eq('id', user_id).execute()
 
             logger.info(f"User {user_id} subscription canceled, downgraded to basic tier")
@@ -786,7 +786,7 @@ class StripeService:
 
             client.table('users').update({
                 'subscription_status': 'past_due',
-                'updated_at': datetime.now(timezone.utc).isoformat()
+                'updated_at': datetime.now(UTC).isoformat()
             }).eq('id', user_id).execute()
 
             logger.info(f"User {user_id} subscription marked as past_due due to failed payment")

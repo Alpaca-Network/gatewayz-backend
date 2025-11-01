@@ -8,7 +8,6 @@ This module handles transformations between user-friendly model IDs
 """
 
 import logging
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ def transform_model_id(model_id: str, provider: str) -> str:
             logger.info(f"Stripped 'openrouter/' prefix: '{model_id}' -> '{stripped}' for OpenRouter")
             model_id = stripped
         else:
-            logger.info(f"Preserving 'openrouter/auto' - this model requires the full ID")
+            logger.info("Preserving 'openrouter/auto' - this model requires the full ID")
 
     # Special handling for Near: strip 'near/' prefix if present
     if provider_lower == "near" and model_id.startswith("near/"):
@@ -124,7 +123,7 @@ def transform_model_id(model_id: str, provider: str) -> str:
     return model_id
 
 
-def get_model_id_mapping(provider: str) -> Dict[str, str]:
+def get_model_id_mapping(provider: str) -> dict[str, str]:
     """
     Get simplified -> native format mapping for a specific provider.
     This maps user-friendly input to what the provider API expects.
@@ -418,7 +417,7 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str) -> Optional[str]:
+def detect_provider_from_model_id(model_id: str) -> str | None:
     """
     Try to detect which provider a model belongs to based on its ID.
 

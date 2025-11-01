@@ -1,7 +1,5 @@
-import datetime
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -31,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 #Plan Management Endpoints
-@router.get("/plans", response_model=List[PlanResponse], tags=["plans"])
+@router.get("/plans", response_model=list[PlanResponse], tags=["plans"])
 async def get_plans():
     """Get all available subscription plans"""
     try:
@@ -86,7 +84,7 @@ async def get_plans():
 
     except Exception as e:
         logger.error(f"Error getting plans: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
 
 @router.get("/plans/{plan_id}", response_model=PlanResponse, tags=["plans"])
 async def get_plan(plan_id: int):
@@ -101,7 +99,7 @@ async def get_plan(plan_id: int):
         raise
     except Exception as e:
         logger.error(f"Error getting plan {plan_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.get("/user/plan", response_model=UserPlanResponse, tags=["authentication"])
 async def get_user_plan_endpoint(api_key: str = Depends(get_api_key)):
@@ -121,7 +119,7 @@ async def get_user_plan_endpoint(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting user plan: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.get("/user/plan/usage", response_model=PlanUsageResponse, tags=["authentication"])
 async def get_user_plan_usage(api_key: str = Depends(get_api_key)):
@@ -141,10 +139,10 @@ async def get_user_plan_usage(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting user plan usage: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.get("/user/plan/entitlements", response_model=PlanEntitlementsResponse, tags=["authentication"])
-async def get_user_plan_entitlements(api_key: str = Depends(get_api_key), feature: Optional[str] = Query(None)):
+async def get_user_plan_entitlements(api_key: str = Depends(get_api_key), feature: str | None = Query(None)):
     """Check user's plan entitlements"""
     try:
         user = get_user(api_key)
@@ -158,7 +156,7 @@ async def get_user_plan_entitlements(api_key: str = Depends(get_api_key), featur
         raise
     except Exception as e:
         logger.error(f"Error checking user plan entitlements: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.post("/admin/assign-plan", tags=["admin"])
 async def assign_plan_to_user(request: AssignPlanRequest, admin_user: dict = Depends(require_admin)):
@@ -175,14 +173,14 @@ async def assign_plan_to_user(request: AssignPlanRequest, admin_user: dict = Dep
             "user_id": request.user_id,
             "plan_id": request.plan_id,
             "duration_months": request.duration_months,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error assigning plan: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.get("/user/environment-usage", tags=["authentication"])
 async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
@@ -198,14 +196,14 @@ async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
             "status": "success",
             "user_id": user["id"],
             "environment_usage": env_usage,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting environment usage: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 # Trial Status Endpoint (Simplified)
 
@@ -223,7 +221,7 @@ async def get_trial_status(api_key: str = Depends(get_api_key)):
         }
     except Exception as e:
         logger.error(f"Error getting trial status: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.get("/subscription/plans", tags=["subscription"])
 async def get_subscription_plans():
@@ -276,5 +274,5 @@ async def get_subscription_plans():
         }
     except Exception as e:
         logger.error(f"Error getting subscription plans: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 

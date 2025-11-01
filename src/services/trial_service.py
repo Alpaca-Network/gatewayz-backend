@@ -7,7 +7,8 @@ Handles free trial logic, expiration, and conversion to paid subscriptions
 import logging
 import os
 from datetime import datetime
-from typing import Optional
+
+from supabase import Client, create_client
 
 from src.schemas import PlanType, SubscriptionPlansResponse
 from src.schemas.plans import SubscriptionPlan
@@ -23,21 +24,20 @@ from src.schemas.trials import (
     TrialStatusResponse,
     TrialValidationResult,
 )
-from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 
 class TrialService:
     """Service for managing free trials and subscriptions"""
-    
+
     def __init__(self):
         self.supabase_url = os.environ.get("SUPABASE_URL")
         self.supabase_key = os.environ.get("SUPABASE_KEY")
         if not self.supabase_url or not self.supabase_key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
-        
+
         self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
-    
+
     async def start_trial(self, request: StartTrialRequest) -> StartTrialResponse:
         """Start a free trial for an API key"""
         try:
@@ -54,7 +54,7 @@ class TrialService:
                     trial_credits=0.0,
                     message="API key not found"
                 )
-            
+
             # Check if already has trial or subscription
             current_status = await self.get_trial_status(request.api_key)
             if current_status.trial_status.is_trial or current_status.trial_status.subscription_status != SubscriptionStatus.TRIAL:
@@ -68,13 +68,13 @@ class TrialService:
                     trial_credits=0.0,
                     message="Trial already started or subscription active"
                 )
-            
+
             # Call database function to start trial
             result = self.supabase.rpc('start_trial', {
                 'api_key_id': api_key_id,
                 'trial_days': request.trial_days
             }).execute()
-            
+
             if result.data and result.data.get('success'):
                 trial_data = result.data
                 return StartTrialResponse(
@@ -99,7 +99,7 @@ class TrialService:
                     trial_credits=0.0,
                     message=f"Failed to start trial: {error_msg}"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error starting trial: {e}")
             return StartTrialResponse(
@@ -112,7 +112,7 @@ class TrialService:
                 trial_credits=0.0,
                 message=f"Internal error: {str(e)}"
             )
-    
+
     async def get_trial_status(self, api_key: str) -> TrialStatusResponse:
         """Get current trial status for an API key"""
         try:
@@ -123,12 +123,12 @@ class TrialService:
                     trial_status=TrialStatus(is_trial=False),
                     message="API key not found"
                 )
-            
+
             # Call database function to get trial status
             result = self.supabase.rpc('check_trial_status', {
                 'api_key_id': api_key_id
             }).execute()
-            
+
             if result.data and not result.data.get('error'):
                 trial_data = result.data
                 trial_status = TrialStatus(
@@ -150,7 +150,7 @@ class TrialService:
                     trial_remaining_requests=trial_data['trial_remaining_requests'],
                     trial_remaining_credits=trial_data.get('trial_remaining_credits', 10.00)
                 )
-                
+
                 return TrialStatusResponse(
                     success=True,
                     trial_status=trial_status,
@@ -163,7 +163,7 @@ class TrialService:
                     trial_status=TrialStatus(is_trial=False),
                     message=f"Failed to get trial status: {error_msg}"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error getting trial status: {e}")
             return TrialStatusResponse(
@@ -171,7 +171,7 @@ class TrialService:
                 trial_status=TrialStatus(is_trial=False),
                 message=f"Internal error: {str(e)}"
             )
-    
+
     async def convert_trial_to_paid(self, request: ConvertTrialRequest) -> ConvertTrialResponse:
         """Convert trial to paid subscription"""
         try:
@@ -185,13 +185,13 @@ class TrialService:
                     subscription_end_date=datetime.now(),
                     message="API key not found"
                 )
-            
+
             # Call database function to convert trial
             result = self.supabase.rpc('convert_trial_to_paid', {
                 'api_key_id': api_key_id,
                 'plan_name': request.plan_name
             }).execute()
-            
+
             if result.data and result.data.get('success'):
                 conversion_data = result.data
                 return ConvertTrialResponse(
@@ -212,7 +212,7 @@ class TrialService:
                     subscription_end_date=datetime.now(),
                     message=f"Failed to convert trial: {error_msg}"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error converting trial: {e}")
             return ConvertTrialResponse(
@@ -223,7 +223,7 @@ class TrialService:
                 subscription_end_date=datetime.now(),
                 message=f"Internal error: {str(e)}"
             )
-    
+
     async def track_trial_usage(self, request: TrackUsageRequest) -> TrackUsageResponse:
         """Track usage for trial users"""
         try:
@@ -239,7 +239,7 @@ class TrialService:
                     remaining_requests=0,
                     message="API key not found"
                 )
-            
+
             # Call database function to track usage
             result = self.supabase.rpc('track_trial_usage', {
                 'api_key_id': api_key_id,
@@ -247,7 +247,7 @@ class TrialService:
                 'requests_used': request.requests_used,
                 'credits_used': request.credits_used
             }).execute()
-            
+
             if result.data and result.data.get('success'):
                 usage_data = result.data
                 return TrackUsageResponse(
@@ -276,7 +276,7 @@ class TrialService:
                     remaining_credits=0.0,
                     message=f"Failed to track usage: {error_msg}"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error tracking trial usage: {e}")
             return TrackUsageResponse(
@@ -291,12 +291,12 @@ class TrialService:
                 remaining_credits=0.0,
                 message=f"Internal error: {str(e)}"
             )
-    
+
     async def get_subscription_plans(self) -> SubscriptionPlansResponse:
         """Get available subscription plans"""
         try:
             result = self.supabase.table('subscription_plans').select('*').eq('is_active', True).execute()
-            
+
             if result.data:
                 plans = []
                 for plan_data in result.data:
@@ -320,7 +320,7 @@ class TrialService:
                         updated_at=datetime.fromisoformat(plan_data['updated_at'].replace('Z', '+00:00')) if plan_data.get('updated_at') else None
                     )
                     plans.append(plan)
-                
+
                 return SubscriptionPlansResponse(
                     success=True,
                     plans=plans,
@@ -332,7 +332,7 @@ class TrialService:
                     plans=[],
                     message="No subscription plans found"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error getting subscription plans: {e}")
             return SubscriptionPlansResponse(
@@ -340,7 +340,7 @@ class TrialService:
                 plans=[],
                 message=f"Internal error: {str(e)}"
             )
-    
+
     async def validate_trial_access(self, api_key: str, tokens_used: int = 0, requests_used: int = 1) -> TrialValidationResult:
         """Validate if API key has trial access for the requested usage"""
         try:
@@ -355,9 +355,9 @@ class TrialService:
                     remaining_credits=0.0,
                     error_message="Failed to get trial status"
                 )
-            
+
             status = trial_status.trial_status
-            
+
             # Check if it's a trial
             if not status.is_trial:
                 return TrialValidationResult(
@@ -369,7 +369,7 @@ class TrialService:
                     remaining_credits=0.0,
                     error_message="Not a trial account"
                 )
-            
+
             # Check if trial is expired
             if status.trial_expired:
                 return TrialValidationResult(
@@ -382,7 +382,7 @@ class TrialService:
                     trial_end_date=status.trial_end_date,
                     error_message="Trial has expired"
                 )
-            
+
             # Check if trial has remaining tokens/requests/credits
             if status.trial_remaining_tokens < tokens_used:
                 return TrialValidationResult(
@@ -395,7 +395,7 @@ class TrialService:
                     trial_end_date=status.trial_end_date,
                     error_message="Trial token limit exceeded"
                 )
-            
+
             if status.trial_remaining_requests < requests_used:
                 return TrialValidationResult(
                     is_valid=False,
@@ -407,7 +407,7 @@ class TrialService:
                     trial_end_date=status.trial_end_date,
                     error_message="Trial request limit exceeded"
                 )
-            
+
             # Check credit limit (standard pricing: $20 for 1M tokens = $0.00002 per token)
             estimated_credit_cost = tokens_used * 0.00002
             if status.trial_remaining_credits < estimated_credit_cost:
@@ -421,7 +421,7 @@ class TrialService:
                     trial_end_date=status.trial_end_date,
                     error_message="Trial credit limit exceeded"
                 )
-            
+
             return TrialValidationResult(
                 is_valid=True,
                 is_trial=True,
@@ -431,7 +431,7 @@ class TrialService:
                 remaining_credits=status.trial_remaining_credits,
                 trial_end_date=status.trial_end_date
             )
-            
+
         except Exception as e:
             logger.error(f"Error validating trial access: {e}")
             return TrialValidationResult(
@@ -443,8 +443,8 @@ class TrialService:
                 remaining_credits=0.0,
                 error_message=f"Internal error: {str(e)}"
             )
-    
-    async def _get_api_key_id(self, api_key: str) -> Optional[int]:
+
+    async def _get_api_key_id(self, api_key: str) -> int | None:
         """Get API key ID from the key string"""
         try:
             result = self.supabase.table('api_keys').select('id').eq('key', api_key).execute()

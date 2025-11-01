@@ -25,11 +25,11 @@ from .image_models import ImageData, ImageGenerationRequest, ImageGenerationResp
 __all__ = [
     # Existing models
     "ImageGenerationRequest",
-    "ImageGenerationResponse", 
+    "ImageGenerationResponse",
     "ImageData",
     # Health models
     "HealthStatus",
-    "ProviderStatus", 
+    "ProviderStatus",
     "ModelHealthResponse",
     "ProviderHealthResponse",
     "SystemHealthResponse",

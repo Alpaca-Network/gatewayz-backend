@@ -4,14 +4,13 @@ Handles model pricing calculations and credit cost computation
 """
 
 import logging
-from typing import Dict
 
 from src.services.models import get_cached_models
 
 logger = logging.getLogger(__name__)
 
 
-def get_model_pricing(model_id: str) -> Dict[str, float]:
+def get_model_pricing(model_id: str) -> dict[str, float]:
     """
     Get pricing information for a specific model
 
@@ -57,7 +56,7 @@ def get_model_pricing(model_id: str) -> Dict[str, float]:
                 # Also ensure negative values (e.g., -1 for dynamic pricing) are treated as 0
                 prompt_price = float(pricing.get("prompt", "0") or "0")
                 prompt_price = max(0.0, prompt_price)  # Convert negative to 0
-                
+
                 completion_price = float(pricing.get("completion", "0") or "0")
                 completion_price = max(0.0, completion_price)  # Convert negative to 0
 

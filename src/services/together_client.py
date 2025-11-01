@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 def get_together_client():
     """Get Together.ai client using OpenAI-compatible interface
-    
+
     Together.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
         if not Config.TOGETHER_API_KEY:
             raise ValueError("Together API key not configured")
-        
+
         return OpenAI(
             base_url="https://api.together.xyz/v1",
             api_key=Config.TOGETHER_API_KEY
@@ -29,7 +29,7 @@ def get_together_client():
 
 def make_together_request_openai(messages, model, **kwargs):
     """Make request to Together.ai using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use
@@ -50,7 +50,7 @@ def make_together_request_openai(messages, model, **kwargs):
 
 def make_together_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to Together.ai using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use

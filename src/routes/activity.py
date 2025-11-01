@@ -4,7 +4,7 @@ Endpoints for retrieving user activity statistics and logs
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -18,10 +18,10 @@ router = APIRouter(prefix="/user/activity", tags=["Activity"])
 
 @router.get("/stats")
 async def get_activity_stats(
-    days: Optional[int] = Query(None, description="Number of days to look back", ge=1, le=365),
-    from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
-    to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    days: int | None = Query(None, description="Number of days to look back", ge=1, le=365),
+    from_date: str | None = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str | None = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get aggregated activity statistics for the authenticated user
@@ -72,19 +72,19 @@ async def get_activity_stats(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve activity statistics: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/log")
 async def get_activity_log(
     limit: int = Query(10, description="Maximum number of records", ge=1, le=1000),
     offset: int = Query(0, description="Number of records to skip", ge=0),
-    page: Optional[int] = Query(None, description="Page number (alternative to offset)", ge=1),
-    from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
-    to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
-    model: Optional[str] = Query(None, description="Filter by model name"),
-    provider: Optional[str] = Query(None, description="Filter by provider name"),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    page: int | None = Query(None, description="Page number (alternative to offset)", ge=1),
+    from_date: str | None = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str | None = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    model: str | None = Query(None, description="Filter by model name"),
+    provider: str | None = Query(None, description="Filter by provider name"),
+    current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get paginated activity log for the authenticated user
@@ -166,4 +166,4 @@ async def get_activity_log(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve activity log: {str(e)}"
-        )
+        ) from e

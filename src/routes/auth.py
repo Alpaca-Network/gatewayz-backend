@@ -1,8 +1,6 @@
-import datetime
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-import requests
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 import src.config.supabase_config as supabase_config
@@ -217,7 +215,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=existing_user.get('username') or display_name,
                 email=existing_user.get('email') or email,
                 credits=existing_user.get('credits', 0),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(UTC)
             )
         else:
             # New user - create account
@@ -247,13 +245,13 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     'credits': 10,
                     'privy_user_id': request.user.id,
                     'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
-                    'created_at': datetime.now(timezone.utc).isoformat(),
+                    'created_at': datetime.now(UTC).isoformat(),
                     'welcome_email_sent': False,
                 }
 
                 user_insert = client.table('users').insert(user_payload).execute()
                 if not user_insert.data:
-                    raise HTTPException(status_code=500, detail="Failed to create user account")
+                    raise HTTPException(status_code=500, detail="Failed to create user account") from creation_error
 
                 created_user = user_insert.data[0]
                 api_key_value = f"gw_live_{username}_fallback"
@@ -357,12 +355,12 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=display_name or user_data['username'],
                 email=email,
                 credits=user_data['credits'],
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(UTC)
             )
 
     except Exception as e:
         logger.error(f"Privy authentication failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}") from e
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])
@@ -404,13 +402,13 @@ async def register_user(request: UserRegistrationRequest):
                 'credits': 10,
                 'privy_user_id': None,
                 'auth_method': request.auth_method.value if hasattr(request.auth_method, 'value') else str(request.auth_method),
-                'created_at': datetime.now(timezone.utc).isoformat(),
+                'created_at': datetime.now(UTC).isoformat(),
                 'welcome_email_sent': False,
             }
 
             user_insert = client.table('users').insert(fallback_payload).execute()
             if not user_insert.data:
-                raise HTTPException(status_code=500, detail="Failed to create user account")
+                raise HTTPException(status_code=500, detail="Failed to create user account") from creation_error
 
             created_user = user_insert.data[0]
             api_key_value = f"gw_live_{request.username}_fallback"
@@ -435,7 +433,6 @@ async def register_user(request: UserRegistrationRequest):
             }
 
         # Validate and track referral code if provided
-        referral_code_valid = False
         if request.referral_code:
             try:
                 from src.services.referral import (
@@ -447,7 +444,6 @@ async def register_user(request: UserRegistrationRequest):
                 success, error_msg, referrer = track_referral_signup(request.referral_code, user_data['user_id'])
 
                 if success and referrer:
-                    referral_code_valid = True
                     logger.info(f"Valid referral code provided: {request.referral_code}")
 
                     # Store referral code for the new user
@@ -501,14 +497,14 @@ async def register_user(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Registration failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}") from e
 
 
 @router.post("/auth/password-reset", tags=["authentication"])
@@ -541,7 +537,7 @@ async def request_password_reset(email: str):
         raise
     except Exception as e:
         logger.error(f"Error requesting password reset: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/auth/reset-password", tags=["authentication"])
@@ -559,7 +555,7 @@ async def reset_password(token: str):
         token_data = token_result.data[0]
         expires_at = datetime.fromisoformat(token_data['expires_at'].replace('Z', '+00:00'))
 
-        if datetime.now(timezone.utc).replace(tzinfo=expires_at.tzinfo) > expires_at:
+        if datetime.now(UTC).replace(tzinfo=expires_at.tzinfo) > expires_at:
             raise HTTPException(status_code=400, detail="Reset token has expired")
 
         # Update password (in a real app, you'd hash this)
@@ -572,4 +568,4 @@ async def reset_password(token: str):
         raise
     except Exception as e:
         logger.error(f"Error resetting password: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

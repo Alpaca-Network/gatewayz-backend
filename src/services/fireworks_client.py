@@ -10,13 +10,13 @@ logger = logging.getLogger(__name__)
 
 def get_fireworks_client():
     """Get Fireworks.ai client using OpenAI-compatible interface
-    
+
     Fireworks.ai provides OpenAI-compatible API endpoints for various models
     """
     try:
         if not Config.FIREWORKS_API_KEY:
             raise ValueError("Fireworks API key not configured")
-        
+
         return OpenAI(
             base_url="https://api.fireworks.ai/inference/v1",
             api_key=Config.FIREWORKS_API_KEY
@@ -57,7 +57,7 @@ def make_fireworks_request_openai(messages, model, **kwargs):
                 # Don't log response body as it might contain problematic characters
         except UnicodeEncodeError:
             # Fallback if logging fails due to encoding issues
-            logger.error(f"Fireworks request failed (encoding error in logging)")
+            logger.error("Fireworks request failed (encoding error in logging)")
         raise
 
 
@@ -93,7 +93,7 @@ def make_fireworks_request_openai_stream(messages, model, **kwargs):
                 # Don't log response body as it might contain problematic characters
         except UnicodeEncodeError:
             # Fallback if logging fails due to encoding issues
-            logger.error(f"Fireworks streaming request failed (encoding error in logging)")
+            logger.error("Fireworks streaming request failed (encoding error in logging)")
         raise
 
 

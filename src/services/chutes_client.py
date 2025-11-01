@@ -30,7 +30,7 @@ def get_chutes_client():
 
 def make_chutes_request_openai(messages, model, **kwargs):
     """Make request to Chutes.ai using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use
@@ -51,7 +51,7 @@ def make_chutes_request_openai(messages, model, **kwargs):
 
 def make_chutes_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to Chutes.ai using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use

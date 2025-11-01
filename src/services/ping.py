@@ -6,11 +6,11 @@ Business logic for ping operations with Redis caching
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import UTC, datetime
+from typing import Any
 
 from src.config.redis_config import get_redis_config
-from src.db.ping import get_ping_count, get_ping_stats, increment_ping_count, reset_ping_count
+from src.db.ping import get_ping_stats, increment_ping_count, reset_ping_count
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class PingService:
         self.cache_ttl = 300  # Cache for 5 minutes
         self.cache_key = "ping:count"
 
-    def handle_ping(self) -> Dict[str, Any]:
+    def handle_ping(self) -> dict[str, Any]:
         """
         Handle a ping request by incrementing counter and returning response.
         Uses Redis for caching to reduce database load.
@@ -65,7 +65,7 @@ class PingService:
             return {
                 "message": "pong",
                 "count": count,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
         except Exception as e:
@@ -74,10 +74,10 @@ class PingService:
                 "message": "pong",
                 "count": 0,
                 "error": "Service temporarily unavailable",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """
         Get detailed ping statistics
 
@@ -92,7 +92,7 @@ class PingService:
                     return {
                         "total_pings": int(cached_count),
                         "cached": True,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
+                        "timestamp": datetime.now(UTC).isoformat()
                     }
 
             # Get from database
@@ -112,13 +112,13 @@ class PingService:
                     "created_at": stats["created_at"],
                     "updated_at": stats["updated_at"],
                     "cached": False,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 }
             else:
                 return {
                     "total_pings": 0,
                     "error": "Failed to retrieve statistics",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 }
 
         except Exception as e:
@@ -126,10 +126,10 @@ class PingService:
             return {
                 "total_pings": 0,
                 "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
-    def reset_counter(self) -> Dict[str, Any]:
+    def reset_counter(self) -> dict[str, Any]:
         """
         Reset the ping counter (admin operation)
 
@@ -147,7 +147,7 @@ class PingService:
             return {
                 "success": success,
                 "message": "Counter reset successfully" if success else "Failed to reset counter",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
         except Exception as e:
@@ -155,7 +155,7 @@ class PingService:
             return {
                 "success": False,
                 "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
     def _sync_to_database(self):

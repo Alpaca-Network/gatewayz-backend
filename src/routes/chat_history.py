@@ -1,5 +1,4 @@
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -43,13 +42,13 @@ async def create_session(
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         session = create_chat_session(
             user_id=user['id'],
             title=request.title,
             model=request.model
         )
-        
+
         logger.info(f"Created chat session {session['id']} for user {user['id']}")
 
         # Log session creation activity
@@ -77,10 +76,10 @@ async def create_session(
             data=session,
             message="Chat session created successfully"
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to create chat session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create chat session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create chat session: {str(e)}") from e
 
 
 @router.get("/sessions", response_model=ChatSessionsListResponse)
@@ -94,25 +93,25 @@ async def get_sessions(
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         sessions = get_user_chat_sessions(
             user_id=user['id'],
             limit=limit,
             offset=offset
         )
-        
+
         logger.info(f"Retrieved {len(sessions)} chat sessions for user {user['id']}")
-        
+
         return ChatSessionsListResponse(
             success=True,
             data=sessions,
             count=len(sessions),
             message=f"Retrieved {len(sessions)} chat sessions"
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to get chat sessions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get chat sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get chat sessions: {str(e)}") from e
 
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
@@ -125,25 +124,25 @@ async def get_session(
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         session = get_chat_session(session_id, user['id'])
-        
+
         if not session:
             raise HTTPException(status_code=404, detail="Chat session not found")
-        
+
         logger.info(f"Retrieved chat session {session_id} for user {user['id']}")
-        
+
         return ChatSessionResponse(
             success=True,
             data=session,
             message="Chat session retrieved successfully"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get chat session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get chat session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get chat session: {str(e)}") from e
 
 
 @router.put("/sessions/{session_id}", response_model=ChatSessionResponse)
@@ -157,33 +156,33 @@ async def update_session(
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         success = update_chat_session(
             session_id=session_id,
             user_id=user['id'],
             title=request.title,
             model=request.model
         )
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Chat session not found")
-        
+
         # Get updated session
         session = get_chat_session(session_id, user['id'])
-        
+
         logger.info(f"Updated chat session {session_id} for user {user['id']}")
-        
+
         return ChatSessionResponse(
             success=True,
             data=session,
             message="Chat session updated successfully"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update chat session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update chat session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update chat session: {str(e)}") from e
 
 
 @router.delete("/sessions/{session_id}")
@@ -196,24 +195,24 @@ async def delete_session(
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         success = delete_chat_session(session_id, user['id'])
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Chat session not found")
-        
+
         logger.info(f"Deleted chat session {session_id} for user {user['id']}")
-        
+
         return {
             "success": True,
             "message": "Chat session deleted successfully"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete chat session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete chat session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete chat session: {str(e)}") from e
 
 
 @router.get("/stats", response_model=ChatSessionStatsResponse)
@@ -223,20 +222,20 @@ async def get_stats(api_key: str = Depends(get_api_key)):
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         stats = get_chat_session_stats(user['id'])
-        
+
         logger.info(f"Retrieved chat stats for user {user['id']}")
-        
+
         return ChatSessionStatsResponse(
             success=True,
             stats=stats,
             message="Chat statistics retrieved successfully"
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to get chat stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get chat stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get chat stats: {str(e)}") from e
 
 
 @router.post("/search", response_model=ChatSessionsListResponse)
@@ -249,25 +248,25 @@ async def search_sessions(
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
         sessions = search_chat_sessions(
             user_id=user['id'],
             query=request.query,
             limit=request.limit
         )
-        
+
         logger.info(f"Found {len(sessions)} sessions matching '{request.query}' for user {user['id']}")
-        
+
         return ChatSessionsListResponse(
             success=True,
             data=sessions,
             count=len(sessions),
             message=f"Found {len(sessions)} sessions matching '{request.query}'"
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to search chat sessions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to search chat sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to search chat sessions: {str(e)}") from e
 
 
 @router.post("/sessions/{session_id}/messages")
@@ -307,4 +306,4 @@ async def save_message(
         raise
     except Exception as e:
         logger.error(f"Failed to save message: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save message: {str(e)}") from e

@@ -131,7 +131,7 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
                     raise HTTPException(
                         status_code=400,
                         detail="Image size must be formatted as WIDTHxHEIGHT with positive integers"
-                    )
+                    ) from None
 
             # Image generation is more expensive - estimate ~100 tokens per image
             estimated_tokens = 100 * req.n
@@ -257,7 +257,7 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             raise
         except Exception as e:
             logger.error(f"Unexpected error in image generation: {e}")
-            raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}") from e
 
         finally:
             # Clean up executor
@@ -267,4 +267,4 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
         raise
     except Exception as e:
         logger.error(f"Unexpected error in image generation endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e

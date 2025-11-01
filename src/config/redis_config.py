@@ -6,7 +6,6 @@ Handles Redis connection and configuration for rate limiting and caching.
 
 import logging
 import os
-from typing import Optional
 
 import redis
 from redis.connection import ConnectionPool
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class RedisConfig:
     """Redis configuration and connection management"""
-    
+
     def __init__(self):
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         self.redis_password = os.environ.get("REDIS_PASSWORD")
@@ -26,10 +25,10 @@ class RedisConfig:
         self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
         self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
         self.redis_retry_on_timeout = os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
-        
-        self._client: Optional[redis.Redis] = None
-        self._pool: Optional[ConnectionPool] = None
-    
+
+        self._client: redis.Redis | None = None
+        self._pool: ConnectionPool | None = None
+
     def get_connection_pool(self) -> ConnectionPool:
         """Get Redis connection pool"""
         if self._pool is None:
@@ -58,7 +57,7 @@ class RedisConfig:
                     decode_responses=True
                 )
         return self._pool
-    
+
     def get_client(self) -> redis.Redis:
         """Get Redis client instance"""
         if self._client is None:
@@ -74,7 +73,7 @@ class RedisConfig:
                 logger.warning(f"Redis connection failed: {e}. Falling back to local cache.")
                 self._client = None
         return self._client
-    
+
     def is_available(self) -> bool:
         """Check if Redis is available"""
         try:
@@ -85,11 +84,11 @@ class RedisConfig:
         except Exception:
             pass
         return False
-    
+
     def get_cache_key(self, prefix: str, identifier: str) -> str:
         """Generate cache key with prefix"""
         return f"{prefix}:{identifier}"
-    
+
     def set_cache(self, key: str, value: any, ttl: int = 300) -> bool:
         """Set cache value with TTL"""
         try:
@@ -100,8 +99,8 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to set cache key {key}: {e}")
         return False
-    
-    def get_cache(self, key: str) -> Optional[str]:
+
+    def get_cache(self, key: str) -> str | None:
         """Get cache value"""
         try:
             client = self.get_client()
@@ -110,7 +109,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to get cache key {key}: {e}")
         return None
-    
+
     def delete_cache(self, key: str) -> bool:
         """Delete cache key"""
         try:
@@ -121,8 +120,8 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to delete cache key {key}: {e}")
         return False
-    
-    def increment_counter(self, key: str, amount: int = 1, ttl: int = 300) -> Optional[int]:
+
+    def increment_counter(self, key: str, amount: int = 1, ttl: int = 300) -> int | None:
         """Increment counter with TTL"""
         try:
             client = self.get_client()
@@ -135,8 +134,8 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to increment counter {key}: {e}")
         return None
-    
-    def get_counter(self, key: str) -> Optional[int]:
+
+    def get_counter(self, key: str) -> int | None:
         """Get counter value"""
         try:
             client = self.get_client()
@@ -146,7 +145,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to get counter {key}: {e}")
         return None
-    
+
     def set_hash(self, key: str, field: str, value: any, ttl: int = 300) -> bool:
         """Set hash field value with TTL"""
         try:
@@ -160,8 +159,8 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to set hash {key}.{field}: {e}")
         return False
-    
-    def get_hash(self, key: str, field: str) -> Optional[str]:
+
+    def get_hash(self, key: str, field: str) -> str | None:
         """Get hash field value"""
         try:
             client = self.get_client()
@@ -170,7 +169,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to get hash {key}.{field}: {e}")
         return None
-    
+
     def get_all_hash(self, key: str) -> dict:
         """Get all hash fields"""
         try:
@@ -180,7 +179,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to get all hash {key}: {e}")
         return {}
-    
+
     def delete_hash(self, key: str, field: str) -> bool:
         """Delete hash field"""
         try:
@@ -191,7 +190,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to delete hash field {key}.{field}: {e}")
         return False
-    
+
     def add_to_set(self, key: str, value: str, ttl: int = 300) -> bool:
         """Add value to set with TTL"""
         try:
@@ -205,7 +204,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to add to set {key}: {e}")
         return False
-    
+
     def is_in_set(self, key: str, value: str) -> bool:
         """Check if value is in set"""
         try:
@@ -215,7 +214,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to check set membership {key}: {e}")
         return False
-    
+
     def remove_from_set(self, key: str, value: str) -> bool:
         """Remove value from set"""
         try:
@@ -226,7 +225,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to remove from set {key}: {e}")
         return False
-    
+
     def get_set_size(self, key: str) -> int:
         """Get set size"""
         try:
@@ -236,7 +235,7 @@ class RedisConfig:
         except Exception as e:
             logger.warning(f"Failed to get set size {key}: {e}")
         return 0
-    
+
     def cleanup_expired_keys(self, pattern: str = "*") -> int:
         """Clean up expired keys matching pattern"""
         try:
@@ -259,7 +258,7 @@ def get_redis_config() -> RedisConfig:
         _redis_config = RedisConfig()
     return _redis_config
 
-def get_redis_client() -> Optional[redis.Redis]:
+def get_redis_client() -> redis.Redis | None:
     """Get Redis client instance"""
     config = get_redis_config()
     return config.get_client()

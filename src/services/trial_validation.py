@@ -4,10 +4,9 @@ Simplified Trial Validation
 Direct trial validation without complex service layer
 """
 
-import datetime
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import UTC, datetime
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -18,7 +17,7 @@ def _parse_trial_end_utc(s: str) -> datetime:
     if "T" not in s:
         # Date-only -> use end of that day UTC (friendliest interpretation)
         d = datetime.fromisoformat(s)
-        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=UTC)
     # Full datetime
     if s.endswith("Z"):
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
@@ -26,12 +25,12 @@ def _parse_trial_end_utc(s: str) -> datetime:
         dt = datetime.fromisoformat(s)
     # Ensure UTC-aware
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt
 
-def validate_trial_access(api_key: str) -> Dict[str, Any]:
+def validate_trial_access(api_key: str) -> dict[str, Any]:
     """Validate trial access for an API key - simplified version"""
     try:
         client = get_supabase_client()
@@ -62,11 +61,11 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
             }
         else:
             key_data = result.data[0]
-        
+
         # Debug logging
         logger.info(f"Trial validation for key: {api_key[:20]}...")
         logger.info(f"Key data: is_trial={key_data.get('is_trial')}, trial_end_date={key_data.get('trial_end_date')}")
-        
+
         # Check if it's a trial key
         if not key_data.get('is_trial', False):
             return {
@@ -74,14 +73,14 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
                 'is_trial': False,
                 'message': 'Not a trial key - full access'
             }
-        
+
         # Check if trial is expired
         trial_end_date = key_data.get('trial_end_date')
         trial_end_date = key_data.get('trial_end_date')
         if trial_end_date:
             try:
                 trial_end = _parse_trial_end_utc(trial_end_date)
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 if trial_end <= now:
                     return {
                         'is_valid': False,
@@ -93,16 +92,16 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"Error parsing trial end date '{trial_end_date}': {e}")
                 # Keep previous behavior: assume not expired on parse failure
-        
+
         # Check trial limits
         trial_used_tokens = key_data.get('trial_used_tokens', 0)
         trial_used_requests = key_data.get('trial_used_requests', 0)
         trial_used_credits = key_data.get('trial_used_credits', 0.0)
-        
+
         trial_max_tokens = key_data.get('trial_max_tokens', 100000)
         trial_max_requests = key_data.get('trial_max_requests', 1000)
         trial_credits = key_data.get('trial_credits', 10.0)
-        
+
         # Check if any limits are exceeded
         if trial_used_tokens >= trial_max_tokens:
             return {
@@ -114,7 +113,7 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
                 'remaining_requests': max(0, trial_max_requests - trial_used_requests),
                 'remaining_credits': max(0, trial_credits - trial_used_credits)
             }
-        
+
         if trial_used_requests >= trial_max_requests:
             return {
                 'is_valid': False,
@@ -125,7 +124,7 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
                 'remaining_requests': 0,
                 'remaining_credits': max(0, trial_credits - trial_used_credits)
             }
-        
+
         if trial_used_credits >= trial_credits:
             return {
                 'is_valid': False,
@@ -136,7 +135,7 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
                 'remaining_requests': max(0, trial_max_requests - trial_used_requests),
                 'remaining_credits': 0
             }
-        
+
         # Trial is valid
         return {
             'is_valid': True,
@@ -147,7 +146,7 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
             'remaining_credits': trial_credits - trial_used_credits,
             'trial_end_date': trial_end_date
         }
-        
+
     except Exception as e:
         logger.error(f"Error validating trial access: {e}")
         import traceback
@@ -162,12 +161,12 @@ def track_trial_usage(api_key: str, tokens_used: int, requests_used: int = 1) ->
     """Track trial usage - simplified version"""
     try:
         client = get_supabase_client()
-        
+
         # Calculate credit cost (standard pricing: $20 for 1M tokens = $0.00002 per token)
         credit_cost = tokens_used * 0.00002
-        
+
         logger.info(f"Tracking usage: {tokens_used} tokens, {requests_used} requests, ${credit_cost:.6f} credits")
-        
+
         # Get current usage first from api_keys_new
         current_result = client.table('api_keys_new').select('trial_used_tokens, trial_used_requests, trial_used_credits').eq('api_key', api_key).execute()
 
@@ -211,11 +210,11 @@ def track_trial_usage(api_key: str, tokens_used: int, requests_used: int = 1) ->
                 'trial_used_requests': new_requests,
                 'trial_used_credits': new_credits
             }).eq('api_key', api_key).execute()
-        
+
         success = len(result.data) > 0 if result.data else False
         logger.info(f"Usage tracking result: {success}")
         return success
-        
+
     except Exception as e:
         logger.error(f"Error tracking trial usage: {e}")
         return False

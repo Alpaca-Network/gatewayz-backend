@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -34,7 +33,6 @@ except ImportError:
 
 import importlib
 
-import src.config.supabase_config as supabase_config
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
 import src.db.chat_history as chat_history_module
@@ -44,7 +42,7 @@ import src.db.users as users_module
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.config import Config
-from src.schemas import MessagesRequest, ProxyRequest, ResponseRequest
+from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
 from src.services.aimo_client import (
     make_aimo_request_openai,
@@ -212,7 +210,7 @@ async def stream_generator(stream, user, api_key, model, trial, environment_tag,
     completion_tokens = 0
     total_tokens = 0
     start_time = time.monotonic()
-    release_required = rate_limit_mgr is not None and not trial.get("is_trial", False)
+    rate_limit_mgr is not None and not trial.get("is_trial", False)
     has_thinking = False
 
     try:
@@ -403,7 +401,7 @@ async def stream_generator(stream, user, api_key, model, trial, environment_tag,
 async def chat_completions(
     req: ProxyRequest,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None
 ):
     # === 0) Setup / sanity ===
@@ -466,7 +464,6 @@ async def chat_completions(
 
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
-        stream_release_handled = False
         if should_release_concurrency:
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
@@ -635,7 +632,6 @@ async def chat_completions(
                             make_openrouter_request_openai_stream, messages, request_model, **optional
                         )
 
-                    stream_release_handled = True
                     provider = attempt_provider
                     model = request_model
                     return StreamingResponse(
@@ -678,7 +674,7 @@ async def chat_completions(
                         )
                         continue
 
-                    raise http_exc
+                    raise http_exc from exc
 
             raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
 
@@ -810,7 +806,7 @@ async def chat_completions(
                     )
                     continue
 
-                raise http_exc
+                raise http_exc from exc
 
         if processed is None:
             raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
@@ -868,7 +864,7 @@ async def chat_completions(
                 await _to_thread(record_usage, user["id"], api_key, model, total_tokens, cost, int(elapsed * 1000))
             except ValueError as e:
                 # e.g., insufficient funds detected atomically in DB
-                raise HTTPException(status_code=402, detail=str(e))
+                raise HTTPException(status_code=402, detail=str(e)) from e
             except Exception as e:
                 logger.error("Usage recording error: %s", e)
 
@@ -963,10 +959,10 @@ async def chat_completions(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Unhandled server error")
         # Don't leak internal details
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
 
 @router.post("/v1/responses", tags=["chat"])
@@ -974,7 +970,7 @@ async def chat_completions(
 async def unified_responses(
     req: ResponseRequest,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None
 ):
     """
@@ -1104,7 +1100,7 @@ async def unified_responses(
                     raise HTTPException(status_code=400, detail=f"Invalid content type: {type(inp_msg.content)}")
         except Exception as e:
             logger.error(f"Error transforming input to messages: {e}, input: {req.input}")
-            raise HTTPException(status_code=400, detail=f"Invalid input format: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid input format: {str(e)}") from e
 
         # === 2.1) Inject conversation history if session_id provided ===
         if session_id:
@@ -1236,7 +1232,7 @@ async def unified_responses(
                             make_openrouter_request_openai_stream, messages, request_model, **optional
                         )
 
-                    async def response_stream_generator():
+                    async def response_stream_generator(stream=stream, request_model=request_model):
                         """Transform chat/completions stream to responses format with usage tracking"""
                         async for chunk_data in stream_generator(
                             stream,
@@ -1463,7 +1459,7 @@ async def unified_responses(
                 })
                 await _to_thread(record_usage, user["id"], api_key, model, total_tokens, cost, int(elapsed * 1000))
             except ValueError as e:
-                raise HTTPException(status_code=402, detail=str(e))
+                raise HTTPException(status_code=402, detail=str(e)) from e
             except Exception as e:
                 logger.error("Usage recording error: %s", e)
 
@@ -1602,9 +1598,9 @@ async def unified_responses(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Unhandled server error in unified_responses")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from None
     finally:
         if should_release_concurrency and rate_limit_mgr and (not req.stream or not stream_release_handled):
             try:

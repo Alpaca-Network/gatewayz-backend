@@ -9,7 +9,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any
 
 import resend
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class EnhancedNotificationService:
     """Enhanced notification service with professional email templates"""
-    
+
     def __init__(self):
         try:
             self.supabase = supabase_config.get_supabase_client()
@@ -40,11 +40,11 @@ class EnhancedNotificationService:
         self.from_email = os.environ.get("FROM_EMAIL", "noreply@yourdomain.com")
         self.app_name = os.environ.get("APP_NAME", "AI Gateway")
         self.app_url = os.environ.get("APP_URL", "https://gatewayz.ai")
-        
+
         # Initialize Resend client
         if self.resend_api_key:
             resend.api_key = self.resend_api_key
-    
+
     def send_welcome_email(self, user_id: int, username: str, email: str, credits: int) -> bool:
         """Send welcome email to new users (API key not included for security)"""
         try:
@@ -52,20 +52,20 @@ class EnhancedNotificationService:
             logger.info(f"Resend API key available: {bool(self.resend_api_key)}")
             logger.info(f"From email: {self.from_email}")
             logger.info(f"App name: {self.app_name}")
-            
+
             # Use the simple welcome email template
             template = email_templates.simple_welcome_email(username, email, credits)
-            logger.info(f"Email template generated successfully")
-            
+            logger.info("Email template generated successfully")
+
             success = self.send_email_notification(
                 to_email=email,
                 subject=template["subject"],
                 html_content=template["html"],
                 text_content=template["text"]
             )
-            
+
             logger.info(f"Email notification result: {success}")
-            
+
             if success:
                 # Create notification record
                 request = SendNotificationRequest(
@@ -82,52 +82,52 @@ class EnhancedNotificationService:
                 )
                 self.create_notification(request)
                 logger.info(f"Welcome email sent to {email}")
-            
+
             return success
         except Exception as e:
             logger.error(f"Error sending welcome email: {e}")
             logger.error(f"Error details: {str(e)}", exc_info=True)
             return False
-    
+
     def send_welcome_email_if_needed(self, user_id: int, username: str, email: str, credits: int) -> bool:
         """Send welcome email only if the user hasn't received one yet"""
         try:
             # Check if user has already received a welcome email
             client = self.supabase or supabase_config.get_supabase_client()
             user_result = client.table('users').select('welcome_email_sent').eq('id', user_id).execute()
-            
+
             if not user_result.data:
                 logger.warning(f"User {user_id} not found, skipping welcome email")
                 return False
-            
+
             user_data = user_result.data[0]
             welcome_email_sent = user_data.get('welcome_email_sent', False)
-            
+
             if welcome_email_sent:
                 logger.info(f"User {user_id} has already received welcome email, skipping")
                 return True
-            
+
             # Send welcome email
             success = self.send_welcome_email(user_id, username, email, credits)
-            
+
             if success:
                 # Mark welcome email as sent
                 from src.db.users import mark_welcome_email_sent
                 mark_welcome_email_sent(user_id)
                 logger.info(f"Welcome email sent and marked as sent for user {user_id}")
-            
+
             return success
-            
+
         except Exception as e:
             logger.error(f"Error checking/sending welcome email: {e}")
             return False
-    
-    def send_password_reset_email(self, user_id: int, username: str, email: str) -> Optional[str]:
+
+    def send_password_reset_email(self, user_id: int, username: str, email: str) -> str | None:
         """Send password reset email and return reset token"""
         try:
             # Generate reset token
             reset_token = secrets.token_urlsafe(32)
-            
+
             # Store token in database with expiration
             expires_at = datetime.utcnow() + timedelta(hours=1)
             client = self.supabase or supabase_config.get_supabase_client()
@@ -137,39 +137,39 @@ class EnhancedNotificationService:
                 'expires_at': expires_at.isoformat(),
                 'used': False
             }).execute()
-            
+
             # Send email
             template = email_templates.password_reset_email(username, email, reset_token)
-            
+
             success = self.send_email_notification(
                 to_email=email,
                 subject=template["subject"],
                 html_content=template["html"],
                 text_content=template["text"]
             )
-            
+
             if success:
                 logger.info(f"Password reset email sent to {email}")
                 return reset_token
             else:
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error sending password reset email: {e}")
             return None
-    
-    def send_monthly_usage_report(self, user_id: int, username: str, email: str, month: str, usage_stats: Dict[str, Any]) -> bool:
+
+    def send_monthly_usage_report(self, user_id: int, username: str, email: str, month: str, usage_stats: dict[str, Any]) -> bool:
         """Send monthly usage report email"""
         try:
             template = email_templates.monthly_usage_report(username, email, month, usage_stats)
-            
+
             success = self.send_email_notification(
                 to_email=email,
                 subject=template["subject"],
                 html_content=template["html"],
                 text_content=template["text"]
             )
-            
+
             if success:
                 # Create notification record
                 request = SendNotificationRequest(
@@ -186,12 +186,12 @@ class EnhancedNotificationService:
                 )
                 self.create_notification(request)
                 logger.info(f"Monthly usage report sent to {email}")
-            
+
             return success
         except Exception as e:
             logger.error(f"Error sending monthly usage report: {e}")
             return False
-    
+
     def send_plan_upgrade_confirmation(self, user_id: int, username: str, email: str, old_plan: str, new_plan: str, effective_date: str) -> bool:
         """Send plan upgrade confirmation email"""
         try:
@@ -199,7 +199,7 @@ class EnhancedNotificationService:
                 <h2>🎉 Plan Upgraded Successfully!</h2>
                 <p>Hi <strong>{username}</strong>,</p>
                 <p>Congratulations! Your plan has been successfully upgraded.</p>
-                
+
                 <div class="success-box">
                     <h3 style="margin-bottom: 12px; color: #065f46;">Upgrade Details</h3>
                     <div class="info-grid">
@@ -217,17 +217,17 @@ class EnhancedNotificationService:
                         </div>
                     </div>
                 </div>
-                
+
                 <div style="text-align: center; margin: 30px 0;">
                     <a href="{self.app_url}/settings/credits" class="cta-button">📊 View Dashboard</a>
                     <a href="{self.app_url}/billing" class="cta-button secondary-button">💳 Billing Details</a>
                 </div>
-                
+
                 <p>You now have access to all the features of your new plan. If you have any questions, contact our support team at <a href="mailto:{self.from_email}" style="color: #3b82f6;">{self.from_email}</a>.</p>
             """
-            
+
             subject = f"Plan upgraded to {new_plan} - Welcome to your new features! 🚀"
-            
+
             success = self.send_email_notification(
                 to_email=email,
                 subject=subject,
@@ -258,15 +258,15 @@ Best regards,
 The {self.app_name} Team
 """
             )
-            
+
             if success:
                 logger.info(f"Plan upgrade confirmation sent to {email}")
-            
+
             return success
         except Exception as e:
             logger.error(f"Error sending plan upgrade confirmation: {e}")
             return False
-    
+
     def send_api_key_created_email(self, user_id: int, username: str, email: str, api_key: str, key_name: str) -> bool:
         """Send email when new API key is created"""
         try:
@@ -274,7 +274,7 @@ The {self.app_name} Team
                 <h2>🔑 New API Key Created</h2>
                 <p>Hi <strong>{username}</strong>,</p>
                 <p>A new API key has been created for your account.</p>
-                
+
                 <div class="highlight-box">
                     <h3 style="margin-bottom: 12px;">API Key Details</h3>
                     <div class="info-grid">
@@ -291,17 +291,17 @@ The {self.app_name} Team
                     <div class="api-key-box">{api_key}</div>
                     <p style="font-size: 14px; color: #6b7280; margin-top: 12px;">⚠️ Keep this key secure and never share it publicly.</p>
                 </div>
-                
+
                 <div style="text-align: center; margin: 30px 0;">
                     <a href="{self.app_url}/settings/credits" class="cta-button">📊 Manage API Keys</a>
                     <a href="{self.app_url}/docs" class="cta-button secondary-button">📚 API Documentation</a>
                 </div>
-                
+
                 <p>If you didn't create this API key, please contact our support team immediately at <a href="mailto:{self.from_email}" style="color: #3b82f6;">{self.from_email}</a>.</p>
             """
-            
+
             subject = f"New API key '{key_name}' created - {self.app_name}"
-            
+
             success = self.send_email_notification(
                 to_email=email,
                 subject=subject,
@@ -333,15 +333,15 @@ Best regards,
 The {self.app_name} Team
 """
             )
-            
+
             if success:
                 logger.info(f"API key creation email sent to {email}")
-            
+
             return success
         except Exception as e:
             logger.error(f"Error sending API key creation email: {e}")
             return False
-    
+
     def send_email_notification(self, to_email: str, subject: str, html_content: str, text_content: str = None) -> bool:
         """Send email notification using Resend SDK"""
         try:
@@ -349,11 +349,11 @@ The {self.app_name} Team
             logger.info(f"Subject: {subject}")
             logger.info(f"Resend API key configured: {bool(self.resend_api_key)}")
             logger.info(f"From email: {self.from_email}")
-            
+
             if not self.resend_api_key:
                 logger.warning("❌ Resend API key not configured, skipping email notification")
                 return False
-            
+
             # Use Resend SDK
             logger.info("Sending email via Resend SDK...")
             response = resend.Emails.send({
@@ -363,21 +363,21 @@ The {self.app_name} Team
                 "html": html_content,
                 "text": text_content
             })
-            
+
             logger.info(f"Resend response: {response}")
-            
+
             if response.get('id'):
                 logger.info(f"✅ Email sent successfully to {to_email}, ID: {response['id']}")
                 return True
             else:
                 logger.error(f"❌ Failed to send email to {to_email}: {response}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ Error sending email to {to_email}: {e}")
             logger.error(f"Error details: {str(e)}", exc_info=True)
             return False
-    
+
     def create_notification(self, request: SendNotificationRequest) -> bool:
         """Create notification record in database"""
         try:
@@ -390,20 +390,20 @@ The {self.app_name} Team
                 'status': NotificationStatus.PENDING.value,
                 'metadata': json.dumps(request.metadata) if request.metadata else None
             }
-            
+
             client = self.supabase or supabase_config.get_supabase_client()
             result = client.table('notifications').insert(notification_data).execute()
             return bool(result.data)
         except Exception as e:
             logger.error(f"Error creating notification: {e}")
             return False
-    
-    def get_user_preferences(self, user_id: int) -> Optional[NotificationPreferences]:
+
+    def get_user_preferences(self, user_id: int) -> NotificationPreferences | None:
         """Get user notification preferences"""
         try:
             client = self.supabase or supabase_config.get_supabase_client()
             result = client.table('notification_preferences').select('*').eq('user_id', user_id).execute()
-            
+
             if result.data:
                 data = result.data[0]
                 return NotificationPreferences(

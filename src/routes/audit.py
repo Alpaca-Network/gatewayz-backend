@@ -1,7 +1,5 @@
-import datetime
 import logging
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -20,10 +18,10 @@ router = APIRouter()
 
 @router.get("/user/api-keys/audit-logs", tags=["authentication"])
 async def get_user_audit_logs(
-        key_id: Optional[int] = None,
-        action: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        key_id: int | None = None,
+        action: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 100,
         api_key: str = Depends(get_api_key)
 ):
@@ -45,14 +43,14 @@ async def get_user_audit_logs(
                 normalized_start = start_date.replace(' ', '+').replace('Z', '+00:00')
                 start_dt = datetime.fromisoformat(normalized_start)
             except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
+                raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.") from None
 
         if end_date:
             try:
                 normalized_end = end_date.replace(' ', '+').replace('Z', '+00:00')
                 end_dt = datetime.fromisoformat(normalized_end)
             except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
+                raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.") from None
 
         # Get audit logs
         logs = get_audit_logs(
@@ -76,4 +74,4 @@ async def get_user_audit_logs(
         raise
     except Exception as e:
         logger.error(f"Error getting audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

@@ -5,7 +5,7 @@ Handles user roles and permissions
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -59,7 +59,7 @@ def check_user_permission(user_id: int, resource: str, action: str) -> bool:
         return False
 
 
-def get_user_permissions(user_id: int) -> List[Dict[str, Any]]:
+def get_user_permissions(user_id: int) -> list[dict[str, Any]]:
     """
     Get all permissions for a user
 
@@ -83,7 +83,7 @@ def get_user_permissions(user_id: int) -> List[Dict[str, Any]]:
         return []
 
 
-def get_user_role(user_id: int) -> Optional[str]:
+def get_user_role(user_id: int) -> str | None:
     """
     Get user's role
 
@@ -115,8 +115,8 @@ def get_user_role(user_id: int) -> Optional[str]:
 def update_user_role(
     user_id: int,
     new_role: str,
-    changed_by: Optional[int] = None,
-    reason: Optional[str] = None
+    changed_by: int | None = None,
+    reason: str | None = None
 ) -> bool:
     """
     Update a user's role
@@ -163,7 +163,7 @@ def update_user_role(
         return False
 
 
-def get_role_audit_log(user_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
+def get_role_audit_log(user_id: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
     """
     Get role change audit log
 
@@ -191,7 +191,7 @@ def get_role_audit_log(user_id: Optional[int] = None, limit: int = 50) -> List[D
         return []
 
 
-def get_users_by_role(role: str, limit: int = 100) -> List[Dict[str, Any]]:
+def get_users_by_role(role: str, limit: int = 100) -> list[dict[str, Any]]:
     """
     Get all users with a specific role
 
@@ -220,7 +220,7 @@ def get_users_by_role(role: str, limit: int = 100) -> List[Dict[str, Any]]:
 # Role Permissions Management
 # ============================================
 
-def get_role_permissions(role: str) -> List[Dict[str, Any]]:
+def get_role_permissions(role: str) -> list[dict[str, Any]]:
     """
     Get all permissions for a role
 

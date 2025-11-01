@@ -1,9 +1,7 @@
-import asyncio
-import datetime
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
@@ -51,7 +49,7 @@ DESC_GATEWAY_WITH_ALL = (
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 
 
-def normalize_developer_segment(value: Optional[str]) -> Optional[str]:
+def normalize_developer_segment(value: str | None) -> str | None:
     """Align developer/provider identifiers with Hugging Face style slugs."""
     if value is None:
         return None
@@ -65,7 +63,7 @@ def normalize_developer_segment(value: Optional[str]) -> Optional[str]:
     return normalized
 
 
-def normalize_model_segment(value: Optional[str]) -> Optional[str]:
+def normalize_model_segment(value: str | None) -> str | None:
     """Normalize model identifiers without altering intentional casing."""
     if value is None:
         return None
@@ -75,7 +73,7 @@ def normalize_model_segment(value: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
-def annotate_provider_sources(providers: List[dict], source: str) -> List[dict]:
+def annotate_provider_sources(providers: list[dict], source: str) -> list[dict]:
     annotated = []
     for provider in providers or []:
         entry = provider.copy()
@@ -87,8 +85,8 @@ def annotate_provider_sources(providers: List[dict], source: str) -> List[dict]:
     return annotated
 
 
-def derive_portkey_providers(models: List[dict]) -> List[dict]:
-    providers: Dict[str, dict] = {}
+def derive_portkey_providers(models: list[dict]) -> list[dict]:
+    providers: dict[str, dict] = {}
     for model in models or []:
         provider_slug = model.get("provider_slug")
         if not provider_slug:
@@ -110,37 +108,37 @@ def derive_portkey_providers(models: List[dict]) -> List[dict]:
     return list(providers.values())
 
 
-def derive_providers_from_models(models: List[dict], gateway_name: str) -> List[dict]:
+def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[dict]:
     """
     Generic function to derive provider list from model list for any gateway.
     Used for gateways that don't have a dedicated provider endpoint.
     """
-    providers: Dict[str, dict] = {}
+    providers: dict[str, dict] = {}
     for model in models or []:
         # Try different fields to get provider name
         provider_slug = None
-        
+
         # Try provider_slug field
         provider_slug = model.get("provider_slug") or model.get("provider")
-        
+
         # Try extracting from model ID (format: provider/model-name)
         if not provider_slug:
             model_id = model.get("id", "")
             if "/" in model_id:
                 provider_slug = model_id.split("/")[0]
-        
+
         # Try name field
         if not provider_slug:
             name = model.get("name", "")
             if "/" in name:
                 provider_slug = name.split("/")[0]
-        
+
         if not provider_slug:
             continue
-        
+
         # Clean up slug
         provider_slug = provider_slug.lstrip("@").lower()
-        
+
         if provider_slug not in providers:
             providers[provider_slug] = {
                 "slug": provider_slug,
@@ -150,12 +148,12 @@ def derive_providers_from_models(models: List[dict], gateway_name: str) -> List[
                 "source_gateway": gateway_name,
                 "source_gateways": [gateway_name],
             }
-    
+
     return list(providers.values())
 
 
-def merge_provider_lists(*provider_lists: List[List[dict]]) -> List[dict]:
-    merged: Dict[str, dict] = {}
+def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
+    merged: dict[str, dict] = {}
     for providers in provider_lists:
         for provider in providers or []:
             slug = provider.get("slug")
@@ -182,7 +180,7 @@ def merge_provider_lists(*provider_lists: List[List[dict]]) -> List[dict]:
     return list(merged.values())
 
 
-def merge_models_by_slug(*model_lists: List[dict]) -> List[dict]:
+def merge_models_by_slug(*model_lists: list[dict]) -> list[dict]:
     """Merge multiple model lists by slug, avoiding duplicates"""
     merged = []
     seen = set()
@@ -200,9 +198,9 @@ def merge_models_by_slug(*model_lists: List[dict]) -> List[dict]:
 @router.get("/v1/provider", tags=["providers"])
 async def get_providers(
     moderated_only: bool = Query(False, description="Filter for moderated providers only"),
-    limit: Optional[int] = Query(None, description="Limit number of results"),
-    offset: Optional[int] = Query(0, description="Offset for pagination"),
-    gateway: Optional[str] = Query(
+    limit: int | None = Query(None, description="Limit number of results"),
+    offset: int | None = Query(0, description="Offset for pagination"),
+    gateway: str | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -216,7 +214,7 @@ async def get_providers(
 
         openrouter_models = []
         portkey_models = []
-        provider_groups: List[List[dict]] = []
+        provider_groups: list[list[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             raw_providers = get_cached_providers()
@@ -256,7 +254,7 @@ async def get_providers(
 
         combined_providers = merge_provider_lists(*provider_groups)
 
-        models_for_counts: List[dict] = []
+        models_for_counts: list[dict] = []
         if gateway_value in ("openrouter", "all"):
             models_for_counts.extend(openrouter_models)
         if gateway_value in ("portkey", "all"):
@@ -288,14 +286,14 @@ async def get_providers(
             "offset": offset or 0,
             "limit": limit,
             "gateway": gateway_value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get providers: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get providers")
+        raise HTTPException(status_code=500, detail="Failed to get providers") from e
 
 
 # ============================================================================
@@ -304,13 +302,13 @@ async def get_providers(
 # ============================================================================
 
 async def get_models(
-    provider: Optional[str] = Query(None, description="Filter models by provider"),
-    limit: Optional[int] = Query(None, description="Limit number of results"),
-    offset: Optional[int] = Query(0, description="Offset for pagination"),
+    provider: str | None = Query(None, description="Filter models by provider"),
+    limit: int | None = Query(None, description="Limit number of results"),
+    offset: int | None = Query(0, description="Offset for pagination"),
     include_huggingface: bool = Query(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -328,23 +326,23 @@ async def get_models(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
 
-        openrouter_models: List[dict] = []
-        portkey_models: List[dict] = []
-        featherless_models: List[dict] = []
-        deepinfra_models: List[dict] = []
-        chutes_models: List[dict] = []
-        groq_models: List[dict] = []
-        fireworks_models: List[dict] = []
-        together_models: List[dict] = []
-        google_models: List[dict] = []
-        cerebras_models: List[dict] = []
-        nebius_models: List[dict] = []
-        xai_models: List[dict] = []
-        novita_models: List[dict] = []
-        hug_models: List[dict] = []
-        aimo_models: List[dict] = []
-        near_models: List[dict] = []
-        fal_models: List[dict] = []
+        openrouter_models: list[dict] = []
+        portkey_models: list[dict] = []
+        featherless_models: list[dict] = []
+        deepinfra_models: list[dict] = []
+        chutes_models: list[dict] = []
+        groq_models: list[dict] = []
+        fireworks_models: list[dict] = []
+        together_models: list[dict] = []
+        google_models: list[dict] = []
+        cerebras_models: list[dict] = []
+        nebius_models: list[dict] = []
+        xai_models: list[dict] = []
+        novita_models: list[dict] = []
+        hug_models: list[dict] = []
+        aimo_models: list[dict] = []
+        near_models: list[dict] = []
+        fal_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -492,7 +490,7 @@ async def get_models(
             logger.error("No models data available after applying gateway selection")
             raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
-        provider_groups: List[List[dict]] = []
+        provider_groups: list[list[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             providers = get_cached_providers()
@@ -674,7 +672,7 @@ async def get_models(
             "include_huggingface": include_huggingface,
             "gateway": gateway_value,
             "note": note,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         logger.error(f"Returning /models response with keys: {list(result.keys())}, gateway={gateway_value}, first_model={enhanced_models[0]['id'] if enhanced_models else 'none'}")
 
@@ -693,32 +691,32 @@ async def get_models(
         raise
     except Exception as e:
         logger.error(f"Failed to get models: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get models")
+        raise HTTPException(status_code=500, detail="Failed to get models") from e
 
 
 async def get_specific_model(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
 ):
     """Get specific model data of a given provider with detailed information from any gateway
-    
+
     This endpoint supports fetching model data from multiple model providers:
     - OpenRouter: Full model endpoint data including performance metrics
     - Portkey: Model catalog data with cross-referenced pricing
-    - Featherless: Model catalog data  
+    - Featherless: Model catalog data
     - DeepInfra: Model catalog data from DeepInfra's API
     - Chutes: Model catalog data from Chutes.ai
     - Fal.ai: Image/video/audio generation models (e.g., fal-ai/stable-diffusion-v15)
     - Hugging Face: Open-source models from Hugging Face Hub
     - And other gateways: groq, fireworks, together, google, cerebras, nebius, xai, novita, aimo, near
-    
+
     If gateway is not specified, it will automatically detect which gateway the model belongs to.
-    
+
     Examples:
         GET /v1/models/openai/gpt-4?gateway=openrouter
         GET /v1/models/anthropic/claude-3?gateway=portkey
@@ -739,11 +737,11 @@ async def get_specific_model(
     try:
         # Fetch model data from appropriate gateway
         model_data = fetch_specific_model(provider_name, model_name, gateway)
-        
+
         if not model_data:
             gateway_msg = f" from gateway '{gateway}'" if gateway else ""
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"Model {provider_name}/{model_name} not found{gateway_msg}"
             )
 
@@ -751,8 +749,8 @@ async def get_specific_model(
         detected_gateway = model_data.get("source_gateway", gateway or "openrouter")
 
         # Get enhanced providers data for all gateways
-        provider_groups: List[List[dict]] = []
-        
+        provider_groups: list[list[dict]] = []
+
         # Always try to get OpenRouter providers for cross-reference
         openrouter_providers = get_cached_providers()
         if openrouter_providers:
@@ -761,7 +759,7 @@ async def get_specific_model(
                 "openrouter",
             )
             provider_groups.append(enhanced_openrouter)
-        
+
         # Add providers from other gateways based on detected gateway
         if detected_gateway in ["portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]:
             # Get models from the detected gateway to derive providers
@@ -770,7 +768,7 @@ async def get_specific_model(
                 derived_providers = derive_portkey_providers(gateway_models)
                 annotated_providers = annotate_provider_sources(derived_providers, detected_gateway)
                 provider_groups.append(annotated_providers)
-        
+
         # Merge all provider data
         enhanced_providers = merge_provider_lists(*provider_groups) if provider_groups else []
 
@@ -788,22 +786,22 @@ async def get_specific_model(
             "model": model_name,
             "gateway": detected_gateway,
             "include_huggingface": include_huggingface,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get specific model {provider_name}/{model_name}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get model data")
+        raise HTTPException(status_code=500, detail="Failed to get model data") from e
 
 
 async def get_developer_models(
     developer_name: str,
-    limit: Optional[int] = Query(None, description="Limit number of results"),
-    offset: Optional[int] = Query(0, description="Offset for pagination"),
+    limit: int | None = Query(None, description="Limit number of results"),
+    offset: int | None = Query(0, description="Offset for pagination"),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
-    gateway: Optional[str] = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
+    gateway: str | None = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
 ):
     """
     Get all models from a specific developer/provider (e.g., anthropic, openai, google)
@@ -895,7 +893,7 @@ async def get_developer_models(
         raise
     except Exception as e:
         logger.error(f"Failed to get models for developer {developer_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get developer models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get developer models: {str(e)}") from e
 
 
 # ==================== NEW: Gateway & Provider Statistics Endpoints ====================
@@ -903,20 +901,20 @@ async def get_developer_models(
 @router.get("/v1/provider/{provider_name}/stats", tags=["statistics"])
 async def get_provider_statistics(
     provider_name: str,
-    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
     time_range: str = Query("24h", description="Time range: '1h', '24h', '7d', '30d', 'all'")
 ):
     """
     Get comprehensive statistics for a specific provider
-    
+
     This endpoint provides usage statistics for a provider across all or a specific gateway.
     **This fixes the "Total Tokens: 0" and "Top Model: N/A" issues in your UI!**
-    
+
     Args:
         provider_name: Provider name (e.g., 'openai', 'anthropic', 'meta-llama')
         gateway: Optional gateway filter
         time_range: Time range for statistics
-    
+
     Returns:
         Provider statistics including:
         - Total requests and tokens
@@ -924,34 +922,34 @@ async def get_provider_statistics(
         - Top model used
         - Model breakdown
         - Speed metrics
-        
+
     Example:
         GET /catalog/provider/openai/stats?time_range=24h
         GET /catalog/provider/anthropic/stats?gateway=portkey&time_range=7d
     """
     try:
         logger.info(f"Fetching stats for provider: {provider_name}, gateway: {gateway}, time_range: {time_range}")
-        
+
         stats = get_provider_stats(
             provider_name=provider_name,
             gateway=gateway,
             time_range=time_range
         )
-        
+
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
-        
+
         return {
             "success": True,
             "data": stats,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get provider stats for {provider_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get provider statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get provider statistics: {str(e)}") from e
 
 
 @router.get("/v1/gateway/{gateway}/stats", tags=["statistics"])
@@ -961,14 +959,14 @@ async def get_gateway_statistics(
 ):
     """
     Get comprehensive statistics for a specific gateway
-    
+
     This endpoint provides usage statistics for a gateway (e.g., openrouter, portkey, groq, deepinfra).
     **This fixes the "Top Provider: N/A" issue in your UI!**
-    
+
     Args:
         gateway: Gateway name ('openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', 'groq')
         time_range: Time range for statistics
-        
+
     Returns:
         Gateway statistics including:
         - Total requests, tokens, and cost
@@ -976,14 +974,14 @@ async def get_gateway_statistics(
         - Top provider used through this gateway
         - Provider breakdown
         - Performance metrics
-        
+
     Example:
         GET /catalog/gateway/openrouter/stats?time_range=24h
         GET /catalog/gateway/deepinfra/stats?time_range=7d
     """
     try:
         logger.info(f"Fetching stats for gateway: {gateway}, time_range: {time_range}")
-        
+
         # Validate gateway
         valid_gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]
         if gateway.lower() not in valid_gateways:
@@ -991,56 +989,56 @@ async def get_gateway_statistics(
                 status_code=400,
                 detail=f"Invalid gateway. Must be one of: {', '.join(valid_gateways)}"
             )
-        
+
         stats = get_gateway_stats(
             gateway=gateway,
             time_range=time_range
         )
-        
+
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
-        
+
         return {
             "success": True,
             "data": stats,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get gateway stats for {gateway}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get gateway statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get gateway statistics: {str(e)}") from e
 
 
 async def get_trending_models_endpoint(
-    gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
+    gateway: str | None = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description="Time range: '1h', '24h', '7d', '30d'"),
     limit: int = Query(10, description="Number of models to return", ge=1, le=100),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'")
 ):
     """
     Get trending models based on usage
-    
+
     This endpoint returns the most popular models sorted by usage metrics.
     **This helps populate "Top Model" in your UI!**
-    
+
     Args:
         gateway: Gateway filter ('all' for all gateways)
         time_range: Time range for trending calculation
         limit: Number of models to return
         sort_by: Sort criteria ('requests', 'tokens', 'users')
-        
+
     Returns:
         List of trending models with statistics
-        
+
     Example:
         GET /catalog/models/trending?time_range=24h&limit=10
         GET /catalog/models/trending?gateway=deepinfra&sort_by=tokens
     """
     try:
         logger.info(f"Fetching trending models: gateway={gateway}, time_range={time_range}, sort_by={sort_by}")
-        
+
         # Validate sort_by
         valid_sort = ["requests", "tokens", "users"]
         if sort_by not in valid_sort:
@@ -1048,14 +1046,14 @@ async def get_trending_models_endpoint(
                 status_code=400,
                 detail=f"Invalid sort_by. Must be one of: {', '.join(valid_sort)}"
             )
-        
+
         trending = get_trending_models(
             gateway=gateway,
             time_range=time_range,
             limit=limit,
             sort_by=sort_by
         )
-        
+
         return {
             "success": True,
             "data": trending,
@@ -1063,14 +1061,14 @@ async def get_trending_models_endpoint(
             "gateway": gateway,
             "time_range": time_range,
             "sort_by": sort_by,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get trending models: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get trending models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get trending models: {str(e)}") from e
 
 
 @router.get("/v1/gateways/summary", tags=["statistics"])
@@ -1079,38 +1077,38 @@ async def get_all_gateways_summary_endpoint(
 ):
     """
     Get summary statistics for all gateways
-    
+
     This endpoint provides a comprehensive overview of usage across all gateways.
     **Perfect for dashboard overview showing all providers!**
-    
+
     Args:
         time_range: Time range for statistics
-        
+
     Returns:
         Dictionary with statistics for each gateway and overall totals
-        
+
     Example:
         GET /catalog/gateways/summary?time_range=24h
     """
     try:
         logger.info(f"Fetching summary for all gateways: time_range={time_range}")
-        
+
         summary = get_all_gateways_summary(time_range=time_range)
-        
+
         if "error" in summary:
             raise HTTPException(status_code=500, detail=summary["error"])
-        
+
         return {
             "success": True,
             "data": summary,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get gateways summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get gateways summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get gateways summary: {str(e)}") from e
 
 
 @router.get("/v1/provider/{provider_name}/top-models", tags=["statistics"])
@@ -1121,44 +1119,44 @@ async def get_provider_top_models_endpoint(
 ):
     """
     Get top models for a specific provider
-    
+
     This endpoint returns the most used models from a provider.
-    
+
     Args:
         provider_name: Provider name (e.g., 'openai', 'anthropic')
         limit: Number of models to return
         time_range: Time range for statistics
-        
+
     Returns:
         List of top models with usage statistics
-        
+
     Example:
         GET /catalog/provider/openai/top-models?limit=5&time_range=7d
     """
     try:
         provider_name = normalize_developer_segment(provider_name) or provider_name
         logger.info(f"Fetching top models for provider: {provider_name}")
-        
+
         top_models = get_top_models_by_provider(
             provider_name=provider_name,
             limit=limit,
             time_range=time_range
         )
-        
+
         return {
             "success": True,
             "provider": provider_name,
             "data": top_models,
             "count": len(top_models),
             "time_range": time_range,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get top models for {provider_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get top models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get top models: {str(e)}") from e
 
 
 # ==================== NEW: Model Comparison Endpoints ====================
@@ -1166,25 +1164,25 @@ async def get_provider_top_models_endpoint(
 async def compare_model_across_gateways(
     provider_name: str,
     model_name: str,
-    gateways: Optional[str] = Query("all", description="Comma-separated gateways or 'all'")
+    gateways: str | None = Query("all", description="Comma-separated gateways or 'all'")
 ):
     """
     Compare the same model across different gateways
-    
+
     This endpoint fetches the same model from multiple gateways and compares:
     - Pricing (if available)
     - Availability
     - Features/capabilities
     - Provider information
-    
+
     Args:
         provider_name: Provider name (e.g., 'openai', 'anthropic')
         model_name: Model name (e.g., 'gpt-4', 'claude-3')
         gateways: Comma-separated list of gateways or 'all'
-        
+
     Returns:
         Comparison data across gateways with recommendation
-        
+
     Example:
         GET /catalog/model/openai/gpt-4/compare
         GET /catalog/model/anthropic/claude-3/compare?gateways=openrouter,portkey
@@ -1193,25 +1191,25 @@ async def compare_model_across_gateways(
         provider_name = normalize_developer_segment(provider_name) or provider_name
         model_name = normalize_model_segment(model_name) or model_name
         logger.info(f"Comparing model {provider_name}/{model_name} across gateways")
-        
+
         # Parse gateways list
         if gateways and gateways.lower() != "all":
             gateway_list = [g.strip().lower() for g in gateways.split(",")]
         else:
             gateway_list = ["openrouter", "portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]
-        
+
         model_id = f"{provider_name}/{model_name}"
         comparisons = []
-        
+
         # Fetch model from each gateway
         for gateway in gateway_list:
             try:
                 model_data = fetch_specific_model(provider_name, model_name, gateway)
-                
+
                 if model_data:
                     # Extract relevant comparison data
                     pricing = model_data.get("pricing", {})
-                    
+
                     comparison = {
                         "gateway": gateway,
                         "available": True,
@@ -1228,7 +1226,7 @@ async def compare_model_across_gateways(
                         "provider_site_url": model_data.get("provider_site_url"),
                         "source_gateway": model_data.get("source_gateway")
                     }
-                    
+
                     comparisons.append(comparison)
                 else:
                     comparisons.append({
@@ -1242,7 +1240,7 @@ async def compare_model_across_gateways(
                         "provider_site_url": None,
                         "source_gateway": gateway
                     })
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to fetch model from {gateway}: {e}")
                 comparisons.append({
@@ -1251,13 +1249,13 @@ async def compare_model_across_gateways(
                     "error": str(e),
                     "model_id": model_id
                 })
-        
+
         # Calculate recommendation based on pricing
         recommendation = _calculate_recommendation(comparisons)
-        
+
         # Calculate potential savings
         savings_info = _calculate_savings(comparisons)
-        
+
         return {
             "success": True,
             "model_id": model_id,
@@ -1268,40 +1266,40 @@ async def compare_model_across_gateways(
             "savings": savings_info,
             "available_count": sum(1 for c in comparisons if c.get("available")),
             "total_gateways_checked": len(comparisons),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to compare model {provider_name}/{model_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to compare model: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to compare model: {str(e)}") from e
 
 
 async def batch_compare_models(
-    model_ids: List[str] = Query(..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"),
+    model_ids: list[str] = Query(..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"),
     criteria: str = Query("price", description="Comparison criteria: 'price', 'context', 'availability'")
 ):
     """
     Compare multiple models at once
-    
+
     This endpoint allows comparing multiple models based on specific criteria.
-    
+
     Args:
         model_ids: List of model IDs in format "provider/model"
         criteria: Comparison criteria
-        
+
     Returns:
         Comparison data for all models
-        
+
     Example:
         POST /catalog/models/batch-compare?model_ids=openai/gpt-4&model_ids=anthropic/claude-3&criteria=price
     """
     try:
         logger.info(f"Batch comparing {len(model_ids)} models by {criteria}")
-        
+
         results = []
-        
+
         for model_id in model_ids:
             # Parse model_id
             if "/" not in model_id:
@@ -1310,17 +1308,17 @@ async def batch_compare_models(
                     "error": "Invalid model ID format. Expected 'provider/model'"
                 })
                 continue
-            
+
             provider_part, model_part = model_id.split("/", 1)
             provider_name = normalize_developer_segment(provider_part) or provider_part.strip()
             model_name = normalize_model_segment(model_part) or model_part.strip()
             normalized_model_id = f"{provider_name}/{model_name}"
-            
+
             try:
                 # Get model from all gateways
                 all_gateways = ["openrouter", "portkey", "featherless", "groq", "fireworks", "together"]
                 models_data = []
-                
+
                 for gateway in all_gateways:
                     model_data = fetch_specific_model(provider_name, model_name, gateway)
                     if model_data:
@@ -1328,7 +1326,7 @@ async def batch_compare_models(
                             "gateway": gateway,
                             "data": model_data
                         })
-                
+
                 if models_data:
                     # Extract comparison data based on criteria
                     if criteria == "price":
@@ -1339,7 +1337,7 @@ async def batch_compare_models(
                         comparison_data = _extract_availability_comparison(models_data, all_gateways)
                     else:
                         comparison_data = {"error": f"Unknown criteria: {criteria}"}
-                    
+
                     results.append({
                         "model_id": normalized_model_id,
                         "comparison": comparison_data,
@@ -1350,27 +1348,27 @@ async def batch_compare_models(
                         "model_id": normalized_model_id,
                         "error": "Model not found in any gateway"
                     })
-                    
+
             except Exception as e:
                 logger.error(f"Error comparing {normalized_model_id}: {e}")
                 results.append({
                     "model_id": normalized_model_id,
                     "error": str(e)
                 })
-        
+
         return {
             "success": True,
             "criteria": criteria,
             "models_compared": len(model_ids),
             "results": results,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed batch comparison: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to batch compare models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to batch compare models: {str(e)}") from e
 
 
 # ============================================================================
@@ -1380,13 +1378,13 @@ async def batch_compare_models(
 
 @router.get("/v1/models", tags=["models"])
 async def get_all_models(
-    provider: Optional[str] = Query(None, description="Filter models by provider"),
-    limit: Optional[int] = Query(50, description="Limit number of results (default: 50 for fast load)"),
-    offset: Optional[int] = Query(0, description="Offset for pagination"),
+    provider: str | None = Query(None, description="Filter models by provider"),
+    limit: int | None = Query(50, description="Limit number of results (default: 50 for fast load)"),
+    offset: int | None = Query(0, description="Offset for pagination"),
     include_huggingface: bool = Query(
         False, description="Include Hugging Face metrics for models that have hugging_face_id (slower, default: false)"
     ),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -1402,7 +1400,7 @@ async def get_all_models(
 
 @router.get("/v1/models/trending", tags=["statistics"])
 async def get_trending_models_api(
-    gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
+    gateway: str | None = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description="Time range: '1h', '24h', '7d', '30d'"),
     limit: int = Query(10, description="Number of models to return", ge=1, le=100),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
@@ -1417,7 +1415,7 @@ async def get_trending_models_api(
 
 @router.post("/models/batch-compare", tags=["comparison"])
 async def batch_compare_models_api(
-    model_ids: List[str] = Query(..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"),
+    model_ids: list[str] = Query(..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"),
     criteria: str = Query("price", description="Comparison criteria: 'price', 'context', 'availability'"),
 ):
     return await batch_compare_models(model_ids=model_ids, criteria=criteria)
@@ -1427,7 +1425,7 @@ async def batch_compare_models_api(
 async def compare_model_gateways_api(
     provider_name: str,
     model_name: str,
-    gateways: Optional[str] = Query("all", description="Comma-separated gateways or 'all'"),
+    gateways: str | None = Query("all", description="Comma-separated gateways or 'all'"),
 ):
     return await compare_model_across_gateways(
         provider_name=provider_name,
@@ -1441,7 +1439,7 @@ async def get_specific_model_api(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1459,7 +1457,7 @@ async def get_specific_model_api_legacy(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1476,10 +1474,10 @@ async def get_specific_model_api_legacy(
 @router.get("/v1/models/{developer_name}", tags=["models"])
 async def get_developer_models_api(
     developer_name: str,
-    limit: Optional[int] = Query(None, description="Limit number of results"),
-    offset: Optional[int] = Query(0, description="Offset for pagination"),
+    limit: int | None = Query(None, description="Limit number of results"),
+    offset: int | None = Query(0, description="Offset for pagination"),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
-    gateway: Optional[str] = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
+    gateway: str | None = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
 ):
     return await get_developer_models(
         developer_name=developer_name,
@@ -1492,13 +1490,13 @@ async def get_developer_models_api(
 
 @router.get("/v1/models/search", tags=["models"])
 async def search_models(
-    q: Optional[str] = Query(None, description="Search query (searches in model name, provider, description)"),
-    modality: Optional[str] = Query(None, description="Filter by modality: text, image, audio, video, multimodal"),
-    min_context: Optional[int] = Query(None, description="Minimum context window size (tokens)"),
-    max_context: Optional[int] = Query(None, description="Maximum context window size (tokens)"),
-    min_price: Optional[float] = Query(None, description="Minimum price per token (USD)"),
-    max_price: Optional[float] = Query(None, description="Maximum price per token (USD)"),
-    gateway: Optional[str] = Query("all", description="Gateway filter: openrouter, portkey, featherless, deepinfra, chutes, groq, fireworks, together, or all"),
+    q: str | None = Query(None, description="Search query (searches in model name, provider, description)"),
+    modality: str | None = Query(None, description="Filter by modality: text, image, audio, video, multimodal"),
+    min_context: int | None = Query(None, description="Minimum context window size (tokens)"),
+    max_context: int | None = Query(None, description="Maximum context window size (tokens)"),
+    min_price: float | None = Query(None, description="Minimum price per token (USD)"),
+    max_price: float | None = Query(None, description="Maximum price per token (USD)"),
+    gateway: str | None = Query("all", description="Gateway filter: openrouter, portkey, featherless, deepinfra, chutes, groq, fireworks, together, or all"),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),
     limit: int = Query(20, description="Number of results", ge=1, le=100),
@@ -1506,16 +1504,16 @@ async def search_models(
 ):
     """
     Advanced model search with multiple filters.
-    
+
     This endpoint allows you to search and filter models across all gateways
     with powerful query capabilities.
-    
+
     **Examples:**
     - Search for cheap models: `?max_price=0.0001&sort_by=price`
     - Find models with large context: `?min_context=100000&sort_by=context&order=desc`
     - Search by name: `?q=gpt-4&gateway=openrouter`
     - Filter by modality: `?modality=image&sort_by=popularity`
-    
+
     **Returns:**
     - List of models matching the criteria
     - Total count of matching models
@@ -1525,43 +1523,43 @@ async def search_models(
         # Get all models from specified gateways
         all_models = []
         gateway_value = gateway.lower() if gateway else "all"
-        
+
         # Fetch from selected gateways
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
             all_models.extend(openrouter_models)
-        
+
         if gateway_value in ("portkey", "all"):
             portkey_models = get_cached_models("portkey") or []
             all_models.extend(portkey_models)
-        
+
         if gateway_value in ("featherless", "all"):
             featherless_models = get_cached_models("featherless") or []
             all_models.extend(featherless_models)
-        
+
         if gateway_value in ("deepinfra", "all"):
             deepinfra_models = get_cached_models("deepinfra") or []
             all_models.extend(deepinfra_models)
-        
+
         if gateway_value in ("chutes", "all"):
             chutes_models = get_cached_models("chutes") or []
             all_models.extend(chutes_models)
-        
+
         if gateway_value in ("groq", "all"):
             groq_models = get_cached_models("groq") or []
             all_models.extend(groq_models)
-        
+
         if gateway_value in ("fireworks", "all"):
             fireworks_models = get_cached_models("fireworks") or []
             all_models.extend(fireworks_models)
-        
+
         if gateway_value in ("together", "all"):
             together_models = get_cached_models("together") or []
             all_models.extend(together_models)
-        
+
         # Apply filters
         filtered_models = all_models
-        
+
         # Text search filter
         if q:
             q_lower = q.lower()
@@ -1572,7 +1570,7 @@ async def search_models(
                     q_lower in m.get("description", "").lower() or
                     q_lower in str(m.get("provider", "")).lower())
             ]
-        
+
         # Modality filter
         if modality:
             modality_lower = modality.lower()
@@ -1581,20 +1579,20 @@ async def search_models(
                 if modality_lower in str(m.get("modality", "text")).lower() or
                    modality_lower in str(m.get("architecture", {}).get("modality", "text")).lower()
             ]
-        
+
         # Context window filters
         if min_context is not None:
             filtered_models = [
                 m for m in filtered_models
                 if m.get("context_length", 0) >= min_context
             ]
-        
+
         if max_context is not None:
             filtered_models = [
                 m for m in filtered_models
                 if m.get("context_length", float('inf')) <= max_context
             ]
-        
+
         # Price filters (check pricing data)
         if min_price is not None or max_price is not None:
             def get_model_price(model):
@@ -1606,19 +1604,19 @@ async def search_models(
                         # Return average price
                         return (float(prompt_price) + float(completion_price)) / 2
                 return None
-            
+
             if min_price is not None:
                 filtered_models = [
                     m for m in filtered_models
                     if (price := get_model_price(m)) is not None and price >= min_price
                 ]
-            
+
             if max_price is not None:
                 filtered_models = [
                     m for m in filtered_models
                     if (price := get_model_price(m)) is not None and price <= max_price
                 ]
-        
+
         # Sorting
         def get_sort_key(model):
             if sort_by == "price":
@@ -1629,19 +1627,19 @@ async def search_models(
                     if prompt and completion:
                         return (float(prompt) + float(completion)) / 2
                 return float('inf')  # Put models without pricing at the end
-            
+
             elif sort_by == "context":
                 return model.get("context_length", 0)
-            
+
             elif sort_by == "popularity":
                 # Use ranking if available, otherwise 0
                 return model.get("rank", model.get("ranking", 0))
-            
+
             elif sort_by == "name":
                 return model.get("name", model.get("id", ""))
-            
+
             return 0
-        
+
         # Sort
         reverse = (order.lower() == "desc")
         if sort_by == "name":
@@ -1650,11 +1648,11 @@ async def search_models(
         else:
             # Numeric sorting
             filtered_models.sort(key=get_sort_key, reverse=reverse)
-        
+
         # Apply pagination
         total_count = len(filtered_models)
         paginated_models = filtered_models[offset:offset + limit]
-        
+
         return {
             "success": True,
             "data": paginated_models,
@@ -1675,35 +1673,35 @@ async def search_models(
                     "order": order
                 }
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-    
+
     except Exception as e:
         logger.error(f"Failed to search models: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to search models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to search models: {str(e)}") from e
 
 
 # Helper functions for model comparison
 
-def _calculate_recommendation(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _calculate_recommendation(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     """Calculate which gateway is recommended based on pricing"""
     available = [c for c in comparisons if c.get("available")]
-    
+
     if not available:
         return {"gateway": None, "reason": "Model not available in any gateway"}
-    
+
     # Filter out comparisons without pricing
     with_pricing = [
-        c for c in available 
+        c for c in available
         if c.get("pricing") and c["pricing"].get("prompt") and c["pricing"].get("completion")
     ]
-    
+
     if not with_pricing:
         return {
             "gateway": available[0]["gateway"],
             "reason": "First available gateway (pricing data not available)"
         }
-    
+
     # Calculate total cost (prompt + completion) for comparison
     for comp in with_pricing:
         try:
@@ -1712,10 +1710,10 @@ def _calculate_recommendation(comparisons: List[Dict[str, Any]]) -> Dict[str, An
             comp["_total_cost"] = prompt_price + completion_price
         except (ValueError, TypeError):
             comp["_total_cost"] = float('inf')
-    
+
     # Find cheapest
     cheapest = min(with_pricing, key=lambda x: x.get("_total_cost", float('inf')))
-    
+
     return {
         "gateway": cheapest["gateway"],
         "reason": f"Lowest pricing (${cheapest['_total_cost']}/1M tokens combined)",
@@ -1723,17 +1721,17 @@ def _calculate_recommendation(comparisons: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-def _calculate_savings(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _calculate_savings(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     """Calculate potential savings"""
     available = [c for c in comparisons if c.get("available") and c.get("pricing")]
-    
+
     if len(available) < 2:
         return {
             "potential_savings": 0.0,
             "most_expensive_gateway": None,
             "cheapest_gateway": None
         }
-    
+
     # Calculate total costs
     costs = []
     for comp in available:
@@ -1749,20 +1747,20 @@ def _calculate_savings(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
                 })
         except (ValueError, TypeError):
             continue
-    
+
     if len(costs) < 2:
         return {
             "potential_savings": 0.0,
             "most_expensive_gateway": None,
             "cheapest_gateway": None
         }
-    
+
     cheapest = min(costs, key=lambda x: x["total_cost"])
     most_expensive = max(costs, key=lambda x: x["total_cost"])
-    
+
     savings_amount = most_expensive["total_cost"] - cheapest["total_cost"]
     savings_percent = (savings_amount / most_expensive["total_cost"]) * 100 if most_expensive["total_cost"] > 0 else 0
-    
+
     return {
         "potential_savings_per_1m_tokens": round(savings_amount, 4),
         "savings_percentage": round(savings_percent, 2),
@@ -1773,7 +1771,7 @@ def _calculate_savings(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _extract_price_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_price_comparison(models_data: list[dict[str, Any]]) -> dict[str, Any]:
     """Extract price comparison data"""
     prices = {}
     for item in models_data:
@@ -1787,7 +1785,7 @@ def _extract_price_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, An
     return prices
 
 
-def _extract_context_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_context_comparison(models_data: list[dict[str, Any]]) -> dict[str, Any]:
     """Extract context length comparison data"""
     contexts = {}
     for item in models_data:
@@ -1797,9 +1795,9 @@ def _extract_context_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, 
     return contexts
 
 
-def _extract_availability_comparison(models_data: List[Dict[str, Any]], all_gateways: List[str]) -> Dict[str, bool]:
+def _extract_availability_comparison(models_data: list[dict[str, Any]], all_gateways: list[str]) -> dict[str, bool]:
     """Extract availability comparison data"""
-    availability = {gateway: False for gateway in all_gateways}
+    availability = dict.fromkeys(all_gateways, False)
     for item in models_data:
         availability[item["gateway"]] = True
     return availability
@@ -1811,42 +1809,42 @@ def _extract_availability_comparison(models_data: List[Dict[str, Any]], all_gate
 
 @router.get("/modelz/models")
 async def get_modelz_models(
-    is_graduated: Optional[bool] = Query(
-        None, 
+    is_graduated: bool | None = Query(
+        None,
         description="Filter for graduated (singularity) models: true=graduated only, false=non-graduated only, null=all models"
     )
 ):
     """
     Get models that exist on Modelz with optional graduation filter.
-    
+
     This endpoint bridges Gatewayz with Modelz by fetching model token data
     from the Modelz API and applying the same filters as the original Modelz API.
-    
+
     Query Parameters:
     - is_graduated: Filter for graduated models
       - true: Only graduated/singularity models
-      - false: Only non-graduated models  
+      - false: Only non-graduated models
       - null: All models (default)
-    
+
     Returns:
     - List of models with their token data from Modelz
     - Includes model IDs, graduation status, and other metadata
     """
     try:
         logger.info(f"Fetching Modelz models with is_graduated={is_graduated}")
-        
+
         # Fetch token data from Modelz API
         tokens = await fetch_modelz_tokens(is_graduated)
-        
+
         # Transform the data to a consistent format
         models = []
         for token in tokens:
             model_data = {
                 "model_id": (
                     token.get("Token") or
-                    token.get("model_id") or 
-                    token.get("modelId") or 
-                    token.get("id") or 
+                    token.get("model_id") or
+                    token.get("modelId") or
+                    token.get("id") or
                     token.get("name") or
                     token.get("model")
                 ),
@@ -1855,13 +1853,13 @@ async def get_modelz_models(
                 "source": "modelz",
                 "has_token": True
             }
-            
+
             # Only include models with valid model IDs
             if model_data["model_id"]:
                 models.append(model_data)
-        
+
         logger.info(f"Successfully processed {len(models)} models from Modelz")
-        
+
         return {
             "models": models,
             "total_count": len(models),
@@ -1876,7 +1874,7 @@ async def get_modelz_models(
             "source": "modelz",
             "api_reference": "https://backend.alpacanetwork.ai/api/tokens"
         }
-        
+
     except HTTPException:
         # Re-raise HTTP exceptions from the client
         raise
@@ -1885,33 +1883,33 @@ async def get_modelz_models(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch models from Modelz: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/modelz/ids")
 async def get_modelz_model_ids_endpoint(
-    is_graduated: Optional[bool] = Query(
-        None, 
+    is_graduated: bool | None = Query(
+        None,
         description="Filter for graduated models: true=graduated only, false=non-graduated only, null=all models"
     )
 ):
     """
     Get a list of model IDs that exist on Modelz.
-    
+
     This is a lightweight endpoint that returns only the model IDs,
     useful for checking which models have tokens on Modelz.
-    
+
     Query Parameters:
     - is_graduated: Filter for graduated models (same as /models/modelz)
-    
+
     Returns:
     - List of model IDs from Modelz
     """
     try:
         logger.info(f"Fetching Modelz model IDs with is_graduated={is_graduated}")
-        
+
         model_ids = await get_modelz_model_ids(is_graduated)
-        
+
         return {
             "model_ids": model_ids,
             "total_count": len(model_ids),
@@ -1925,7 +1923,7 @@ async def get_modelz_model_ids_endpoint(
             },
             "source": "modelz"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1933,35 +1931,35 @@ async def get_modelz_model_ids_endpoint(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch model IDs from Modelz: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/modelz/check/{model_id}")
 async def check_model_on_modelz(
     model_id: str,
-    is_graduated: Optional[bool] = Query(
-        None, 
+    is_graduated: bool | None = Query(
+        None,
         description="Filter for graduated models when checking"
     )
 ):
     """
     Check if a specific model exists on Modelz.
-    
+
     Path Parameters:
     - model_id: The model ID to check
-    
+
     Query Parameters:
     - is_graduated: Filter for graduated models when checking
-    
+
     Returns:
     - Boolean indicating if model exists on Modelz
     - Additional model details if found
     """
     try:
         logger.info(f"Checking if model '{model_id}' exists on Modelz with is_graduated={is_graduated}")
-        
+
         exists = await check_model_exists_on_modelz(model_id, is_graduated)
-        
+
         result = {
             "model_id": model_id,
             "exists_on_modelz": exists,
@@ -1975,15 +1973,15 @@ async def check_model_on_modelz(
             },
             "source": "modelz"
         }
-        
+
         # If model exists, get additional details
         if exists:
             model_details = await get_modelz_model_details(model_id)
             if model_details:
                 result["model_details"] = model_details
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1991,4 +1989,4 @@ async def check_model_on_modelz(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to check model on Modelz: {str(e)}"
-        )
+        ) from e

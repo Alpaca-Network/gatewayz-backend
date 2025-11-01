@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -28,9 +27,9 @@ class ValidateReferralRequest(BaseModel):
 
 class ValidateReferralResponse(BaseModel):
     valid: bool
-    message: Optional[str] = None
-    referrer_username: Optional[str] = None
-    referrer_email: Optional[str] = None
+    message: str | None = None
+    referrer_username: str | None = None
+    referrer_email: str | None = None
 
 
 class ReferralStatsResponse(BaseModel):
@@ -43,7 +42,7 @@ class ReferralStatsResponse(BaseModel):
     max_uses: int
     total_earned: float
     current_balance: float
-    referred_by_code: Optional[str]
+    referred_by_code: str | None
     referrals: list
 
 
@@ -85,7 +84,7 @@ async def get_my_referral_stats(
         raise
     except Exception as e:
         logger.error(f"Error getting referral stats: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/referral/validate", tags=["referral"], response_model=ValidateReferralResponse)
@@ -132,7 +131,7 @@ async def validate_referral(
         raise
     except Exception as e:
         logger.error(f"Error validating referral code: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/referral/generate", tags=["referral"])
@@ -169,7 +168,7 @@ async def generate_my_referral_code(
         raise
     except Exception as e:
         logger.error(f"Error generating referral code: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/referral/code", tags=["referral"])
@@ -211,4 +210,4 @@ async def get_my_referral_code(
         raise
     except Exception as e:
         logger.error(f"Error getting referral code: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

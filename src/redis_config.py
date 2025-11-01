@@ -7,7 +7,6 @@ Redis client configuration and utilities for caching and rate limiting.
 
 import logging
 import os
-from typing import Any, Optional
 
 import redis
 from redis.exceptions import ConnectionError, RedisError
@@ -20,7 +19,7 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
 # Global Redis client
-_redis_client: Optional[redis.Redis] = None
+_redis_client: redis.Redis | None = None
 
 def get_redis_config() -> dict:
     """Get Redis configuration"""
@@ -30,10 +29,10 @@ def get_redis_config() -> dict:
         "db": REDIS_DB
     }
 
-def get_redis_client() -> Optional[redis.Redis]:
+def get_redis_client() -> redis.Redis | None:
     """Get Redis client instance"""
     global _redis_client
-    
+
     if _redis_client is None:
         try:
             _redis_client = redis.from_url(
@@ -45,15 +44,15 @@ def get_redis_client() -> Optional[redis.Redis]:
                 socket_timeout=5,
                 retry_on_timeout=True
             )
-            
+
             # Test connection
             _redis_client.ping()
             logger.info("Redis client connected successfully")
-            
+
         except (ConnectionError, RedisError) as e:
             logger.warning(f"Redis connection failed: {e}")
             _redis_client = None
-    
+
     return _redis_client
 
 def is_redis_available() -> bool:
@@ -94,7 +93,7 @@ def get_redis_info() -> dict:
             }
     except Exception as e:
         logger.error(f"Failed to get Redis info: {e}")
-    
+
     return {
         "connected": False,
         "error": "Redis not available"

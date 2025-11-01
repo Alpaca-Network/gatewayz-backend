@@ -1,5 +1,4 @@
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -17,15 +16,15 @@ router = APIRouter()
 
 @router.get("/ranking/models", tags=["ranking"])
 async def get_ranking_models(
-    limit: Optional[int] = Query(None, description="Limit number of results"),
-    offset: Optional[int] = Query(0, description="Offset for pagination")
+    limit: int | None = Query(None, description="Limit number of results"),
+    offset: int | None = Query(0, description="Offset for pagination")
 ):
     """Get all models from latest_models table for ranking page with logo URLs"""
-    try:        
+    try:
         # Get models with pagination support
         models = get_all_latest_models(limit=limit, offset=offset)
         logger.info(f"Retrieved {len(models)} models from latest_models table")
-        
+
         return {
             "success": True,
             "data": models,
@@ -34,10 +33,10 @@ async def get_ranking_models(
             "offset": offset or 0,
             "has_logo_urls": any(model.get('logo_url') for model in models)
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to fetch models: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch models: {str(e)}") from e
 
 
 @router.get("/ranking/apps", tags=["ranking"])
@@ -46,16 +45,16 @@ async def get_ranking_apps():
     try:
         # Get apps based on filters
         apps = get_all_latest_apps()
-        
+
         logger.info(f"Retrieved {len(apps)} apps")
-        
+
         return {
             "success": True,
             "data": apps,
             "count": len(apps),
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to fetch apps: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch apps: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch apps: {str(e)}") from e
 

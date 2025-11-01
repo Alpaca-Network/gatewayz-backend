@@ -132,10 +132,10 @@ class Config:
                 "OPENROUTER_SITE_NAME=your_site_name (optional)\n"
                 "PORTKEY_API_KEY=your_portkey_api_key"
             )
-        
+
         return True
-    
+
     @classmethod
     def get_supabase_config(cls):
         """Get Supabase configuration as a tuple"""
-        return cls.SUPABASE_URL, cls.SUPABASE_KEY 
+        return cls.SUPABASE_URL, cls.SUPABASE_KEY

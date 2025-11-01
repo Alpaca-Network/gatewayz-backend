@@ -1,6 +1,5 @@
-import datetime
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -95,7 +94,7 @@ async def get_user_balance(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting user balance: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/monitor", tags=["authentication"])
@@ -125,7 +124,7 @@ async def user_monitor(api_key: str = Depends(get_api_key)):
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "user_id": usage_data["user_id"],
             "api_key": f"{api_key[:10]}...",
             "current_credits": usage_data["current_credits"],
@@ -137,7 +136,7 @@ async def user_monitor(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting user monitor data: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/limit", tags=["authentication"])
@@ -166,9 +165,9 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
                     "reason": "No rate limits configured"
                 },
                 "reset_times": {
-                    "minute": datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1),
-                    "hour": datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1),
-                    "day": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+                    "minute": datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1),
+                    "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1),
+                    "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
                 }
             }
 
@@ -187,9 +186,9 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
             },
             "current_usage": current_usage,
             "reset_times": {
-                "minute": datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1),
-                "hour": datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1),
-                "day": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+                "minute": datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1),
+                "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1),
+                "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
             }
         }
 
@@ -197,7 +196,7 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting user rate limits: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/profile", response_model=UserProfileResponse, tags=["authentication"])
@@ -230,7 +229,7 @@ async def get_user_profile_endpoint(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting user profile: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
 
 
 @router.put("/user/profile", response_model=UserProfileResponse, tags=["authentication"])
@@ -267,7 +266,7 @@ async def update_user_profile_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error updating user profile: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.delete("/user/account", response_model=DeleteAccountResponse, tags=["authentication"])
@@ -299,14 +298,14 @@ async def delete_user_account_endpoint(
             "status": "success",
             "message": "User account deleted successfully",
             "user_id": str(user["id"]),
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.now(UTC)
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting user account: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/credit-transactions", tags=["authentication"])
@@ -379,4 +378,4 @@ async def get_credit_transactions_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error getting credit transactions: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

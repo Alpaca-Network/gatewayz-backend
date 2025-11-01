@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 def get_deepinfra_client():
     """Get DeepInfra client using OpenAI-compatible interface
-    
+
     DeepInfra provides OpenAI-compatible API endpoints for various models
     """
     try:
         if not Config.DEEPINFRA_API_KEY:
             raise ValueError("DeepInfra API key not configured")
-        
+
         return OpenAI(
             base_url="https://api.deepinfra.com/v1/openai",
             api_key=Config.DEEPINFRA_API_KEY
@@ -29,7 +29,7 @@ def get_deepinfra_client():
 
 def make_deepinfra_request_openai(messages, model, **kwargs):
     """Make request to DeepInfra using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use
@@ -50,7 +50,7 @@ def make_deepinfra_request_openai(messages, model, **kwargs):
 
 def make_deepinfra_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to DeepInfra using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use

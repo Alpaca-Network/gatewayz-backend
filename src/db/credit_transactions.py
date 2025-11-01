@@ -5,8 +5,8 @@ Tracks all credit additions and deductions with full audit trail
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -33,10 +33,10 @@ def log_credit_transaction(
         description: str,
         balance_before: float,
         balance_after: float,
-        payment_id: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        created_by: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
+        payment_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
+        created_by: str | None = None
+) -> dict[str, Any] | None:
     """
     Log a credit transaction to the audit trail
 
@@ -67,7 +67,7 @@ def log_credit_transaction(
             'payment_id': payment_id,
             'metadata': metadata or {},
             'created_by': created_by,
-            'created_at': datetime.now(timezone.utc).isoformat()
+            'created_at': datetime.now(UTC).isoformat()
         }
 
         result = client.table('credit_transactions').insert(transaction_data).execute()
@@ -94,8 +94,8 @@ def get_user_transactions(
         user_id: int,
         limit: int = 50,
         offset: int = 0,
-        transaction_type: Optional[str] = None
-) -> List[Dict[str, Any]]:
+        transaction_type: str | None = None
+) -> list[dict[str, Any]]:
     """
     Get credit transaction history for a user
 
@@ -129,9 +129,9 @@ def add_credits(
         api_key: str,
         amount: float,
         description: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         transaction_type: str = TransactionType.BONUS,
-        user_id: Optional[int] = None
+        user_id: int | None = None
 ) -> bool:
     """
     Add credits to a user's account
@@ -197,7 +197,7 @@ def add_credits(
         return False
 
 
-def get_transaction_summary(user_id: int) -> Dict[str, Any]:
+def get_transaction_summary(user_id: int) -> dict[str, Any]:
     """
     Get summary of credit transactions for a user
 

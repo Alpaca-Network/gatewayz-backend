@@ -7,7 +7,6 @@ PostgreSQL connection management for Docker-based database
 import logging
 import os
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Optional
 
 # Conditional imports
 try:
@@ -101,7 +100,7 @@ class DatabaseConfig:
                 )
             except Exception as e:
                 logger.error(f"Failed to create database connection pool: {e}")
-                raise RuntimeError(f"Database connection pool creation failed: {e}")
+                raise RuntimeError(f"Database connection pool creation failed: {e}") from e
 
         return self._connection_pool
 
@@ -304,7 +303,7 @@ class DatabaseConfig:
 
 
 # Global database configuration instance
-_db_config: Optional[DatabaseConfig] = None
+_db_config: DatabaseConfig | None = None
 
 
 def get_db_config() -> DatabaseConfig:
