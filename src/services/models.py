@@ -1713,7 +1713,7 @@ def normalize_vercel_model(model) -> Optional[dict]:
     # Extract model ID
     model_id = getattr(model, 'id', None)
     if not model_id:
-        logger.warning(f"Vercel model missing 'id' field: {model}")
+        logger.warning("Vercel model missing 'id' field: %s", sanitize_for_logging(str(model)))
         return None
 
     # Determine provider from model ID
