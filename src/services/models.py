@@ -53,6 +53,8 @@ logger = logging.getLogger(__name__)
 
 # Modality constants to reduce duplication
 MODALITY_TEXT_TO_TEXT = "text->text"
+MODALITY_TEXT_TO_IMAGE = "text->image"
+MODALITY_TEXT_TO_AUDIO = "text->audio"
 
 
 def sanitize_pricing(pricing: dict) -> dict:
@@ -891,11 +893,11 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
     # Determine modality based on type
     modality_map = {
         "LLM": MODALITY_TEXT_TO_TEXT,
-        "Image Generation": "text->image",
-        "Text to Speech": "text->audio",
+        "Image Generation": MODALITY_TEXT_TO_IMAGE,
+        "Text to Speech": MODALITY_TEXT_TO_AUDIO,
         "Speech to Text": "audio->text",
         "Video": "text->video",
-        "Music Generation": "text->audio",
+        "Music Generation": MODALITY_TEXT_TO_AUDIO,
         "Embeddings": "text->embedding",
         "Content Moderation": MODALITY_TEXT_TO_TEXT,
         "Other": "multimodal"
@@ -1609,18 +1611,18 @@ def normalize_fal_model(fal_model: dict) -> dict:
     # Determine modality based on type
     model_type = fal_model.get("type", "text-to-image")
     modality_map = {
-        "text-to-image": "text->image",
+        "text-to-image": MODALITY_TEXT_TO_IMAGE,
         "text-to-video": "text->video",
         "image-to-image": "image->image",
         "image-to-video": "image->video",
         "video-to-video": "video->video",
-        "text-to-audio": "text->audio",
-        "text-to-speech": "text->audio",
+        "text-to-audio": MODALITY_TEXT_TO_AUDIO,
+        "text-to-speech": MODALITY_TEXT_TO_AUDIO,
         "audio-to-audio": "audio->audio",
         "image-to-3d": "image->3d",
         "vision": "image->text",
     }
-    modality = modality_map.get(model_type, "text->image")
+    modality = modality_map.get(model_type, MODALITY_TEXT_TO_IMAGE)
 
     # Parse input/output modalities
     input_mod, output_mod = modality.split("->") if "->" in modality else ("text", "image")
@@ -1958,11 +1960,11 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
     output_modalities = ["text"]
 
     if model_type in ("text-to-image", "image"):
-        modality = "text->image"
+        modality = MODALITY_TEXT_TO_IMAGE
         input_modalities = ["text"]
         output_modalities = ["image"]
     elif model_type in ("text-to-speech", "tts"):
-        modality = "text->audio"
+        modality = MODALITY_TEXT_TO_AUDIO
         input_modalities = ["text"]
         output_modalities = ["audio"]
     elif model_type in ("speech-to-text", "stt"):
