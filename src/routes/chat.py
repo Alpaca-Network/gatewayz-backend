@@ -44,7 +44,7 @@ import src.db.users as users_module
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.config import Config
-from src.schemas import InputMessage, MessagesRequest, ProxyRequest, ResponseRequest
+from src.schemas import MessagesRequest, ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
 from src.services.aimo_client import (
     make_aimo_request_openai,
