@@ -104,7 +104,7 @@ class TestAdminAuthentication:
         )
         assert response.status_code == 401
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     def test_admin_endpoint_rejects_non_admin_user(self, mock_get_user, client, regular_user, user_headers):
         """Regular user cannot access admin endpoints"""
         mock_get_user.return_value = regular_user
@@ -116,7 +116,7 @@ class TestAdminAuthentication:
         )
         assert response.status_code == 403
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.db.users.add_credits_to_user')
     def test_admin_endpoint_accepts_valid_admin(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
@@ -230,7 +230,7 @@ class TestUserCreation:
 class TestCreditManagement:
     """Test credit management operations"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.db.users.add_credits_to_user')
     def test_add_credits_success(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
@@ -253,7 +253,7 @@ class TestCreditManagement:
             assert data['status'] == 'success'
             assert data['new_balance'] == 150
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     def test_add_credits_user_not_found(self, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
         """Add credits fails when user not found"""
@@ -269,7 +269,7 @@ class TestCreditManagement:
         # Should return 404 or 401 depending on auth
         assert response.status_code in [404, 401, 403]
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.db.users.add_credits_to_user')
     def test_add_negative_credits(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
@@ -295,7 +295,7 @@ class TestCreditManagement:
 class TestRateLimitManagement:
     """Test rate limit management"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.db.rate_limits.set_user_rate_limits')
     def test_set_rate_limits_success(self, mock_set_limits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
@@ -321,7 +321,7 @@ class TestRateLimitManagement:
 class TestSystemOperations:
     """Test system operations"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     def test_clear_cache_success(self, mock_get_admin, client, admin_user, admin_headers):
         """Admin can clear system caches"""
         mock_get_admin.return_value = admin_user
@@ -331,7 +331,7 @@ class TestSystemOperations:
         # Should succeed or return not found if endpoint doesn't exist
         assert response.status_code in [200, 404, 401, 403]
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     def test_refresh_models_success(self, mock_get_admin, client, admin_user, admin_headers):
         """Admin can trigger model refresh"""
         mock_get_admin.return_value = admin_user
@@ -341,7 +341,7 @@ class TestSystemOperations:
         # Should succeed or return not found if endpoint doesn't exist
         assert response.status_code in [200, 404, 401, 403]
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_all_users')
     def test_get_all_users(self, mock_get_all_users, mock_get_admin, client, admin_user, admin_headers):
         """Admin can view all users"""
@@ -364,7 +364,7 @@ class TestAdminSecurity:
         """Admin key is loaded from environment variable"""
         assert os.getenv('ADMIN_API_KEY') is not None
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     def test_admin_operations_logged(self, mock_get_admin, client, admin_user, admin_headers):
         """Admin operations should be logged (audit trail)"""
         mock_get_admin.return_value = admin_user
@@ -431,7 +431,7 @@ class TestAdminValidation:
 class TestAdminEdgeCases:
     """Test edge cases and error handling"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.db.users.add_credits_to_user')
     def test_add_zero_credits(self, mock_add_credits, mock_get_user, mock_get_admin, client, admin_user, admin_headers):
