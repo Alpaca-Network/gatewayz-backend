@@ -183,7 +183,7 @@ def create_api_key(user_id: int, key_name: str, environment_tag: str = 'live',
         except Exception as audit_error:
             logger.warning(f"Failed to create audit log for API key {api_key}: {audit_error}")
 
-        return api_key
+        return api_key, result.data[0]['id']
 
     except Exception as e:
         logger.error(f"Failed to create API key: {e}")
