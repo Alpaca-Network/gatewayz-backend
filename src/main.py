@@ -109,14 +109,14 @@ def create_app() -> FastAPI:
     # Compress responses larger than 1KB (1000 bytes)
     # This significantly reduces payload size for large model lists
     app.add_middleware(GZipMiddleware, minimum_size=1000)
-    logger.info("  🗜️  GZip compression middleware enabled (threshold: 1KB)")
+    logger.info("  🗜  GZip compression middleware enabled (threshold: 1KB)")
 
     # Security
     HTTPBearer()
 
     # ==================== Load All Routes ====================
-    logger.info("🚀 Loading application routes...")
-    print("🚀 Loading application routes...", flush=True)  # Force output for debugging
+    logger.info("Loading application routes...")
+    print("Loading application routes...", flush=True)  # Force output for debugging
 
     # Write to file for debugging in CI
     try:
@@ -174,13 +174,13 @@ def create_app() -> FastAPI:
             app.include_router(router)
 
             # Log success
-            success_msg = f"  ✅ {display_name} ({module_name})"
+            success_msg = f"  [OK] {display_name} ({module_name})"
             logger.info(success_msg)
             print(success_msg, flush=True)  # Force output for debugging
             loaded_count += 1
 
         except ImportError as e:
-            error_msg = f"  ⚠️  {display_name} ({module_name}) - Module not found: {e}"
+            error_msg = f"  [WARN] {display_name} ({module_name}) - Module not found: {e}"
             logger.error(error_msg)
             print(error_msg, flush=True)  # Force output for debugging
             logger.error(f"       Full error details: {repr(e)}")
@@ -193,13 +193,13 @@ def create_app() -> FastAPI:
             failed_count += 1
 
         except AttributeError as e:
-            error_msg = f"  ❌ {display_name} ({module_name}) - No router found: {e}"
+            error_msg = f"  [ERROR] {display_name} ({module_name}) - No router found: {e}"
             logger.error(error_msg)
             print(error_msg, flush=True)  # Force output for debugging
             failed_count += 1
 
         except Exception as e:
-            error_msg = f"  ❌ {display_name} ({module_name}) - Error: {e}"
+            error_msg = f"  [ERROR] {display_name} ({module_name}) - Error: {e}"
             logger.error(error_msg)
             print(error_msg, flush=True)  # Force output for debugging
             import traceback
@@ -208,11 +208,11 @@ def create_app() -> FastAPI:
             failed_count += 1
 
     # Log summary
-    logger.info("\n📊 Route Loading Summary:")
-    logger.info(f"   ✅ Loaded: {loaded_count}")
+    logger.info("\nRoute Loading Summary:")
+    logger.info(f"   [OK] Loaded: {loaded_count}")
     if failed_count > 0:
-        logger.warning(f"   ❌ Failed: {failed_count}")
-    logger.info(f"   📍 Total: {loaded_count + failed_count}")
+        logger.warning(f"   [FAIL] Failed: {failed_count}")
+    logger.info(f"   Total: {loaded_count + failed_count}")
 
     # ==================== Exception Handler ====================
 
@@ -231,25 +231,25 @@ def create_app() -> FastAPI:
 
         try:
             # Validate configuration
-            logger.info("  ⚙️  Validating configuration...")
+            logger.info("    Validating configuration...")
             Config.validate()
-            logger.info("  ✅ Configuration validated")
+            logger.info("  [OK] Configuration validated")
 
             # Enforce admin key presence in production
             if Config.IS_PRODUCTION and not os.environ.get("ADMIN_API_KEY"):
-                logger.error("  ❌ ADMIN_API_KEY is not set in production. Aborting startup.")
+                logger.error("  [ERROR] ADMIN_API_KEY is not set in production. Aborting startup.")
                 raise RuntimeError("ADMIN_API_KEY is required in production")
 
             # Initialize database
             try:
-                logger.info("  🗄️  Initializing database...")
+                logger.info("    Initializing database...")
                 from src.config.supabase_config import init_db
 
                 init_db()
-                logger.info("  ✅ Database initialized")
+                logger.info("   Database initialized")
 
             except Exception as db_e:
-                logger.warning(f"  ⚠️  Database initialization warning: {db_e}")
+                logger.warning(f"    Database initialization warning: {db_e}")
 
             # Set default admin user
             try:
@@ -259,7 +259,7 @@ def create_app() -> FastAPI:
                 ADMIN_EMAIL = Config.ADMIN_EMAIL
 
                 if not ADMIN_EMAIL:
-                    logger.warning("  ⚠️  ADMIN_EMAIL not configured in environment variables")
+                    logger.warning("    ADMIN_EMAIL not configured in environment variables")
                 else:
                     client = get_supabase_client()
                     result = (
@@ -276,40 +276,40 @@ def create_app() -> FastAPI:
                                 new_role=UserRole.ADMIN,
                                 reason="Default admin setup on startup",
                             )
-                            logger.info(f"  ✅ Set {ADMIN_EMAIL} as admin")
+                            logger.info(f"   Set {ADMIN_EMAIL} as admin")
                         else:
-                            logger.info(f"  ℹ️  {ADMIN_EMAIL} is already admin")
+                            logger.info(f"  ℹ  {ADMIN_EMAIL} is already admin")
 
             except Exception as admin_e:
-                logger.warning(f"  ⚠️  Admin setup warning: {admin_e}")
+                logger.warning(f"    Admin setup warning: {admin_e}")
 
             # Initialize analytics services (Statsig, PostHog, and Braintrust)
             try:
-                logger.info("  📊 Initializing analytics services...")
+                logger.info("   Initializing analytics services...")
 
                 # Initialize Statsig
                 from src.services.statsig_service import statsig_service
 
                 await statsig_service.initialize()
-                logger.info("  ✅ Statsig analytics initialized")
+                logger.info("   Statsig analytics initialized")
 
                 # Initialize PostHog
                 from src.services.posthog_service import posthog_service
 
                 posthog_service.initialize()
-                logger.info("  ✅ PostHog analytics initialized")
+                logger.info("   PostHog analytics initialized")
 
                 # Initialize Braintrust
                 try:
                     from braintrust import init_logger
 
                     init_logger(project="Gatewayz Backend")
-                    logger.info("  ✅ Braintrust tracing initialized")
+                    logger.info("   Braintrust tracing initialized")
                 except Exception as bt_e:
-                    logger.warning(f"  ⚠️  Braintrust initialization warning: {bt_e}")
+                    logger.warning(f"    Braintrust initialization warning: {bt_e}")
 
             except Exception as analytics_e:
-                logger.warning(f"  ⚠️  Analytics initialization warning: {analytics_e}")
+                logger.warning(f"    Analytics initialization warning: {analytics_e}")
 
             # Warm model caches on startup
             try:
@@ -318,17 +318,17 @@ def create_app() -> FastAPI:
 
                 # Warm critical provider caches
                 get_cached_models("hug")
-                logger.info("  ✅ HuggingFace models cache warmed")
+                logger.info("   HuggingFace models cache warmed")
 
             except Exception as cache_e:
-                logger.warning(f"  ⚠️  Cache warming warning: {cache_e}")
+                logger.warning(f"    Cache warming warning: {cache_e}")
 
         except Exception as e:
-            logger.error(f"  ❌ Startup initialization failed: {e}")
+            logger.error(f"   Startup initialization failed: {e}")
 
         logger.info("\n🎉 Application startup complete!")
-        logger.info("📍 API Documentation: http://localhost:8000/docs")
-        logger.info("📍 Health Check: http://localhost:8000/health\n")
+        logger.info(" API Documentation: http://localhost:8000/docs")
+        logger.info(" Health Check: http://localhost:8000/health\n")
 
     # ==================== Shutdown Event ====================
 
@@ -341,17 +341,17 @@ def create_app() -> FastAPI:
             from src.services.statsig_service import statsig_service
 
             await statsig_service.shutdown()
-            logger.info("  ✅ Statsig shutdown complete")
+            logger.info("   Statsig shutdown complete")
         except Exception as e:
-            logger.warning(f"  ⚠️  Statsig shutdown warning: {e}")
+            logger.warning(f"    Statsig shutdown warning: {e}")
 
         try:
             from src.services.posthog_service import posthog_service
 
             posthog_service.shutdown()
-            logger.info("  ✅ PostHog shutdown complete")
+            logger.info("   PostHog shutdown complete")
         except Exception as e:
-            logger.warning(f"  ⚠️  PostHog shutdown warning: {e}")
+            logger.warning(f"    PostHog shutdown warning: {e}")
 
     return app
 
@@ -363,5 +363,5 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("🚀 Starting Gatewayz API server...")
+    logger.info(" Starting Gatewayz API server...")
     uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True)

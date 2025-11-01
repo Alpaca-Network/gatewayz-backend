@@ -328,7 +328,17 @@ class TestHealthSummary:
     def test_get_health_summary(self, mock_get_summary, mock_auth, client, auth_headers):
         """Get comprehensive health summary"""
         mock_auth.return_value = {'id': 1, 'api_key': 'gw_test_key'}
-        mock_summary = MagicMock()
+        from datetime import datetime, timezone
+        mock_summary = {
+            'system': {
+                'overall_status': 'healthy',
+                'total_providers': 5,
+                'total_models': 10
+            },
+            'providers': [],
+            'models': [],
+            'last_check': datetime.now(timezone.utc).isoformat()
+        }
         mock_get_summary.return_value = mock_summary
 
         response = client.get('/health/summary', headers=auth_headers)
