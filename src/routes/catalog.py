@@ -21,6 +21,7 @@ from src.services.modelz_client import (
     fetch_modelz_tokens, get_modelz_model_ids, check_model_exists_on_modelz,
     get_modelz_model_details
 )
+from src.utils.security_validators import sanitize_for_logging
 
 
 # Initialize logging
@@ -801,7 +802,7 @@ async def get_specific_model(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get specific model {provider_name}/{model_name}: {e}")
+        logger.error("Failed to get specific model %s/%s: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail="Failed to get model data")
 
 
@@ -835,7 +836,7 @@ async def get_developer_models(
     """
     try:
         developer_name = normalize_developer_segment(developer_name) or developer_name
-        logger.info(f"Getting models for developer: {developer_name}")
+        logger.info("Getting models for developer: %s", sanitize_for_logging(developer_name))
 
         # Get models from specified gateway
         gateway_value = (gateway or "all").lower()
@@ -858,7 +859,7 @@ async def get_developer_models(
                 filtered_models.append(model)
 
         if not filtered_models:
-            logger.warning(f"No models found for developer: {developer_name}")
+            logger.warning("No models found for developer: %s", sanitize_for_logging(developer_name))
             return {
                 "developer": developer_name,
                 "models": [],
@@ -869,7 +870,7 @@ async def get_developer_models(
             }
 
         total_models = len(filtered_models)
-        logger.info(f"Found {total_models} models for developer '{developer_name}'")
+        logger.info("Found %d models for developer '%s'", total_models, sanitize_for_logging(developer_name))
 
         # Apply pagination
         if offset:
@@ -901,7 +902,7 @@ async def get_developer_models(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get models for developer {developer_name}: {e}")
+        logger.error("Failed to get models for developer %s: %s", sanitize_for_logging(developer_name), sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail=f"Failed to get developer models: {str(e)}")
 
 
@@ -937,7 +938,8 @@ async def get_provider_statistics(
         GET /catalog/provider/anthropic/stats?gateway=portkey&time_range=7d
     """
     try:
-        logger.info(f"Fetching stats for provider: {provider_name}, gateway: {gateway}, time_range: {time_range}")
+        logger.info("Fetching stats for provider: %s, gateway: %s, time_range: %s", 
+                   sanitize_for_logging(provider_name), sanitize_for_logging(gateway), sanitize_for_logging(time_range))
         
         stats = get_provider_stats(
             provider_name=provider_name,
@@ -957,7 +959,7 @@ async def get_provider_statistics(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get provider stats for {provider_name}: {e}")
+        logger.error("Failed to get provider stats for %s: %s", sanitize_for_logging(provider_name), sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail=f"Failed to get provider statistics: {str(e)}")
 
 
@@ -989,7 +991,7 @@ async def get_gateway_statistics(
         GET /catalog/gateway/deepinfra/stats?time_range=7d
     """
     try:
-        logger.info(f"Fetching stats for gateway: {gateway}, time_range: {time_range}")
+        logger.info("Fetching stats for gateway: %s, time_range: %s", sanitize_for_logging(gateway), sanitize_for_logging(time_range))
         
         # Validate gateway
         valid_gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]
@@ -1016,7 +1018,7 @@ async def get_gateway_statistics(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get gateway stats for {gateway}: {e}")
+        logger.error("Failed to get gateway stats for %s: %s", sanitize_for_logging(gateway), sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail=f"Failed to get gateway statistics: {str(e)}")
 
 
@@ -1046,7 +1048,8 @@ async def get_trending_models_endpoint(
         GET /catalog/models/trending?gateway=deepinfra&sort_by=tokens
     """
     try:
-        logger.info(f"Fetching trending models: gateway={gateway}, time_range={time_range}, sort_by={sort_by}")
+        logger.info("Fetching trending models: gateway=%s, time_range=%s, sort_by=%s", 
+                   sanitize_for_logging(gateway), sanitize_for_logging(time_range), sanitize_for_logging(sort_by))
         
         # Validate sort_by
         valid_sort = ["requests", "tokens", "users"]
@@ -1100,7 +1103,7 @@ async def get_all_gateways_summary_endpoint(
         GET /catalog/gateways/summary?time_range=24h
     """
     try:
-        logger.info(f"Fetching summary for all gateways: time_range={time_range}")
+        logger.info("Fetching summary for all gateways: time_range=%s", sanitize_for_logging(time_range))
         
         summary = get_all_gateways_summary(time_range=time_range)
         
@@ -1144,7 +1147,7 @@ async def get_provider_top_models_endpoint(
     """
     try:
         provider_name = normalize_developer_segment(provider_name) or provider_name
-        logger.info(f"Fetching top models for provider: {provider_name}")
+        logger.info("Fetching top models for provider: %s", sanitize_for_logging(provider_name))
         
         top_models = get_top_models_by_provider(
             provider_name=provider_name,
@@ -1164,7 +1167,7 @@ async def get_provider_top_models_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get top models for {provider_name}: {e}")
+        logger.error("Failed to get top models for %s: %s", sanitize_for_logging(provider_name), sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail=f"Failed to get top models: {str(e)}")
 
 
@@ -1199,7 +1202,7 @@ async def compare_model_across_gateways(
     try:
         provider_name = normalize_developer_segment(provider_name) or provider_name
         model_name = normalize_model_segment(model_name) or model_name
-        logger.info(f"Comparing model {provider_name}/{model_name} across gateways")
+        logger.info("Comparing model %s/%s across gateways", sanitize_for_logging(provider_name), sanitize_for_logging(model_name))
         
         # Parse gateways list
         if gateways and gateways.lower() != "all":
@@ -1251,7 +1254,7 @@ async def compare_model_across_gateways(
                     })
                     
             except Exception as e:
-                logger.warning(f"Failed to fetch model from {gateway}: {e}")
+                logger.warning("Failed to fetch model from %s: %s", sanitize_for_logging(gateway), sanitize_for_logging(str(e)))
                 comparisons.append({
                     "gateway": gateway,
                     "available": False,
@@ -1281,7 +1284,7 @@ async def compare_model_across_gateways(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to compare model {provider_name}/{model_name}: {e}")
+        logger.error("Failed to compare model %s/%s: %s", sanitize_for_logging(provider_name), sanitize_for_logging(model_name), sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail=f"Failed to compare model: {str(e)}")
 
 
@@ -1305,7 +1308,7 @@ async def batch_compare_models(
         POST /catalog/models/batch-compare?model_ids=openai/gpt-4&model_ids=anthropic/claude-3&criteria=price
     """
     try:
-        logger.info(f"Batch comparing {len(model_ids)} models by {criteria}")
+        logger.info("Batch comparing %d models by %s", len(model_ids), sanitize_for_logging(criteria))
         
         results = []
         
@@ -1359,7 +1362,7 @@ async def batch_compare_models(
                     })
                     
             except Exception as e:
-                logger.error(f"Error comparing {normalized_model_id}: {e}")
+                logger.error("Error comparing %s: %s", sanitize_for_logging(normalized_model_id), sanitize_for_logging(str(e)))
                 results.append({
                     "model_id": normalized_model_id,
                     "error": str(e)
@@ -1835,7 +1838,7 @@ async def get_modelz_models(
     - Includes model IDs, graduation status, and other metadata
     """
     try:
-        logger.info(f"Fetching Modelz models with is_graduated={is_graduated}")
+        logger.info("Fetching Modelz models with is_graduated=%s", is_graduated)
         
         # Fetch token data from Modelz API
         tokens = await fetch_modelz_tokens(is_graduated)
@@ -1910,7 +1913,7 @@ async def get_modelz_model_ids_endpoint(
     - List of model IDs from Modelz
     """
     try:
-        logger.info(f"Fetching Modelz model IDs with is_graduated={is_graduated}")
+        logger.info("Fetching Modelz model IDs with is_graduated=%s", is_graduated)
         
         model_ids = await get_modelz_model_ids(is_graduated)
         
@@ -1960,7 +1963,7 @@ async def check_model_on_modelz(
     - Additional model details if found
     """
     try:
-        logger.info(f"Checking if model '{model_id}' exists on Modelz with is_graduated={is_graduated}")
+        logger.info("Checking if model '%s' exists on Modelz with is_graduated=%s", sanitize_for_logging(model_id), is_graduated)
         
         exists = await check_model_exists_on_modelz(model_id, is_graduated)
         
