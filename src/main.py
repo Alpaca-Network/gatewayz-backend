@@ -251,45 +251,51 @@ def create_app() -> FastAPI:
                 logger.error("  ❌ ADMIN_API_KEY is not set in production. Aborting startup.")
                 raise RuntimeError("ADMIN_API_KEY is required in production")
 
-            # Initialize database
-            try:
-                logger.info("  🗄️  Initializing database...")
-                from src.config.supabase_config import init_db
-                init_db()
-                logger.info("  ✅ Database initialized")
+            # Initialize database (skip during testing)
+            if not Config.IS_TESTING:
+                try:
+                    logger.info("  🗄️  Initializing database...")
+                    from src.config.supabase_config import init_db
+                    init_db()
+                    logger.info("  ✅ Database initialized")
 
-            except Exception as db_e:
-                logger.warning(f"  ⚠️  Database initialization warning: {db_e}")
+                except Exception as db_e:
+                    logger.warning(f"  ⚠️  Database initialization warning: {db_e}")
+            else:
+                logger.info("  🧪 Skipping database initialization in testing mode")
 
-            # Set default admin user
-            try:
-                from src.db.roles import update_user_role, get_user_role, UserRole
-                from src.config.supabase_config import get_supabase_client
+            # Set default admin user (skip during testing)
+            if not Config.IS_TESTING:
+                try:
+                    from src.db.roles import update_user_role, get_user_role, UserRole
+                    from src.config.supabase_config import get_supabase_client
 
-                ADMIN_EMAIL = Config.ADMIN_EMAIL
+                    ADMIN_EMAIL = Config.ADMIN_EMAIL
 
-                if not ADMIN_EMAIL:
-                    logger.warning("  ⚠️  ADMIN_EMAIL not configured in environment variables")
-                else:
-                    client = get_supabase_client()
-                    result = client.table('users').select('id, role').eq('email', ADMIN_EMAIL).execute()
+                    if not ADMIN_EMAIL:
+                        logger.warning("  ⚠️  ADMIN_EMAIL not configured in environment variables")
+                    else:
+                        client = get_supabase_client()
+                        result = client.table('users').select('id, role').eq('email', ADMIN_EMAIL).execute()
 
-                    if result.data:
-                        user = result.data[0]
-                        current_role = user.get('role', 'user')
+                        if result.data:
+                            user = result.data[0]
+                            current_role = user.get('role', 'user')
 
-                        if current_role != UserRole.ADMIN:
-                            update_user_role(
-                                user_id=user['id'],
-                                new_role=UserRole.ADMIN,
-                                reason="Default admin setup on startup"
-                            )
-                            logger.info(f"  ✅ Set {ADMIN_EMAIL} as admin")
-                        else:
-                            logger.info(f"  ℹ️  {ADMIN_EMAIL} is already admin")
+                            if current_role != UserRole.ADMIN:
+                                update_user_role(
+                                    user_id=user['id'],
+                                    new_role=UserRole.ADMIN,
+                                    reason="Default admin setup on startup"
+                                )
+                                logger.info(f"  ✅ Set {ADMIN_EMAIL} as admin")
+                            else:
+                                logger.info(f"  ℹ️  {ADMIN_EMAIL} is already admin")
 
-            except Exception as admin_e:
-                logger.warning(f"  ⚠️  Admin setup warning: {admin_e}")
+                except Exception as admin_e:
+                    logger.warning(f"  ⚠️  Admin setup warning: {admin_e}")
+            else:
+                logger.info("  🧪 Skipping admin user setup in testing mode")
 
             # Initialize analytics services (Statsig, PostHog, and Braintrust)
             try:
