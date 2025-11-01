@@ -1,8 +1,8 @@
 import logging
 import secrets
 import string
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.credit_transactions import add_credits
@@ -15,7 +15,7 @@ def send_referral_signup_notification(referrer_id: int, referrer_email: str, ref
     try:
         from src.enhanced_notification_service import enhanced_notification_service
 
-        subject = f"Someone used your referral code! - AI Gateway"
+        subject = "Someone used your referral code! - AI Gateway"
 
         content = f"""
             <h2>🎉 Great News!</h2>
@@ -85,7 +85,7 @@ def send_referral_bonus_notification(
     referee_username: str,
     referee_email: str,
     referee_new_balance: float
-) -> Tuple[bool, bool]:
+) -> tuple[bool, bool]:
     """
     Send email notifications to both referrer and referee when bonus is applied.
 
@@ -95,7 +95,7 @@ def send_referral_bonus_notification(
         from src.enhanced_notification_service import enhanced_notification_service
 
         # Send notification to referrer
-        referrer_subject = f"You earned $10 from your referral! - AI Gateway"
+        referrer_subject = "You earned $10 from your referral! - AI Gateway"
 
         referrer_content = f"""
             <h2>💰 Congratulations!</h2>
@@ -159,7 +159,7 @@ The AI Gateway Team
         )
 
         # Send notification to referee
-        referee_subject = f"Welcome bonus applied - $10 in credits! - AI Gateway"
+        referee_subject = "Welcome bonus applied - $10 in credits! - AI Gateway"
 
         referee_content = f"""
             <h2>🎉 Welcome Bonus Applied!</h2>
@@ -224,7 +224,7 @@ The AI Gateway Team
         if referrer_success:
             logger.info(f"Sent referral bonus notification to referrer {referrer_id}")
         if referee_success:
-            logger.info(f"Sent referral bonus notification to referee")
+            logger.info("Sent referral bonus notification to referee")
 
         return referrer_success, referee_success
 
@@ -275,7 +275,7 @@ def create_user_referral_code(user_id: int) -> str:
         raise
 
 
-def validate_referral_code(referral_code: str, user_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+def validate_referral_code(referral_code: str, user_id: int) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Validate if a referral code can be used by a user.
 
@@ -334,7 +334,7 @@ def apply_referral_bonus(
     user_id: int,
     referral_code: str,
     purchase_amount: float
-) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Apply referral bonus to both user and referrer after a qualifying purchase.
 
@@ -369,7 +369,7 @@ def apply_referral_bonus(
             # Update existing pending referral to completed
             referral_result = client.table('referrals').update({
                 'status': 'completed',
-                'completed_at': datetime.now(timezone.utc).isoformat()
+                'completed_at': datetime.now(UTC).isoformat()
             }).eq('id', existing_referral.data[0]['id']).execute()
 
             if not referral_result.data:
@@ -382,7 +382,7 @@ def apply_referral_bonus(
                 'referral_code': referral_code,
                 'bonus_amount': REFERRAL_BONUS,
                 'status': 'completed',
-                'completed_at': datetime.now(timezone.utc).isoformat()
+                'completed_at': datetime.now(UTC).isoformat()
             }
 
             referral_result = client.table('referrals').insert(referral_data).execute()
@@ -466,7 +466,7 @@ def apply_referral_bonus(
         return False, f"Failed to apply referral bonus: {str(e)}", None
 
 
-def get_referral_stats(user_id: int) -> Optional[Dict[str, Any]]:
+def get_referral_stats(user_id: int) -> dict[str, Any] | None:
     """Get referral statistics for a user"""
     try:
         client = get_supabase_client()
@@ -548,7 +548,7 @@ def get_referral_stats(user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def track_referral_signup(referral_code: str, referred_user_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+def track_referral_signup(referral_code: str, referred_user_id: int) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Track when a user signs up with a referral code (creates pending referral record).
 
@@ -586,7 +586,7 @@ def track_referral_signup(referral_code: str, referred_user_id: int) -> Tuple[bo
             'referral_code': referral_code,
             'bonus_amount': REFERRAL_BONUS,
             'status': 'pending',
-            'created_at': datetime.now(timezone.utc).isoformat()
+            'created_at': datetime.now(UTC).isoformat()
         }
 
         referral_result = client.table('referrals').insert(referral_data).execute()

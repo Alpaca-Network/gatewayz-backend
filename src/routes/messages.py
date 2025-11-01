@@ -4,9 +4,9 @@ Compatible with Claude API: https://docs.claude.com/en/api/messages
 """
 
 import asyncio
+import importlib
 import logging
 import time
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -19,6 +19,7 @@ import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
+from src.config import Config
 from src.schemas import MessagesRequest
 from src.security.deps import get_api_key
 from src.services.anthropic_transformer import (
@@ -145,7 +146,7 @@ async def _to_thread(func, *args, **kwargs):
 async def anthropic_messages(
     req: MessagesRequest,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None
 ):
     """
@@ -503,7 +504,7 @@ async def anthropic_messages(
                 })
                 await _to_thread(record_usage, user["id"], api_key, model, total_tokens, cost, int(elapsed * 1000))
             except ValueError as e:
-                raise HTTPException(status_code=402, detail=str(e))
+                raise HTTPException(status_code=402, detail=str(e)) from e
             except Exception as e:
                 logger.error("Usage recording error: %s", e)
 
@@ -574,13 +575,10 @@ async def anthropic_messages(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Unhandled server error in anthropic_messages")
-        raise HTTPException(status_code=500, detail="Internal server error")
-import importlib
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
-import src.config.supabase_config as supabase_config
-from src.config import Config
 
 # When running in test mode we reuse OpenRouter client for providers that
 # normally rely on external credentials, so unit tests can stub a single path

@@ -43,14 +43,14 @@ _provider_cache = {
 def get_admin_key(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     """Validate admin API key with security improvements"""
     admin_key = credentials.credentials
-    
+
     # Input validation
     try:
         ensure_non_empty_string(admin_key, "admin API key")
         ensure_api_key_like(admin_key, field_name="admin API key", min_length=10)
     except ValueError:
         # Do not leak details; preserve current response contract
-        raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY)
+        raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY) from None
 
     # Get expected key from environment
     expected_key = os.environ.get("ADMIN_API_KEY")
@@ -62,7 +62,7 @@ def get_admin_key(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer
     # Use constant-time comparison to prevent timing attacks
     if not secrets.compare_digest(admin_key, expected_key):
         raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY)
-    
+
     return admin_key
 
 
@@ -85,7 +85,7 @@ def create_app() -> FastAPI:
         "https://staging.gatewayz.ai",
         "https://api.gatewayz.ai",  # Added for chat API access from frontend
     ]
-    
+
     if Config.IS_PRODUCTION:
         allowed_origins = [
             "https://gatewayz.ai",
@@ -105,10 +105,10 @@ def create_app() -> FastAPI:
         ] + base_origins
 
     # Log CORS configuration for debugging
-    logger.info(f"🌐 CORS Configuration:")
+    logger.info("🌐 CORS Configuration:")
     logger.info(f"   Environment: {Config.APP_ENV}")
     logger.info(f"   Allowed Origins: {allowed_origins}")
-    
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -124,7 +124,7 @@ def create_app() -> FastAPI:
     logger.info("  🗜️  GZip compression middleware enabled (threshold: 1KB)")
 
     # Security
-    security = HTTPBearer()
+    HTTPBearer()
 
     # ==================== Load All Routes ====================
     logger.info("🚀 Loading application routes...")
@@ -135,7 +135,7 @@ def create_app() -> FastAPI:
         with open("/tmp/route_loading_debug.txt", "w") as f:
             f.write("Starting route loading...\n")
             f.flush()
-    except:
+    except Exception:
         pass
 
     # Define all routes to load
@@ -178,7 +178,7 @@ def create_app() -> FastAPI:
         try:
             # Import the route module
             module = __import__(f"src.routes.{module_name}", fromlist=['router'])
-            router = getattr(module, 'router')
+            router = module.router
 
             # Include the router (all routes now follow clean REST patterns)
             app.include_router(router)
@@ -216,7 +216,7 @@ def create_app() -> FastAPI:
             failed_count += 1
 
     # Log summary
-    logger.info(f"\n📊 Route Loading Summary:")
+    logger.info("\n📊 Route Loading Summary:")
     logger.info(f"   ✅ Loaded: {loaded_count}")
     if failed_count > 0:
         logger.warning(f"   ❌ Failed: {failed_count}")
@@ -264,7 +264,7 @@ def create_app() -> FastAPI:
             # Set default admin user
             try:
                 from src.config.supabase_config import get_supabase_client
-                from src.db.roles import UserRole, get_user_role, update_user_role
+                from src.db.roles import UserRole, update_user_role
 
                 ADMIN_EMAIL = Config.ADMIN_EMAIL
 
@@ -308,7 +308,7 @@ def create_app() -> FastAPI:
                 # Initialize Braintrust
                 try:
                     from braintrust import init_logger
-                    braintrust_logger = init_logger(project="Gatewayz Backend")
+                    init_logger(project="Gatewayz Backend")
                     logger.info("  ✅ Braintrust tracing initialized")
                 except Exception as bt_e:
                     logger.warning(f"  ⚠️  Braintrust initialization warning: {bt_e}")
@@ -332,8 +332,8 @@ def create_app() -> FastAPI:
             logger.error(f"  ❌ Startup initialization failed: {e}")
 
         logger.info("\n🎉 Application startup complete!")
-        logger.info(f"📍 API Documentation: http://localhost:8000/docs")
-        logger.info(f"📍 Health Check: http://localhost:8000/health\n")
+        logger.info("📍 API Documentation: http://localhost:8000/docs")
+        logger.info("📍 Health Check: http://localhost:8000/health\n")
 
     # ==================== Shutdown Event ====================
 

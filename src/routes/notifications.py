@@ -1,7 +1,6 @@
-import datetime
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -42,7 +41,7 @@ async def get_notification_preferences(api_key: str = Depends(get_api_key)):
         return preferences
     except Exception as e:
         logger.error(f"Error getting notification preferences: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.put("/user/notifications/preferences", tags=["notifications"])
@@ -75,7 +74,7 @@ async def update_notification_preferences(
         raise
     except Exception as e:
         logger.error(f"Error updating notification preferences: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/user/notifications/test", tags=["notifications"])
@@ -163,7 +162,7 @@ async def test_notification(
         raise
     except Exception as e:
         logger.error(f"Error sending test notification: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/user/notifications/send-usage-report", tags=["notifications"])
@@ -202,7 +201,7 @@ async def send_usage_report(
         raise
     except Exception as e:
         logger.error(f"Error sending usage report: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/notifications/stats", response_model=NotificationStats, tags=["admin"])
@@ -229,7 +228,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
                     recent_notifications=[]
                 )
             else:
-                raise table_error
+                raise table_error from table_error
 
         total_notifications = len(notifications)
         sent_notifications = len([n for n in notifications if n['status'] == 'sent'])
@@ -241,7 +240,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
         # Get last 24-hour notifications - use a simpler approach
         logger.info("Fetching recent notifications...")
         try:
-            yesterday = (datetime.now(timezone.utc) - datetime.timedelta(days=1)).isoformat()
+            yesterday = (datetime.now(UTC) - datetime.timedelta(days=1)).isoformat()
             recent_result = client.table('notifications').select('id').gte('created_at', yesterday).execute()
             last_24h_notifications = len(recent_result.data) if recent_result.data else 0
         except Exception as recent_error:
@@ -249,7 +248,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
             # Fallback: get all notifications and filter in Python
             all_notifications = client.table('notifications').select('created_at').execute()
             if all_notifications.data:
-                yesterday_dt = datetime.now(timezone.utc) - datetime.timedelta(days=1)
+                yesterday_dt = datetime.now(UTC) - datetime.timedelta(days=1)
                 last_24h_notifications = len([
                     n for n in all_notifications.data
                     if datetime.fromisoformat(n['created_at'].replace('Z', '+00:00')) >= yesterday_dt
@@ -270,7 +269,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
         )
     except Exception as e:
         logger.error(f"Error getting notification stats: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
 
 
 @router.post("/admin/notifications/process", tags=["admin"])
@@ -286,4 +285,4 @@ async def process_notifications(admin_user: dict = Depends(require_admin)):
         }
     except Exception as e:
         logger.error(f"Error processing notifications: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

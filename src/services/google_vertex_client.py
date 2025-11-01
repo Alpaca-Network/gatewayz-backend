@@ -7,7 +7,8 @@ using the official google-cloud-aiplatform SDK.
 import json
 import logging
 import time
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 
 import google.auth
 from google.auth.transport.requests import Request
@@ -61,7 +62,7 @@ def get_google_vertex_credentials():
                     logger.debug("Credentials successfully decoded from base64 and parsed as JSON")
                 except Exception as base64_error:
                     logger.error(f"Failed to decode credentials as base64: {base64_error}")
-                    raise ValueError(f"GOOGLE_VERTEX_CREDENTIALS_JSON must be valid JSON or base64-encoded JSON")
+                    raise ValueError("GOOGLE_VERTEX_CREDENTIALS_JSON must be valid JSON or base64-encoded JSON") from None
 
             try:
                 credentials = Credentials.from_service_account_info(creds_dict)
@@ -157,9 +158,9 @@ def transform_google_vertex_model_id(model_id: str) -> str:
 def make_google_vertex_request_openai(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs
 ) -> dict:
     """Make request to Google Vertex AI generative models
@@ -279,7 +280,7 @@ def make_google_vertex_request_openai(
         # Step 7: Process and normalize response
         try:
             processed_response = _process_google_vertex_response(response, model)
-            logger.info(f"Successfully processed Vertex AI response")
+            logger.info("Successfully processed Vertex AI response")
             return processed_response
         except Exception as process_error:
             logger.error(f"Failed to process Vertex AI response: {process_error}", exc_info=True)
@@ -293,9 +294,9 @@ def make_google_vertex_request_openai(
 def make_google_vertex_request_openai_stream(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs
 ) -> Iterator[str]:
     """Make streaming request to Google Vertex AI

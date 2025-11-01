@@ -30,7 +30,7 @@ HISTORICAL NOTE:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.cache import (
     _cerebras_models_cache,
@@ -176,7 +176,7 @@ def fetch_models_from_google():
             return None
 
         _google_models_cache["data"] = normalized_models
-        _google_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _google_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} Google models")
         return _google_models_cache["data"]
@@ -363,7 +363,7 @@ def fetch_models_from_cerebras():
             return None
 
         _cerebras_models_cache["data"] = normalized_models
-        _cerebras_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _cerebras_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} Cerebras models")
         return _cerebras_models_cache["data"]
@@ -409,7 +409,7 @@ def fetch_models_from_nebius():
         normalized_models = [normalize_portkey_provider_model(model, "nebius") for model in models_list if model]
 
         _nebius_models_cache["data"] = normalized_models
-        _nebius_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _nebius_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} Nebius models")
         return _nebius_models_cache["data"]
@@ -520,7 +520,7 @@ def fetch_models_from_xai():
         normalized_models = [normalize_portkey_provider_model(model, "xai") for model in models_list if model]
 
         _xai_models_cache["data"] = normalized_models
-        _xai_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _xai_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} xAI models")
         return _xai_models_cache["data"]
@@ -549,7 +549,7 @@ def fetch_models_from_xai():
         ]
         normalized_models = [normalize_portkey_provider_model(model, "xai") for model in fallback_models]
         _xai_models_cache["data"] = normalized_models
-        _xai_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _xai_models_cache["timestamp"] = datetime.now(UTC)
         logger.info(f"Using {len(normalized_models)} fallback xAI models due to error")
         return _xai_models_cache["data"]
 
@@ -590,7 +590,7 @@ def fetch_models_from_novita():
         normalized_models = [normalize_portkey_provider_model(model, "novita") for model in models_list if model]
 
         _novita_models_cache["data"] = normalized_models
-        _novita_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _novita_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} Novita models")
         return _novita_models_cache["data"]
@@ -613,7 +613,7 @@ def fetch_models_from_hug():
         normalized_models = [normalize_portkey_provider_model(model, "hug") for model in filtered_models if model]
 
         _huggingface_models_cache["data"] = normalized_models
-        _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _huggingface_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} Hugging Face models from Portkey catalog")
         return _huggingface_models_cache["data"]
@@ -840,7 +840,7 @@ def fetch_models_from_google_vertex():
             return None
 
         _google_vertex_models_cache["data"] = normalized_models
-        _google_vertex_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _google_vertex_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"✅ Cached {len(normalized_models)} Google Vertex AI models")
         return _google_vertex_models_cache["data"]

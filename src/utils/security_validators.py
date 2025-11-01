@@ -11,7 +11,6 @@ import hashlib
 import hmac
 import ipaddress
 import logging
-from typing import Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ def is_private_ip(ip: str) -> bool:
         return False
 
 
-def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bool:
+def validate_webhook_url(url: str, allowed_domains: list | None = None) -> bool:
     """Validate webhook URL to prevent SSRF attacks.
 
     Security checks:
@@ -70,7 +69,7 @@ def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bo
 
         # Try to resolve and check if it's a private IP
         try:
-            ip_obj = ipaddress.ip_address(hostname)
+            ipaddress.ip_address(hostname)
             if is_private_ip(hostname):
                 logger.warning(f"Webhook URL points to private IP: {url}")
                 return False
@@ -98,7 +97,7 @@ def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bo
         return False
 
 
-def validate_redirect_url(url: str, allowed_origins: Optional[list] = None) -> bool:
+def validate_redirect_url(url: str, allowed_origins: list | None = None) -> bool:
     """Validate redirect URL to prevent open redirect attacks.
 
     Security checks:
@@ -203,7 +202,7 @@ def verify_webhook_signature(
         return False
 
 
-def sanitize_pii_for_logging(data: dict, pii_fields: Optional[list] = None) -> dict:
+def sanitize_pii_for_logging(data: dict, pii_fields: list | None = None) -> dict:
     """Remove or mask personally identifiable information from logging data.
 
     Args:

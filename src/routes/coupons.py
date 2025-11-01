@@ -3,8 +3,6 @@ API routes for coupon system
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -15,14 +13,12 @@ from src.db.coupons import (
     get_all_coupons_stats,
     get_available_coupons_for_user,
     get_coupon_analytics,
-    get_coupon_by_code,
     get_coupon_by_id,
     get_user_redemption_history,
     list_coupons,
     redeem_coupon,
     update_coupon,
 )
-from src.db.users import get_user
 from src.schemas.coupons import (
     AvailableCouponResponse,
     CouponAnalyticsResponse,
@@ -36,7 +32,7 @@ from src.schemas.coupons import (
     RedemptionResponse,
     UpdateCouponRequest,
 )
-from src.security.deps import get_api_key, get_current_user, require_admin
+from src.security.deps import get_current_user, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +84,10 @@ async def redeem_coupon_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error in redeem coupon endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.get("/coupons/available", response_model=List[AvailableCouponResponse], tags=["coupons"])
+@router.get("/coupons/available", response_model=list[AvailableCouponResponse], tags=["coupons"])
 async def get_available_coupons(user: dict = Depends(get_current_user)):
     """
     Get all coupons available for the current user
@@ -112,7 +108,7 @@ async def get_available_coupons(user: dict = Depends(get_current_user)):
         raise
     except Exception as e:
         logger.error(f"Error getting available coupons: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/coupons/history", response_model=RedemptionHistoryResponse, tags=["coupons"])
@@ -159,7 +155,7 @@ async def get_redemption_history(
         raise
     except Exception as e:
         logger.error(f"Error getting redemption history: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============================================
@@ -203,17 +199,17 @@ async def create_coupon_endpoint(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error creating coupon: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/coupons", response_model=ListCouponsResponse, tags=["admin", "coupons"])
 async def list_coupons_endpoint(
-        scope: Optional[str] = None,
-        coupon_type: Optional[str] = None,
-        is_active: Optional[bool] = None,
+        scope: str | None = None,
+        coupon_type: str | None = None,
+        is_active: bool | None = None,
         limit: int = 100,
         offset: int = 0,
         user: dict = Depends(require_admin)
@@ -249,7 +245,7 @@ async def list_coupons_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error listing coupons: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/coupons/{coupon_id}", response_model=CouponResponse, tags=["admin", "coupons"])
@@ -270,7 +266,7 @@ async def get_coupon_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error getting coupon: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.patch("/admin/coupons/{coupon_id}", response_model=CouponResponse, tags=["admin", "coupons"])
@@ -299,7 +295,7 @@ async def update_coupon_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error updating coupon: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.delete("/admin/coupons/{coupon_id}", tags=["admin", "coupons"])
@@ -320,7 +316,7 @@ async def deactivate_coupon_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error deactivating coupon: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/coupons/{coupon_id}/analytics", response_model=CouponAnalyticsResponse, tags=["admin", "coupons"])
@@ -349,7 +345,7 @@ async def get_coupon_analytics_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error getting coupon analytics: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/coupons/stats/overview", response_model=CouponStatsResponse, tags=["admin", "coupons"])
@@ -364,4 +360,4 @@ async def get_coupon_stats_endpoint(user: dict = Depends(require_admin)):
         raise
     except Exception as e:
         logger.error(f"Error getting coupon stats: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

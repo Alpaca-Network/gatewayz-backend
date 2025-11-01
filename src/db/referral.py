@@ -1,6 +1,5 @@
 import random
 import string
-import uuid
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
@@ -94,7 +93,7 @@ class CouponUsage(db.Model):
     is_valid = db.Column(db.Boolean, default=True)
 
     def __init__(self, **kwargs):
-        super(CouponUsage, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if self.bonus_amount is None:
             self.bonus_amount = 10.0
         if self.is_valid is None:
@@ -129,7 +128,7 @@ class Purchase(db.Model):
     user = db.relationship('User', backref='purchases')
 
     def __init__(self, **kwargs):
-        super(Purchase, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if self.referral_bonus_applied is None:
             self.referral_bonus_applied = False
 

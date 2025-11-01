@@ -2,7 +2,6 @@
 Startup service for initializing health monitoring, availability services, and connection pools
 """
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -35,7 +34,7 @@ async def lifespan(app):
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
         # Initialize response cache
-        cache = get_cache()
+        get_cache()
         logger.info("Response cache initialized")
 
         logger.info("All monitoring services started successfully")
@@ -73,15 +72,15 @@ async def initialize_services():
     """
     try:
         logger.info("Initializing monitoring services...")
-        
+
         # Start health monitoring
         await health_monitor.start_monitoring()
-        
+
         # Start availability monitoring
         await availability_service.start_monitoring()
-        
+
         logger.info("All services initialized successfully")
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
@@ -92,14 +91,14 @@ async def shutdown_services():
     """
     try:
         logger.info("Shutting down services...")
-        
+
         # Stop availability monitoring
         await availability_service.stop_monitoring()
-        
+
         # Stop health monitoring
         await health_monitor.stop_monitoring()
-        
+
         logger.info("All services shut down successfully")
-        
+
     except Exception as e:
         logger.error(f"Error shutting down services: {e}")

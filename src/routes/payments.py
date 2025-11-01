@@ -6,7 +6,7 @@ Endpoints for handling Stripe webhooks and payment operations
 
 import inspect
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -143,22 +143,22 @@ async def stripe_webhook(
         raise HTTPException(
             status_code=400,
             detail=f"Invalid signature: {str(e)}"
-        )
+        ) from e
 
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Webhook processing failed: {str(e)}"
-        )
+        ) from e
 
 
 # ==================== Checkout Sessions ====================
 
-@router.post("/checkout-session", response_model=Dict[str, Any])
+@router.post("/checkout-session", response_model=dict[str, Any])
 async def create_checkout_session(
         request: CreateCheckoutSessionRequest,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe checkout session for hosted payment page
@@ -205,20 +205,20 @@ async def create_checkout_session(
 
     except ValueError as e:
         logger.error(f"Validation error creating checkout session: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
         logger.error(f"Error creating checkout session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create checkout session: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/checkout-session/{session_id}")
 async def get_checkout_session(
         session_id: str,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retrieve checkout session details
@@ -244,15 +244,15 @@ async def get_checkout_session(
 
     except Exception as e:
         logger.error(f"Error retrieving checkout session: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 # ==================== Payment Intents ====================
 
-@router.post("/payment-intent", response_model=Dict[str, Any])
+@router.post("/payment-intent", response_model=dict[str, Any])
 async def create_payment_intent(
         request: CreatePaymentIntentRequest,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe payment intent for custom payment flows
@@ -297,20 +297,20 @@ async def create_payment_intent(
 
     except ValueError as e:
         logger.error(f"Validation error creating payment intent: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
         logger.error(f"Error creating payment intent: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create payment intent: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/payment-intent/{payment_intent_id}")
 async def get_payment_intent(
         payment_intent_id: str,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retrieve payment intent details
@@ -336,7 +336,7 @@ async def get_payment_intent(
 
     except Exception as e:
         logger.error(f"Error retrieving payment intent: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 # ==================== Credit Packages ====================
@@ -385,15 +385,15 @@ async def get_credit_packages():
 
     except Exception as e:
         logger.error(f"Error getting credit packages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== Refunds ====================
 
-@router.post("/refund", response_model=Dict[str, Any])
+@router.post("/refund", response_model=dict[str, Any])
 async def create_refund(
         request: CreateRefundRequest,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a refund for a payment (admin only)
@@ -431,7 +431,7 @@ async def create_refund(
         raise
     except Exception as e:
         logger.error(f"Error creating refund: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== Payment History ====================
@@ -440,7 +440,7 @@ async def create_refund(
 async def get_payment_history(
         limit: int = 50,
         offset: int = 0,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get payment history for the authenticated user
@@ -479,13 +479,13 @@ async def get_payment_history(
 
     except Exception as e:
         logger.error(f"Error getting payment history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/payments/{payment_id}")
 async def get_payment_details(
         payment_id: int,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get details of a specific payment
@@ -530,15 +530,15 @@ async def get_payment_details(
         raise
     except Exception as e:
         logger.error(f"Error getting payment details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== Subscription Checkout ====================
 
-@router.post("/subscription-checkout", response_model=Dict[str, Any])
+@router.post("/subscription-checkout", response_model=dict[str, Any])
 async def create_subscription_checkout(
         request: CreateSubscriptionCheckoutRequest,
-        current_user: Dict[str, Any] = Depends(get_current_user)
+        current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe checkout session for subscription
@@ -591,11 +591,11 @@ async def create_subscription_checkout(
 
     except ValueError as e:
         logger.error(f"Validation error creating subscription checkout: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
         logger.error(f"Error creating subscription checkout: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create subscription checkout: {str(e)}"
-        )
+        ) from e

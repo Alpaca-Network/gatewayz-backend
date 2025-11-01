@@ -1,8 +1,7 @@
-import base64
 import logging
 import os
 import time
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -23,7 +22,7 @@ def make_portkey_image_request(
     quality: str = "standard",
     style: str = "natural",
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request to Portkey
 
     Args:
@@ -106,7 +105,7 @@ def make_deepinfra_image_request(
     size: str = "1024x1024",
     n: int = 1,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request directly to DeepInfra
 
     Args:
@@ -162,7 +161,7 @@ def make_google_vertex_image_request(
     location: str = None,
     endpoint_id: str = None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request to Google Vertex AI endpoint
 
     Args:
@@ -187,7 +186,7 @@ def make_google_vertex_image_request(
             raise ImportError(
                 "google-cloud-aiplatform and google-auth packages are required. "
                 "Install with: pip install google-cloud-aiplatform google-auth"
-            )
+            ) from None
 
         # Use config values if not provided
         project_id = project_id or Config.GOOGLE_PROJECT_ID
@@ -304,7 +303,7 @@ def make_google_vertex_image_request(
         raise
 
 
-def process_image_generation_response(response: Dict[str, Any], provider: str, model: str) -> Dict[str, Any]:
+def process_image_generation_response(response: dict[str, Any], provider: str, model: str) -> dict[str, Any]:
     """Process image generation response to standard format
 
     Args:

@@ -1,14 +1,13 @@
-import datetime
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import UTC, datetime
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
 
-def start_trial_for_key(api_key: str, trial_days: int = 14) -> Dict[str, Any]:
+def start_trial_for_key(api_key: str, trial_days: int = 14) -> dict[str, Any]:
     """Start a free trial for an API key"""
     try:
         client = get_supabase_client()
@@ -33,7 +32,7 @@ def start_trial_for_key(api_key: str, trial_days: int = 14) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def get_trial_status_for_key(api_key: str) -> Dict[str, Any]:
+def get_trial_status_for_key(api_key: str) -> dict[str, Any]:
     """Get trial status for an API key"""
     try:
         client = get_supabase_client()
@@ -57,7 +56,7 @@ def get_trial_status_for_key(api_key: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def convert_trial_to_paid_for_key(api_key: str, plan_name: str) -> Dict[str, Any]:
+def convert_trial_to_paid_for_key(api_key: str, plan_name: str) -> dict[str, Any]:
     """Convert trial to paid subscription for an API key"""
     try:
         client = get_supabase_client()
@@ -82,7 +81,7 @@ def convert_trial_to_paid_for_key(api_key: str, plan_name: str) -> Dict[str, Any
         return {"success": False, "error": str(e)}
 
 
-def track_trial_usage_for_key(api_key: str, tokens_used: int, requests_used: int = 1) -> Dict[str, Any]:
+def track_trial_usage_for_key(api_key: str, tokens_used: int, requests_used: int = 1) -> dict[str, Any]:
     """Track trial usage for an API key"""
     try:
         client = get_supabase_client()
@@ -108,7 +107,7 @@ def track_trial_usage_for_key(api_key: str, tokens_used: int, requests_used: int
         return {"success": False, "error": str(e)}
 
 
-def get_trial_analytics() -> Dict[str, Any]:
+def get_trial_analytics() -> dict[str, Any]:
     """Get trial analytics and conversion metrics"""
     try:
         client = get_supabase_client()
@@ -127,7 +126,7 @@ def get_trial_analytics() -> Dict[str, Any]:
         # Calculate active trials (not expired)
         active_trials = 0
         expired_trials = 0
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
 
         for key in trial_keys:
             trial_end_date = key.get('trial_end_date')
@@ -141,7 +140,7 @@ def get_trial_analytics() -> Dict[str, Any]:
                     # Ensure both datetimes have timezone info for comparison
                     if end_date.tzinfo is None:
                         # If end_date is naive, assume it's UTC
-                        end_date = end_date.replace(tzinfo=timezone.utc)
+                        end_date = end_date.replace(tzinfo=UTC)
 
                     if end_date > current_time:
                         active_trials += 1

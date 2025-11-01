@@ -1,7 +1,5 @@
-import datetime
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -71,14 +69,14 @@ async def get_user_rate_limits_advanced(api_key: str = Depends(get_api_key)):
             "status": "success",
             "user_id": user["id"],
             "rate_limit_configs": enhanced_configs,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting advanced rate limits: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.put("/user/rate-limits/{key_id}", tags=["authentication"])
@@ -120,14 +118,14 @@ async def update_user_rate_limits_advanced(
             "message": "Rate limit configuration updated successfully",
             "key_id": key_id,
             "updated_config": rate_limit_config,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating rate limits: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/user/rate-limits/bulk-update", tags=["authentication"])
@@ -160,14 +158,14 @@ async def bulk_update_user_rate_limits(
             "message": f"Rate limit configuration updated for {updated_count} API keys",
             "updated_count": updated_count,
             "updated_config": rate_limit_config,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error bulk updating rate limits: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/rate-limits/usage/{key_id}", tags=["authentication"])
@@ -204,14 +202,14 @@ async def get_api_key_rate_limit_usage(
             "time_window": time_window,
             "usage_stats": usage_stats,
             "rate_limit_config": rate_limit_config,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting rate limit usage: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/rate-limits/system", tags=["admin"])
@@ -223,17 +221,17 @@ async def get_system_rate_limits(admin_user: dict = Depends(require_admin)):
         return {
             "status": "success",
             "system_stats": stats,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Error getting system rate limit stats: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/rate-limits/alerts", tags=["admin"])
 async def get_rate_limit_alerts_endpoint(
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         resolved: bool = False,
         limit: int = 100,
         admin_user: dict = Depends(require_admin)
@@ -246,12 +244,12 @@ async def get_rate_limit_alerts_endpoint(
             "status": "success",
             "total_alerts": len(alerts),
             "alerts": alerts,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Error getting rate limit alerts: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 

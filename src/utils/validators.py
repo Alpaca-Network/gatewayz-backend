@@ -8,7 +8,8 @@ Design goals:
 """
 
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 
 def ensure_non_empty_string(value: Any, field_name: str) -> None:
@@ -34,7 +35,7 @@ def ensure_positive_number(value: Any, field_name: str, allow_zero: bool = True)
     try:
         num = float(value)
     except Exception:
-        raise ValueError(f"{field_name} must be a number")
+        raise ValueError(f"{field_name} must be a number") from None
     if allow_zero:
         if num < 0:
             raise ValueError(f"{field_name} must be >= 0")

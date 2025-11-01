@@ -1,6 +1,5 @@
-import datetime
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -79,14 +78,14 @@ async def create_api_key(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status="trial",
             message="API key created successfully!",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"API key creation failed: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Admin endpoints
@@ -112,10 +111,10 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Add credits failed: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/balance", tags=["admin"])
@@ -140,7 +139,7 @@ async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
 
     except Exception as e:
         logger.error(f"Error getting all user balances: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/monitor", tags=["admin"])
@@ -157,14 +156,14 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
             # Still return the data but log the error
             return {
                 "status": "success",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "data": monitor_data,
                 "warning": "Data retrieved with errors, some information may be incomplete"
             }
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": monitor_data
         }
 
@@ -172,7 +171,7 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
         raise
     except Exception as e:
         logger.error(f"Error getting admin monitor data: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/admin/limit", tags=["admin"])
@@ -199,12 +198,12 @@ async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depe
         }
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error setting rate limits: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Admin cache management endpoints
@@ -221,12 +220,12 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
             "status": "success",
             "message": "Provider cache refreshed successfully",
             "total_providers": len(providers) if providers else 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Failed to refresh provider cache: {e}")
-        raise HTTPException(status_code=500, detail="Failed to refresh provider cache")
+        raise HTTPException(status_code=500, detail="Failed to refresh provider cache") from e
 
 
 @router.get("/admin/cache-status", tags=["admin"])
@@ -234,7 +233,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     try:
         cache_age = None
         if _provider_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
 
         return {
             "status": "success",
@@ -245,12 +244,12 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
                 "is_valid": cache_age is not None and cache_age < _provider_cache["ttl"],
                 "total_cached_providers": len(_provider_cache["data"]) if _provider_cache["data"] else 0
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Failed to get cache status: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get cache status")
+        raise HTTPException(status_code=500, detail="Failed to get cache status") from e
 
 
 @router.get("/admin/huggingface-cache-status", tags=["admin"])
@@ -259,7 +258,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
     try:
         cache_age = None
         if _huggingface_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _huggingface_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - _huggingface_cache["timestamp"]).total_seconds()
 
         return {
             "huggingface_cache": {
@@ -268,12 +267,12 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
                 "total_cached_models": len(_huggingface_cache["data"]),
                 "cached_model_ids": list(_huggingface_cache["data"].keys())
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Failed to get Hugging Face cache status: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get Hugging Face cache status")
+        raise HTTPException(status_code=500, detail="Failed to get Hugging Face cache status") from e
 
 
 @router.post("/admin/refresh-huggingface-cache", tags=["admin"])
@@ -285,12 +284,12 @@ async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_adm
 
         return {
             "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Failed to clear Hugging Face cache: {e}")
-        raise HTTPException(status_code=500, detail="Failed to clear Hugging Face cache")
+        raise HTTPException(status_code=500, detail="Failed to clear Hugging Face cache") from e
 
 
 @router.get("/admin/test-huggingface/{hugging_face_id}", tags=["admin"])
@@ -317,14 +316,14 @@ async def admin_test_huggingface(hugging_face_id: str = "openai/gpt-oss-120b", a
                         'author_data') else 0
                 }
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to test Hugging Face API for {hugging_face_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to test Hugging Face API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to test Hugging Face API: {str(e)}") from e
 
 
 @router.get("/admin/debug-models", tags=["admin"])
@@ -367,7 +366,7 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_models": sample_models,
                 "cache_timestamp": _models_cache.get("timestamp"),
                 "cache_age_seconds": (
-                            datetime.now(timezone.utc) - _models_cache["timestamp"]).total_seconds() if _models_cache.get(
+                            datetime.now(UTC) - _models_cache["timestamp"]).total_seconds() if _models_cache.get(
                     "timestamp") else None
             },
             "providers_cache": {
@@ -375,16 +374,16 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_providers": sample_providers,
                 "cache_timestamp": _provider_cache.get("timestamp"),
                 "cache_age_seconds": (
-                            datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds() if _provider_cache.get(
+                            datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds() if _provider_cache.get(
                     "timestamp") else None
             },
             "provider_matching_test": provider_matching_test,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Failed to debug models and providers: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to debug: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to debug: {str(e)}") from e
 
 
 @router.get("/test-provider-matching", tags=["debug"])
@@ -458,10 +457,10 @@ async def test_provider_matching():
             "cache_info": {
                 "provider_cache_timestamp": _provider_cache.get("timestamp"),
                 "provider_cache_age": (
-                            datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds() if _provider_cache.get(
+                            datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds() if _provider_cache.get(
                     "timestamp") else None
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
@@ -503,7 +502,7 @@ async def test_refresh_providers():
                 "provider_site_url": enhanced_model.get('provider_site_url'),
                 "model_logo_url": enhanced_model.get('model_logo_url')
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
@@ -548,7 +547,7 @@ async def test_openrouter_providers():
                     "status_page_url": p.get('status_page_url')
                 } for p in providers[:5]
             ],
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
@@ -563,8 +562,6 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
     """Clear rate limit configuration cache to force reload from database"""
     try:
         from src.services.rate_limiting import (
-            _rate_limit_manager,
-            _rate_limiter,
             get_rate_limit_manager,
         )
 
@@ -580,12 +577,12 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         return {
             "status": "success",
             "message": "Rate limit cache cleared successfully. New requests will reload configuration.",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except Exception as e:
         logger.error(f"Failed to clear rate limit cache: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear rate limit cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear rate limit cache: {str(e)}") from e
 
 
 @router.get("/admin/trial/analytics", tags=["admin"])
@@ -596,7 +593,7 @@ async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
         return {"success": True, "analytics": analytics}
     except Exception as e:
         logger.error(f"Error getting trial analytics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get trial analytics")
+        raise HTTPException(status_code=500, detail="Failed to get trial analytics") from e
 
 
 @router.get("/admin/users", tags=["admin"])
@@ -604,41 +601,41 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
     """Get all users information from users table (Admin only)"""
     try:
         from src.config.supabase_config import get_supabase_client
-        
+
         client = get_supabase_client()
-        
+
         # Get all users with their information
         result = client.table('users').select(
             'id, username, email, credits, is_active, role, registration_date, '
             'auth_method, subscription_status, trial_expires_at, created_at, updated_at'
         ).execute()
-        
+
         if not result.data:
             return {
                 "status": "success",
                 "total_users": 0,
                 "users": [],
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
-        
+
         users = result.data
-        
+
         # Get additional statistics
         total_users = len(users)
         active_users = len([u for u in users if u.get('is_active', True)])
         admin_users = len([u for u in users if u.get('role') == 'admin'])
         developer_users = len([u for u in users if u.get('role') == 'developer'])
         regular_users = len([u for u in users if u.get('role') == 'user' or u.get('role') is None])
-        
+
         # Calculate total credits across all users
         total_credits = sum(float(u.get('credits', 0)) for u in users)
-        
+
         # Get subscription status breakdown
         subscription_stats = {}
         for user in users:
             status = user.get('subscription_status', 'unknown')
             subscription_stats[status] = subscription_stats.get(status, 0) + 1
-        
+
         return {
             "status": "success",
             "total_users": total_users,
@@ -653,12 +650,12 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
                 "subscription_breakdown": subscription_stats
             },
             "users": users,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting all users info: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get users information")
+        raise HTTPException(status_code=500, detail="Failed to get users information") from e
 
 
 @router.get("/admin/users/{user_id}", tags=["admin"])
@@ -666,46 +663,46 @@ async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_a
     """Get detailed information for a specific user (Admin only)"""
     try:
         from src.config.supabase_config import get_supabase_client
-        
+
         client = get_supabase_client()
-        
+
         # Get user information
         user_result = client.table('users').select('*').eq('id', user_id).execute()
-        
+
         if not user_result.data:
             raise HTTPException(status_code=404, detail="User not found")
-        
+
         user = user_result.data[0]
-        
+
         # Get user's API keys
         api_keys_result = client.table('api_keys_new').select('*').eq('user_id', user_id).execute()
         api_keys = api_keys_result.data if api_keys_result.data else []
-        
+
         # Get user's usage records (if available)
         try:
             usage_result = client.table('usage_records').select('*').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
             recent_usage = usage_result.data if usage_result.data else []
-        except:
+        except Exception:
             recent_usage = []
-        
+
         # Get user's activity log (if available)
         try:
             activity_result = client.table('activity_log').select('*').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
             recent_activity = activity_result.data if activity_result.data else []
-        except:
+        except Exception:
             recent_activity = []
-        
+
         return {
             "status": "success",
             "user": user,
             "api_keys": api_keys,
             "recent_usage": recent_usage,
             "recent_activity": recent_activity,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting user info for ID {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get user information")
+        raise HTTPException(status_code=500, detail="Failed to get user information") from e

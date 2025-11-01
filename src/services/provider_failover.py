@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List, Optional
 
 import httpx
 from fastapi import HTTPException
@@ -37,14 +36,14 @@ FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 
 
-def build_provider_failover_chain(initial_provider: str | None) -> List[str]:
+def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     """Return the provider attempt order starting with the initial provider."""
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
-    chain: List[str] = []
+    chain: list[str] = []
     if provider:
         chain.append(provider)
 
@@ -90,7 +89,7 @@ def map_provider_error(
         except (TypeError, ValueError):
             status = 500
         detail = "Upstream error"
-        headers: Optional[dict[str, str]] = None
+        headers: dict[str, str] | None = None
 
         if RateLimitError and isinstance(exc, RateLimitError):
             retry_after = None

@@ -6,19 +6,13 @@ circuit breakers, and reliability features.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.models.health_models import (
-    ModelHealthResponse,
-    ProviderHealthResponse,
-    SystemHealthResponse,
-)
 from src.security.deps import get_api_key
 from src.services.model_availability import (
-    AvailabilityStatus,
     ModelAvailability,
     availability_service,
 )
@@ -26,16 +20,16 @@ from src.services.model_availability import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/availability/models", response_model=List[ModelAvailability], tags=["availability"])
+@router.get("/availability/models", response_model=list[ModelAvailability], tags=["availability"])
 async def get_available_models(
-    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
-    provider: Optional[str] = Query(None, description="Filter by specific provider"),
-    status: Optional[str] = Query(None, description="Filter by availability status"),
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    provider: str | None = Query(None, description="Filter by specific provider"),
+    status: str | None = Query(None, description="Filter by availability status"),
     api_key: str = Depends(get_api_key)
 ):
     """
     Get available models with enhanced reliability features
-    
+
     Returns models with availability status including:
     - Circuit breaker state
     - Fallback model suggestions
@@ -44,25 +38,25 @@ async def get_available_models(
     """
     try:
         available_models = availability_service.get_available_models(gateway, provider)
-        
+
         # Apply status filter
         if status:
             available_models = [m for m in available_models if m.status.value == status]
-        
+
         return available_models
     except Exception as e:
         logger.error(f"Failed to get available models: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve available models")
+        raise HTTPException(status_code=500, detail="Failed to retrieve available models") from e
 
 @router.get("/availability/model/{model_id}", response_model=ModelAvailability, tags=["availability"])
 async def get_model_availability(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key)
 ):
     """
     Get availability status for a specific model
-    
+
     Returns detailed availability information including:
     - Current availability status
     - Circuit breaker state
@@ -74,29 +68,29 @@ async def get_model_availability(
         availability = availability_service.get_model_availability(model_id, gateway)
         if not availability:
             raise HTTPException(status_code=404, detail=f"Model {model_id} not found or no availability data")
-        
+
         return availability
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get model availability for {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve model availability")
+        raise HTTPException(status_code=500, detail="Failed to retrieve model availability") from e
 
-@router.get("/availability/check/{model_id}", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/check/{model_id}", response_model=dict[str, Any], tags=["availability"])
 async def check_model_availability(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key)
 ):
     """
     Quick availability check for a model
-    
+
     Returns a simple availability status suitable for quick checks.
     """
     try:
         is_available = availability_service.is_model_available(model_id, gateway)
         availability = availability_service.get_model_availability(model_id, gateway)
-        
+
         if not availability:
             return {
                 "model_id": model_id,
@@ -104,7 +98,7 @@ async def check_model_availability(
                 "status": "not_found",
                 "message": "Model not found or no availability data"
             }
-        
+
         return {
             "model_id": model_id,
             "available": is_available,
@@ -118,22 +112,22 @@ async def check_model_availability(
         }
     except Exception as e:
         logger.error(f"Failed to check model availability for {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to check model availability")
+        raise HTTPException(status_code=500, detail="Failed to check model availability") from e
 
-@router.get("/availability/fallback/{model_id}", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/fallback/{model_id}", response_model=dict[str, Any], tags=["availability"])
 async def get_fallback_models(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key)
 ):
     """
     Get fallback models for a given model
-    
+
     Returns suggested fallback models when the primary model is unavailable.
     """
     try:
         fallback_models = availability_service.get_fallback_models(model_id)
-        
+
         # Check which fallback models are actually available
         available_fallbacks = []
         for fallback in fallback_models:
@@ -150,7 +144,7 @@ async def get_fallback_models(
                     "available": False,
                     "status": availability.status.value if availability else "unknown"
                 })
-        
+
         return {
             "primary_model": model_id,
             "fallback_models": available_fallbacks,
@@ -158,22 +152,22 @@ async def get_fallback_models(
         }
     except Exception as e:
         logger.error(f"Failed to get fallback models for {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve fallback models")
+        raise HTTPException(status_code=500, detail="Failed to retrieve fallback models") from e
 
-@router.get("/availability/best/{model_id}", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/best/{model_id}", response_model=dict[str, Any], tags=["availability"])
 async def get_best_available_model(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key)
 ):
     """
     Get the best available model with fallbacks
-    
+
     Returns the best available model, trying fallbacks if the primary is unavailable.
     """
     try:
         best_model = availability_service.get_best_available_model(model_id, gateway)
-        
+
         if not best_model:
             return {
                 "primary_model": model_id,
@@ -181,10 +175,10 @@ async def get_best_available_model(
                 "message": "No available models found",
                 "suggestions": availability_service.get_fallback_models(model_id)
             }
-        
+
         # Get details of the best available model
         availability = availability_service.get_model_availability(best_model, gateway)
-        
+
         return {
             "primary_model": model_id,
             "best_available": best_model,
@@ -195,13 +189,13 @@ async def get_best_available_model(
         }
     except Exception as e:
         logger.error(f"Failed to get best available model for {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get best available model")
+        raise HTTPException(status_code=500, detail="Failed to get best available model") from e
 
-@router.get("/availability/summary", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/summary", response_model=dict[str, Any], tags=["availability"])
 async def get_availability_summary(api_key: str = Depends(get_api_key)):
     """
     Get availability summary across all models
-    
+
     Returns comprehensive availability statistics including:
     - Total and available model counts
     - Gateway-wise breakdown
@@ -213,9 +207,9 @@ async def get_availability_summary(api_key: str = Depends(get_api_key)):
         return summary
     except Exception as e:
         logger.error(f"Failed to get availability summary: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve availability summary")
+        raise HTTPException(status_code=500, detail="Failed to retrieve availability summary") from e
 
-@router.post("/availability/maintenance/{model_id}", response_model=Dict[str, Any], tags=["availability", "admin"])
+@router.post("/availability/maintenance/{model_id}", response_model=dict[str, Any], tags=["availability", "admin"])
 async def set_maintenance_mode(
     model_id: str,
     gateway: str,
@@ -224,7 +218,7 @@ async def set_maintenance_mode(
 ):
     """
     Set maintenance mode for a model
-    
+
     Places a model in maintenance mode until the specified time.
     """
     try:
@@ -237,9 +231,9 @@ async def set_maintenance_mode(
         }
     except Exception as e:
         logger.error(f"Failed to set maintenance mode for {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to set maintenance mode")
+        raise HTTPException(status_code=500, detail="Failed to set maintenance mode") from e
 
-@router.delete("/availability/maintenance/{model_id}", response_model=Dict[str, Any], tags=["availability", "admin"])
+@router.delete("/availability/maintenance/{model_id}", response_model=dict[str, Any], tags=["availability", "admin"])
 async def clear_maintenance_mode(
     model_id: str,
     gateway: str,
@@ -247,7 +241,7 @@ async def clear_maintenance_mode(
 ):
     """
     Clear maintenance mode for a model
-    
+
     Removes maintenance mode and allows normal availability checking.
     """
     try:
@@ -259,52 +253,52 @@ async def clear_maintenance_mode(
         }
     except Exception as e:
         logger.error(f"Failed to clear maintenance mode for {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to clear maintenance mode")
+        raise HTTPException(status_code=500, detail="Failed to clear maintenance mode") from e
 
-@router.post("/availability/monitoring/start", response_model=Dict[str, Any], tags=["availability", "admin"])
+@router.post("/availability/monitoring/start", response_model=dict[str, Any], tags=["availability", "admin"])
 async def start_availability_monitoring(api_key: str = Depends(get_api_key)):
     """
     Start availability monitoring service
-    
+
     Starts the background availability monitoring service.
     """
     try:
         await availability_service.start_monitoring()
         return {
             "message": "Availability monitoring started",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     except Exception as e:
         logger.error(f"Failed to start availability monitoring: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start availability monitoring")
+        raise HTTPException(status_code=500, detail="Failed to start availability monitoring") from e
 
-@router.post("/availability/monitoring/stop", response_model=Dict[str, Any], tags=["availability", "admin"])
+@router.post("/availability/monitoring/stop", response_model=dict[str, Any], tags=["availability", "admin"])
 async def stop_availability_monitoring(api_key: str = Depends(get_api_key)):
     """
     Stop availability monitoring service
-    
+
     Stops the background availability monitoring service.
     """
     try:
         await availability_service.stop_monitoring()
         return {
             "message": "Availability monitoring stopped",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     except Exception as e:
         logger.error(f"Failed to stop availability monitoring: {e}")
-        raise HTTPException(status_code=500, detail="Failed to stop availability monitoring")
+        raise HTTPException(status_code=500, detail="Failed to stop availability monitoring") from e
 
-@router.get("/availability/status", response_model=Dict[str, Any], tags=["availability", "status"])
+@router.get("/availability/status", response_model=dict[str, Any], tags=["availability", "status"])
 async def get_availability_status(api_key: str = Depends(get_api_key)):
     """
     Get simple availability status for quick checks
-    
+
     Returns a simple status response suitable for health checks and monitoring tools.
     """
     try:
         summary = availability_service.get_availability_summary()
-        
+
         return {
             "status": "operational" if summary["availability_percentage"] > 90 else "degraded",
             "availability_percentage": summary["availability_percentage"],
@@ -318,5 +312,5 @@ async def get_availability_status(api_key: str = Depends(get_api_key)):
         return {
             "status": "error",
             "message": "Failed to retrieve availability status",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }

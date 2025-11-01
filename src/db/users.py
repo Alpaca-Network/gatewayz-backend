@@ -1,8 +1,7 @@
-import datetime
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key
@@ -10,13 +9,13 @@ from src.db.api_keys import create_api_key
 logger = logging.getLogger(__name__)
 
 
-def create_enhanced_user(username: str, email: str, auth_method: str, credits: int = 10, privy_user_id: Optional[str] = None) -> Dict[str, Any]:
+def create_enhanced_user(username: str, email: str, auth_method: str, credits: int = 10, privy_user_id: str | None = None) -> dict[str, Any]:
     """Create a new user with automatic 3-day trial and $10 credits"""
     try:
         client = get_supabase_client()
 
         # Prepare user data with trial setup
-        trial_start = datetime.now(timezone.utc)
+        trial_start = datetime.now(UTC)
         trial_end = trial_start + timedelta(days=3)
 
         user_data = {
@@ -74,10 +73,10 @@ def create_enhanced_user(username: str, email: str, auth_method: str, credits: i
 
     except Exception as e:
         logger.error(f"Failed to create enhanced user: {e}")
-        raise RuntimeError(f"Failed to create enhanced user: {e}")
+        raise RuntimeError(f"Failed to create enhanced user: {e}") from e
 
 
-def get_user(api_key: str) -> Optional[Dict[str, Any]]:
+def get_user(api_key: str) -> dict[str, Any] | None:
     """Get user by API key from unified system"""
     try:
         client = get_supabase_client()
@@ -115,7 +114,7 @@ def get_user(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     """
     Get user by user ID (primary key)
 
@@ -140,7 +139,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_privy_id(privy_user_id: str) -> Optional[Dict[str, Any]]:
+def get_user_by_privy_id(privy_user_id: str) -> dict[str, Any] | None:
     """Get user by Privy user ID"""
     try:
         client = get_supabase_client()
@@ -157,7 +156,7 @@ def get_user_by_privy_id(privy_user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+def get_user_by_username(username: str) -> dict[str, Any] | None:
     """Get user by username"""
     try:
         client = get_supabase_client()
@@ -179,8 +178,8 @@ def add_credits_to_user(
     credits: float,
     transaction_type: str = "admin_credit",
     description: str = "Credits added",
-    payment_id: Optional[int] = None,
-    metadata: Optional[dict] = None
+    payment_id: int | None = None,
+    metadata: dict | None = None
 ) -> None:
     """
     Add credits to user account by user ID and log the transaction
@@ -212,7 +211,7 @@ def add_credits_to_user(
         # Update user credits
         result = client.table('users').update({
             'credits': balance_after,
-            'updated_at': datetime.now(timezone.utc).isoformat()
+            'updated_at': datetime.now(UTC).isoformat()
         }).eq('id', user_id).execute()
 
         if not result.data:
@@ -234,7 +233,7 @@ def add_credits_to_user(
 
     except Exception as e:
         logger.error(f"Failed to add credits: {e}")
-        raise RuntimeError(f"Failed to add credits: {e}")
+        raise RuntimeError(f"Failed to add credits: {e}") from e
 
 
 def add_credits(api_key: str, credits: int) -> None:
@@ -246,7 +245,7 @@ def add_credits(api_key: str, credits: int) -> None:
     add_credits_to_user(user['id'], credits)
 
 
-def deduct_credits(api_key: str, tokens: float, description: str = "API usage", metadata: Optional[dict] = None) -> None:
+def deduct_credits(api_key: str, tokens: float, description: str = "API usage", metadata: dict | None = None) -> None:
     """
     Deduct credits from user account by API key and log the transaction
 
@@ -281,9 +280,9 @@ def deduct_credits(api_key: str, tokens: float, description: str = "API usage", 
         balance_after = balance_before - tokens
 
         client = get_supabase_client()
-        result = client.table('users').update({
+        client.table('users').update({
             'credits': balance_after,
-            'updated_at': datetime.now(timezone.utc).isoformat()
+            'updated_at': datetime.now(UTC).isoformat()
         }).eq('id', user_id).execute()
 
         # Log the transaction (negative amount for deduction)
@@ -301,10 +300,10 @@ def deduct_credits(api_key: str, tokens: float, description: str = "API usage", 
 
     except Exception as e:
         logger.error(f"Failed to deduct credits: {e}")
-        raise RuntimeError(f"Failed to deduct credits: {e}")
+        raise RuntimeError(f"Failed to deduct credits: {e}") from e
 
 
-def get_all_users() -> List[Dict[str, Any]]:
+def get_all_users() -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
         result = client.table('users').select('*').execute()
@@ -325,7 +324,7 @@ def delete_user(api_key: str) -> None:
 
     except Exception as e:
         logger.error(f"Failed to delete user: {e}")
-        raise RuntimeError(f"Failed to delete user: {e}")
+        raise RuntimeError(f"Failed to delete user: {e}") from e
 
 
 def get_user_count() -> int:
@@ -349,8 +348,7 @@ def record_usage(user_id: int, api_key: str, model: str, tokens_used: int, cost:
         client = get_supabase_client()
 
         # Ensure timestamp is timezone-aware
-        from datetime import timezone
-        timestamp = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).replace(tzinfo=UTC).isoformat()
 
         # Only include columns that exist in the schema
         usage_data = {
@@ -362,7 +360,7 @@ def record_usage(user_id: int, api_key: str, model: str, tokens_used: int, cost:
             'timestamp': timestamp
         }
 
-        result = client.table('usage_records').insert(usage_data).execute()
+        client.table('usage_records').insert(usage_data).execute()
 
         logger.info(
             f"Usage recorded successfully: user_id={user_id}, api_key={api_key[:20]}..., model={model}, tokens={tokens_used}, cost={cost}")
@@ -372,7 +370,7 @@ def record_usage(user_id: int, api_key: str, model: str, tokens_used: int, cost:
         # Don't raise the exception to avoid breaking the main flow
 
 
-def get_user_usage_metrics(api_key: str) -> Dict[str, Any]:
+def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
@@ -444,7 +442,7 @@ def get_user_usage_metrics(api_key: str) -> Dict[str, Any]:
         return None
 
 
-def get_admin_monitor_data() -> Dict[str, Any]:
+def get_admin_monitor_data() -> dict[str, Any]:
     """Get admin monitoring data with robust error handling"""
     try:
         client = get_supabase_client()
@@ -469,11 +467,11 @@ def get_admin_monitor_data() -> Dict[str, Any]:
 
         # Calculate basic statistics
         total_users = len(users)
-        total_credits = sum(user.get('credits', 0) for user in users)
-        active_users = len([user for user in users if user.get('credits', 0) > 0])
+        sum(user.get('credits', 0) for user in users)
+        len([user for user in users if user.get('credits', 0) > 0])
 
         # Calculate time-based statistics
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
@@ -507,17 +505,17 @@ def get_admin_monitor_data() -> Dict[str, Any]:
             return sum(record.get(field, 0) for record in records)
 
         total_tokens_day = safe_sum(day_usage, 'tokens_used')
-        total_tokens_week = safe_sum(week_usage, 'tokens_used')
+        safe_sum(week_usage, 'tokens_used')
         total_tokens_month = safe_sum(month_usage, 'tokens_used')
         total_tokens_all = safe_sum(usage_records, 'tokens_used')
 
         total_cost_day = safe_sum(day_usage, 'cost')
-        total_cost_week = safe_sum(week_usage, 'cost')
+        safe_sum(week_usage, 'cost')
         total_cost_month = safe_sum(month_usage, 'cost')
         total_cost_all = safe_sum(usage_records, 'cost')
 
         requests_day = len(day_usage)
-        requests_week = len(week_usage)
+        len(week_usage)
         requests_month = len(month_usage)
         requests_all = len(usage_records)
 
@@ -567,7 +565,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
         # Build response data
         response_data = {
             "total_users": total_users,
-            "active_users_today": len(set(record.get('api_key', '') for record in day_usage)),
+            "active_users_today": len({record.get('api_key', '') for record in day_usage}),
             "total_requests_today": requests_day,
             "total_tokens_today": total_tokens_day,
             "total_cost_today": total_cost_day,
@@ -621,7 +619,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
         }
 
 
-def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str, Any]:
     """Update user profile information"""
     try:
         client = get_supabase_client()
@@ -642,13 +640,13 @@ def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str,
         if not update_data:
             raise ValueError("No valid profile fields to update")
 
-        update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+        update_data['updated_at'] = datetime.now(UTC).isoformat()
 
         # Update user profile
         result = client.table('users').update(update_data).eq('api_key', api_key).execute()
 
         if not result.data:
-            raise ValueError(f"Failed to update user profile")
+            raise ValueError("Failed to update user profile")
 
         # Return updated user data
         updated_user = get_user(api_key)
@@ -656,10 +654,10 @@ def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str,
 
     except Exception as e:
         logger.error(f"Failed to update user profile: {e}")
-        raise RuntimeError(f"Failed to update user profile: {e}")
+        raise RuntimeError(f"Failed to update user profile: {e}") from e
 
 
-def get_user_profile(api_key: str) -> Dict[str, Any]:
+def get_user_profile(api_key: str) -> dict[str, Any]:
     """Get user profile information"""
     try:
         logger.info(f"get_user_profile called for API key: {api_key[:10]}...")
@@ -710,21 +708,21 @@ def mark_welcome_email_sent(user_id: int) -> bool:
     """Mark welcome email as sent for a user"""
     try:
         client = get_supabase_client()
-        
+
         result = client.table('users').update({
             'welcome_email_sent': True,
-            'updated_at': datetime.now(timezone.utc).isoformat()
+            'updated_at': datetime.now(UTC).isoformat()
         }).eq('id', user_id).execute()
-        
+
         if not result.data:
             raise ValueError(f"User with ID {user_id} not found")
-        
+
         logger.info(f"Welcome email marked as sent for user {user_id}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to mark welcome email as sent: {e}")
-        raise RuntimeError(f"Failed to mark welcome email as sent: {e}")
+        raise RuntimeError(f"Failed to mark welcome email as sent: {e}") from e
 
 
 def delete_user_account(api_key: str) -> bool:
@@ -743,11 +741,11 @@ def delete_user_account(api_key: str) -> bool:
         result = client.table('users').delete().eq('api_key', api_key).execute()
 
         if not result.data:
-            raise ValueError(f"Failed to delete user account")
+            raise ValueError("Failed to delete user account")
 
         logger.info(f"Successfully deleted user account {user_id}")
         return True
 
     except Exception as e:
         logger.error(f"Failed to delete user account: {e}")
-        raise RuntimeError(f"Failed to delete user account: {e}")
+        raise RuntimeError(f"Failed to delete user account: {e}") from e

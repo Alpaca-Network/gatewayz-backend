@@ -1,6 +1,5 @@
-import datetime
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -105,9 +104,9 @@ async def create_user_api_key(
                 # Handle specific validation errors
                 error_message = str(ve)
                 if "already exists" in error_message:
-                    raise HTTPException(status_code=400, detail=error_message)
+                    raise HTTPException(status_code=400, detail=error_message) from ve
                 else:
-                    raise HTTPException(status_code=400, detail=f"Validation error: {error_message}")
+                    raise HTTPException(status_code=400, detail=f"Validation error: {error_message}") from ve
 
             return {
                 "status": "success",
@@ -135,7 +134,7 @@ async def create_user_api_key(
         import traceback
         logger.error(f"Error creating/changing API key: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
 
 
 @router.put("/user/api-keys/{key_id}", tags=["authentication"])
@@ -200,11 +199,11 @@ async def update_user_api_key_endpoint(
                     "rotated_count": result['rotated_count'],
                     "new_keys": result['new_keys'],
                     "phase4_integration": True,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 }
             except Exception as e:
                 logger.error(f"Bulk rotation failed: {e}")
-                raise HTTPException(status_code=500, detail=f"Bulk rotation failed: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Bulk rotation failed: {str(e)}") from e
 
         else:
             # Regular update - prepare updates (only include fields that were provided)
@@ -237,9 +236,9 @@ async def update_user_api_key_endpoint(
             # Handle specific validation errors
             error_message = str(ve)
             if "already exists" in error_message:
-                raise HTTPException(status_code=400, detail=error_message)
+                raise HTTPException(status_code=400, detail=error_message) from ve
             else:
-                raise HTTPException(status_code=400, detail=f"Validation error: {error_message}")
+                raise HTTPException(status_code=400, detail=f"Validation error: {error_message}") from ve
 
         # Get the updated key details
         updated_key = get_api_key_by_id(key_id, user["id"])
@@ -259,14 +258,14 @@ async def update_user_api_key_endpoint(
             status="success",
             message=message,
             updated_key=ApiKeyResponse(**updated_key),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating API key: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/api-keys", tags=["authentication"])
@@ -312,7 +311,7 @@ async def list_user_api_keys(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error listing API keys: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.delete("/user/api-keys/{key_id}", tags=["authentication"])
@@ -353,14 +352,14 @@ async def delete_user_api_key(
             "status": "success",
             "message": "API key deleted successfully",
             "deleted_key_id": key_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting API key: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/user/api-keys/usage", tags=["authentication"])
@@ -380,7 +379,7 @@ async def get_user_api_key_usage(api_key: str = Depends(get_api_key)):
         enhanced_usage = usage_stats.copy()
         enhanced_usage['audit_logging'] = {
             'enabled': True,
-            'last_audit_check': datetime.now(timezone.utc).isoformat(),
+            'last_audit_check': datetime.now(UTC).isoformat(),
             'security_events_tracked': True,
             'access_patterns_monitored': True
         }
@@ -392,4 +391,4 @@ async def get_user_api_key_usage(api_key: str = Depends(get_api_key)):
         raise
     except Exception as e:
         logger.error(f"Error getting API key usage: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

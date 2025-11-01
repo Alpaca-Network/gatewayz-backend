@@ -178,18 +178,18 @@ def get_provider_pricing_for_vercel_model(model_id: str):
     try:
         # Extract provider from model ID if available
         if "/" in model_id:
-            provider_prefix = model_id.split("/")[0].lower()
+            model_id.split("/")[0].lower()
         else:
             # Try to infer from model name
             model_name = model_id.lower()
             if "gpt" in model_name or "dall-e" in model_name:
-                provider_prefix = "openai"
+                pass
             elif "claude" in model_name:
-                provider_prefix = "anthropic"
+                pass
             elif "gemini" in model_name:
-                provider_prefix = "google"
+                pass
             elif "llama" in model_name:
-                provider_prefix = "meta"
+                pass
             else:
                 return None
 

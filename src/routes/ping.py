@@ -82,7 +82,7 @@ async def ping():
         raise HTTPException(
             status_code=500,
             detail="Internal server error while processing ping"
-        )
+        ) from e
 
 
 @router.get("/ping/stats")
@@ -110,4 +110,4 @@ async def ping_stats():
         raise HTTPException(
             status_code=500,
             detail="Internal server error while retrieving statistics"
-        )
+        ) from e

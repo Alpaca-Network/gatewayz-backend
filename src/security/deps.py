@@ -4,7 +4,7 @@ Dependency injection functions for authentication and authorization
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -114,17 +114,17 @@ async def get_api_key(
                 ip_address=client_ip
             )
 
-        raise HTTPException(status_code=status_code, detail=error_message)
+        raise HTTPException(status_code=status_code, detail=error_message) from e
 
     except Exception as e:
         logger.error(f"Unexpected error validating API key: {e}")
         raise HTTPException(
             status_code=500,
             detail="Internal authentication error"
-        )
+        ) from e
 
 
-async def get_current_user(api_key: str = Depends(get_api_key)) -> Dict[str, Any]:
+async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any]:
     """
     Get the current authenticated user
 
@@ -147,7 +147,7 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> Dict[str, Any
     return user
 
 
-async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """
     Require admin role
 
@@ -177,9 +177,9 @@ async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dic
 
 
 async def get_optional_user(
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+        credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
         request: Request = None
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Get user if authenticated, None otherwise
 
@@ -203,8 +203,8 @@ async def get_optional_user(
 
 
 async def require_active_subscription(
-        user: Dict[str, Any] = Depends(get_current_user)
-) -> Dict[str, Any]:
+        user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
     """
     Require active subscription
 
@@ -229,9 +229,9 @@ async def require_active_subscription(
 
 
 async def check_credits(
-        user: Dict[str, Any] = Depends(get_current_user),
+        user: dict[str, Any] = Depends(get_current_user),
         min_credits: float = 0.0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Check if user has sufficient credits
 
@@ -256,14 +256,14 @@ async def check_credits(
     return user
 
 
-async def get_user_id(user: Dict[str, Any] = Depends(get_current_user)) -> int:
+async def get_user_id(user: dict[str, Any] = Depends(get_current_user)) -> int:
     """Extract just the user ID (lightweight dependency)"""
     return user['id']
 
 
 async def verify_key_permissions(
         api_key: str = Depends(get_api_key),
-        required_permissions: List[str] = None
+        required_permissions: list[str] = None
 ) -> str:
     """
     Verify API key has specific permissions

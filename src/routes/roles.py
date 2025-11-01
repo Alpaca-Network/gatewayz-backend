@@ -4,9 +4,10 @@ API routes for role management (Admin only)
 
 import inspect
 import logging
-from typing import Any, Callable, List, Optional
+from collections.abc import Callable
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from src.db.roles import (
@@ -71,17 +72,17 @@ require_admin = _require_admin_dependency
 class UpdateRoleRequest(BaseModel):
     user_id: int
     new_role: str
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class RoleResponse(BaseModel):
     user_id: int
     role: str
-    permissions: List[dict]
+    permissions: list[dict]
 
 
 class RoleAuditLogResponse(BaseModel):
-    logs: List[dict]
+    logs: list[dict]
     total: int
 
 
@@ -127,7 +128,7 @@ async def update_role(
         raise
     except Exception as e:
         logger.error(f"Error updating role: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/roles/{user_id}", response_model=RoleResponse, tags=["admin", "roles"])
@@ -137,7 +138,7 @@ async def get_user_role_info(
 ):
     """Get user's role and permissions (Admin only)"""
     try:
-        admin_user = await _require_admin_dependency(http_request)
+        await _require_admin_dependency(http_request)
 
         role = get_user_role(user_id)
         if not role:
@@ -155,18 +156,18 @@ async def get_user_role_info(
         raise
     except Exception as e:
         logger.error(f"Error getting user role: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/roles/audit/log", response_model=RoleAuditLogResponse, tags=["admin", "roles"])
 async def get_audit_log(
         http_request: Request,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         limit: int = 50,
 ):
     """Get role change audit log (Admin only)"""
     try:
-        admin_user = await _require_admin_dependency(http_request)
+        await _require_admin_dependency(http_request)
 
         logs = get_role_audit_log(user_id=user_id, limit=limit)
 
@@ -179,7 +180,7 @@ async def get_audit_log(
         raise
     except Exception as e:
         logger.error(f"Error getting audit log: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/roles/list/{role}", tags=["admin", "roles"])
@@ -190,7 +191,7 @@ async def list_users_by_role(
 ):
     """List all users with a specific role (Admin only)"""
     try:
-        admin_user = await _require_admin_dependency(http_request)
+        await _require_admin_dependency(http_request)
 
         if role not in [UserRole.USER, UserRole.DEVELOPER, UserRole.ADMIN]:
             raise HTTPException(status_code=400, detail="Invalid role")
@@ -207,7 +208,7 @@ async def list_users_by_role(
         raise
     except Exception as e:
         logger.error(f"Error listing users by role: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/admin/roles/permissions/{role}", tags=["admin", "roles"])
@@ -217,7 +218,7 @@ async def get_role_permissions_endpoint(
 ):
     """Get all permissions for a role (Admin only)"""
     try:
-        admin_user = await _require_admin_dependency(http_request)
+        await _require_admin_dependency(http_request)
 
         if role not in [UserRole.USER, UserRole.DEVELOPER, UserRole.ADMIN]:
             raise HTTPException(status_code=400, detail="Invalid role")
@@ -234,4 +235,4 @@ async def get_role_permissions_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error getting role permissions: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

@@ -10,10 +10,9 @@ Each provider is accessed individually to:
 3. Leverage Portkey SDK features (tracing, metadata, etc.)
 """
 
-import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 try:
     from portkey_ai import Portkey
@@ -75,7 +74,7 @@ class PortkeySDKService:
 
         logger.info("Portkey SDK service initialized")
 
-    def get_client(self, provider: str) -> Optional[Portkey]:
+    def get_client(self, provider: str) -> Portkey | None:
         """
         Get a Portkey client configured for a specific provider.
 
@@ -108,7 +107,7 @@ class PortkeySDKService:
                 api_key=self.api_key,
                 provider=portkey_provider,
                 # Add tracing for observability
-                trace_id=f"gatewayz-{provider}-{datetime.now(timezone.utc).timestamp()}",
+                trace_id=f"gatewayz-{provider}-{datetime.now(UTC).timestamp()}",
             )
 
             logger.debug(f"Created Portkey client for provider: {provider}")
@@ -118,7 +117,7 @@ class PortkeySDKService:
             logger.error(f"Error creating Portkey client for provider {provider}: {e}")
             return None
 
-    def list_models(self, provider: str) -> List[Dict[str, Any]]:
+    def list_models(self, provider: str) -> list[dict[str, Any]]:
         """
         List available models for a provider via Portkey SDK.
 
@@ -197,7 +196,7 @@ class PortkeySDKService:
 
 
 # Singleton instance
-_portkey_service: Optional[PortkeySDKService] = None
+_portkey_service: PortkeySDKService | None = None
 
 
 def get_portkey_service() -> PortkeySDKService:

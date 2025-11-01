@@ -1,8 +1,7 @@
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 class UsageMetrics(BaseModel):
@@ -17,14 +16,14 @@ class UsageMetrics(BaseModel):
     cost_this_month: float
     average_tokens_per_request: float
     most_used_model: str
-    last_request_time: Optional[datetime] = None
+    last_request_time: datetime | None = None
 
 class UserMonitorResponse(BaseModel):
     user_id: int
     api_key: str
     current_credits: int
     usage_metrics: UsageMetrics
-    rate_limits: Dict[str, Any]
+    rate_limits: dict[str, Any]
 
 class AdminMonitorResponse(BaseModel):
     total_users: int
@@ -33,7 +32,7 @@ class AdminMonitorResponse(BaseModel):
     total_tokens_today: int
     total_cost_today: float
     system_usage_metrics: UsageMetrics
-    top_users_by_usage: List[Dict[str, Any]]
+    top_users_by_usage: list[dict[str, Any]]
 
 class RateLimitConfig(BaseModel):
     requests_per_minute: int = 60
@@ -50,8 +49,8 @@ class SetRateLimitRequest(BaseModel):
 class RateLimitResponse(BaseModel):
     api_key: str
     current_limits: RateLimitConfig
-    current_usage: Dict[str, Any]
-    reset_times: Dict[str, datetime]
+    current_usage: dict[str, Any]
+    reset_times: dict[str, datetime]
 
 class UsageRecord(BaseModel):
     user_id: int
