@@ -171,12 +171,8 @@ def get_rate_limit_manager(*args, **kwargs):
     return rate_limiting_service.get_rate_limit_manager(*args, **kwargs)
 
 
-def validate_trial_access(*args, **kwargs):
-    return trial_module.validate_trial_access(*args, **kwargs)
-
-
-def track_trial_usage(*args, **kwargs):
-    return trial_module.track_trial_usage(*args, **kwargs)
+# Import shared trial utilities to avoid code duplication
+from src.utils.trial_utils import track_trial_usage, validate_trial_access
 
 
 logger = logging.getLogger(__name__)

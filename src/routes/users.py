@@ -51,8 +51,8 @@ def check_rate_limit(*args, **kwargs):
     return rate_limits_module.check_rate_limit(*args, **kwargs)
 
 
-def validate_trial_access(*args, **kwargs):
-    return trial_module.validate_trial_access(*args, **kwargs)
+# Import shared trial utilities to avoid code duplication
+from src.utils.trial_utils import validate_trial_access
 
 
 def get_user_transactions(*args, **kwargs):

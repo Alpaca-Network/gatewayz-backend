@@ -2,9 +2,7 @@
 API routes for role management (Admin only)
 """
 
-import inspect
 import logging
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -21,26 +19,11 @@ from src.db.roles import (
 )
 from src.security import deps as security_deps
 from src.security.deps import security as bearer_security
+from src.utils.dependency_utils import execute_override
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-async def _execute_override(override: Callable[..., Any], request: Request) -> dict:
-    """
-    Execute patched override handling optional request parameter and awaiting results.
-    """
-    try:
-        result = override(request)
-    except TypeError:
-        # Support overrides that don't accept the request object
-        result = override()
-
-    if inspect.isawaitable(result):
-        return await result
-
-    return result
 
 
 async def _require_admin_dependency(request: Request) -> dict:
@@ -50,7 +33,7 @@ async def _require_admin_dependency(request: Request) -> dict:
     """
     override = globals().get("require_admin")
     if override is not _require_admin_dependency:
-        return await _execute_override(override, request)
+        return await execute_override(override, request)
 
     credentials = await bearer_security(request)
     api_key = await security_deps.get_api_key(credentials=credentials, request=request)

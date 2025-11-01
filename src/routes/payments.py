@@ -4,7 +4,6 @@ Stripe Payment Routes
 Endpoints for handling Stripe webhooks and payment operations
 """
 
-import inspect
 import logging
 from typing import Any
 
@@ -25,6 +24,7 @@ from src.schemas.payments import (
 from src.security import deps as security_deps
 from src.security.deps import security as bearer_security
 from src.services.payments import StripeService
+from src.utils.dependency_utils import execute_override
 
 logger = logging.getLogger(__name__)
 
@@ -34,21 +34,10 @@ router = APIRouter(prefix="/api/stripe", tags=["Stripe Payments"])
 stripe_service = StripeService()
 
 
-async def _execute_user_override(override, request: Request):
-    try:
-        result = override(request)
-    except TypeError:
-        result = override()
-
-    if inspect.isawaitable(result):
-        return await result
-    return result
-
-
 async def _get_current_user_dependency(request: Request):
     override = globals().get("get_current_user")
     if override is not _get_current_user_dependency:
-        return await _execute_user_override(override, request)
+        return await execute_override(override, request)
 
     credentials = await bearer_security(request)
     api_key = await security_deps.get_api_key(credentials=credentials, request=request)
