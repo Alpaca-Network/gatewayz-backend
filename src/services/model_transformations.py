@@ -25,6 +25,9 @@ GEMINI_1_5_PRO = "gemini-1.5-pro"
 GEMINI_1_5_FLASH = "gemini-1.5-flash"
 GEMINI_1_0_PRO = "gemini-1.0-pro"
 
+# Claude model name constants to reduce duplication
+CLAUDE_SONNET_4_5 = "anthropic/claude-sonnet-4.5"
+
 
 def transform_model_id(model_id: str, provider: str) -> str:
     """
@@ -189,11 +192,11 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "anthropic/claude-3-sonnet": "anthropic/claude-3-sonnet-20240229",
             "anthropic/claude-3-haiku": "anthropic/claude-3-haiku-20240307",
             # Claude Sonnet 4.5 - support multiple input formats
-            "claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-4.5-sonnet": "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-4.5-sonnet-20250929": "anthropic/claude-sonnet-4.5",
-            "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
+            "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_5,
+            "anthropic/claude-sonnet-4.5": CLAUDE_SONNET_4_5,
+            "anthropic/claude-4.5-sonnet": CLAUDE_SONNET_4_5,
+            "anthropic/claude-4.5-sonnet-20250929": CLAUDE_SONNET_4_5,
+            "claude-sonnet-4.5": CLAUDE_SONNET_4_5,
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
