@@ -309,11 +309,14 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
     # This ensures the function's datetime.now() matches our test data
     fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=timezone.utc)
 
-    # Mock datetime.now() in the module
-    monkeypatch.setattr("src.db.plans.datetime", type('datetime', (), {
-        'now': lambda tz: fixed_now,
-        'datetime': datetime,
-    }))
+    # Create a mock datetime class that inherits the real one but overrides now()
+    class MockDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    # Mock datetime in the module to use our version
+    monkeypatch.setattr("src.db.plans.datetime", MockDateTime)
 
     # plan + user_plan
     fake_supabase.table("plans").insert({
