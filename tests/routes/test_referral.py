@@ -76,7 +76,7 @@ def auth_headers():
 class TestReferralStats:
     """Test referral stats endpoint"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.get_referral_stats')
     def test_get_referral_stats_success(self, mock_get_stats, mock_get_user, mock_auth, client, user_with_referral, auth_headers):
@@ -112,7 +112,7 @@ class TestReferralStats:
 
         assert response.status_code in [401, 422]
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     def test_get_referral_stats_invalid_api_key(self, mock_get_user, mock_auth, client, auth_headers):
         """Invalid API key returns 401"""
@@ -127,7 +127,7 @@ class TestReferralStats:
 class TestReferralValidation:
     """Test referral code validation"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.validate_referral_code')
     def test_validate_referral_code_success(self, mock_validate, mock_get_user, mock_auth, client, user_without_referral, auth_headers):
@@ -152,7 +152,7 @@ class TestReferralValidation:
             assert data['valid'] is True
             assert 'referrer_username' in data
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.validate_referral_code')
     def test_validate_invalid_referral_code(self, mock_validate, mock_get_user, mock_auth, client, user_without_referral, auth_headers):
@@ -218,7 +218,7 @@ class TestReferralCodeGeneration:
 class TestSelfReferralPrevention:
     """Test self-referral prevention"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.validate_referral_code')
     def test_cannot_use_own_referral_code(self, mock_validate, mock_get_user, mock_auth, client, user_with_referral, auth_headers):
@@ -306,7 +306,7 @@ class TestReferralLimits:
 class TestReferralAnalytics:
     """Test referral analytics"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.get_referral_stats')
     def test_referral_list_includes_details(self, mock_get_stats, mock_get_user, mock_auth, client, user_with_referral, auth_headers):
@@ -362,7 +362,7 @@ class TestReferralEdgeCases:
 
         assert normalized1 == normalized2
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.validate_referral_code')
     def test_referral_code_with_spaces(self, mock_validate, mock_get_user, mock_auth, client, user_without_referral, auth_headers):
@@ -411,7 +411,7 @@ class TestReferralEdgeCases:
 class TestInviteLink:
     """Test invite link generation"""
 
-    @patch('src.security.deps.get_user_by_api_key')
+    @patch('src.security.deps.get_current_user')
     @patch('src.db.users.get_user')
     @patch('src.services.referral.get_referral_stats')
     def test_invite_link_format(self, mock_get_stats, mock_get_user, mock_auth, client, user_with_referral, auth_headers):

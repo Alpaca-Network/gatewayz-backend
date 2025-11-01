@@ -65,7 +65,7 @@ except Exception as e:
     print(f"✗ Failed to fetch models: {e}")
     import traceback
     traceback.print_exc()
-    sys.exit(1)
+    pytest.fail(f"Failed to fetch models: {e}")
 
 # Test 5: Test model caching
 print("\n" + "=" * 60)
