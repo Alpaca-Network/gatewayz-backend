@@ -22,8 +22,10 @@ class PlanResponse(BaseModel):
     features: list[str]
     is_active: bool
 
+
 class SubscriptionPlan(BaseModel):
     """Detailed subscription plan model with all fields"""
+
     id: int | None = None
     plan_name: str
     plan_type: PlanType
@@ -42,8 +44,10 @@ class SubscriptionPlan(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+
 class SubscriptionHistory(BaseModel):
     """Subscription history model"""
+
     id: int | None = None
     api_key_id: int
     plan_name: str
@@ -54,11 +58,14 @@ class SubscriptionHistory(BaseModel):
     payment_method: str | None = None
     created_at: datetime | None = None
 
+
 class SubscriptionPlansResponse(BaseModel):
     """Response for available subscription plans"""
+
     success: bool
     plans: list[SubscriptionPlan]
     message: str
+
 
 class UserPlanResponse(BaseModel):
     user_plan_id: int
@@ -76,10 +83,12 @@ class UserPlanResponse(BaseModel):
     end_date: str
     is_active: bool
 
+
 class AssignPlanRequest(BaseModel):
     user_id: int
     plan_id: int
     duration_months: int = 1
+
 
 class PlanUsageResponse(BaseModel):
     plan_name: str
@@ -87,6 +96,7 @@ class PlanUsageResponse(BaseModel):
     limits: dict[str, int]
     remaining: dict[str, int]
     at_limit: dict[str, bool]
+
 
 class PlanEntitlementsResponse(BaseModel):
     has_plan: bool

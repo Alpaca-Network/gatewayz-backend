@@ -63,5 +63,3 @@ def ensure_api_key_like(value: str, field_name: str = "api key", min_length: int
     """Lightweight check that a key looks like an API key (length + no spaces)."""
     if not isinstance(value, str) or len(value) < min_length or (" " in value):
         raise ValueError(f"{field_name} is invalid")
-
-

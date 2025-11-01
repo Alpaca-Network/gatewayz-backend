@@ -27,10 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _execute_override(
-        override: Callable[..., Any],
-        request: Request
-) -> dict:
+async def _execute_override(override: Callable[..., Any], request: Request) -> dict:
     """
     Execute patched override handling optional request parameter and awaiting results.
     """
@@ -69,6 +66,7 @@ require_admin = _require_admin_dependency
 # Schemas
 # ============================================
 
+
 class UpdateRoleRequest(BaseModel):
     user_id: int
     new_role: str
@@ -90,11 +88,9 @@ class RoleAuditLogResponse(BaseModel):
 # Role Management Endpoints
 # ============================================
 
+
 @router.post("/admin/roles/update", tags=["admin", "roles"])
-async def update_role(
-        request: UpdateRoleRequest,
-        http_request: Request
-):
+async def update_role(request: UpdateRoleRequest, http_request: Request):
     """
     Update a user's role (Admin only)
 
@@ -112,8 +108,8 @@ async def update_role(
         success = update_user_role(
             user_id=request.user_id,
             new_role=request.new_role,
-            changed_by=admin_user['id'],
-            reason=request.reason
+            changed_by=admin_user["id"],
+            reason=request.reason,
         )
 
         if not success:
@@ -121,7 +117,7 @@ async def update_role(
 
         return {
             "success": True,
-            "message": f"User {request.user_id} role updated to {request.new_role}"
+            "message": f"User {request.user_id} role updated to {request.new_role}",
         }
 
     except HTTPException:
@@ -132,10 +128,7 @@ async def update_role(
 
 
 @router.get("/admin/roles/{user_id}", response_model=RoleResponse, tags=["admin", "roles"])
-async def get_user_role_info(
-        user_id: int,
-        http_request: Request
-):
+async def get_user_role_info(user_id: int, http_request: Request):
     """Get user's role and permissions (Admin only)"""
     try:
         await _require_admin_dependency(http_request)
@@ -146,11 +139,7 @@ async def get_user_role_info(
 
         permissions = get_user_permissions(user_id)
 
-        return RoleResponse(
-            user_id=user_id,
-            role=role,
-            permissions=permissions
-        )
+        return RoleResponse(user_id=user_id, role=role, permissions=permissions)
 
     except HTTPException:
         raise
@@ -161,9 +150,9 @@ async def get_user_role_info(
 
 @router.get("/admin/roles/audit/log", response_model=RoleAuditLogResponse, tags=["admin", "roles"])
 async def get_audit_log(
-        http_request: Request,
-        user_id: int | None = None,
-        limit: int = 50,
+    http_request: Request,
+    user_id: int | None = None,
+    limit: int = 50,
 ):
     """Get role change audit log (Admin only)"""
     try:
@@ -171,10 +160,7 @@ async def get_audit_log(
 
         logs = get_role_audit_log(user_id=user_id, limit=limit)
 
-        return RoleAuditLogResponse(
-            logs=logs,
-            total=len(logs)
-        )
+        return RoleAuditLogResponse(logs=logs, total=len(logs))
 
     except HTTPException:
         raise
@@ -185,9 +171,9 @@ async def get_audit_log(
 
 @router.get("/admin/roles/list/{role}", tags=["admin", "roles"])
 async def list_users_by_role(
-        role: str,
-        http_request: Request,
-        limit: int = 100,
+    role: str,
+    http_request: Request,
+    limit: int = 100,
 ):
     """List all users with a specific role (Admin only)"""
     try:
@@ -198,11 +184,7 @@ async def list_users_by_role(
 
         users = get_users_by_role(role, limit=limit)
 
-        return {
-            "role": role,
-            "users": users,
-            "total": len(users)
-        }
+        return {"role": role, "users": users, "total": len(users)}
 
     except HTTPException:
         raise
@@ -212,10 +194,7 @@ async def list_users_by_role(
 
 
 @router.get("/admin/roles/permissions/{role}", tags=["admin", "roles"])
-async def get_role_permissions_endpoint(
-        role: str,
-        http_request: Request
-):
+async def get_role_permissions_endpoint(role: str, http_request: Request):
     """Get all permissions for a role (Admin only)"""
     try:
         await _require_admin_dependency(http_request)
@@ -225,11 +204,7 @@ async def get_role_permissions_endpoint(
 
         permissions = get_role_permissions(role)
 
-        return {
-            "role": role,
-            "permissions": permissions,
-            "total": len(permissions)
-        }
+        return {"role": role, "permissions": permissions, "total": len(permissions)}
 
     except HTTPException:
         raise

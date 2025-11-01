@@ -72,7 +72,9 @@ def get_portkey_client(provider: str | None = None, virtual_key: str | None = No
     )
 
 
-def make_portkey_request_openai(messages, model, provider: str | None = None, virtual_key: str | None = None, **kwargs):
+def make_portkey_request_openai(
+    messages, model, provider: str | None = None, virtual_key: str | None = None, **kwargs
+):
     try:
         resolved_slug = _resolve_portkey_slug(provider, virtual_key)
         formatted_model = _format_portkey_model(model, resolved_slug)
@@ -89,7 +91,9 @@ def make_portkey_request_openai(messages, model, provider: str | None = None, vi
         raise
 
 
-def make_portkey_request_openai_stream(messages, model, provider: str | None = None, virtual_key: str | None = None, **kwargs):
+def make_portkey_request_openai_stream(
+    messages, model, provider: str | None = None, virtual_key: str | None = None, **kwargs
+):
     try:
         resolved_slug = _resolve_portkey_slug(provider, virtual_key)
         formatted_model = _format_portkey_model(model, resolved_slug)
@@ -125,13 +129,15 @@ def process_portkey_response(response):
                 }
                 for choice in response.choices
             ],
-            "usage": {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
-            if response.usage
-            else {},
+            "usage": (
+                {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
+                if response.usage
+                else {}
+            ),
         }
     except Exception as exc:
         logger.error(f"Failed to process Portkey response: {exc}")

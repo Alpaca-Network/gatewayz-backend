@@ -20,9 +20,11 @@ from src.services.rate_limiting_fallback import get_fallback_rate_limit_manager
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class RateLimitConfig:
     """Rate limit configuration for a specific key"""
+
     requests_per_minute: int = 250
     requests_per_hour: int = 1000
     requests_per_day: int = 10000
@@ -33,9 +35,11 @@ class RateLimitConfig:
     concurrency_limit: int = 50  # Maximum concurrent requests
     window_size_seconds: int = 60  # Sliding window size
 
+
 @dataclass
 class RateLimitResult:
     """Result of rate limit check"""
+
     allowed: bool
     remaining_requests: int
     remaining_tokens: int
@@ -44,6 +48,7 @@ class RateLimitResult:
     reason: str | None = None
     burst_remaining: int = 0
     concurrency_remaining: int = 0
+
 
 # Default configurations
 DEFAULT_CONFIG = RateLimitConfig(
@@ -54,8 +59,9 @@ DEFAULT_CONFIG = RateLimitConfig(
     tokens_per_hour=100000,
     tokens_per_day=1000000,
     burst_limit=500,
-    concurrency_limit=50
+    concurrency_limit=50,
 )
+
 
 class SlidingWindowRateLimiter:
     """Simplified rate limiter using fallback system"""
@@ -86,7 +92,7 @@ class SlidingWindowRateLimiter:
                     reset_time=datetime.now(UTC) + timedelta(seconds=60),
                     retry_after=60,
                     reason="Concurrency limit exceeded",
-                    concurrency_remaining=0
+                    concurrency_remaining=0,
                 )
 
             # Check burst limit
@@ -99,7 +105,7 @@ class SlidingWindowRateLimiter:
                     reset_time=datetime.now(UTC) + timedelta(seconds=burst_check["retry_after"]),
                     retry_after=burst_check["retry_after"],
                     reason="Burst limit exceeded",
-                    burst_remaining=burst_check["remaining"]
+                    burst_remaining=burst_check["remaining"],
                 )
 
             # Check sliding window limits
@@ -113,15 +119,13 @@ class SlidingWindowRateLimiter:
                     retry_after=window_check["retry_after"],
                     reason=window_check["reason"],
                     burst_remaining=burst_check["remaining"],
-                    concurrency_remaining=concurrency_check["remaining"]
+                    concurrency_remaining=concurrency_check["remaining"],
                 )
 
             # All checks passed
             # Use the fallback rate limiting system
             result = await self.fallback_manager.check_rate_limit(
-                api_key=api_key,
-                config=config,
-                tokens_used=tokens_used
+                api_key=api_key, config=config, tokens_used=tokens_used
             )
 
             # Convert fallback result to our format
@@ -129,11 +133,15 @@ class SlidingWindowRateLimiter:
                 allowed=result.allowed,
                 remaining_requests=result.remaining_requests,
                 remaining_tokens=result.remaining_tokens,
-                reset_time=datetime.fromtimestamp(result.reset_time) if result.reset_time else datetime.utcnow() + timedelta(minutes=1),
+                reset_time=(
+                    datetime.fromtimestamp(result.reset_time)
+                    if result.reset_time
+                    else datetime.utcnow() + timedelta(minutes=1)
+                ),
                 retry_after=result.retry_after,
                 reason=result.reason,
                 burst_remaining=0,  # Not tracked in fallback system
-                concurrency_remaining=0  # Not tracked in fallback system
+                concurrency_remaining=0,  # Not tracked in fallback system
             )
 
         except Exception as e:
@@ -144,16 +152,20 @@ class SlidingWindowRateLimiter:
                 remaining_requests=config.requests_per_minute,
                 remaining_tokens=config.tokens_per_minute,
                 reset_time=datetime.now(UTC) + timedelta(minutes=1),
-                reason="Rate limit check failed, allowing request"
+                reason="Rate limit check failed, allowing request",
             )
 
-    async def _check_concurrency_limit(self, api_key: str, config: RateLimitConfig) -> dict[str, Any]:
+    async def _check_concurrency_limit(
+        self, api_key: str, config: RateLimitConfig
+    ) -> dict[str, Any]:
         """Check concurrent request limit"""
         current_concurrent = self.concurrent_requests.get(api_key, 0)
 
         # Temporarily disabled for debugging - always allow
         # TODO: Re-enable after confirming deployment
-        logger.info(f"Concurrency check: {current_concurrent}/{config.concurrency_limit} for {api_key[:10]}")
+        logger.info(
+            f"Concurrency check: {current_concurrent}/{config.concurrency_limit} for {api_key[:10]}"
+        )
 
         # if current_concurrent >= config.concurrency_limit:
         #     return {
@@ -167,7 +179,7 @@ class SlidingWindowRateLimiter:
             "allowed": True,
             "remaining": config.concurrency_limit - current_concurrent,
             "current": current_concurrent,
-            "limit": config.concurrency_limit
+            "limit": config.concurrency_limit,
         }
 
     async def _check_burst_limit(self, api_key: str, config: RateLimitConfig) -> dict[str, Any]:
@@ -203,7 +215,7 @@ class SlidingWindowRateLimiter:
                     "allowed": True,
                     "remaining": int(current_tokens - 1),
                     "current": int(current_tokens - 1),
-                    "limit": config.burst_limit
+                    "limit": config.burst_limit,
                 }
             else:
                 return {
@@ -211,7 +223,7 @@ class SlidingWindowRateLimiter:
                     "remaining": 0,
                     "current": int(current_tokens),
                     "limit": config.burst_limit,
-                    "retry_after": int((1 - current_tokens) * 60 / config.burst_limit)
+                    "retry_after": int((1 - current_tokens) * 60 / config.burst_limit),
                 }
         else:
             # Fallback to local cache
@@ -224,7 +236,7 @@ class SlidingWindowRateLimiter:
                     "allowed": True,
                     "remaining": int(self.burst_tokens[api_key]),
                     "current": int(self.burst_tokens[api_key]),
-                    "limit": config.burst_limit
+                    "limit": config.burst_limit,
                 }
             else:
                 return {
@@ -232,20 +244,26 @@ class SlidingWindowRateLimiter:
                     "remaining": 0,
                     "current": int(self.burst_tokens[api_key]),
                     "limit": config.burst_limit,
-                    "retry_after": 60
+                    "retry_after": 60,
                 }
 
-    async def _check_sliding_window(self, api_key: str, config: RateLimitConfig, tokens_used: int) -> dict[str, Any]:
+    async def _check_sliding_window(
+        self, api_key: str, config: RateLimitConfig, tokens_used: int
+    ) -> dict[str, Any]:
         """Check sliding window rate limits"""
         now = datetime.now(UTC)
         window_start = now - timedelta(seconds=config.window_size_seconds)
 
         if self.redis_client:
             # Use Redis for distributed rate limiting
-            return await self._check_redis_sliding_window(api_key, config, tokens_used, now, window_start)
+            return await self._check_redis_sliding_window(
+                api_key, config, tokens_used, now, window_start
+            )
         else:
             # Fallback to local cache
-            return await self._check_local_sliding_window(api_key, config, tokens_used, now, window_start)
+            return await self._check_local_sliding_window(
+                api_key, config, tokens_used, now, window_start
+            )
 
     async def _check_redis_sliding_window(
         self,
@@ -253,7 +271,7 @@ class SlidingWindowRateLimiter:
         config: RateLimitConfig,
         tokens_used: int,
         now: datetime,
-        window_start: datetime
+        window_start: datetime,
     ) -> dict[str, Any]:
         """Check sliding window using Redis"""
         pipe = self.redis_client.pipeline()
@@ -288,7 +306,7 @@ class SlidingWindowRateLimiter:
                 "remaining_tokens": 0,
                 "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
                 "retry_after": 60,
-                "reason": "Minute request limit exceeded"
+                "reason": "Minute request limit exceeded",
             }
 
         if minute_tokens + tokens_used > config.tokens_per_minute:
@@ -298,7 +316,7 @@ class SlidingWindowRateLimiter:
                 "remaining_tokens": 0,
                 "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
                 "retry_after": 60,
-                "reason": "Minute token limit exceeded"
+                "reason": "Minute token limit exceeded",
             }
 
         if hour_requests >= config.requests_per_hour:
@@ -308,7 +326,7 @@ class SlidingWindowRateLimiter:
                 "remaining_tokens": 0,
                 "reset_time": now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1),
                 "retry_after": 3600,
-                "reason": "Hour request limit exceeded"
+                "reason": "Hour request limit exceeded",
             }
 
         if hour_tokens + tokens_used > config.tokens_per_hour:
@@ -318,7 +336,7 @@ class SlidingWindowRateLimiter:
                 "remaining_tokens": 0,
                 "reset_time": now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1),
                 "retry_after": 3600,
-                "reason": "Hour token limit exceeded"
+                "reason": "Hour token limit exceeded",
             }
 
         if day_requests >= config.requests_per_day:
@@ -326,9 +344,10 @@ class SlidingWindowRateLimiter:
                 "allowed": False,
                 "remaining_requests": 0,
                 "remaining_tokens": 0,
-                "reset_time": now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1),
+                "reset_time": now.replace(hour=0, minute=0, second=0, microsecond=0)
+                + timedelta(days=1),
                 "retry_after": 86400,
-                "reason": "Day request limit exceeded"
+                "reason": "Day request limit exceeded",
             }
 
         if day_tokens + tokens_used > config.tokens_per_day:
@@ -336,9 +355,10 @@ class SlidingWindowRateLimiter:
                 "allowed": False,
                 "remaining_requests": config.requests_per_day - day_requests,
                 "remaining_tokens": 0,
-                "reset_time": now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1),
+                "reset_time": now.replace(hour=0, minute=0, second=0, microsecond=0)
+                + timedelta(days=1),
                 "retry_after": 86400,
-                "reason": "Day token limit exceeded"
+                "reason": "Day token limit exceeded",
             }
 
         # All checks passed, update counters
@@ -352,7 +372,7 @@ class SlidingWindowRateLimiter:
         # Set expiration times
         await pipe.expire(f"{minute_key}:requests", 120)  # 2 minutes
         await pipe.expire(f"{minute_key}:tokens", 120)
-        await pipe.expire(f"{hour_key}:requests", 7200)   # 2 hours
+        await pipe.expire(f"{hour_key}:requests", 7200)  # 2 hours
         await pipe.expire(f"{hour_key}:tokens", 7200)
         await pipe.expire(f"{day_key}:requests", 172800)  # 2 days
         await pipe.expire(f"{day_key}:tokens", 172800)
@@ -363,24 +383,21 @@ class SlidingWindowRateLimiter:
             "allowed": True,
             "remaining_requests": config.requests_per_minute - minute_requests - 1,
             "remaining_tokens": config.tokens_per_minute - minute_tokens - tokens_used,
-            "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
         }
 
     async def _check_local_sliding_window(
-            self,
-            api_key: str,
-            config: RateLimitConfig,
-            tokens_used: int,
-            now: datetime,
-            window_start: datetime
+        self,
+        api_key: str,
+        config: RateLimitConfig,
+        tokens_used: int,
+        now: datetime,
+        window_start: datetime,
     ) -> dict[str, Any]:
         """Check sliding window using local cache (fallback)"""
         if api_key not in self.local_cache:
             # tokens: deque of (timestamp, amount)
-            self.local_cache[api_key] = {
-                "requests": deque(),
-                "tokens": deque()
-            }
+            self.local_cache[api_key] = {"requests": deque(), "tokens": deque()}
 
         cache = self.local_cache[api_key]
 
@@ -402,7 +419,7 @@ class SlidingWindowRateLimiter:
                 "remaining_tokens": 0,
                 "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
                 "retry_after": 60,
-                "reason": "Minute request limit exceeded"
+                "reason": "Minute request limit exceeded",
             }
 
         if current_tokens + tokens_used > config.tokens_per_minute:
@@ -412,7 +429,7 @@ class SlidingWindowRateLimiter:
                 "remaining_tokens": 0,
                 "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
                 "retry_after": 60,
-                "reason": "Minute token limit exceeded"
+                "reason": "Minute token limit exceeded",
             }
 
         # Record this request
@@ -423,7 +440,7 @@ class SlidingWindowRateLimiter:
             "allowed": True,
             "remaining_requests": config.requests_per_minute - current_requests - 1,
             "remaining_tokens": config.tokens_per_minute - current_tokens - tokens_used,
-            "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            "reset_time": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
         }
 
     async def increment_concurrent_requests(self, api_key: str):
@@ -442,6 +459,7 @@ class SlidingWindowRateLimiter:
             await self.fallback_manager.release_concurrent_request(api_key)
         except Exception as exc:
             logger.debug("Fallback concurrency release failed for %s: %s", api_key[:10], exc)
+
 
 class RateLimitManager:
     """Manager for rate limiting with per-key configuration"""
@@ -470,15 +488,15 @@ class RateLimitManager:
             config_data = get_rate_limit_config(api_key)
             if config_data:
                 return RateLimitConfig(
-                    requests_per_minute=config_data.get('requests_per_minute', 250),
-                    requests_per_hour=config_data.get('requests_per_hour', 1000),
-                    requests_per_day=config_data.get('requests_per_day', 10000),
-                    tokens_per_minute=config_data.get('tokens_per_minute', 10000),
-                    tokens_per_hour=config_data.get('tokens_per_hour', 100000),
-                    tokens_per_day=config_data.get('tokens_per_day', 1000000),
-                    burst_limit=config_data.get('burst_limit', 500),
-                    concurrency_limit=config_data.get('concurrency_limit', 50),
-                    window_size_seconds=config_data.get('window_size_seconds', 60)
+                    requests_per_minute=config_data.get("requests_per_minute", 250),
+                    requests_per_hour=config_data.get("requests_per_hour", 1000),
+                    requests_per_day=config_data.get("requests_per_day", 10000),
+                    tokens_per_minute=config_data.get("tokens_per_minute", 10000),
+                    tokens_per_hour=config_data.get("tokens_per_hour", 100000),
+                    tokens_per_day=config_data.get("tokens_per_day", 1000000),
+                    burst_limit=config_data.get("burst_limit", 500),
+                    concurrency_limit=config_data.get("concurrency_limit", 50),
+                    window_size_seconds=config_data.get("window_size_seconds", 60),
                 )
         except Exception as e:
             logger.error(f"Failed to load rate limit config from DB: {e}")
@@ -492,10 +510,7 @@ class RateLimitManager:
         pass
 
     async def check_rate_limit(
-        self,
-        api_key: str,
-        tokens_used: int = 0,
-        request_type: str = "api"
+        self, api_key: str, tokens_used: int = 0, request_type: str = "api"
     ) -> RateLimitResult:
         """Check rate limit for a specific API key"""
         config = await self.get_key_config(api_key)
@@ -519,15 +534,15 @@ class RateLimitManager:
         """Save rate limit configuration to database"""
         try:
             config_dict = {
-                'requests_per_minute': config.requests_per_minute,
-                'requests_per_hour': config.requests_per_hour,
-                'requests_per_day': config.requests_per_day,
-                'tokens_per_minute': config.tokens_per_minute,
-                'tokens_per_hour': config.tokens_per_hour,
-                'tokens_per_day': config.tokens_per_day,
-                'burst_limit': config.burst_limit,
-                'concurrency_limit': config.concurrency_limit,
-                'window_size_seconds': config.window_size_seconds
+                "requests_per_minute": config.requests_per_minute,
+                "requests_per_hour": config.requests_per_hour,
+                "requests_per_day": config.requests_per_day,
+                "tokens_per_minute": config.tokens_per_minute,
+                "tokens_per_hour": config.tokens_per_hour,
+                "tokens_per_day": config.tokens_per_day,
+                "burst_limit": config.burst_limit,
+                "concurrency_limit": config.concurrency_limit,
+                "window_size_seconds": config.window_size_seconds,
             }
 
             update_rate_limit_config(api_key, config_dict)
@@ -540,11 +555,13 @@ class RateLimitManager:
         return {
             "requests_remaining": config.requests_per_minute,
             "tokens_remaining": config.tokens_per_minute,
-            "reset_time": int((datetime.now(UTC) + timedelta(minutes=1)).timestamp())
+            "reset_time": int((datetime.now(UTC) + timedelta(minutes=1)).timestamp()),
         }
+
 
 # Global rate limiter instance
 _rate_limiter = None
+
 
 @lru_cache(maxsize=1)
 def get_rate_limiter() -> SlidingWindowRateLimiter:
@@ -554,21 +571,27 @@ def get_rate_limiter() -> SlidingWindowRateLimiter:
         _rate_limiter = SlidingWindowRateLimiter()
     return _rate_limiter
 
+
 # Convenience functions
-async def check_rate_limit(api_key: str, config: RateLimitConfig, tokens_used: int = 0) -> RateLimitResult:
+async def check_rate_limit(
+    api_key: str, config: RateLimitConfig, tokens_used: int = 0
+) -> RateLimitResult:
     """Check rate limit for API key"""
     limiter = get_rate_limiter()
     return await limiter.check_rate_limit(api_key, config, tokens_used)
+
 
 async def increment_request(api_key: str, config: RateLimitConfig, tokens_used: int = 0):
     """Increment request count for API key"""
     limiter = get_rate_limiter()
     await limiter.increment_request(api_key, config, tokens_used)
 
+
 async def get_rate_limit_status(api_key: str, config: RateLimitConfig) -> dict[str, Any]:
     """Get rate limit status for API key"""
     limiter = get_rate_limiter()
     return await limiter.get_rate_limit_status(api_key, config)
+
 
 PREMIUM_CONFIG = RateLimitConfig(
     requests_per_minute=300,
@@ -578,7 +601,7 @@ PREMIUM_CONFIG = RateLimitConfig(
     tokens_per_hour=500000,
     tokens_per_day=5000000,
     burst_limit=50,
-    concurrency_limit=20
+    concurrency_limit=20,
 )
 
 ENTERPRISE_CONFIG = RateLimitConfig(
@@ -589,11 +612,12 @@ ENTERPRISE_CONFIG = RateLimitConfig(
     tokens_per_hour=2000000,
     tokens_per_day=20000000,
     burst_limit=100,
-    concurrency_limit=50
+    concurrency_limit=50,
 )
 
 # Global rate limit manager instance
 _rate_limit_manager = None
+
 
 @lru_cache(maxsize=1)
 def get_rate_limit_manager() -> RateLimitManager:

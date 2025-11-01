@@ -40,5 +40,5 @@ __all__ = [
     "UptimeMetricsResponse",
     "ModelStatusResponse",
     "ProviderStatusResponse",
-    "HealthDashboardResponse"
+    "HealthDashboardResponse",
 ]

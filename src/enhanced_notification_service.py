@@ -25,6 +25,7 @@ from src.services.professional_email_templates import email_templates
 
 logger = logging.getLogger(__name__)
 
+
 class EnhancedNotificationService:
     """Enhanced notification service with professional email templates"""
 
@@ -32,9 +33,7 @@ class EnhancedNotificationService:
         try:
             self.supabase = supabase_config.get_supabase_client()
         except Exception as exc:
-            logger.warning(
-                "Supabase client unavailable during notification service init: %s", exc
-            )
+            logger.warning("Supabase client unavailable during notification service init: %s", exc)
             self.supabase = None
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
         self.from_email = os.environ.get("FROM_EMAIL", "noreply@yourdomain.com")
@@ -61,7 +60,7 @@ class EnhancedNotificationService:
                 to_email=email,
                 subject=template["subject"],
                 html_content=template["html"],
-                text_content=template["text"]
+                text_content=template["text"],
             )
 
             logger.info(f"Email notification result: {success}")
@@ -75,10 +74,10 @@ class EnhancedNotificationService:
                     subject=template["subject"],
                     content=template["html"],
                     metadata={
-                        'email_type': 'welcome',
-                        'api_key_provided': True,
-                        'credits_provided': credits
-                    }
+                        "email_type": "welcome",
+                        "api_key_provided": True,
+                        "credits_provided": credits,
+                    },
                 )
                 self.create_notification(request)
                 logger.info(f"Welcome email sent to {email}")
@@ -89,19 +88,23 @@ class EnhancedNotificationService:
             logger.error(f"Error details: {str(e)}", exc_info=True)
             return False
 
-    def send_welcome_email_if_needed(self, user_id: int, username: str, email: str, credits: int) -> bool:
+    def send_welcome_email_if_needed(
+        self, user_id: int, username: str, email: str, credits: int
+    ) -> bool:
         """Send welcome email only if the user hasn't received one yet"""
         try:
             # Check if user has already received a welcome email
             client = self.supabase or supabase_config.get_supabase_client()
-            user_result = client.table('users').select('welcome_email_sent').eq('id', user_id).execute()
+            user_result = (
+                client.table("users").select("welcome_email_sent").eq("id", user_id).execute()
+            )
 
             if not user_result.data:
                 logger.warning(f"User {user_id} not found, skipping welcome email")
                 return False
 
             user_data = user_result.data[0]
-            welcome_email_sent = user_data.get('welcome_email_sent', False)
+            welcome_email_sent = user_data.get("welcome_email_sent", False)
 
             if welcome_email_sent:
                 logger.info(f"User {user_id} has already received welcome email, skipping")
@@ -113,6 +116,7 @@ class EnhancedNotificationService:
             if success:
                 # Mark welcome email as sent
                 from src.db.users import mark_welcome_email_sent
+
                 mark_welcome_email_sent(user_id)
                 logger.info(f"Welcome email sent and marked as sent for user {user_id}")
 
@@ -131,12 +135,14 @@ class EnhancedNotificationService:
             # Store token in database with expiration
             expires_at = datetime.utcnow() + timedelta(hours=1)
             client = self.supabase or supabase_config.get_supabase_client()
-            client.table('password_reset_tokens').insert({
-                'user_id': user_id,
-                'token': reset_token,
-                'expires_at': expires_at.isoformat(),
-                'used': False
-            }).execute()
+            client.table("password_reset_tokens").insert(
+                {
+                    "user_id": user_id,
+                    "token": reset_token,
+                    "expires_at": expires_at.isoformat(),
+                    "used": False,
+                }
+            ).execute()
 
             # Send email
             template = email_templates.password_reset_email(username, email, reset_token)
@@ -145,7 +151,7 @@ class EnhancedNotificationService:
                 to_email=email,
                 subject=template["subject"],
                 html_content=template["html"],
-                text_content=template["text"]
+                text_content=template["text"],
             )
 
             if success:
@@ -158,7 +164,9 @@ class EnhancedNotificationService:
             logger.error(f"Error sending password reset email: {e}")
             return None
 
-    def send_monthly_usage_report(self, user_id: int, username: str, email: str, month: str, usage_stats: dict[str, Any]) -> bool:
+    def send_monthly_usage_report(
+        self, user_id: int, username: str, email: str, month: str, usage_stats: dict[str, Any]
+    ) -> bool:
         """Send monthly usage report email"""
         try:
             template = email_templates.monthly_usage_report(username, email, month, usage_stats)
@@ -167,7 +175,7 @@ class EnhancedNotificationService:
                 to_email=email,
                 subject=template["subject"],
                 html_content=template["html"],
-                text_content=template["text"]
+                text_content=template["text"],
             )
 
             if success:
@@ -179,10 +187,10 @@ class EnhancedNotificationService:
                     subject=template["subject"],
                     content=template["html"],
                     metadata={
-                        'email_type': 'usage_report',
-                        'month': month,
-                        'usage_stats': usage_stats
-                    }
+                        "email_type": "usage_report",
+                        "month": month,
+                        "usage_stats": usage_stats,
+                    },
                 )
                 self.create_notification(request)
                 logger.info(f"Monthly usage report sent to {email}")
@@ -192,7 +200,15 @@ class EnhancedNotificationService:
             logger.error(f"Error sending monthly usage report: {e}")
             return False
 
-    def send_plan_upgrade_confirmation(self, user_id: int, username: str, email: str, old_plan: str, new_plan: str, effective_date: str) -> bool:
+    def send_plan_upgrade_confirmation(
+        self,
+        user_id: int,
+        username: str,
+        email: str,
+        old_plan: str,
+        new_plan: str,
+        effective_date: str,
+    ) -> bool:
         """Send plan upgrade confirmation email"""
         try:
             content = f"""
@@ -238,7 +254,7 @@ class EnhancedNotificationService:
                     app_name=self.app_name,
                     app_url=self.app_url,
                     support_email=self.from_email,
-                    email=email
+                    email=email,
                 ),
                 text_content=f"""Plan Upgraded Successfully - {self.app_name}
 
@@ -256,7 +272,7 @@ Questions? Contact us: {self.from_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
             )
 
             if success:
@@ -267,7 +283,9 @@ The {self.app_name} Team
             logger.error(f"Error sending plan upgrade confirmation: {e}")
             return False
 
-    def send_api_key_created_email(self, user_id: int, username: str, email: str, api_key: str, key_name: str) -> bool:
+    def send_api_key_created_email(
+        self, user_id: int, username: str, email: str, api_key: str, key_name: str
+    ) -> bool:
         """Send email when new API key is created"""
         try:
             content = f"""
@@ -312,7 +330,7 @@ The {self.app_name} Team
                     app_name=self.app_name,
                     app_url=self.app_url,
                     support_email=self.from_email,
-                    email=email
+                    email=email,
                 ),
                 text_content=f"""New API Key Created - {self.app_name}
 
@@ -331,7 +349,7 @@ If you didn't create this API key, please contact our support team immediately a
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
             )
 
             if success:
@@ -342,7 +360,9 @@ The {self.app_name} Team
             logger.error(f"Error sending API key creation email: {e}")
             return False
 
-    def send_email_notification(self, to_email: str, subject: str, html_content: str, text_content: str = None) -> bool:
+    def send_email_notification(
+        self, to_email: str, subject: str, html_content: str, text_content: str = None
+    ) -> bool:
         """Send email notification using Resend SDK"""
         try:
             logger.info(f"Attempting to send email to: {to_email}")
@@ -356,17 +376,19 @@ The {self.app_name} Team
 
             # Use Resend SDK
             logger.info("Sending email via Resend SDK...")
-            response = resend.Emails.send({
-                "from": self.from_email,
-                "to": [to_email],
-                "subject": subject,
-                "html": html_content,
-                "text": text_content
-            })
+            response = resend.Emails.send(
+                {
+                    "from": self.from_email,
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": html_content,
+                    "text": text_content,
+                }
+            )
 
             logger.info(f"Resend response: {response}")
 
-            if response.get('id'):
+            if response.get("id"):
                 logger.info(f"✅ Email sent successfully to {to_email}, ID: {response['id']}")
                 return True
             else:
@@ -382,17 +404,17 @@ The {self.app_name} Team
         """Create notification record in database"""
         try:
             notification_data = {
-                'user_id': request.user_id,
-                'type': request.type.value,
-                'channel': request.channel.value,
-                'subject': request.subject,
-                'content': request.content,
-                'status': NotificationStatus.PENDING.value,
-                'metadata': json.dumps(request.metadata) if request.metadata else None
+                "user_id": request.user_id,
+                "type": request.type.value,
+                "channel": request.channel.value,
+                "subject": request.subject,
+                "content": request.content,
+                "status": NotificationStatus.PENDING.value,
+                "metadata": json.dumps(request.metadata) if request.metadata else None,
             }
 
             client = self.supabase or supabase_config.get_supabase_client()
-            result = client.table('notifications').insert(notification_data).execute()
+            result = client.table("notifications").insert(notification_data).execute()
             return bool(result.data)
         except Exception as e:
             logger.error(f"Error creating notification: {e}")
@@ -402,25 +424,31 @@ The {self.app_name} Team
         """Get user notification preferences"""
         try:
             client = self.supabase or supabase_config.get_supabase_client()
-            result = client.table('notification_preferences').select('*').eq('user_id', user_id).execute()
+            result = (
+                client.table("notification_preferences")
+                .select("*")
+                .eq("user_id", user_id)
+                .execute()
+            )
 
             if result.data:
                 data = result.data[0]
                 return NotificationPreferences(
-                    user_id=data['user_id'],
-                    email_notifications=data.get('email_notifications', True),
-                    low_balance_threshold=data.get('low_balance_threshold', 10.0),
-                    trial_expiry_reminder_days=data.get('trial_expiry_reminder_days', 1),
-                    plan_expiry_reminder_days=data.get('plan_expiry_reminder_days', 7),
-                    usage_alerts=data.get('usage_alerts', True),
-                    webhook_url=data.get('webhook_url'),
-                    created_at=data.get('created_at'),
-                    updated_at=data.get('updated_at')
+                    user_id=data["user_id"],
+                    email_notifications=data.get("email_notifications", True),
+                    low_balance_threshold=data.get("low_balance_threshold", 10.0),
+                    trial_expiry_reminder_days=data.get("trial_expiry_reminder_days", 1),
+                    plan_expiry_reminder_days=data.get("plan_expiry_reminder_days", 7),
+                    usage_alerts=data.get("usage_alerts", True),
+                    webhook_url=data.get("webhook_url"),
+                    created_at=data.get("created_at"),
+                    updated_at=data.get("updated_at"),
                 )
             return None
         except Exception as e:
             logger.error(f"Error getting user preferences: {e}")
             return None
+
 
 # Global enhanced notification service instance
 enhanced_notification_service = EnhancedNotificationService()

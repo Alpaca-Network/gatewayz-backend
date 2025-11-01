@@ -16,18 +16,19 @@ logger = logging.getLogger(__name__)
 # Coupon CRUD Operations
 # ============================================
 
+
 def create_coupon(
-        code: str,
-        value_usd: float,
-        coupon_scope: str,
-        max_uses: int,
-        valid_until: datetime,
-        coupon_type: str = 'promotional',
-        created_by: int | None = None,
-        created_by_type: str = 'admin',
-        assigned_to_user_id: int | None = None,
-        description: str | None = None,
-        valid_from: datetime | None = None
+    code: str,
+    value_usd: float,
+    coupon_scope: str,
+    max_uses: int,
+    valid_until: datetime,
+    coupon_type: str = "promotional",
+    created_by: int | None = None,
+    created_by_type: str = "admin",
+    assigned_to_user_id: int | None = None,
+    description: str | None = None,
+    valid_from: datetime | None = None,
 ) -> dict[str, Any] | None:
     """
     Create a new coupon
@@ -52,38 +53,38 @@ def create_coupon(
         client = get_supabase_client()
 
         # Validate coupon scope and assignment
-        if coupon_scope == 'user_specific' and not assigned_to_user_id:
+        if coupon_scope == "user_specific" and not assigned_to_user_id:
             raise ValueError("User-specific coupons must have assigned_to_user_id")
 
-        if coupon_scope == 'global' and assigned_to_user_id:
+        if coupon_scope == "global" and assigned_to_user_id:
             raise ValueError("Global coupons cannot have assigned_to_user_id")
 
-        if coupon_scope == 'user_specific' and max_uses != 1:
+        if coupon_scope == "user_specific" and max_uses != 1:
             raise ValueError("User-specific coupons must have max_uses = 1")
 
         # Prepare coupon data
         coupon_data = {
-            'code': code.upper(),  # Store in uppercase for consistency
-            'value_usd': value_usd,
-            'coupon_scope': coupon_scope,
-            'max_uses': max_uses,
-            'coupon_type': coupon_type,
-            'created_by_type': created_by_type,
-            'valid_until': valid_until.isoformat(),
-            'valid_from': (valid_from or datetime.now(UTC)).isoformat(),
+            "code": code.upper(),  # Store in uppercase for consistency
+            "value_usd": value_usd,
+            "coupon_scope": coupon_scope,
+            "max_uses": max_uses,
+            "coupon_type": coupon_type,
+            "created_by_type": created_by_type,
+            "valid_until": valid_until.isoformat(),
+            "valid_from": (valid_from or datetime.now(UTC)).isoformat(),
         }
 
         if created_by:
-            coupon_data['created_by'] = created_by
+            coupon_data["created_by"] = created_by
 
         if assigned_to_user_id:
-            coupon_data['assigned_to_user_id'] = assigned_to_user_id
+            coupon_data["assigned_to_user_id"] = assigned_to_user_id
 
         if description:
-            coupon_data['description'] = description
+            coupon_data["description"] = description
 
         # Insert into database
-        result = client.table('coupons').insert(coupon_data).execute()
+        result = client.table("coupons").insert(coupon_data).execute()
 
         if result.data:
             logger.info(f"Coupon created: {code} (scope: {coupon_scope}, value: ${value_usd})")
@@ -102,7 +103,7 @@ def get_coupon_by_code(code: str) -> dict[str, Any] | None:
         client = get_supabase_client()
 
         # Query with case-insensitive match
-        result = client.table('coupons').select('*').ilike('code', code).execute()
+        result = client.table("coupons").select("*").ilike("code", code).execute()
 
         if result.data:
             return result.data[0]
@@ -119,7 +120,7 @@ def get_coupon_by_id(coupon_id: int) -> dict[str, Any] | None:
     try:
         client = get_supabase_client()
 
-        result = client.table('coupons').select('*').eq('id', coupon_id).execute()
+        result = client.table("coupons").select("*").eq("id", coupon_id).execute()
 
         if result.data:
             return result.data[0]
@@ -132,13 +133,13 @@ def get_coupon_by_id(coupon_id: int) -> dict[str, Any] | None:
 
 
 def list_coupons(
-        scope: str | None = None,
-        coupon_type: str | None = None,
-        is_active: bool | None = None,
-        created_by: int | None = None,
-        assigned_to_user_id: int | None = None,
-        limit: int = 100,
-        offset: int = 0
+    scope: str | None = None,
+    coupon_type: str | None = None,
+    is_active: bool | None = None,
+    created_by: int | None = None,
+    assigned_to_user_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """
     List coupons with filters
@@ -158,26 +159,26 @@ def list_coupons(
     try:
         client = get_supabase_client()
 
-        query = client.table('coupons').select('*')
+        query = client.table("coupons").select("*")
 
         # Apply filters
         if scope:
-            query = query.eq('coupon_scope', scope)
+            query = query.eq("coupon_scope", scope)
 
         if coupon_type:
-            query = query.eq('coupon_type', coupon_type)
+            query = query.eq("coupon_type", coupon_type)
 
         if is_active is not None:
-            query = query.eq('is_active', is_active)
+            query = query.eq("is_active", is_active)
 
         if created_by:
-            query = query.eq('created_by', created_by)
+            query = query.eq("created_by", created_by)
 
         if assigned_to_user_id:
-            query = query.eq('assigned_to_user_id', assigned_to_user_id)
+            query = query.eq("assigned_to_user_id", assigned_to_user_id)
 
         # Order and paginate
-        query = query.order('created_at', desc=True).range(offset, offset + limit - 1)
+        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
 
         result = query.execute()
 
@@ -188,10 +189,7 @@ def list_coupons(
         return []
 
 
-def update_coupon(
-        coupon_id: int,
-        updates: dict[str, Any]
-) -> dict[str, Any] | None:
+def update_coupon(coupon_id: int, updates: dict[str, Any]) -> dict[str, Any] | None:
     """
     Update coupon fields
 
@@ -206,7 +204,7 @@ def update_coupon(
         client = get_supabase_client()
 
         # Allowed update fields
-        allowed_fields = ['valid_until', 'max_uses', 'is_active', 'description']
+        allowed_fields = ["valid_until", "max_uses", "is_active", "description"]
 
         # Filter updates to allowed fields only
         filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
@@ -214,7 +212,7 @@ def update_coupon(
         if not filtered_updates:
             raise ValueError("No valid fields to update")
 
-        result = client.table('coupons').update(filtered_updates).eq('id', coupon_id).execute()
+        result = client.table("coupons").update(filtered_updates).eq("id", coupon_id).execute()
 
         if result.data:
             logger.info(f"Coupon {coupon_id} updated: {list(filtered_updates.keys())}")
@@ -232,7 +230,7 @@ def deactivate_coupon(coupon_id: int) -> bool:
     try:
         client = get_supabase_client()
 
-        result = client.table('coupons').update({'is_active': False}).eq('id', coupon_id).execute()
+        result = client.table("coupons").update({"is_active": False}).eq("id", coupon_id).execute()
 
         if result.data:
             logger.info(f"Coupon {coupon_id} deactivated")
@@ -248,6 +246,7 @@ def deactivate_coupon(coupon_id: int) -> bool:
 # ============================================
 # Coupon Validation
 # ============================================
+
 
 def validate_coupon(code: str, user_id: int) -> dict[str, Any]:
     """
@@ -272,37 +271,40 @@ def validate_coupon(code: str, user_id: int) -> dict[str, Any]:
         client = get_supabase_client()
 
         # Call the database validation function
-        result = client.rpc('is_coupon_redeemable', {
-            'p_coupon_code': code,
-            'p_user_id': user_id
-        }).execute()
+        result = client.rpc(
+            "is_coupon_redeemable", {"p_coupon_code": code, "p_user_id": user_id}
+        ).execute()
 
         if result.data and len(result.data) > 0:
             validation = result.data[0]
             return {
-                'is_valid': validation.get('is_valid', False),
-                'error_code': validation.get('error_code'),
-                'error_message': validation.get('error_message'),
-                'coupon_id': validation.get('coupon_id'),
-                'coupon_value': float(validation.get('coupon_value', 0)) if validation.get('coupon_value') else None
+                "is_valid": validation.get("is_valid", False),
+                "error_code": validation.get("error_code"),
+                "error_message": validation.get("error_message"),
+                "coupon_id": validation.get("coupon_id"),
+                "coupon_value": (
+                    float(validation.get("coupon_value", 0))
+                    if validation.get("coupon_value")
+                    else None
+                ),
             }
 
         return {
-            'is_valid': False,
-            'error_code': 'VALIDATION_FAILED',
-            'error_message': 'Coupon validation failed',
-            'coupon_id': None,
-            'coupon_value': None
+            "is_valid": False,
+            "error_code": "VALIDATION_FAILED",
+            "error_message": "Coupon validation failed",
+            "coupon_id": None,
+            "coupon_value": None,
         }
 
     except Exception as e:
         logger.error(f"Error validating coupon: {e}")
         return {
-            'is_valid': False,
-            'error_code': 'SYSTEM_ERROR',
-            'error_message': f'System error: {str(e)}',
-            'coupon_id': None,
-            'coupon_value': None
+            "is_valid": False,
+            "error_code": "SYSTEM_ERROR",
+            "error_message": f"System error: {str(e)}",
+            "coupon_id": None,
+            "coupon_value": None,
         }
 
 
@@ -310,11 +312,9 @@ def validate_coupon(code: str, user_id: int) -> dict[str, Any]:
 # Coupon Redemption
 # ============================================
 
+
 def redeem_coupon(
-        code: str,
-        user_id: int,
-        ip_address: str | None = None,
-        user_agent: str | None = None
+    code: str, user_id: int, ip_address: str | None = None, user_agent: str | None = None
 ) -> dict[str, Any]:
     """
     Redeem a coupon for a user
@@ -344,66 +344,74 @@ def redeem_coupon(
         # Step 1: Validate coupon
         validation = validate_coupon(code, user_id)
 
-        if not validation['is_valid']:
+        if not validation["is_valid"]:
             return {
-                'success': False,
-                'message': validation['error_message'],
-                'error_code': validation['error_code'],
-                'coupon_value': None,
-                'previous_balance': None,
-                'new_balance': None,
-                'coupon_code': code
+                "success": False,
+                "message": validation["error_message"],
+                "error_code": validation["error_code"],
+                "coupon_value": None,
+                "previous_balance": None,
+                "new_balance": None,
+                "coupon_code": code,
             }
 
-        coupon_id = validation['coupon_id']
-        coupon_value = validation['coupon_value']
+        coupon_id = validation["coupon_id"]
+        coupon_value = validation["coupon_value"]
 
         # Step 2: Get current user balance
-        user_result = client.table('users').select('credits').eq('id', user_id).execute()
+        user_result = client.table("users").select("credits").eq("id", user_id).execute()
 
         if not user_result.data:
             return {
-                'success': False,
-                'message': 'User not found',
-                'error_code': 'USER_NOT_FOUND',
-                'coupon_value': None,
-                'previous_balance': None,
-                'new_balance': None,
-                'coupon_code': code
+                "success": False,
+                "message": "User not found",
+                "error_code": "USER_NOT_FOUND",
+                "coupon_value": None,
+                "previous_balance": None,
+                "new_balance": None,
+                "coupon_code": code,
             }
 
-        current_balance = float(user_result.data[0]['credits'])
+        current_balance = float(user_result.data[0]["credits"])
         new_balance = current_balance + coupon_value
 
         # Step 3: Update user balance
-        update_result = client.table('users').update({
-            'credits': new_balance
-        }).eq('id', user_id).execute()
+        update_result = (
+            client.table("users").update({"credits": new_balance}).eq("id", user_id).execute()
+        )
 
         if not update_result.data:
             raise Exception("Failed to update user balance")
 
         # Step 4: Increment coupon usage
-        client.table('coupons').update({
-            'times_used': client.table('coupons').select('times_used').eq('id', coupon_id).execute().data[0][
-                              'times_used'] + 1
-        }).eq('id', coupon_id).execute()
+        client.table("coupons").update(
+            {
+                "times_used": client.table("coupons")
+                .select("times_used")
+                .eq("id", coupon_id)
+                .execute()
+                .data[0]["times_used"]
+                + 1
+            }
+        ).eq("id", coupon_id).execute()
 
         # Better approach: use RPC or raw SQL for atomic increment
-        client.rpc('increment', {'row_id': coupon_id, 'x': 1}).execute()  # If you have this function
+        client.rpc(
+            "increment", {"row_id": coupon_id, "x": 1}
+        ).execute()  # If you have this function
 
         # Step 5: Record redemption
         redemption_data = {
-            'coupon_id': coupon_id,
-            'user_id': user_id,
-            'value_applied': coupon_value,
-            'user_balance_before': current_balance,
-            'user_balance_after': new_balance,
-            'ip_address': ip_address,
-            'user_agent': user_agent
+            "coupon_id": coupon_id,
+            "user_id": user_id,
+            "value_applied": coupon_value,
+            "user_balance_before": current_balance,
+            "user_balance_after": new_balance,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
         }
 
-        redemption_result = client.table('coupon_redemptions').insert(redemption_data).execute()
+        redemption_result = client.table("coupon_redemptions").insert(redemption_data).execute()
 
         if not redemption_result.data:
             logger.error(f"Failed to record redemption for coupon {coupon_id}")
@@ -412,31 +420,32 @@ def redeem_coupon(
         logger.info(f"Coupon {code} redeemed by user {user_id}: ${coupon_value}")
 
         return {
-            'success': True,
-            'message': 'Coupon redeemed successfully!',
-            'coupon_value': coupon_value,
-            'previous_balance': current_balance,
-            'new_balance': new_balance,
-            'coupon_code': code,
-            'error_code': None
+            "success": True,
+            "message": "Coupon redeemed successfully!",
+            "coupon_value": coupon_value,
+            "previous_balance": current_balance,
+            "new_balance": new_balance,
+            "coupon_code": code,
+            "error_code": None,
         }
 
     except Exception as e:
         logger.error(f"Error redeeming coupon: {e}")
         return {
-            'success': False,
-            'message': f'System error: {str(e)}',
-            'error_code': 'SYSTEM_ERROR',
-            'coupon_value': None,
-            'previous_balance': None,
-            'new_balance': None,
-            'coupon_code': code
+            "success": False,
+            "message": f"System error: {str(e)}",
+            "error_code": "SYSTEM_ERROR",
+            "coupon_value": None,
+            "previous_balance": None,
+            "new_balance": None,
+            "coupon_code": code,
         }
 
 
 # ============================================
 # User Coupon Queries
 # ============================================
+
 
 def get_available_coupons_for_user(user_id: int) -> list[dict[str, Any]]:
     """
@@ -453,9 +462,7 @@ def get_available_coupons_for_user(user_id: int) -> list[dict[str, Any]]:
         client = get_supabase_client()
 
         # Call the database function
-        result = client.rpc('get_available_coupons', {
-            'p_user_id': user_id
-        }).execute()
+        result = client.rpc("get_available_coupons", {"p_user_id": user_id}).execute()
 
         return result.data if result.data else []
 
@@ -478,9 +485,14 @@ def get_user_redemption_history(user_id: int, limit: int = 50) -> list[dict[str,
     try:
         client = get_supabase_client()
 
-        result = client.table('coupon_redemptions').select(
-            '*, coupons(code, coupon_type, coupon_scope)'
-        ).eq('user_id', user_id).order('redeemed_at', desc=True).limit(limit).execute()
+        result = (
+            client.table("coupon_redemptions")
+            .select("*, coupons(code, coupon_type, coupon_scope)")
+            .eq("user_id", user_id)
+            .order("redeemed_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
 
         return result.data if result.data else []
 
@@ -492,6 +504,7 @@ def get_user_redemption_history(user_id: int, limit: int = 50) -> list[dict[str,
 # ============================================
 # Admin Analytics
 # ============================================
+
 
 def get_coupon_analytics(coupon_id: int) -> dict[str, Any]:
     """
@@ -513,25 +526,27 @@ def get_coupon_analytics(coupon_id: int) -> dict[str, Any]:
             return {}
 
         # Get redemption stats
-        redemptions_result = client.table('coupon_redemptions').select(
-            '*'
-        ).eq('coupon_id', coupon_id).execute()
+        redemptions_result = (
+            client.table("coupon_redemptions").select("*").eq("coupon_id", coupon_id).execute()
+        )
 
         redemptions = redemptions_result.data if redemptions_result.data else []
 
-        total_value_distributed = sum(float(r['value_applied']) for r in redemptions)
-        unique_users = len({r['user_id'] for r in redemptions})
+        total_value_distributed = sum(float(r["value_applied"]) for r in redemptions)
+        unique_users = len({r["user_id"] for r in redemptions})
 
         return {
-            'coupon': coupon,
-            'total_redemptions': len(redemptions),
-            'unique_users': unique_users,
-            'total_value_distributed': total_value_distributed,
-            'redemption_rate': (len(redemptions) / coupon['max_uses'] * 100) if coupon['max_uses'] > 0 else 0,
-            'remaining_uses': coupon['max_uses'] - coupon['times_used'],
-            'is_expired': datetime.fromisoformat(coupon['valid_until'].replace('Z', '+00:00')) < datetime.now(
-                UTC),
-            'recent_redemptions': redemptions[:10]  # Last 10
+            "coupon": coupon,
+            "total_redemptions": len(redemptions),
+            "unique_users": unique_users,
+            "total_value_distributed": total_value_distributed,
+            "redemption_rate": (
+                (len(redemptions) / coupon["max_uses"] * 100) if coupon["max_uses"] > 0 else 0
+            ),
+            "remaining_uses": coupon["max_uses"] - coupon["times_used"],
+            "is_expired": datetime.fromisoformat(coupon["valid_until"].replace("Z", "+00:00"))
+            < datetime.now(UTC),
+            "recent_redemptions": redemptions[:10],  # Last 10
         }
 
     except Exception as e:
@@ -550,27 +565,29 @@ def get_all_coupons_stats() -> dict[str, Any]:
         client = get_supabase_client()
 
         # Get all coupons
-        all_coupons = client.table('coupons').select('*').execute().data or []
+        all_coupons = client.table("coupons").select("*").execute().data or []
 
         # Get all redemptions
-        all_redemptions = client.table('coupon_redemptions').select('*').execute().data or []
+        all_redemptions = client.table("coupon_redemptions").select("*").execute().data or []
 
-        active_coupons = [c for c in all_coupons if c['is_active']]
-        user_specific = [c for c in all_coupons if c['coupon_scope'] == 'user_specific']
-        global_coupons = [c for c in all_coupons if c['coupon_scope'] == 'global']
+        active_coupons = [c for c in all_coupons if c["is_active"]]
+        user_specific = [c for c in all_coupons if c["coupon_scope"] == "user_specific"]
+        global_coupons = [c for c in all_coupons if c["coupon_scope"] == "global"]
 
-        total_value_distributed = sum(float(r['value_applied']) for r in all_redemptions)
-        unique_redeemers = len({r['user_id'] for r in all_redemptions})
+        total_value_distributed = sum(float(r["value_applied"]) for r in all_redemptions)
+        unique_redeemers = len({r["user_id"] for r in all_redemptions})
 
         return {
-            'total_coupons': len(all_coupons),
-            'active_coupons': len(active_coupons),
-            'user_specific_coupons': len(user_specific),
-            'global_coupons': len(global_coupons),
-            'total_redemptions': len(all_redemptions),
-            'unique_redeemers': unique_redeemers,
-            'total_value_distributed': total_value_distributed,
-            'average_redemption_value': total_value_distributed / len(all_redemptions) if all_redemptions else 0
+            "total_coupons": len(all_coupons),
+            "active_coupons": len(active_coupons),
+            "user_specific_coupons": len(user_specific),
+            "global_coupons": len(global_coupons),
+            "total_redemptions": len(all_redemptions),
+            "unique_redeemers": unique_redeemers,
+            "total_value_distributed": total_value_distributed,
+            "average_redemption_value": (
+                total_value_distributed / len(all_redemptions) if all_redemptions else 0
+            ),
         }
 
     except Exception as e:

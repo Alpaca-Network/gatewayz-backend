@@ -14,9 +14,11 @@ from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class RateLimitConfig:
     """Rate limit configuration"""
+
     requests_per_minute: int = 250
     requests_per_hour: int = 1000
     requests_per_day: int = 10000
@@ -27,15 +29,18 @@ class RateLimitConfig:
     concurrency_limit: int = 50  # Updated from 5 to 50
     window_size_seconds: int = 60
 
+
 @dataclass
 class RateLimitResult:
     """Rate limit check result"""
+
     allowed: bool
     reason: str | None = None
     retry_after: int | None = None
     remaining_requests: int = 0
     remaining_tokens: int = 0
     reset_time: int | None = None
+
 
 class InMemoryRateLimiter:
     """In-memory rate limiter with sliding window algorithm"""
@@ -48,8 +53,9 @@ class InMemoryRateLimiter:
         self.last_burst_refill = defaultdict(float)
         self.lock = asyncio.Lock()
 
-    async def check_rate_limit(self, api_key: str, config: RateLimitConfig,
-                             tokens_used: int = 0, request_type: str = 'api') -> RateLimitResult:
+    async def check_rate_limit(
+        self, api_key: str, config: RateLimitConfig, tokens_used: int = 0, request_type: str = "api"
+    ) -> RateLimitResult:
         """Check rate limit for API key"""
         async with self.lock:
             current_time = time.time()
@@ -76,7 +82,7 @@ class InMemoryRateLimiter:
                     reason="Burst limit exceeded",
                     retry_after=1,
                     remaining_requests=0,
-                    remaining_tokens=0
+                    remaining_tokens=0,
                 )
 
             # Check request rate limits
@@ -85,7 +91,9 @@ class InMemoryRateLimiter:
                 return request_result
 
             # Check token rate limits
-            token_result = await self._check_token_limits(api_key, config, tokens_used, current_time)
+            token_result = await self._check_token_limits(
+                api_key, config, tokens_used, current_time
+            )
             if not token_result.allowed:
                 return token_result
 
@@ -96,14 +104,18 @@ class InMemoryRateLimiter:
             # self.concurrent_requests[api_key] += 1
 
             # Calculate remaining limits
-            remaining_requests = max(0, config.requests_per_minute - len(self.request_windows[api_key]))
-            remaining_tokens = max(0, config.tokens_per_minute - sum(t for _, t in self.token_windows[api_key]))
+            remaining_requests = max(
+                0, config.requests_per_minute - len(self.request_windows[api_key])
+            )
+            remaining_tokens = max(
+                0, config.tokens_per_minute - sum(t for _, t in self.token_windows[api_key])
+            )
 
             return RateLimitResult(
                 allowed=True,
                 remaining_requests=remaining_requests,
                 remaining_tokens=remaining_tokens,
-                reset_time=int(current_time + config.window_size_seconds)
+                reset_time=int(current_time + config.window_size_seconds),
             )
 
     async def release_concurrent_request(self, api_key: str):
@@ -117,24 +129,32 @@ class InMemoryRateLimiter:
         window_size = 60  # 1 minute window
 
         # Clean request window
-        while (self.request_windows[api_key] and
-               current_time - self.request_windows[api_key][0] > window_size):
+        while (
+            self.request_windows[api_key]
+            and current_time - self.request_windows[api_key][0] > window_size
+        ):
             self.request_windows[api_key].popleft()
 
         # Clean token window
-        while (self.token_windows[api_key] and
-               current_time - self.token_windows[api_key][0][0] > window_size):
+        while (
+            self.token_windows[api_key]
+            and current_time - self.token_windows[api_key][0][0] > window_size
+        ):
             self.token_windows[api_key].popleft()
 
-    async def _check_burst_limit(self, api_key: str, config: RateLimitConfig, current_time: float) -> bool:
+    async def _check_burst_limit(
+        self, api_key: str, config: RateLimitConfig, current_time: float
+    ) -> bool:
         """Check burst limit using token bucket algorithm"""
         # Refill burst tokens
         time_since_refill = current_time - self.last_burst_refill[api_key]
         if time_since_refill >= 1.0:  # Refill every second
-            refill_amount = min(config.burst_limit,
-                              int(time_since_refill * config.burst_limit / 60))  # Refill rate
-            self.burst_tokens[api_key] = min(config.burst_limit,
-                                           self.burst_tokens[api_key] + refill_amount)
+            refill_amount = min(
+                config.burst_limit, int(time_since_refill * config.burst_limit / 60)
+            )  # Refill rate
+            self.burst_tokens[api_key] = min(
+                config.burst_limit, self.burst_tokens[api_key] + refill_amount
+            )
             self.last_burst_refill[api_key] = current_time
 
         # Check if we have tokens available
@@ -144,8 +164,9 @@ class InMemoryRateLimiter:
 
         return False
 
-    async def _check_request_limits(self, api_key: str, config: RateLimitConfig,
-                                  current_time: float) -> RateLimitResult:
+    async def _check_request_limits(
+        self, api_key: str, config: RateLimitConfig, current_time: float
+    ) -> RateLimitResult:
         """Check request rate limits"""
         current_requests = len(self.request_windows[api_key])
 
@@ -154,13 +175,14 @@ class InMemoryRateLimiter:
                 allowed=False,
                 reason="Request rate limit exceeded",
                 retry_after=60,
-                remaining_requests=0
+                remaining_requests=0,
             )
 
         return RateLimitResult(allowed=True)
 
-    async def _check_token_limits(self, api_key: str, config: RateLimitConfig,
-                                tokens_used: int, current_time: float) -> RateLimitResult:
+    async def _check_token_limits(
+        self, api_key: str, config: RateLimitConfig, tokens_used: int, current_time: float
+    ) -> RateLimitResult:
         """Check token rate limits"""
         current_tokens = sum(t for _, t in self.token_windows[api_key])
 
@@ -169,10 +191,11 @@ class InMemoryRateLimiter:
                 allowed=False,
                 reason="Token rate limit exceeded",
                 retry_after=60,
-                remaining_tokens=0
+                remaining_tokens=0,
             )
 
         return RateLimitResult(allowed=True)
+
 
 class FallbackRateLimitManager:
     """Fallback rate limit manager that works without Redis"""
@@ -194,8 +217,9 @@ class FallbackRateLimitManager:
 
         return self.key_configs[api_key]
 
-    async def check_rate_limit(self, api_key: str, tokens_used: int = 0,
-                             request_type: str = 'api') -> RateLimitResult:
+    async def check_rate_limit(
+        self, api_key: str, tokens_used: int = 0, request_type: str = "api"
+    ) -> RateLimitResult:
         """Check rate limit for API key"""
         config = await self.get_key_config(api_key)
         return await self.rate_limiter.check_rate_limit(api_key, config, tokens_used, request_type)
@@ -219,22 +243,24 @@ class FallbackRateLimitManager:
         self.key_configs[api_key] = config
         try:
             config_dict = {
-                'requests_per_minute': config.requests_per_minute,
-                'requests_per_hour': config.requests_per_hour,
-                'requests_per_day': config.requests_per_day,
-                'tokens_per_minute': config.tokens_per_minute,
-                'tokens_per_hour': config.tokens_per_hour,
-                'tokens_per_day': config.tokens_per_day,
-                'burst_limit': config.burst_limit,
-                'concurrency_limit': config.concurrency_limit,
-                'window_size_seconds': config.window_size_seconds
+                "requests_per_minute": config.requests_per_minute,
+                "requests_per_hour": config.requests_per_hour,
+                "requests_per_day": config.requests_per_day,
+                "tokens_per_minute": config.tokens_per_minute,
+                "tokens_per_hour": config.tokens_per_hour,
+                "tokens_per_day": config.tokens_per_day,
+                "burst_limit": config.burst_limit,
+                "concurrency_limit": config.concurrency_limit,
+                "window_size_seconds": config.window_size_seconds,
             }
             update_rate_limit_config(api_key, config_dict)
         except Exception as e:
             logger.warning(f"Failed to save rate limit config to DB: {e}")
 
+
 # Global fallback manager
 _fallback_manager = None
+
 
 def get_fallback_rate_limit_manager() -> FallbackRateLimitManager:
     """Get fallback rate limit manager instance"""

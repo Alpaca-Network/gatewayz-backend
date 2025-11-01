@@ -14,7 +14,9 @@ from src.security.deps import get_current_user
 logger = logging.getLogger(__name__)
 
 
-async def require_role(required_role: str, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+async def require_role(
+    required_role: str, user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
     """
     Require specific role
 
@@ -28,23 +30,16 @@ async def require_role(required_role: str, user: dict[str, Any] = Depends(get_cu
     Raises:
         HTTPException: 403 if role doesn't match
     """
-    user_role = user.get('role', UserRole.USER)
+    user_role = user.get("role", UserRole.USER)
 
     # Role hierarchy: admin > developer > user
-    role_hierarchy = {
-        UserRole.ADMIN: 3,
-        UserRole.DEVELOPER: 2,
-        UserRole.USER: 1
-    }
+    role_hierarchy = {UserRole.ADMIN: 3, UserRole.DEVELOPER: 2, UserRole.USER: 1}
 
     user_level = role_hierarchy.get(user_role, 0)
     required_level = role_hierarchy.get(required_role, 0)
 
     if user_level < required_level:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Requires {required_role} role"
-        )
+        raise HTTPException(status_code=403, detail=f"Requires {required_role} role")
 
     return user
 
@@ -60,9 +55,7 @@ async def require_developer(user: dict[str, Any] = Depends(get_current_user)) ->
 
 
 async def require_permission(
-        resource: str,
-        action: str,
-        user: dict[str, Any] = Depends(get_current_user)
+    resource: str, action: str, user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """
     Require specific permission
@@ -78,12 +71,11 @@ async def require_permission(
     Raises:
         HTTPException: 403 if permission denied
     """
-    user_id = user.get('id')
+    user_id = user.get("id")
 
     if not check_user_permission(user_id, resource, action):
         raise HTTPException(
-            status_code=403,
-            detail=f"Permission denied: cannot {action} {resource}"
+            status_code=403, detail=f"Permission denied: cannot {action} {resource}"
         )
 
     return user

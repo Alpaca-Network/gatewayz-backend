@@ -301,7 +301,7 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
             {models_row}
             """.format(
                 clickable_class="clickable" if models_html else "",
-                onclick=f'onclick="toggleModels(\'{escape(gateway_id)}\')"' if models_html else "",
+                onclick=f"onclick=\"toggleModels('{escape(gateway_id)}')\"" if models_html else "",
                 gateway_attr=escape(gateway_id),
                 name=escape(name),
                 expand_icon='<span class="expand-icon">▶</span>' if models_html else "",
@@ -312,7 +312,7 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
                 cache_details=escape(cache_details),
                 final_badge=status_badge(final_status),
                 auto_fix=auto_fix_cell,
-                models_row=models_html
+                models_row=models_html,
             )
         )
 
@@ -348,7 +348,9 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
                 <div class=\"metric\">{fixed}</div>
                 <div class=\"label\">Auto-fixed</div>
             </div>
-        """.format(fixed=summary["fixed"])
+        """.format(
+            fixed=summary["fixed"]
+        )
 
     raw_json = escape(json.dumps(results, indent=2))
     log_block = escape(log_output.strip()) if log_output else "No log output captured."
@@ -785,7 +787,7 @@ async def _run_gateway_check(auto_fix: bool) -> tuple[dict[str, Any], str]:
     if run_comprehensive_check is None:
         raise HTTPException(
             status_code=503,
-            detail="check_and_fix_gateway_models module is unavailable in this deployment."
+            detail="check_and_fix_gateway_models module is unavailable in this deployment.",
         )
 
     def _runner() -> tuple[dict[str, Any], str]:
@@ -803,32 +805,26 @@ async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> tuple[dict[
     if run_comprehensive_check is None:
         raise HTTPException(
             status_code=503,
-            detail="check_and_fix_gateway_models module is unavailable in this deployment."
+            detail="check_and_fix_gateway_models module is unavailable in this deployment.",
         )
 
     def _runner() -> tuple[dict[str, Any], str]:
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             results = run_comprehensive_check(  # type: ignore[arg-type]
-                auto_fix=auto_fix,
-                verbose=False,
-                gateway=gateway
+                auto_fix=auto_fix, verbose=False, gateway=gateway
             )
         return results, buffer.getvalue()
 
     return await run_in_threadpool(_runner)
 
 
-@router.post(
-    "/health/gateways/{gateway}/fix",
-    tags=["health"]
-)
+@router.post("/health/gateways/{gateway}/fix", tags=["health"])
 async def trigger_gateway_fix(
     gateway: str,
     auto_fix: bool = Query(
-        True,
-        description="Attempt to auto-fix the specified gateway after running diagnostics."
-    )
+        True, description="Attempt to auto-fix the specified gateway after running diagnostics."
+    ),
 ):
     """
     Trigger a targeted gateway diagnostics run with optional auto-fix.
@@ -843,8 +839,7 @@ async def trigger_gateway_fix(
 
         if not gateway_payload:
             raise HTTPException(
-                status_code=404,
-                detail=f"Gateway '{gateway}' not found in health check results."
+                status_code=404, detail=f"Gateway '{gateway}' not found in health check results."
             )
 
         return {
@@ -866,7 +861,7 @@ async def trigger_gateway_fix(
                 "unconfigured": results.get("unconfigured"),
                 "fixed": results.get("fixed"),
             },
-            "logs": log_output.strip()
+            "logs": log_output.strip(),
         }
     except HTTPException:
         raise
@@ -874,12 +869,15 @@ async def trigger_gateway_fix(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - unexpected failures
         logger.exception("Failed to trigger gateway fix for %s", gateway)
-        raise HTTPException(status_code=500, detail=f"Failed to run gateway fix: {exc}") from exc  # pragma: no cover - unexpected failures
+        raise HTTPException(
+            status_code=500, detail=f"Failed to run gateway fix: {exc}"
+        ) from exc  # pragma: no cover - unexpected failures
 
 
 # ============================================================================
 # Cache Management Endpoints
 # ============================================================================
+
 
 @router.get("/cache/status", tags=["cache"])
 async def get_cache_status():
@@ -907,7 +905,16 @@ async def get_cache_status():
     """
     try:
         cache_status = {}
-        gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]
+        gateways = [
+            "openrouter",
+            "portkey",
+            "featherless",
+            "deepinfra",
+            "chutes",
+            "groq",
+            "fireworks",
+            "together",
+        ]
 
         for gateway in gateways:
             try:
@@ -940,7 +947,7 @@ async def get_cache_status():
                     "ttl_seconds": ttl,
                     "cache_age_seconds": cache_age_seconds,
                     "status": "stale" if is_stale else ("healthy" if models else "empty"),
-                    "has_data": bool(models)
+                    "has_data": bool(models),
                 }
             else:
                 cache_status[gateway] = {
@@ -949,7 +956,7 @@ async def get_cache_status():
                     "ttl_seconds": 3600,
                     "cache_age_seconds": None,
                     "status": "empty",
-                    "has_data": False
+                    "has_data": False,
                 }
 
         # Add providers cache
@@ -978,7 +985,7 @@ async def get_cache_status():
                 "ttl_seconds": ttl,
                 "cache_age_seconds": cache_age_seconds,
                 "status": "stale" if is_stale else ("healthy" if providers else "empty"),
-                "has_data": bool(providers)
+                "has_data": bool(providers),
             }
         else:
             cache_status["providers"] = {
@@ -987,14 +994,10 @@ async def get_cache_status():
                 "ttl_seconds": 3600,
                 "cache_age_seconds": None,
                 "status": "empty",
-                "has_data": False
+                "has_data": False,
             }
 
-        return {
-            "success": True,
-            "data": cache_status,
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"success": True, "data": cache_status, "timestamp": datetime.now(UTC).isoformat()}
 
     except Exception as e:
         logger.error(f"Failed to get cache status: {e}")
@@ -1004,7 +1007,7 @@ async def get_cache_status():
 @router.post("/cache/refresh/{gateway}", tags=["cache"])
 async def refresh_gateway_cache(
     gateway: str,
-    force: bool = Query(False, description="Force refresh even if cache is still valid")
+    force: bool = Query(False, description="Force refresh even if cache is still valid"),
 ):
     """
     Force refresh cache for a specific gateway.
@@ -1020,12 +1023,22 @@ async def refresh_gateway_cache(
     """
     try:
         gateway = gateway.lower()
-        valid_gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together", "huggingface"]
+        valid_gateways = [
+            "openrouter",
+            "portkey",
+            "featherless",
+            "deepinfra",
+            "chutes",
+            "groq",
+            "fireworks",
+            "together",
+            "huggingface",
+        ]
 
         if gateway not in valid_gateways:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid gateway. Must be one of: {', '.join(valid_gateways)}"
+                detail=f"Invalid gateway. Must be one of: {', '.join(valid_gateways)}",
             )
 
         # Check if refresh is needed
@@ -1050,7 +1063,7 @@ async def refresh_gateway_cache(
                 "message": f"Cache for {gateway} is still valid. Use force=true to refresh anyway.",
                 "gateway": gateway,
                 "action": "skipped",
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Clear existing cache
@@ -1067,7 +1080,7 @@ async def refresh_gateway_cache(
             "groq": fetch_models_from_groq,
             "fireworks": fetch_models_from_fireworks,
             "together": fetch_models_from_together,
-            "huggingface": fetch_models_from_hug
+            "huggingface": fetch_models_from_hug,
         }
 
         fetch_func = fetch_functions.get(gateway)
@@ -1076,11 +1089,13 @@ async def refresh_gateway_cache(
             try:
                 result = fetch_func()
                 # If it's a coroutine, await it
-                if hasattr(result, '__await__'):
+                if hasattr(result, "__await__"):
                     await result
             except Exception as fetch_error:
                 logger.error(f"Error fetching models from {gateway}: {fetch_error}")
-                raise HTTPException(status_code=500, detail=f"Failed to fetch models from {gateway}") from fetch_error
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to fetch models from {gateway}"
+                ) from fetch_error
         elif gateway == "deepinfra":
             # DeepInfra doesn't have bulk fetching, only individual model fetching
             return {
@@ -1088,7 +1103,7 @@ async def refresh_gateway_cache(
                 "message": "DeepInfra does not support bulk cache refresh. Models are fetched on-demand.",
                 "gateway": gateway,
                 "action": "not_supported",
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             raise HTTPException(status_code=400, detail=f"Unknown gateway: {gateway}")
@@ -1106,7 +1121,7 @@ async def refresh_gateway_cache(
             "gateway": gateway,
             "models_cached": models_count,
             "action": "refreshed",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1118,7 +1133,9 @@ async def refresh_gateway_cache(
 
 @router.post("/cache/clear", tags=["cache"])
 async def clear_all_caches(
-    gateway: str | None = Query(None, description="Specific gateway to clear, or all if not specified")
+    gateway: str | None = Query(
+        None, description="Specific gateway to clear, or all if not specified"
+    )
 ):
     """
     Clear cache for all gateways or a specific gateway.
@@ -1133,11 +1150,20 @@ async def clear_all_caches(
                 "success": True,
                 "message": f"Cache cleared for {gateway}",
                 "gateway": gateway,
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             # Clear all gateways
-            gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes", "groq", "fireworks", "together"]
+            gateways = [
+                "openrouter",
+                "portkey",
+                "featherless",
+                "deepinfra",
+                "chutes",
+                "groq",
+                "fireworks",
+                "together",
+            ]
             for gw in gateways:
                 clear_models_cache(gw)
             clear_providers_cache()
@@ -1146,7 +1172,7 @@ async def clear_all_caches(
                 "success": True,
                 "message": "All caches cleared",
                 "gateways_cleared": gateways + ["providers"],
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
@@ -1157,6 +1183,7 @@ async def clear_all_caches(
 # ============================================================================
 # Gateway Health Monitoring Endpoints
 # ============================================================================
+
 
 @router.get("/health/gateways", tags=["health"])
 async def check_all_gateways():
@@ -1187,38 +1214,60 @@ async def check_all_gateways():
             "openrouter": {
                 "url": "https://openrouter.ai/api/v1/models",
                 "api_key": Config.OPENROUTER_API_KEY,
-                "headers": {}
+                "headers": {},
             },
             "portkey": {
                 "url": "https://api.portkey.ai/v1/models",
                 "api_key": Config.PORTKEY_API_KEY,
-                "headers": {"x-portkey-api-key": Config.PORTKEY_API_KEY} if Config.PORTKEY_API_KEY else {}
+                "headers": (
+                    {"x-portkey-api-key": Config.PORTKEY_API_KEY} if Config.PORTKEY_API_KEY else {}
+                ),
             },
             "featherless": {
                 "url": "https://api.featherless.ai/v1/models",
                 "api_key": Config.FEATHERLESS_API_KEY,
-                "headers": {"Authorization": f"Bearer {Config.FEATHERLESS_API_KEY}"} if Config.FEATHERLESS_API_KEY else {}
+                "headers": (
+                    {"Authorization": f"Bearer {Config.FEATHERLESS_API_KEY}"}
+                    if Config.FEATHERLESS_API_KEY
+                    else {}
+                ),
             },
             "deepinfra": {
                 "url": "https://api.deepinfra.com/v1/openai/models",
                 "api_key": Config.DEEPINFRA_API_KEY,
-                "headers": {"Authorization": f"Bearer {Config.DEEPINFRA_API_KEY}"} if Config.DEEPINFRA_API_KEY else {}
+                "headers": (
+                    {"Authorization": f"Bearer {Config.DEEPINFRA_API_KEY}"}
+                    if Config.DEEPINFRA_API_KEY
+                    else {}
+                ),
             },
             "groq": {
                 "url": "https://api.groq.com/openai/v1/models",
                 "api_key": os.environ.get("GROQ_API_KEY"),
-                "headers": {"Authorization": f"Bearer {os.environ.get('GROQ_API_KEY')}"} if os.environ.get("GROQ_API_KEY") else {}
+                "headers": (
+                    {"Authorization": f"Bearer {os.environ.get('GROQ_API_KEY')}"}
+                    if os.environ.get("GROQ_API_KEY")
+                    else {}
+                ),
             },
             "fireworks": {
                 "url": "https://api.fireworks.ai/inference/v1/models",
                 "api_key": os.environ.get("FIREWORKS_API_KEY"),
-                "headers": {"Authorization": f"Bearer {os.environ.get('FIREWORKS_API_KEY')}"} if os.environ.get("FIREWORKS_API_KEY") else {}
+                "headers": (
+                    {"Authorization": f"Bearer {os.environ.get('FIREWORKS_API_KEY')}"}
+                    if os.environ.get("FIREWORKS_API_KEY")
+                    else {}
+                ),
             },
             "together": {
                 "url": "https://api.together.xyz/v1/models",
                 "api_key": os.environ.get("TOGETHER_API_KEY"),
-                "headers": {"Authorization": f"Bearer {os.environ.get('TOGETHER_API_KEY')}"} if os.environ.get("TOGETHER_API_KEY") else {}
-            }
+                "headers": (
+                    {"Authorization": f"Bearer {os.environ.get('TOGETHER_API_KEY')}"}
+                    if os.environ.get("TOGETHER_API_KEY")
+                    else {}
+                ),
+            },
         }
 
         # Check each gateway
@@ -1232,16 +1281,14 @@ async def check_all_gateways():
                         "latency_ms": None,
                         "available": False,
                         "last_check": check_time.isoformat(),
-                        "error": "API key not configured"
+                        "error": "API key not configured",
                     }
                     continue
 
                 try:
                     start_time = datetime.now(UTC)
                     response = await client.get(
-                        config["url"],
-                        headers=config["headers"],
-                        timeout=5.0
+                        config["url"], headers=config["headers"], timeout=5.0
                     )
                     end_time = datetime.now(UTC)
                     latency_ms = int((end_time - start_time).total_seconds() * 1000)
@@ -1252,7 +1299,7 @@ async def check_all_gateways():
                             "latency_ms": latency_ms,
                             "available": True,
                             "last_check": check_time.isoformat(),
-                            "error": None
+                            "error": None,
                         }
                     else:
                         health_status[gateway_name] = {
@@ -1260,7 +1307,7 @@ async def check_all_gateways():
                             "latency_ms": latency_ms,
                             "available": False,
                             "last_check": check_time.isoformat(),
-                            "error": f"HTTP {response.status_code}"
+                            "error": f"HTTP {response.status_code}",
                         }
 
                 except httpx.TimeoutException:
@@ -1269,7 +1316,7 @@ async def check_all_gateways():
                         "latency_ms": None,
                         "available": False,
                         "last_check": check_time.isoformat(),
-                        "error": "Request timed out"
+                        "error": "Request timed out",
                     }
 
                 except Exception as e:
@@ -1278,7 +1325,7 @@ async def check_all_gateways():
                         "latency_ms": None,
                         "available": False,
                         "last_check": check_time.isoformat(),
-                        "error": str(e)
+                        "error": str(e),
                     }
 
         # Calculate overall health
@@ -1292,23 +1339,31 @@ async def check_all_gateways():
                 "total_gateways": len(health_status),
                 "healthy": healthy_count,
                 "degraded": sum(1 for g in health_status.values() if g["status"] == "degraded"),
-                "unhealthy": sum(1 for g in health_status.values() if g["status"] in ["error", "timeout"]),
-                "unconfigured": sum(1 for g in health_status.values() if g["status"] == "unconfigured"),
-                "overall_health_percentage": (healthy_count / total_configured * 100) if total_configured > 0 else 0
+                "unhealthy": sum(
+                    1 for g in health_status.values() if g["status"] in ["error", "timeout"]
+                ),
+                "unconfigured": sum(
+                    1 for g in health_status.values() if g["status"] == "unconfigured"
+                ),
+                "overall_health_percentage": (
+                    (healthy_count / total_configured * 100) if total_configured > 0 else 0
+                ),
             },
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Failed to check gateway health: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to check gateway health: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to check gateway health: {str(e)}"
+        ) from e
 
 
 @router.get("/health/gateways/dashboard", response_class=HTMLResponse, tags=["health"])
 async def gateway_health_dashboard(
     auto_fix: bool = Query(
         False,
-        description="Attempt to auto-fix failing gateways using the CLI logic before rendering the dashboard."
+        description="Attempt to auto-fix failing gateways using the CLI logic before rendering the dashboard.",
     )
 ):
     """Render an HTML dashboard view of the comprehensive gateway health check."""
@@ -1322,12 +1377,11 @@ async def gateway_health_dashboard(
 async def gateway_health_dashboard_data(
     auto_fix: bool = Query(
         False,
-        description="Attempt to auto-fix failing gateways using the CLI logic before returning the payload."
+        description="Attempt to auto-fix failing gateways using the CLI logic before returning the payload.",
     ),
     include_logs: bool = Query(
-        False,
-        description="Include captured stdout logs from the CLI run in the response."
-    )
+        False, description="Include captured stdout logs from the CLI run in the response."
+    ),
 ):
     """Expose the dashboard data as JSON for programmatic consumption."""
 
@@ -1386,32 +1440,31 @@ async def check_single_gateway(gateway: str):
             gateway_health["cache"] = {
                 "models_cached": len(models),
                 "last_refresh": normalized_timestamp.isoformat() if normalized_timestamp else None,
-                "has_data": bool(models)
+                "has_data": bool(models),
             }
         else:
-            gateway_health["cache"] = {
-                "models_cached": 0,
-                "last_refresh": None,
-                "has_data": False
-            }
+            gateway_health["cache"] = {"models_cached": 0, "last_refresh": None, "has_data": False}
 
         return {
             "success": True,
             "gateway": gateway.lower(),
             "data": gateway_health,
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to check gateway {gateway}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to check gateway health: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to check gateway health: {str(e)}"
+        ) from e
 
 
 # ============================================================================
 # Modelz Cache Management Endpoints
 # ============================================================================
+
 
 @router.get("/cache/modelz/status", tags=["cache", "modelz"])
 async def get_modelz_cache_status():
@@ -1439,14 +1492,12 @@ async def get_modelz_cache_status():
     """
     try:
         cache_status = get_modelz_cache_status_func()
-        return {
-            "success": True,
-            "data": cache_status,
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"success": True, "data": cache_status, "timestamp": datetime.now(UTC).isoformat()}
     except Exception as e:
         logger.error(f"Failed to get Modelz cache status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get Modelz cache status: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get Modelz cache status: {str(e)}"
+        ) from e
 
 
 @router.post("/cache/modelz/refresh", tags=["cache", "modelz"])
@@ -1478,14 +1529,12 @@ async def refresh_modelz_cache_endpoint():
         logger.info("Refreshing Modelz cache via API endpoint")
         refresh_result = await refresh_modelz_cache()
 
-        return {
-            "success": True,
-            "data": refresh_result,
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"success": True, "data": refresh_result, "timestamp": datetime.now(UTC).isoformat()}
     except Exception as e:
         logger.error(f"Failed to refresh Modelz cache: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh Modelz cache: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to refresh Modelz cache: {str(e)}"
+        ) from e
 
 
 @router.delete("/cache/modelz/clear", tags=["cache", "modelz"])
@@ -1514,8 +1563,10 @@ async def clear_modelz_cache_endpoint():
         return {
             "success": True,
             "message": "Modelz cache cleared successfully",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to clear Modelz cache: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear Modelz cache: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clear Modelz cache: {str(e)}"
+        ) from e

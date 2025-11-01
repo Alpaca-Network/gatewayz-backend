@@ -43,11 +43,12 @@ router = APIRouter()
 # User Endpoints
 # ============================================
 
+
 @router.post("/coupons/redeem", response_model=RedemptionResponse, tags=["coupons"])
 async def redeem_coupon_endpoint(
-        request: Request,
-        redemption_request: RedeemCouponRequest,
-        user: dict = Depends(get_current_user)
+    request: Request,
+    redemption_request: RedeemCouponRequest,
+    user: dict = Depends(get_current_user),
 ):
     """
     Redeem a coupon code
@@ -58,25 +59,22 @@ async def redeem_coupon_endpoint(
     - Records the redemption
     """
     try:
-        user_id = user['id']
+        user_id = user["id"]
 
         # Get client info for audit
         client_host = request.client.host if request.client else None
-        user_agent = request.headers.get('user-agent')
+        user_agent = request.headers.get("user-agent")
 
         # Redeem the coupon
         result = redeem_coupon(
             code=redemption_request.code,
             user_id=user_id,
             ip_address=client_host,
-            user_agent=user_agent
+            user_agent=user_agent,
         )
 
-        if not result['success']:
-            return JSONResponse(
-                status_code=400,
-                content=result
-            )
+        if not result["success"]:
+            return JSONResponse(status_code=400, content=result)
 
         return RedemptionResponse(**result)
 
@@ -97,7 +95,7 @@ async def get_available_coupons(user: dict = Depends(get_current_user)):
     - Global coupons not yet redeemed by this user
     """
     try:
-        user_id = user['id']
+        user_id = user["id"]
 
         # Get available coupons
         coupons = get_available_coupons_for_user(user_id)
@@ -112,17 +110,14 @@ async def get_available_coupons(user: dict = Depends(get_current_user)):
 
 
 @router.get("/coupons/history", response_model=RedemptionHistoryResponse, tags=["coupons"])
-async def get_redemption_history(
-        limit: int = 50,
-        user: dict = Depends(get_current_user)
-):
+async def get_redemption_history(limit: int = 50, user: dict = Depends(get_current_user)):
     """
     Get redemption history for the current user
 
     Shows all coupons the user has redeemed with details
     """
     try:
-        user_id = user['id']
+        user_id = user["id"]
 
         # Get redemption history
         redemptions = get_user_redemption_history(user_id, limit=limit)
@@ -132,23 +127,25 @@ async def get_redemption_history(
         total_value = 0.0
 
         for r in redemptions:
-            coupon = r.get('coupons', {})
-            history_items.append(RedemptionHistoryItem(
-                id=r['id'],
-                coupon_code=coupon.get('code', 'Unknown'),
-                coupon_scope=coupon.get('coupon_scope', 'unknown'),
-                coupon_type=coupon.get('coupon_type', 'unknown'),
-                value_applied=float(r['value_applied']),
-                redeemed_at=r['redeemed_at'],
-                user_balance_before=float(r['user_balance_before']),
-                user_balance_after=float(r['user_balance_after'])
-            ))
-            total_value += float(r['value_applied'])
+            coupon = r.get("coupons", {})
+            history_items.append(
+                RedemptionHistoryItem(
+                    id=r["id"],
+                    coupon_code=coupon.get("code", "Unknown"),
+                    coupon_scope=coupon.get("coupon_scope", "unknown"),
+                    coupon_type=coupon.get("coupon_type", "unknown"),
+                    value_applied=float(r["value_applied"]),
+                    redeemed_at=r["redeemed_at"],
+                    user_balance_before=float(r["user_balance_before"]),
+                    user_balance_after=float(r["user_balance_after"]),
+                )
+            )
+            total_value += float(r["value_applied"])
 
         return RedemptionHistoryResponse(
             redemptions=history_items,
             total_redemptions=len(history_items),
-            total_value_redeemed=total_value
+            total_value_redeemed=total_value,
         )
 
     except HTTPException:
@@ -162,10 +159,10 @@ async def get_redemption_history(
 # Admin Endpoints
 # ============================================
 
+
 @router.post("/admin/coupons", response_model=CouponResponse, tags=["admin", "coupons"])
 async def create_coupon_endpoint(
-        coupon_request: CreateCouponRequest,
-        user: dict = Depends(require_admin)
+    coupon_request: CreateCouponRequest, user: dict = Depends(require_admin)
 ):
     """
     Create a new coupon (Admin only)
@@ -174,7 +171,7 @@ async def create_coupon_endpoint(
     - Global: available to all users, one-time per user
     """
     try:
-        created_by = user['id']
+        created_by = user["id"]
 
         # Create coupon
         coupon = create_coupon(
@@ -185,10 +182,10 @@ async def create_coupon_endpoint(
             valid_until=coupon_request.valid_until,
             coupon_type=coupon_request.coupon_type.value,
             created_by=created_by,
-            created_by_type='admin',
+            created_by_type="admin",
             assigned_to_user_id=coupon_request.assigned_to_user_id,
             description=coupon_request.description,
-            valid_from=coupon_request.valid_from
+            valid_from=coupon_request.valid_from,
         )
 
         if not coupon:
@@ -207,12 +204,12 @@ async def create_coupon_endpoint(
 
 @router.get("/admin/coupons", response_model=ListCouponsResponse, tags=["admin", "coupons"])
 async def list_coupons_endpoint(
-        scope: str | None = None,
-        coupon_type: str | None = None,
-        is_active: bool | None = None,
-        limit: int = 100,
-        offset: int = 0,
-        user: dict = Depends(require_admin)
+    scope: str | None = None,
+    coupon_type: str | None = None,
+    is_active: bool | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: dict = Depends(require_admin),
 ):
     """
     List all coupons with filters (Admin only)
@@ -227,18 +224,14 @@ async def list_coupons_endpoint(
     try:
         # List coupons
         coupons = list_coupons(
-            scope=scope,
-            coupon_type=coupon_type,
-            is_active=is_active,
-            limit=limit,
-            offset=offset
+            scope=scope, coupon_type=coupon_type, is_active=is_active, limit=limit, offset=offset
         )
 
         return ListCouponsResponse(
             coupons=[CouponResponse(**c) for c in coupons],
             total=len(coupons),
             offset=offset,
-            limit=limit
+            limit=limit,
         )
 
     except HTTPException:
@@ -249,10 +242,7 @@ async def list_coupons_endpoint(
 
 
 @router.get("/admin/coupons/{coupon_id}", response_model=CouponResponse, tags=["admin", "coupons"])
-async def get_coupon_endpoint(
-        coupon_id: int,
-        user: dict = Depends(require_admin)
-):
+async def get_coupon_endpoint(coupon_id: int, user: dict = Depends(require_admin)):
     """Get a specific coupon by ID (Admin only)"""
     try:
         coupon = get_coupon_by_id(coupon_id)
@@ -269,11 +259,11 @@ async def get_coupon_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.patch("/admin/coupons/{coupon_id}", response_model=CouponResponse, tags=["admin", "coupons"])
+@router.patch(
+    "/admin/coupons/{coupon_id}", response_model=CouponResponse, tags=["admin", "coupons"]
+)
 async def update_coupon_endpoint(
-        coupon_id: int,
-        update_request: UpdateCouponRequest,
-        user: dict = Depends(require_admin)
+    coupon_id: int, update_request: UpdateCouponRequest, user: dict = Depends(require_admin)
 ):
     """Update a coupon (Admin only)"""
     try:
@@ -299,10 +289,7 @@ async def update_coupon_endpoint(
 
 
 @router.delete("/admin/coupons/{coupon_id}", tags=["admin", "coupons"])
-async def deactivate_coupon_endpoint(
-        coupon_id: int,
-        user: dict = Depends(require_admin)
-):
+async def deactivate_coupon_endpoint(coupon_id: int, user: dict = Depends(require_admin)):
     """Deactivate a coupon (Admin only)"""
     try:
         success = deactivate_coupon(coupon_id)
@@ -319,11 +306,12 @@ async def deactivate_coupon_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.get("/admin/coupons/{coupon_id}/analytics", response_model=CouponAnalyticsResponse, tags=["admin", "coupons"])
-async def get_coupon_analytics_endpoint(
-        coupon_id: int,
-        user: dict = Depends(require_admin)
-):
+@router.get(
+    "/admin/coupons/{coupon_id}/analytics",
+    response_model=CouponAnalyticsResponse,
+    tags=["admin", "coupons"],
+)
+async def get_coupon_analytics_endpoint(coupon_id: int, user: dict = Depends(require_admin)):
     """Get detailed analytics for a coupon (Admin only)"""
     try:
         analytics = get_coupon_analytics(coupon_id)
@@ -332,13 +320,13 @@ async def get_coupon_analytics_endpoint(
             raise HTTPException(status_code=404, detail="Coupon not found")
 
         return CouponAnalyticsResponse(
-            coupon=CouponResponse(**analytics['coupon']),
-            total_redemptions=analytics['total_redemptions'],
-            unique_users=analytics['unique_users'],
-            total_value_distributed=analytics['total_value_distributed'],
-            redemption_rate=analytics['redemption_rate'],
-            remaining_uses=analytics['remaining_uses'],
-            is_expired=analytics['is_expired']
+            coupon=CouponResponse(**analytics["coupon"]),
+            total_redemptions=analytics["total_redemptions"],
+            unique_users=analytics["unique_users"],
+            total_value_distributed=analytics["total_value_distributed"],
+            redemption_rate=analytics["redemption_rate"],
+            remaining_uses=analytics["remaining_uses"],
+            is_expired=analytics["is_expired"],
         )
 
     except HTTPException:
@@ -348,7 +336,9 @@ async def get_coupon_analytics_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.get("/admin/coupons/stats/overview", response_model=CouponStatsResponse, tags=["admin", "coupons"])
+@router.get(
+    "/admin/coupons/stats/overview", response_model=CouponStatsResponse, tags=["admin", "coupons"]
+)
 async def get_coupon_stats_endpoint(user: dict = Depends(require_admin)):
     """Get system-wide coupon statistics (Admin only)"""
     try:

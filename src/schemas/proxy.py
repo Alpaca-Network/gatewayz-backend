@@ -68,6 +68,7 @@ class InputMessage(BaseModel):
     Unified input message for v1/responses endpoint.
     Supports multimodal input (text, images, etc.)
     """
+
     role: str
     content: str | list[dict[str, Any]]  # String or multimodal content array
 
@@ -77,6 +78,7 @@ class ResponseRequest(BaseModel):
     Unified API request schema for v1/responses endpoint.
     This is the newer, more flexible alternative to v1/chat/completions.
     """
+
     model: str
     input: list[InputMessage]  # Replaces 'messages' in chat/completions
     max_tokens: int | None = 950
@@ -105,8 +107,10 @@ class ResponseRequest(BaseModel):
 # Anthropic Messages API Schemas
 # ============================================================================
 
+
 class ContentBlock(BaseModel):
     """Content block for Anthropic Messages API"""
+
     type: str  # "text", "image", etc.
     text: str | None = None
     source: dict[str, Any] | None = None  # For image blocks
@@ -117,6 +121,7 @@ class ContentBlock(BaseModel):
 
 class AnthropicMessage(BaseModel):
     """Message format for Anthropic Messages API"""
+
     role: str  # "user" or "assistant"
     content: str | list[ContentBlock]  # String or content blocks
 
@@ -156,6 +161,7 @@ class MessagesRequest(BaseModel):
     - Content can be string or array of content blocks
     - No frequency_penalty or presence_penalty
     """
+
     model: str  # e.g., "claude-sonnet-4-5-20250929"
     messages: list[AnthropicMessage]
     max_tokens: int  # REQUIRED for Anthropic API

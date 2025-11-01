@@ -89,21 +89,23 @@ from src.schemas.payments import (
     StripePaymentMethodType,
     StripeWebhookEvent,
     StripeWebhookEventType,
-    SubscriptionResponse,
-    WebhookProcessingResult,
 )
 from src.schemas.payments import (
     SubscriptionPlan as PaymentSubscriptionPlan,  # Stripe-specific models; Rename to avoid conflict
 )
+from src.schemas.payments import (
+    SubscriptionResponse,
+    WebhookProcessingResult,
+)
 
 # Plan models
+from src.schemas.plans import SubscriptionPlan  # This is the correct one for trial service
 from src.schemas.plans import (
     AssignPlanRequest,
     PlanEntitlementsResponse,
     PlanResponse,
     PlanUsageResponse,
     SubscriptionHistory,
-    SubscriptionPlan,  # This is the correct one for trial service
     SubscriptionPlansResponse,
     UserPlanResponse,
 )

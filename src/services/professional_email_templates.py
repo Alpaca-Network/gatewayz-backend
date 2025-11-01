@@ -10,7 +10,12 @@ from typing import Any
 class ProfessionalEmailTemplates:
     """Professional email templates with modern design"""
 
-    def __init__(self, app_name: str = "Gatewayz", app_url: str = "https://betagatewayz.ai", support_email: str = None):
+    def __init__(
+        self,
+        app_name: str = "Gatewayz",
+        app_url: str = "https://betagatewayz.ai",
+        support_email: str = None,
+    ):
         self.app_name = app_name
         self.app_url = app_url
         # Use provided support email or extract from URL
@@ -18,7 +23,7 @@ class ProfessionalEmailTemplates:
             self.support_email = support_email
         else:
             # Extract domain from URL and use support email
-            domain = app_url.split('//')[-1].replace('beta.', '').replace('www.', '')
+            domain = app_url.split("//")[-1].replace("beta.", "").replace("www.", "")
             self.support_email = f"support@{domain}"
 
     def get_base_template(self) -> str:
@@ -260,10 +265,10 @@ class ProfessionalEmailTemplates:
         """Welcome to Gatewayz!"""
         # Use display name if it looks like a real name, otherwise use email prefix
         display_name = username
-        if username and not username.startswith(('google_', 'github_', 'privy_')):
+        if username and not username.startswith(("google_", "github_", "privy_")):
             display_name = username
         elif email:
-            display_name = email.split('@')[0].replace('.', ' ').title()
+            display_name = email.split("@")[0].replace(".", " ").title()
         else:
             display_name = "there"
 
@@ -365,7 +370,7 @@ class ProfessionalEmailTemplates:
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Welcome to {self.app_name}!
 
@@ -391,17 +396,17 @@ Questions? Contact us: {self.support_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
     def simple_welcome_email(self, username: str, email: str, credits: int) -> dict[str, str]:
         """Simple, clean welcome email template"""
         # Use display name if it looks like a real name, otherwise use email prefix
         display_name = username
-        if username and not username.startswith(('google_', 'github_', 'privy_')):
+        if username and not username.startswith(("google_", "github_", "privy_")):
             display_name = username
         elif email:
-            display_name = email.split('@')[0].replace('.', ' ').title()
+            display_name = email.split("@")[0].replace(".", " ").title()
         else:
             display_name = "there"
 
@@ -435,7 +440,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Welcome to {self.app_name}!
 
@@ -451,10 +456,18 @@ Questions? Contact us: {self.support_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
-    def low_balance_alert(self, username: str, email: str, current_credits: float, threshold: float, is_trial: bool = False, plan_name: str = None) -> dict[str, str]:
+    def low_balance_alert(
+        self,
+        username: str,
+        email: str,
+        current_credits: float,
+        threshold: float,
+        is_trial: bool = False,
+        plan_name: str = None,
+    ) -> dict[str, str]:
         """Low balance alert email"""
         if is_trial:
             content = f"""
@@ -538,7 +551,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Low Balance Alert - {self.app_name}
 
@@ -557,10 +570,19 @@ Questions? Contact us: {self.support_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
-    def trial_expiry_alert(self, username: str, email: str, remaining_days: int, remaining_credits: float, remaining_tokens: int, remaining_requests: int, trial_end_date: str) -> dict[str, str]:
+    def trial_expiry_alert(
+        self,
+        username: str,
+        email: str,
+        remaining_days: int,
+        remaining_credits: float,
+        remaining_tokens: int,
+        remaining_requests: int,
+        trial_end_date: str,
+    ) -> dict[str, str]:
         """Trial expiry alert email"""
         content = f"""
             <h2>⏰ Trial Expiring Soon</h2>
@@ -627,7 +649,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Trial Expiring Soon - {self.app_name}
 
@@ -647,10 +669,12 @@ Questions? Contact us: {self.support_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
-    def subscription_expiry_alert(self, username: str, email: str, plan_name: str, remaining_days: int, end_date: str) -> dict[str, str]:
+    def subscription_expiry_alert(
+        self, username: str, email: str, plan_name: str, remaining_days: int, end_date: str
+    ) -> dict[str, str]:
         """Subscription expiry alert email"""
         content = f"""
             <h2>📅 Subscription Expiring Soon</h2>
@@ -702,7 +726,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Subscription Expiring Soon - {self.app_name}
 
@@ -720,10 +744,12 @@ Questions? Contact us: {self.support_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
-    def credits_added_confirmation(self, username: str, email: str, credits_added: float, new_balance: float) -> dict[str, str]:
+    def credits_added_confirmation(
+        self, username: str, email: str, credits_added: float, new_balance: float
+    ) -> dict[str, str]:
         """Credits added confirmation email"""
         content = f"""
             <h2>✅ Credits Added Successfully</h2>
@@ -773,7 +799,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Credits Added Successfully - {self.app_name}
 
@@ -797,7 +823,7 @@ Thank you for choosing {self.app_name}!
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
     def password_reset_email(self, username: str, email: str, reset_token: str) -> dict[str, str]:
@@ -843,7 +869,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Password Reset Request - {self.app_name}
 
@@ -860,10 +886,12 @@ If you didn't request this password reset, please ignore this email or contact o
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
 
-    def monthly_usage_report(self, username: str, email: str, month: str, usage_stats: dict[str, Any]) -> dict[str, str]:
+    def monthly_usage_report(
+        self, username: str, email: str, month: str, usage_stats: dict[str, Any]
+    ) -> dict[str, str]:
         """Monthly usage report email"""
         content = f"""
             <h2>📊 Monthly Usage Report - {month}</h2>
@@ -919,7 +947,7 @@ The {self.app_name} Team
                 app_name=self.app_name,
                 app_url=self.app_url,
                 support_email=self.support_email,
-                email=email
+                email=email,
             ),
             "text": f"""Monthly Usage Report - {self.app_name}
 
@@ -939,12 +967,13 @@ Questions? Contact us: {self.support_email}
 
 Best regards,
 The {self.app_name} Team
-"""
+""",
         }
+
 
 # Global instance
 email_templates = ProfessionalEmailTemplates(
     app_name=os.environ.get("APP_NAME", "Gatewayz"),
     app_url=os.environ.get("APP_URL", "https://beta.gatewayz.ai"),
-    support_email=os.environ.get("SUPPORT_EMAIL", "support@gatewayz.ai")
+    support_email=os.environ.get("SUPPORT_EMAIL", "support@gatewayz.ai"),
 )

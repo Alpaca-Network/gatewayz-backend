@@ -17,15 +17,15 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
             title = f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}"
 
         session_data = {
-            'user_id': user_id,
-            'title': title,
-            'model': model or 'openai/gpt-3.5-turbo',
-            'created_at': datetime.now(UTC).isoformat(),
-            'updated_at': datetime.now(UTC).isoformat(),
-            'is_active': True
+            "user_id": user_id,
+            "title": title,
+            "model": model or "openai/gpt-3.5-turbo",
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+            "is_active": True,
         }
 
-        result = client.table('chat_sessions').insert(session_data).execute()
+        result = client.table("chat_sessions").insert(session_data).execute()
 
         if not result.data:
             raise ValueError("Failed to create chat session")
@@ -39,21 +39,23 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
         raise RuntimeError(f"Failed to create chat session: {e}") from e
 
 
-def save_chat_message(session_id: int, role: str, content: str, model: str = None, tokens: int = 0) -> dict[str, Any]:
+def save_chat_message(
+    session_id: int, role: str, content: str, model: str = None, tokens: int = 0
+) -> dict[str, Any]:
     """Save a chat message to a session"""
     try:
         client = get_supabase_client()
 
         message_data = {
-            'session_id': session_id,
-            'role': role,  # 'user' or 'assistant'
-            'content': content,
-            'model': model,
-            'tokens': tokens,
-            'created_at': datetime.now(UTC).isoformat()
+            "session_id": session_id,
+            "role": role,  # 'user' or 'assistant'
+            "content": content,
+            "model": model,
+            "tokens": tokens,
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
-        result = client.table('chat_messages').insert(message_data).execute()
+        result = client.table("chat_messages").insert(message_data).execute()
 
         if not result.data:
             raise ValueError("Failed to save chat message")
@@ -72,7 +74,15 @@ def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> li
     try:
         client = get_supabase_client()
 
-        result = client.table('chat_sessions').select('*').eq('user_id', user_id).eq('is_active', True).order('updated_at', desc=True).range(offset, offset + limit - 1).execute()
+        result = (
+            client.table("chat_sessions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .order("updated_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
 
         sessions = result.data or []
         logger.info(f"Retrieved {len(sessions)} chat sessions for user {user_id}")
@@ -89,7 +99,14 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         client = get_supabase_client()
 
         # Get session
-        session_result = client.table('chat_sessions').select('*').eq('id', session_id).eq('user_id', user_id).eq('is_active', True).execute()
+        session_result = (
+            client.table("chat_sessions")
+            .select("*")
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
 
         if not session_result.data:
             logger.warning(f"Chat session {session_id} not found for user {user_id}")
@@ -98,9 +115,15 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         session = session_result.data[0]
 
         # Get messages for this session
-        messages_result = client.table('chat_messages').select('*').eq('session_id', session_id).order('created_at', desc=False).execute()
+        messages_result = (
+            client.table("chat_messages")
+            .select("*")
+            .eq("session_id", session_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
 
-        session['messages'] = messages_result.data or []
+        session["messages"] = messages_result.data or []
         logger.info(f"Retrieved session {session_id} with {len(session['messages'])} messages")
         return session
 
@@ -109,21 +132,27 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         raise RuntimeError(f"Failed to get chat session: {e}") from e
 
 
-def update_chat_session(session_id: int, user_id: int, title: str = None, model: str = None) -> bool:
+def update_chat_session(
+    session_id: int, user_id: int, title: str = None, model: str = None
+) -> bool:
     """Update a chat session"""
     try:
         client = get_supabase_client()
 
-        update_data = {
-            'updated_at': datetime.now(UTC).isoformat()
-        }
+        update_data = {"updated_at": datetime.now(UTC).isoformat()}
 
         if title:
-            update_data['title'] = title
+            update_data["title"] = title
         if model:
-            update_data['model'] = model
+            update_data["model"] = model
 
-        result = client.table('chat_sessions').update(update_data).eq('id', session_id).eq('user_id', user_id).execute()
+        result = (
+            client.table("chat_sessions")
+            .update(update_data)
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
         if not result.data:
             logger.warning(f"Failed to update chat session {session_id}")
@@ -143,10 +172,13 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
         client = get_supabase_client()
 
         # Soft delete - mark as inactive
-        result = client.table('chat_sessions').update({
-            'is_active': False,
-            'updated_at': datetime.now(UTC).isoformat()
-        }).eq('id', session_id).eq('user_id', user_id).execute()
+        result = (
+            client.table("chat_sessions")
+            .update({"is_active": False, "updated_at": datetime.now(UTC).isoformat()})
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
         if not result.data:
             logger.warning(f"Failed to delete chat session {session_id}")
@@ -166,21 +198,43 @@ def get_chat_session_stats(user_id: int) -> dict[str, Any]:
         client = get_supabase_client()
 
         # Get total sessions
-        sessions_result = client.table('chat_sessions').select('id').eq('user_id', user_id).eq('is_active', True).execute()
+        sessions_result = (
+            client.table("chat_sessions")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
         total_sessions = len(sessions_result.data) if sessions_result.data else 0
 
         # Get total messages
-        messages_result = client.table('chat_messages').select('id').join('chat_sessions', 'session_id', 'id').eq('chat_sessions.user_id', user_id).eq('chat_sessions.is_active', True).execute()
+        messages_result = (
+            client.table("chat_messages")
+            .select("id")
+            .join("chat_sessions", "session_id", "id")
+            .eq("chat_sessions.user_id", user_id)
+            .eq("chat_sessions.is_active", True)
+            .execute()
+        )
         total_messages = len(messages_result.data) if messages_result.data else 0
 
         # Get total tokens
-        tokens_result = client.table('chat_messages').select('tokens').join('chat_sessions', 'session_id', 'id').eq('chat_sessions.user_id', user_id).eq('chat_sessions.is_active', True).execute()
-        total_tokens = sum(msg.get('tokens', 0) for msg in tokens_result.data) if tokens_result.data else 0
+        tokens_result = (
+            client.table("chat_messages")
+            .select("tokens")
+            .join("chat_sessions", "session_id", "id")
+            .eq("chat_sessions.user_id", user_id)
+            .eq("chat_sessions.is_active", True)
+            .execute()
+        )
+        total_tokens = (
+            sum(msg.get("tokens", 0) for msg in tokens_result.data) if tokens_result.data else 0
+        )
 
         stats = {
-            'total_sessions': total_sessions,
-            'total_messages': total_messages,
-            'total_tokens': total_tokens
+            "total_sessions": total_sessions,
+            "total_messages": total_messages,
+            "total_tokens": total_tokens,
         }
 
         logger.info(f"Retrieved chat stats for user {user_id}: {stats}")
@@ -197,29 +251,52 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
         client = get_supabase_client()
 
         # Search in session titles
-        title_result = client.table('chat_sessions').select('*').eq('user_id', user_id).eq('is_active', True).ilike('title', f'%{query}%').execute()
+        title_result = (
+            client.table("chat_sessions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .ilike("title", f"%{query}%")
+            .execute()
+        )
 
         # Search in message content
-        message_result = client.table('chat_messages').select('session_id').ilike('content', f'%{query}%').execute()
+        message_result = (
+            client.table("chat_messages")
+            .select("session_id")
+            .ilike("content", f"%{query}%")
+            .execute()
+        )
 
         session_ids = set()
         if message_result.data:
-            session_ids.update(msg['session_id'] for msg in message_result.data)
+            session_ids.update(msg["session_id"] for msg in message_result.data)
 
         # Get sessions from message search
         message_sessions = []
         if session_ids:
-            message_sessions_result = client.table('chat_sessions').select('*').eq('user_id', user_id).eq('is_active', True).in_('id', list(session_ids)).execute()
+            message_sessions_result = (
+                client.table("chat_sessions")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .in_("id", list(session_ids))
+                .execute()
+            )
             message_sessions = message_sessions_result.data or []
 
         # Combine and deduplicate results
         all_sessions = (title_result.data or []) + message_sessions
-        unique_sessions = {session['id']: session for session in all_sessions}.values()
+        unique_sessions = {session["id"]: session for session in all_sessions}.values()
 
         # Sort by updated_at and limit
-        sorted_sessions = sorted(unique_sessions, key=lambda x: x['updated_at'], reverse=True)[:limit]
+        sorted_sessions = sorted(unique_sessions, key=lambda x: x["updated_at"], reverse=True)[
+            :limit
+        ]
 
-        logger.info(f"Found {len(sorted_sessions)} sessions matching query '{query}' for user {user_id}")
+        logger.info(
+            f"Found {len(sorted_sessions)} sessions matching query '{query}' for user {user_id}"
+        )
         return list(sorted_sessions)
 
     except Exception as e:

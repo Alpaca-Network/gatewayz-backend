@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Ping Service Layer
@@ -39,9 +38,7 @@ class PingService:
                 if cached_count:
                     # Increment in Redis
                     new_count = self.redis_config.increment_counter(
-                        self.cache_key,
-                        amount=1,
-                        ttl=self.cache_ttl
+                        self.cache_key, amount=1, ttl=self.cache_ttl
                     )
 
                     # Sync with database every 10 pings
@@ -62,11 +59,7 @@ class PingService:
                 if count is None:
                     count = 0
 
-            return {
-                "message": "pong",
-                "count": count,
-                "timestamp": datetime.now(UTC).isoformat()
-            }
+            return {"message": "pong", "count": count, "timestamp": datetime.now(UTC).isoformat()}
 
         except Exception as e:
             logger.error(f"Error handling ping: {e}")
@@ -74,7 +67,7 @@ class PingService:
                 "message": "pong",
                 "count": 0,
                 "error": "Service temporarily unavailable",
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     def get_statistics(self) -> dict[str, Any]:
@@ -92,7 +85,7 @@ class PingService:
                     return {
                         "total_pings": int(cached_count),
                         "cached": True,
-                        "timestamp": datetime.now(UTC).isoformat()
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
             # Get from database
@@ -101,9 +94,7 @@ class PingService:
                 # Update cache
                 if self.redis_config.is_available():
                     self.redis_config.set_cache(
-                        self.cache_key,
-                        str(stats["count"]),
-                        ttl=self.cache_ttl
+                        self.cache_key, str(stats["count"]), ttl=self.cache_ttl
                     )
 
                 return {
@@ -112,22 +103,18 @@ class PingService:
                     "created_at": stats["created_at"],
                     "updated_at": stats["updated_at"],
                     "cached": False,
-                    "timestamp": datetime.now(UTC).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             else:
                 return {
                     "total_pings": 0,
                     "error": "Failed to retrieve statistics",
-                    "timestamp": datetime.now(UTC).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
 
         except Exception as e:
             logger.error(f"Error getting ping statistics: {e}")
-            return {
-                "total_pings": 0,
-                "error": str(e),
-                "timestamp": datetime.now(UTC).isoformat()
-            }
+            return {"total_pings": 0, "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
     def reset_counter(self) -> dict[str, Any]:
         """
@@ -147,16 +134,12 @@ class PingService:
             return {
                 "success": success,
                 "message": "Counter reset successfully" if success else "Failed to reset counter",
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         except Exception as e:
             logger.error(f"Error resetting counter: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "timestamp": datetime.now(UTC).isoformat()
-            }
+            return {"success": False, "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
     def _sync_to_database(self):
         """

@@ -31,6 +31,7 @@ from src.services.model_health_monitor import health_monitor
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
 @router.get("/health", tags=["health"])
 async def health_check():
     """
@@ -39,6 +40,7 @@ async def health_check():
     Returns basic health status for monitoring and load balancing
     """
     return {"status": "healthy"}
+
 
 @router.get("/health/system", response_model=SystemHealthResponse, tags=["health"])
 async def get_system_health(api_key: str = Depends(get_api_key)):
@@ -61,10 +63,11 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
         logger.error(f"Failed to get system health: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve system health") from e
 
+
 @router.get("/health/providers", response_model=list[ProviderHealthResponse], tags=["health"])
 async def get_providers_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_api_key),
 ):
     """
     Get health metrics for all providers
@@ -82,12 +85,13 @@ async def get_providers_health(
         logger.error(f"Failed to get providers health: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers health") from e
 
+
 @router.get("/health/models", response_model=list[ModelHealthResponse], tags=["health"])
 async def get_models_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     provider: str | None = Query(None, description="Filter by specific provider"),
     status: str | None = Query(None, description="Filter by health status"),
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_api_key),
 ):
     """
     Get health metrics for all models
@@ -113,11 +117,12 @@ async def get_models_health(
         logger.error(f"Failed to get models health: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve models health") from e
 
+
 @router.get("/health/model/{model_id}", response_model=ModelHealthResponse, tags=["health"])
 async def get_model_health(
     model_id: str,
     gateway: str | None = Query(None, description="Specific gateway to check"),
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_api_key),
 ):
     """
     Get health metrics for a specific model
@@ -131,7 +136,9 @@ async def get_model_health(
     try:
         model_health = health_monitor.get_model_health(model_id, gateway)
         if not model_health:
-            raise HTTPException(status_code=404, detail=f"Model {model_id} not found or no health data available")
+            raise HTTPException(
+                status_code=404, detail=f"Model {model_id} not found or no health data available"
+            )
 
         return model_health
     except HTTPException:
@@ -140,11 +147,12 @@ async def get_model_health(
         logger.error(f"Failed to get model health for {model_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve model health") from e
 
+
 @router.get("/health/provider/{provider}", response_model=ProviderHealthResponse, tags=["health"])
 async def get_provider_health(
     provider: str,
     gateway: str | None = Query(None, description="Specific gateway to check"),
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_api_key),
 ):
     """
     Get health metrics for a specific provider
@@ -158,7 +166,9 @@ async def get_provider_health(
     try:
         provider_health = health_monitor.get_provider_health(provider, gateway)
         if not provider_health:
-            raise HTTPException(status_code=404, detail=f"Provider {provider} not found or no health data available")
+            raise HTTPException(
+                status_code=404, detail=f"Provider {provider} not found or no health data available"
+            )
 
         return provider_health
     except HTTPException:
@@ -166,6 +176,7 @@ async def get_provider_health(
     except Exception as e:
         logger.error(f"Failed to get provider health for {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve provider health") from e
+
 
 @router.get("/health/summary", response_model=HealthSummaryResponse, tags=["health"])
 async def get_health_summary(api_key: str = Depends(get_api_key)):
@@ -185,11 +196,12 @@ async def get_health_summary(api_key: str = Depends(get_api_key)):
         logger.error(f"Failed to get health summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve health summary") from e
 
+
 @router.post("/health/check", response_model=dict[str, Any], tags=["health"])
 async def perform_health_check(
     request: HealthCheckRequest,
     background_tasks: BackgroundTasks,
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_api_key),
 ):
     """
     Perform immediate health check
@@ -204,11 +216,12 @@ async def perform_health_check(
         return {
             "message": "Health check initiated",
             "timestamp": datetime.now(UTC).isoformat(),
-            "force_refresh": request.force_refresh
+            "force_refresh": request.force_refresh,
         }
     except Exception as e:
         logger.error(f"Failed to initiate health check: {e}")
         raise HTTPException(status_code=500, detail="Failed to initiate health check") from e
+
 
 @router.post("/health/check/now", response_model=dict[str, Any], tags=["health", "admin"])
 async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
@@ -235,11 +248,14 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
             "models_checked": models_count,
             "providers_checked": providers_count,
             "system_status": system_health.overall_status.value if system_health else "unknown",
-            "monitoring_active": health_monitor.monitoring_active
+            "monitoring_active": health_monitor.monitoring_active,
         }
     except Exception as e:
         logger.error(f"Failed to perform immediate health check: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to perform health check: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to perform health check: {str(e)}"
+        ) from e
+
 
 @router.get("/health/uptime", response_model=UptimeMetricsResponse, tags=["health", "uptime"])
 async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
@@ -259,13 +275,19 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
 
         # Calculate uptime metrics
         total_requests = sum(m.total_requests for m in health_monitor.get_all_models_health())
-        successful_requests = sum(m.total_requests - m.error_count for m in health_monitor.get_all_models_health())
+        successful_requests = sum(
+            m.total_requests - m.error_count for m in health_monitor.get_all_models_health()
+        )
         failed_requests = sum(m.error_count for m in health_monitor.get_all_models_health())
 
         error_rate = (failed_requests / total_requests * 100) if total_requests > 0 else 0.0
 
         # Get average response time
-        response_times = [m.avg_response_time_ms for m in health_monitor.get_all_models_health() if m.avg_response_time_ms]
+        response_times = [
+            m.avg_response_time_ms
+            for m in health_monitor.get_all_models_health()
+            if m.avg_response_time_ms
+        ]
         avg_response_time = sum(response_times) / len(response_times) if response_times else None
 
         # Determine status
@@ -285,13 +307,16 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=successful_requests,
             failed_requests=failed_requests,
             error_rate=error_rate,
-            last_updated=system_health.last_updated or datetime.now(UTC)
+            last_updated=system_health.last_updated or datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve uptime metrics") from e
 
-@router.get("/health/dashboard", response_model=HealthDashboardResponse, tags=["health", "dashboard"])
+
+@router.get(
+    "/health/dashboard", response_model=HealthDashboardResponse, tags=["health", "dashboard"]
+)
 async def get_health_dashboard(api_key: str = Depends(get_api_key)):
     """
     Get complete health dashboard data for frontend
@@ -330,7 +355,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 degraded_models=0,
                 unhealthy_models=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(UTC)
+                last_updated=datetime.now(UTC),
             )
         else:
             # Convert SystemHealthMetrics to SystemHealthResponse
@@ -345,7 +370,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 degraded_models=system_health_metrics.degraded_models,
                 unhealthy_models=system_health_metrics.unhealthy_models,
                 system_uptime=system_health_metrics.system_uptime,
-                last_updated=system_health_metrics.last_updated or datetime.now(UTC)
+                last_updated=system_health_metrics.last_updated or datetime.now(UTC),
             )
 
         # Get providers health
@@ -373,16 +398,18 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 else:
                     response_time_display = f"{provider.avg_response_time_ms/1000:.1f}s"
 
-            providers_status.append(ProviderStatusResponse(
-                provider=provider.provider,
-                gateway=provider.gateway,
-                status=status_text,
-                status_color=status_color,
-                models_count=provider.total_models,
-                healthy_count=provider.healthy_models,
-                uptime=f"{provider.overall_uptime:.1f}%",
-                avg_response_time=response_time_display
-            ))
+            providers_status.append(
+                ProviderStatusResponse(
+                    provider=provider.provider,
+                    gateway=provider.gateway,
+                    status=status_text,
+                    status_color=status_color,
+                    models_count=provider.total_models,
+                    healthy_count=provider.healthy_models,
+                    uptime=f"{provider.overall_uptime:.1f}%",
+                    avg_response_time=response_time_display,
+                )
+            )
 
         # Get models health
         models_health = health_monitor.get_all_models_health()
@@ -414,16 +441,18 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
             if model.last_checked:
                 last_checked_display = model.last_checked.strftime("%H:%M:%S")
 
-            models_status.append(ModelStatusResponse(
-                model_id=model.model_id,
-                name=model.model_id.split("/")[-1] if "/" in model.model_id else model.model_id,
-                provider=model.provider,
-                status=status_text,
-                status_color=status_color,
-                response_time=response_time_display,
-                uptime=f"{model.uptime_percentage:.1f}%",
-                last_checked=last_checked_display
-            ))
+            models_status.append(
+                ModelStatusResponse(
+                    model_id=model.model_id,
+                    name=model.model_id.split("/")[-1] if "/" in model.model_id else model.model_id,
+                    provider=model.provider,
+                    status=status_text,
+                    status_color=status_color,
+                    response_time=response_time_display,
+                    uptime=f"{model.uptime_percentage:.1f}%",
+                    last_checked=last_checked_display,
+                )
+            )
 
         # Get uptime metrics
         logger.info("Getting uptime metrics")
@@ -442,7 +471,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(UTC)
+                last_updated=datetime.now(UTC),
             )
         except Exception as e:
             logger.warning(f"Failed to get uptime metrics, using defaults: {e}")
@@ -456,7 +485,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(UTC)
+                last_updated=datetime.now(UTC),
             )
 
         logger.info("Creating HealthDashboardResponse")
@@ -471,7 +500,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
             models=models_status,
             uptime_metrics=uptime_metrics,
             last_updated=system_health.last_updated or datetime.now(UTC),
-            monitoring_active=health_monitor.monitoring_active
+            monitoring_active=health_monitor.monitoring_active,
         )
 
         logger.info("HealthDashboardResponse created successfully")
@@ -479,8 +508,12 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
     except Exception as e:
         logger.error(f"Failed to get health dashboard: {e}")
         import traceback
+
         logger.error(f"Full traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve health dashboard: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve health dashboard: {str(e)}"
+        ) from e
+
 
 @router.get("/health/status", response_model=dict[str, Any], tags=["health", "status"])
 async def get_health_status(api_key: str = Depends(get_api_key)):
@@ -496,7 +529,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                 "status": "unknown",
                 "message": "Health data not available - monitoring may not be started",
                 "monitoring_active": health_monitor.monitoring_active,
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         return {
@@ -505,15 +538,20 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
             "healthy_models": system_health.healthy_models,
             "total_models": system_health.total_models,
             "monitoring_active": health_monitor.monitoring_active,
-            "timestamp": system_health.last_updated.isoformat() if system_health.last_updated else datetime.now(UTC).isoformat()
+            "timestamp": (
+                system_health.last_updated.isoformat()
+                if system_health.last_updated
+                else datetime.now(UTC).isoformat()
+            ),
         }
     except Exception as e:
         logger.error(f"Failed to get health status: {e}")
         return {
             "status": "error",
             "message": "Failed to retrieve health status",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
+
 
 @router.get("/health/monitoring/status", response_model=dict[str, Any], tags=["health", "admin"])
 async def get_monitoring_status(api_key: str = Depends(get_api_key)):
@@ -530,14 +568,15 @@ async def get_monitoring_status(api_key: str = Depends(get_api_key)):
             "availability_data_available": len(availability_service.availability_cache) > 0,
             "health_models_count": len(health_monitor.health_data),
             "availability_models_count": len(availability_service.availability_cache),
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get monitoring status: {e}")
         return {
             "error": "Failed to retrieve monitoring status",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
+
 
 @router.post("/health/monitoring/start", response_model=dict[str, Any], tags=["health", "admin"])
 async def start_health_monitoring(api_key: str = Depends(get_api_key)):
@@ -548,13 +587,11 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.start_monitoring()
-        return {
-            "message": "Health monitoring started",
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"message": "Health monitoring started", "timestamp": datetime.now(UTC).isoformat()}
     except Exception as e:
         logger.error(f"Failed to start health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to start health monitoring") from e
+
 
 @router.post("/health/monitoring/stop", response_model=dict[str, Any], tags=["health", "admin"])
 async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
@@ -565,10 +602,7 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.stop_monitoring()
-        return {
-            "message": "Health monitoring stopped",
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"message": "Health monitoring stopped", "timestamp": datetime.now(UTC).isoformat()}
     except Exception as e:
         logger.error(f"Failed to stop health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop health monitoring") from e

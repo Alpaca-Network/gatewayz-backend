@@ -29,10 +29,7 @@ async def root():
             "status": "operational"
         }
     """
-    return {
-        "message": "Welcome to Gatewayz Universal Inference API",
-        "status": "operational"
-    }
+    return {"message": "Welcome to Gatewayz Universal Inference API", "status": "operational"}
 
 
 @router.get("/health")
@@ -50,10 +47,8 @@ async def health_check():
         }
     """
     import datetime
-    return {
-        "status": "healthy",
-        "timestamp": datetime.datetime.utcnow().isoformat()
-    }
+
+    return {"status": "healthy", "timestamp": datetime.datetime.utcnow().isoformat()}
 
 
 @router.get("/ping")
@@ -80,8 +75,7 @@ async def ping():
     except Exception as e:
         logger.error(f"Error in ping endpoint: {e}")
         raise HTTPException(
-            status_code=500,
-            detail="Internal server error while processing ping"
+            status_code=500, detail="Internal server error while processing ping"
         ) from e
 
 
@@ -108,6 +102,5 @@ async def ping_stats():
     except Exception as e:
         logger.error(f"Error getting ping stats: {e}")
         raise HTTPException(
-            status_code=500,
-            detail="Internal server error while retrieving statistics"
+            status_code=500, detail="Internal server error while retrieving statistics"
         ) from e
