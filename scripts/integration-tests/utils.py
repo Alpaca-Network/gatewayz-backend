@@ -6,7 +6,6 @@ This module provides shared functionality for manual integration testing scripts
 
 import os
 import sys
-from typing import Optional
 from dotenv import load_dotenv
 
 
