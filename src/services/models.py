@@ -49,6 +49,11 @@ from src.services.model_transformations import detect_provider_from_model_id
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
+# Modality constants to reduce duplication
+MODALITY_TEXT_TO_TEXT = "text->text"
+
 
 def sanitize_pricing(pricing: dict) -> dict:
     """
@@ -148,7 +153,7 @@ def load_featherless_catalog_export() -> list:
                         "description": row.get("description") or f"Featherless catalog entry for {model_id}.",
                         "context_length": context_length,
                         "architecture": {
-                            "modality": row.get("modality") or "text->text",
+                            "modality": row.get("modality") or MODALITY_TEXT_TO_TEXT,
                             "input_modalities": ["text"],
                             "output_modalities": ["text"],
                             "tokenizer": None,
@@ -634,7 +639,7 @@ def normalize_portkey_model(portkey_model: dict, openrouter_models: list = None)
     description = f"Portkey catalog entry for {slug}. {description_suffix}"
 
     architecture = {
-        "modality": "text->text",
+        "modality": MODALITY_TEXT_TO_TEXT,
         "input_modalities": ["text"],
         "output_modalities": ["text"],
         "tokenizer": None,
@@ -747,7 +752,7 @@ def normalize_featherless_model(featherless_model: dict) -> dict:
     }
 
     architecture = {
-        "modality": "text->text",
+        "modality": MODALITY_TEXT_TO_TEXT,
         "input_modalities": ["text"],
         "output_modalities": ["text"],
         "tokenizer": None,
@@ -885,18 +890,18 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
 
     # Determine modality based on type
     modality_map = {
-        "LLM": "text->text",
+        "LLM": MODALITY_TEXT_TO_TEXT,
         "Image Generation": "text->image",
         "Text to Speech": "text->audio",
         "Speech to Text": "audio->text",
         "Video": "text->video",
         "Music Generation": "text->audio",
         "Embeddings": "text->embedding",
-        "Content Moderation": "text->text",
+        "Content Moderation": MODALITY_TEXT_TO_TEXT,
         "Other": "multimodal"
     }
 
-    modality = modality_map.get(model_type, "text->text")
+    modality = modality_map.get(model_type, MODALITY_TEXT_TO_TEXT)
 
     pricing = {
         "prompt": prompt_price,
@@ -978,7 +983,7 @@ def normalize_groq_model(groq_model: dict) -> dict:
     }
 
     architecture = {
-        "modality": metadata.get("modality", "text->text"),
+        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
         "input_modalities": metadata.get("input_modalities") or ["text"],
         "output_modalities": metadata.get("output_modalities") or ["text"],
         "tokenizer": metadata.get("tokenizer"),
@@ -1078,7 +1083,7 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     }
 
     architecture = {
-        "modality": metadata.get("modality", "text->text"),
+        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
         "input_modalities": metadata.get("input_modalities") or ["text"],
         "output_modalities": metadata.get("output_modalities") or ["text"],
         "tokenizer": metadata.get("tokenizer"),
@@ -1211,7 +1216,7 @@ def normalize_together_model(together_model: dict) -> dict:
         pricing["completion"] = pricing_info.get("output")
 
     architecture = {
-        "modality": "text->text",
+        "modality": MODALITY_TEXT_TO_TEXT,
         "input_modalities": ["text"],
         "output_modalities": ["text"],
         "tokenizer": together_model.get("config", {}).get("tokenizer"),
@@ -1360,7 +1365,7 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
 
     # Determine modality string
     if input_modalities == ["text"] and output_modalities == ["text"]:
-        modality = "text->text"
+        modality = MODALITY_TEXT_TO_TEXT
     else:
         modality = "multimodal"
 
@@ -1508,7 +1513,7 @@ def normalize_near_model(near_model: dict) -> dict:
         pricing["completion"] = str(pricing_info.get("completion")) if pricing_info.get("completion") is not None else None
 
     architecture = {
-        "modality": metadata.get("modality", "text->text"),
+        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
         "input_modalities": metadata.get("input_modalities") or ["text"],
         "output_modalities": metadata.get("output_modalities") or ["text"],
         "tokenizer": metadata.get("tokenizer"),
@@ -1739,7 +1744,7 @@ def normalize_vercel_model(model) -> dict:
         "description": description,
         "context_length": context_length,
         "architecture": {
-            "modality": "text->text",
+            "modality": MODALITY_TEXT_TO_TEXT,
             "input_modalities": ["text"],
             "output_modalities": ["text"],
             "instruct_type": "chat"
@@ -1948,7 +1953,7 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
         pricing["image"] = str(cents_per_sec * 5 / 100) if cents_per_sec else None
 
     # Determine modality based on model type
-    modality = "text->text"
+    modality = MODALITY_TEXT_TO_TEXT
     input_modalities = ["text"]
     output_modalities = ["text"]
 
