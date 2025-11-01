@@ -186,7 +186,7 @@ class TestApiKeyCreation:
         """Test successful API key creation"""
         mock_get_user.return_value = mock_user
         mock_validate_perms.return_value = True
-        mock_create_key.return_value = 'gw_live_newkey123456'
+        mock_create_key.return_value = ('gw_live_newkey123456', 123)
 
         supabase_client, table_mock = mock_supabase_client
         mock_get_client.return_value = supabase_client
@@ -873,7 +873,7 @@ class TestApiKeyIntegration:
         mock_get_client.return_value = supabase_client
 
         # 1. Create new key
-        mock_create_key.return_value = 'gw_live_newkey123'
+        mock_create_key.return_value = ('gw_live_newkey123', 456)
 
         create_response = client.post(
             '/user/api-keys',

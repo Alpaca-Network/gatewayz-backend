@@ -238,7 +238,7 @@ def sb(monkeypatch):
     stub._tx_log = tx_log
 
     # predictable create_api_key
-    monkeypatch.setattr("src.db.users.create_api_key", lambda **kwargs: "gw_live_primary_TESTKEY")
+    monkeypatch.setattr("src.db.users.create_api_key", lambda **kwargs: ("gw_live_primary_TESTKEY", 1))
 
     return stub
 
