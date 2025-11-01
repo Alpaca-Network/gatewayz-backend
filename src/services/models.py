@@ -1702,7 +1702,7 @@ def fetch_models_from_vercel_ai_gateway():
         return []
 
 
-def normalize_vercel_model(model) -> dict:
+def normalize_vercel_model(model) -> Optional[dict]:
     """Normalize Vercel AI Gateway model to catalog schema
 
     Vercel models can originate from various providers (OpenAI, Google, Anthropic, etc.)
@@ -1725,7 +1725,7 @@ def normalize_vercel_model(model) -> dict:
         display_name = model_id
 
     # Get description - Vercel doesn't provide this, so we create one
-    description = getattr(model, 'description', None) or f"Model available through Vercel AI Gateway"
+    description = getattr(model, 'description', None) or "Model available through Vercel AI Gateway"
 
     # Get context length if available
     context_length = getattr(model, 'context_length', 4096)
