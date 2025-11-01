@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
-from src.schemas import PlanType, SubscriptionStatus
+from src.schemas.common import PlanType, SubscriptionStatus
 
 
 class PlanResponse(BaseModel):
