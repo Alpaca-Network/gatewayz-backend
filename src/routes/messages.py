@@ -41,7 +41,9 @@ from src.services.openrouter_client import (
     make_openrouter_request_openai,
     process_openrouter_response,
 )
-from src.services.portkey_client import make_portkey_request_openai, process_portkey_response
+
+# Conditionally imported below based on testing mode
+# from src.services.portkey_client import make_portkey_request_openai, process_portkey_response
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
@@ -475,7 +477,7 @@ async def anthropic_messages(
                 model = request_model
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -672,7 +674,11 @@ async def anthropic_messages(
 
 
 # When running in test mode we reuse OpenRouter client for providers that
+# Import portkey functions conditionally to avoid redefinition warnings
+# In testing mode, use openrouter functions as stubs since they don't
 # normally rely on external credentials, so unit tests can stub a single path
 if Config.IS_TESTING:
     make_portkey_request_openai = make_openrouter_request_openai
     process_portkey_response = process_openrouter_response
+else:
+    from src.services.portkey_client import make_portkey_request_openai, process_portkey_response

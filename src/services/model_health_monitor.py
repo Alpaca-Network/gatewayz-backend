@@ -257,7 +257,6 @@ class ModelHealthMonitor:
     async def _perform_model_request(self, model_id: str, gateway: str) -> dict[str, Any]:
         """Perform a real test request to a model"""
         try:
-
             import httpx
 
             # Create a simple test request based on the gateway

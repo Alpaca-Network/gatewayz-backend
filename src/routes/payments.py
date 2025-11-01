@@ -10,10 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from src.db.payments import (
-    get_payment,
-    get_user_payments,
-)
+from src.db.payments import get_payment, get_user_payments
 from src.schemas.payments import (
     CreateCheckoutSessionRequest,
     CreatePaymentIntentRequest,

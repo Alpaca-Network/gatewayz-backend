@@ -46,10 +46,12 @@ class StripeService:
 
         if not self.api_key:
             raise ValueError("STRIPE_SECRET_KEY not found in environment variables")
-        
+
         # Validate webhook secret is configured for security
         if not self.webhook_secret:
-            logger.warning("STRIPE_WEBHOOK_SECRET not configured - webhook signature validation will fail")
+            logger.warning(
+                "STRIPE_WEBHOOK_SECRET not configured - webhook signature validation will fail"
+            )
 
         # Set Stripe API key
         stripe.api_key = self.api_key
@@ -297,12 +299,10 @@ class StripeService:
         if not self.webhook_secret:
             logger.error("Webhook secret not configured - rejecting webhook")
             raise ValueError("Webhook secret not configured")
-        
         # Validate signature is provided
         if not signature:
             logger.error("Missing webhook signature")
             raise ValueError("Missing webhook signature")
-        
         try:
             # Use Stripe's built-in signature verification (constant-time comparison)
             event = stripe.Webhook.construct_event(payload, signature, self.webhook_secret)

@@ -200,7 +200,8 @@ async def get_providers(
     moderated_only: bool = Query(False, description="Filter for moderated providers only"),
     limit: int | None = Query(None, description="Limit number of results"),
     offset: int | None = Query(0, description="Offset for pagination"),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -321,7 +322,8 @@ async def get_models(
     include_huggingface: bool = Query(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -731,7 +733,8 @@ async def get_specific_model(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1442,15 +1445,15 @@ async def batch_compare_models(
 @router.get("/v1/models", tags=["models"])
 async def get_all_models(
     provider: str | None = Query(None, description="Filter models by provider"),
-    limit: int | None = Query(
-        50, description="Limit number of results (default: 50 for fast load)"
-    ),
+    limit: int
+    | None = Query(50, description="Limit number of results (default: 50 for fast load)"),
     offset: int | None = Query(0, description="Offset for pagination"),
     include_huggingface: bool = Query(
         False,
         description="Include Hugging Face metrics for models that have hugging_face_id (slower, default: false)",
     ),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -1509,7 +1512,8 @@ async def get_specific_model_api(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1527,7 +1531,8 @@ async def get_specific_model_api_legacy(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1560,17 +1565,18 @@ async def get_developer_models_api(
 
 @router.get("/v1/models/search", tags=["models"])
 async def search_models(
-    q: str | None = Query(
+    q: str
+    | None = Query(
         None, description="Search query (searches in model name, provider, description)"
     ),
-    modality: str | None = Query(
-        None, description="Filter by modality: text, image, audio, video, multimodal"
-    ),
+    modality: str
+    | None = Query(None, description="Filter by modality: text, image, audio, video, multimodal"),
     min_context: int | None = Query(None, description="Minimum context window size (tokens)"),
     max_context: int | None = Query(None, description="Maximum context window size (tokens)"),
     min_price: float | None = Query(None, description="Minimum price per token (USD)"),
     max_price: float | None = Query(None, description="Maximum price per token (USD)"),
-    gateway: str | None = Query(
+    gateway: str
+    | None = Query(
         "all",
         description="Gateway filter: openrouter, portkey, featherless, deepinfra, chutes, groq, fireworks, together, or all",
     ),
@@ -1888,7 +1894,8 @@ def _extract_availability_comparison(
 
 @router.get("/modelz/models")
 async def get_modelz_models(
-    is_graduated: bool | None = Query(
+    is_graduated: bool
+    | None = Query(
         None,
         description="Filter for graduated (singularity) models: true=graduated only, false=non-graduated only, null=all models",
     )
@@ -1947,7 +1954,9 @@ async def get_modelz_models(
                 "description": (
                     "All models"
                     if is_graduated is None
-                    else "Graduated models only" if is_graduated else "Non-graduated models only"
+                    else "Graduated models only"
+                    if is_graduated
+                    else "Non-graduated models only"
                 ),
             },
             "source": "modelz",
@@ -1966,7 +1975,8 @@ async def get_modelz_models(
 
 @router.get("/modelz/ids")
 async def get_modelz_model_ids_endpoint(
-    is_graduated: bool | None = Query(
+    is_graduated: bool
+    | None = Query(
         None,
         description="Filter for graduated models: true=graduated only, false=non-graduated only, null=all models",
     )
@@ -1996,7 +2006,9 @@ async def get_modelz_model_ids_endpoint(
                 "description": (
                     "All models"
                     if is_graduated is None
-                    else "Graduated models only" if is_graduated else "Non-graduated models only"
+                    else "Graduated models only"
+                    if is_graduated
+                    else "Non-graduated models only"
                 ),
             },
             "source": "modelz",
@@ -2014,9 +2026,8 @@ async def get_modelz_model_ids_endpoint(
 @router.get("/modelz/check/{model_id}")
 async def check_model_on_modelz(
     model_id: str,
-    is_graduated: bool | None = Query(
-        None, description="Filter for graduated models when checking"
-    ),
+    is_graduated: bool
+    | None = Query(None, description="Filter for graduated models when checking"),
 ):
     """
     Check if a specific model exists on Modelz.
@@ -2046,7 +2057,9 @@ async def check_model_on_modelz(
                 "description": (
                     "All models"
                     if is_graduated is None
-                    else "Graduated models only" if is_graduated else "Non-graduated models only"
+                    else "Graduated models only"
+                    if is_graduated
+                    else "Non-graduated models only"
                 ),
             },
             "source": "modelz",

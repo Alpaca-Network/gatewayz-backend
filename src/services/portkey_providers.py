@@ -477,7 +477,7 @@ def fetch_models_from_xai():
 
             # Convert to list if it's an iterator/generator
             if hasattr(models_response, "__iter__") and not isinstance(
-                models_response, (list, dict)
+                models_response, list | dict
             ):
                 raw_models = list(models_response)
             else:
