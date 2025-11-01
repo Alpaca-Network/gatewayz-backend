@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import after path is set
 from src.cache import _cerebras_models_cache
-from utils import print_section, print_test_result
+from utils import print_section
 
 def test_cerebras_models():
     """Test that Cerebras models are properly formatted"""
