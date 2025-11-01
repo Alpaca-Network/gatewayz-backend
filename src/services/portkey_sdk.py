@@ -10,10 +10,10 @@ Each provider is accessed individually to:
 3. Leverage Portkey SDK features (tracing, metadata, etc.)
 """
 
-import logging
 import json
-from typing import Optional, List, Dict, Any
+import logging
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 try:
     from portkey_ai import Portkey

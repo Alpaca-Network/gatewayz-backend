@@ -2,10 +2,12 @@
 Data models for health monitoring and availability status
 """
 
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class HealthStatus(str, Enum):
     """Health status enumeration"""

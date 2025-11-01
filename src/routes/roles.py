@@ -2,20 +2,21 @@
 API routes for role management (Admin only)
 """
 
+import inspect
 import logging
-from typing import Optional, List, Any, Callable
+from typing import Any, Callable, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-import inspect
 
 from src.db.roles import (
-    update_user_role,
+    UserRole,
     get_role_audit_log,
-    get_users_by_role,
     get_role_permissions,
     get_user_permissions,
     get_user_role,
-    UserRole
+    get_users_by_role,
+    update_user_role,
 )
 from src.security import deps as security_deps
 from src.security.deps import security as bearer_security

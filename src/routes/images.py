@@ -1,18 +1,24 @@
-import logging
 import asyncio
-import time
+import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.config import Config
 from src.db.api_keys import increment_api_key_usage
-from src.db.users import get_user, deduct_credits, record_usage
+from src.db.users import deduct_credits, get_user, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
 from src.security.deps import get_api_key
-from src.services.image_generation_client import make_portkey_image_request, make_deepinfra_image_request, make_google_vertex_image_request, process_image_generation_response
 from src.services.fal_image_client import make_fal_image_request
-from src.config import Config
+from src.services.image_generation_client import (
+    make_deepinfra_image_request,
+    make_google_vertex_image_request,
+    make_portkey_image_request,
+    process_image_generation_response,
+)
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

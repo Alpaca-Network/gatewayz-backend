@@ -1,19 +1,30 @@
 import logging
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from src.db.activity import log_activity
 from src.db.chat_history import (
-    create_chat_session, get_user_chat_sessions, get_chat_session,
-    update_chat_session, delete_chat_session, get_chat_session_stats,
-    search_chat_sessions, save_chat_message
+    create_chat_session,
+    delete_chat_session,
+    get_chat_session,
+    get_chat_session_stats,
+    get_user_chat_sessions,
+    save_chat_message,
+    search_chat_sessions,
+    update_chat_session,
 )
+from src.db.users import get_user
 from src.schemas.chat import (
-    CreateChatSessionRequest, UpdateChatSessionRequest, ChatSessionResponse,
-    ChatSessionsListResponse, ChatSessionStatsResponse, SearchChatSessionsRequest,
-    SaveChatMessageRequest
+    ChatSessionResponse,
+    ChatSessionsListResponse,
+    ChatSessionStatsResponse,
+    CreateChatSessionRequest,
+    SaveChatMessageRequest,
+    SearchChatSessionsRequest,
+    UpdateChatSessionRequest,
 )
 from src.security.deps import get_api_key
-from src.db.users import get_user
-from src.db.activity import log_activity
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)

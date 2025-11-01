@@ -2,12 +2,14 @@
 Modelz API client for fetching model token data and filtering models.
 """
 
-import httpx
 import logging
 import time
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
+import httpx
 from fastapi import HTTPException
-from src.cache import get_modelz_cache, clear_modelz_cache
+
+from src.cache import clear_modelz_cache, get_modelz_cache
 
 logger = logging.getLogger(__name__)
 

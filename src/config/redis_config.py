@@ -4,9 +4,10 @@ Redis Configuration Module
 Handles Redis connection and configuration for rate limiting and caching.
 """
 
-import os
 import logging
+import os
 from typing import Optional
+
 import redis
 from redis.connection import ConnectionPool
 

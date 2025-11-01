@@ -5,6 +5,7 @@ Handles model pricing calculations and credit cost computation
 
 import logging
 from typing import Dict
+
 from src.services.models import get_cached_models
 
 logger = logging.getLogger(__name__)

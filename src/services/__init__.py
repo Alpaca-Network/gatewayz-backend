@@ -2,6 +2,7 @@
 # Lazy imports for testing - makes modules accessible without importing dependencies
 import sys
 
+
 def __getattr__(name):
     if name == "rate_limiting":
         # Import the module dynamically to avoid circular reference

@@ -22,13 +22,14 @@ FEATURES:
 """
 
 import logging
-from datetime import datetime, timezone
-import httpx
 import time
+from datetime import datetime, timezone
+
+import httpx
 
 from src.cache import _huggingface_models_cache
-from src.services.pricing_lookup import enrich_model_with_pricing
 from src.config import Config
+from src.services.pricing_lookup import enrich_model_with_pricing
 
 logger = logging.getLogger(__name__)
 

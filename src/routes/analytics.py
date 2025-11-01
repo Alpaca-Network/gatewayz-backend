@@ -3,14 +3,15 @@ Analytics API Routes
 Server-side endpoint for logging analytics events to Statsig and PostHog
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
 import logging
+from typing import Any, Dict, Optional
 
-from src.services.statsig_service import statsig_service
-from src.services.posthog_service import posthog_service
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
 from src.security.deps import get_current_user
+from src.services.posthog_service import posthog_service
+from src.services.statsig_service import statsig_service
 
 logger = logging.getLogger(__name__)
 

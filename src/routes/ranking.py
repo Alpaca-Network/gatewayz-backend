@@ -1,9 +1,11 @@
 import logging
 from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException, Query
+
 from src.db.ranking import (
-    get_all_latest_models,
     get_all_latest_apps,
+    get_all_latest_models,
 )
 
 # Initialize logging

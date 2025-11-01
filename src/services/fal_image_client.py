@@ -1,9 +1,10 @@
-import logging
-import httpx
-import time
 import json
+import logging
+import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+import httpx
 
 from src.config import Config
 

@@ -1,7 +1,8 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, EmailStr
 
 from src.schemas import AuthMethod, SubscriptionStatus
 

@@ -1,16 +1,22 @@
-import logging
 import datetime
-import requests
+import logging
 from datetime import datetime, timezone
 
-import src.enhanced_notification_service as notif_module
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+import requests
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from src.schemas import PrivyAuthResponse, PrivyAuthRequest, AuthMethod, UserRegistrationResponse, \
-    UserRegistrationRequest, SubscriptionStatus
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
+import src.enhanced_notification_service as notif_module
 from src.db.activity import log_activity
+from src.schemas import (
+    AuthMethod,
+    PrivyAuthRequest,
+    PrivyAuthResponse,
+    SubscriptionStatus,
+    UserRegistrationRequest,
+    UserRegistrationResponse,
+)
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -275,7 +281,10 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             referral_code_valid = False
             if request.referral_code:
                 try:
-                    from src.services.referral import track_referral_signup, send_referral_signup_notification
+                    from src.services.referral import (
+                        send_referral_signup_notification,
+                        track_referral_signup,
+                    )
                     client = supabase_config.get_supabase_client()
 
                     # Track referral signup and store referred_by_code
@@ -429,7 +438,10 @@ async def register_user(request: UserRegistrationRequest):
         referral_code_valid = False
         if request.referral_code:
             try:
-                from src.services.referral import track_referral_signup, send_referral_signup_notification
+                from src.services.referral import (
+                    send_referral_signup_notification,
+                    track_referral_signup,
+                )
 
                 # Track referral signup and store referred_by_code
                 success, error_msg, referrer = track_referral_signup(request.referral_code, user_data['user_id'])

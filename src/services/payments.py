@@ -4,25 +4,33 @@ Stripe Service
 Handles all Stripe payment operations
 """
 
-import os
 import logging
-from typing import Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
 import stripe
 
+from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
+from src.db.users import add_credits_to_user, get_user_by_id
+from src.schemas.payments import (
+    CheckoutSessionResponse,
+    CreateCheckoutSessionRequest,
+    CreatePaymentIntentRequest,
+    CreateRefundRequest,
+    CreateSubscriptionCheckoutRequest,
+    CreditPackage,
+    CreditPackagesResponse,
+    PaymentIntentResponse,
+    PaymentStatus,
+    RefundResponse,
+    StripeCurrency,
+    SubscriptionCheckoutResponse,
+    WebhookProcessingResult,
+)
 
 # Import Stripe SDK with alias to avoid conflict with schema module
 
-from src.db.payments import (
-    create_payment,
-    update_payment_status,
-    get_payment_by_stripe_intent
-)
-from src.db.users import get_user_by_id, add_credits_to_user
-from src.schemas.payments import CreateCheckoutSessionRequest, CheckoutSessionResponse, StripeCurrency, \
-    CreatePaymentIntentRequest, PaymentIntentResponse, WebhookProcessingResult, CreditPackagesResponse, CreditPackage, \
-    RefundResponse, CreateRefundRequest, PaymentStatus, CreateSubscriptionCheckoutRequest, SubscriptionCheckoutResponse
 
 logger = logging.getLogger(__name__)
 
@@ -355,8 +363,8 @@ class StripeService:
 
             # Check for referral bonus (first purchase of $10+)
             try:
-                from src.services.referral import apply_referral_bonus, mark_first_purchase
                 from src.config.supabase_config import get_supabase_client
+                from src.services.referral import apply_referral_bonus, mark_first_purchase
 
                 client = get_supabase_client()
                 user_result = client.table('users').select('*').eq('id', user_id).execute()

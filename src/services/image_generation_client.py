@@ -1,9 +1,10 @@
-import logging
-import httpx
-import time
 import base64
+import logging
 import os
-from typing import Dict, Any
+import time
+from typing import Any, Dict
+
+import httpx
 
 from src.config import Config
 
@@ -180,8 +181,8 @@ def make_google_vertex_image_request(
     try:
         # Import Google Cloud AI Platform SDK
         try:
+            from google.auth import default, impersonated_credentials
             from google.cloud import aiplatform
-            from google.auth import impersonated_credentials, default
         except ImportError:
             raise ImportError(
                 "google-cloud-aiplatform and google-auth packages are required. "

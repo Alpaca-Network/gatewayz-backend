@@ -7,7 +7,6 @@ Learn more at https://www.braintrust.dev/docs
 
 from braintrust import current_span, init_logger, start_span, traced
 
-
 # Initialize logger with your project name
 logger = init_logger(project="Gatewayz Backend")
 

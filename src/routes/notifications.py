@@ -1,20 +1,23 @@
 import datetime
-import os
 import logging
-
-
-
-from src.db.users import  get_user
-from src.enhanced_notification_service import enhanced_notification_service
-from fastapi import APIRouter, Query
+import os
 from datetime import datetime, timezone
-from fastapi import Depends, HTTPException
-from src.security.deps import get_api_key, require_admin
-from src.schemas.notification import NotificationPreferences, UpdateNotificationPreferencesRequest, \
-    NotificationType, SendNotificationRequest, NotificationChannel, NotificationStats
-from src.services.notification import notification_service
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.supabase_config import get_supabase_client
+from src.db.users import get_user
+from src.enhanced_notification_service import enhanced_notification_service
+from src.schemas.notification import (
+    NotificationChannel,
+    NotificationPreferences,
+    NotificationStats,
+    NotificationType,
+    SendNotificationRequest,
+    UpdateNotificationPreferencesRequest,
+)
+from src.security.deps import get_api_key, require_admin
+from src.services.notification import notification_service
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)

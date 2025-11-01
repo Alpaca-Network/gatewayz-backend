@@ -1,8 +1,9 @@
-import os
 import logging
+import os
 from typing import Optional
-from supabase import create_client, Client
+
 from src.config.config import Config
+from supabase import Client, create_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

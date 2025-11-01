@@ -5,13 +5,13 @@ This module provides a priority queue and request classification system to
 fast-track high-priority chat completion requests for improved streaming performance.
 """
 
-import logging
 import asyncio
-from typing import Optional, Dict, Any
-from enum import IntEnum
+import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
-import time
+from enum import IntEnum
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -1,21 +1,28 @@
 import datetime
 import logging
-
-
-from src.db.api_keys import validate_api_key_permissions, create_api_key, get_api_key_by_id, \
-    update_api_key, get_user_api_keys, get_user_all_api_keys_usage, delete_api_key
-
-from src.db.users import get_user
-from fastapi import APIRouter
 from datetime import datetime, timezone
 
-from fastapi import Depends, HTTPException
-
-from src.schemas import CreateApiKeyRequest, UpdateApiKeyRequest, UpdateApiKeyResponse, ApiKeyResponse, \
-    DeleteApiKeyRequest
-from src.security.deps import get_api_key
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import (
+    create_api_key,
+    delete_api_key,
+    get_api_key_by_id,
+    get_user_all_api_keys_usage,
+    get_user_api_keys,
+    update_api_key,
+    validate_api_key_permissions,
+)
+from src.db.users import get_user
+from src.schemas import (
+    ApiKeyResponse,
+    CreateApiKeyRequest,
+    DeleteApiKeyRequest,
+    UpdateApiKeyRequest,
+    UpdateApiKeyResponse,
+)
+from src.security.deps import get_api_key
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

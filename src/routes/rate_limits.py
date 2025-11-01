@@ -1,16 +1,22 @@
-import logging
 import datetime
+import logging
 from datetime import datetime, timezone
-from typing import  Optional
+from typing import Optional
 
-from fastapi import Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.api_keys import get_api_key_by_id
-from src.db.rate_limits import get_user_rate_limit_configs, get_rate_limit_usage_stats, update_rate_limit_config, \
-    bulk_update_rate_limit_configs, get_rate_limit_config, get_system_rate_limit_stats, get_rate_limit_alerts
+from src.db.rate_limits import (
+    bulk_update_rate_limit_configs,
+    get_rate_limit_alerts,
+    get_rate_limit_config,
+    get_rate_limit_usage_stats,
+    get_system_rate_limit_stats,
+    get_user_rate_limit_configs,
+    update_rate_limit_config,
+)
 from src.db.users import get_user
 from src.security.deps import get_api_key, require_admin
-from fastapi import APIRouter
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

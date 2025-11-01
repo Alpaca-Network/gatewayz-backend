@@ -5,29 +5,30 @@ Provides comprehensive monitoring of model availability, performance,
 and health status across all providers and gateways.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
-from typing import Optional, List, Dict, Any
 import logging
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from src.models.health_models import (
-    ModelHealthResponse,
-    ProviderHealthResponse,
-    SystemHealthResponse,
-    HealthSummaryResponse,
-    ModelAvailabilityRequest,
-    ProviderAvailabilityRequest,
     HealthCheckRequest,
-    UptimeMetricsResponse,
-    ModelStatusResponse,
-    ProviderStatusResponse,
     HealthDashboardResponse,
     HealthStatus,
-    ProviderStatus
+    HealthSummaryResponse,
+    ModelAvailabilityRequest,
+    ModelHealthResponse,
+    ModelStatusResponse,
+    ProviderAvailabilityRequest,
+    ProviderHealthResponse,
+    ProviderStatus,
+    ProviderStatusResponse,
+    SystemHealthResponse,
+    UptimeMetricsResponse,
 )
-from src.services.model_health_monitor import health_monitor
-from src.services.model_availability import availability_service
 from src.security.deps import get_api_key
+from src.services.model_availability import availability_service
+from src.services.model_health_monitor import health_monitor
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -307,9 +308,14 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
         logger.info("Starting health dashboard request")
         
         # Import required models at the top
-        from src.models.health_models import SystemHealthResponse, HealthStatus, UptimeMetricsResponse
         from datetime import datetime, timezone
-        
+
+        from src.models.health_models import (
+            HealthStatus,
+            SystemHealthResponse,
+            UptimeMetricsResponse,
+        )
+
         # Get system health
         system_health_metrics = health_monitor.get_system_health()
         logger.info(f"System health retrieved: {system_health_metrics is not None}")
