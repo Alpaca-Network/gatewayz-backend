@@ -96,8 +96,8 @@ def _initialize_fal_on_load():
     try:
         from src.cache import initialize_fal_cache
         initialize_fal_cache()
-    except Exception:
-        # Silently fail if initialization fails
+    except (ImportError, AttributeError):
+        # Silently fail if initialization fails - FAL models will be loaded on first request
         pass
 
 

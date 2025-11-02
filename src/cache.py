@@ -293,6 +293,6 @@ def initialize_fal_cache():
             if normalized_models:
                 _fal_models_cache["data"] = normalized_models
                 _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
-    except Exception as e:
-        # Silently fail - FAL models will be loaded on first request
+    except (ImportError, AttributeError, ValueError, TypeError):
+        # Silently fail if initialization fails - FAL models will be loaded on first request
         pass
