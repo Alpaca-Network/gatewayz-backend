@@ -1,6 +1,6 @@
 import logging
 import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta, timezone
 
 from src.db.plans import check_plan_entitlements
@@ -43,7 +43,7 @@ def check_key_name_uniqueness(user_id: int, key_name: str, exclude_key_id: Optio
 def create_api_key(user_id: int, key_name: str, environment_tag: str = 'live',
                    scope_permissions: Optional[Dict[str, Any]] = None, expiration_days: Optional[int] = None,
                    max_requests: Optional[int] = None, ip_allowlist: Optional[List[str]] = None,
-                   domain_referrers: Optional[List[str]] = None, is_primary: bool = False) -> str:
+                   domain_referrers: Optional[List[str]] = None, is_primary: bool = False) -> Tuple[str, int]:
     """Create a new API key for a user"""
     try:
         client = get_supabase_client()
