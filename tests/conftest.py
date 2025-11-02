@@ -2,6 +2,8 @@
 Pytest configuration and fixtures for test database setup
 """
 import os
+import sys
+import types
 import pytest
 import random
 import string
@@ -30,6 +32,23 @@ from tests.factories import (
     PaymentFactory,
     ReferralFactory,
 )
+
+
+# Stub out security module globally for tests that need audit logger
+def _stub_security_module():
+    """Provide a mock security module with audit logger for tests"""
+    security_mod = types.SimpleNamespace(
+        get_audit_logger=lambda: types.SimpleNamespace(
+            log_api_key_creation=lambda *args, **kwargs: None,
+            log_api_key_deletion=lambda *args, **kwargs: None,
+            log_api_key_update=lambda *args, **kwargs: None,
+        )
+    )
+    sys.modules["src.security.security"] = security_mod
+
+
+# Stub security module at test session start
+_stub_security_module()
 
 
 @pytest.fixture
