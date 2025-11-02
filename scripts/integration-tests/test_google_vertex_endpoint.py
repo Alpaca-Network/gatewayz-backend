@@ -18,6 +18,7 @@ Usage:
 
 import os
 import json
+import pytest
 import requests
 import base64
 import pytest
