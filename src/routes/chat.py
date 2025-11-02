@@ -235,7 +235,7 @@ async def stream_generator(
     completion_tokens = 0
     total_tokens = 0
     start_time = time.monotonic()
-    rate_limit_mgr is not None and not trial.get("is_trial", False)
+    release_required = rate_limit_mgr is not None and not trial.get("is_trial", False)
     has_thinking = False
 
     try:
@@ -305,6 +305,14 @@ async def stream_generator(
         logger.info(
             f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
         )
+
+        # Warn if stream was empty - this might indicate a provider issue
+        if chunk_count == 0:
+            logger.warning(
+                f"[STREAM] Empty stream received from provider {provider} for model {model}. "
+                f"This may indicate: 1) Model not available, 2) Provider configuration issue, "
+                f"3) Invalid model ID, or 4) Provider API error"
+            )
 
         # If no usage was provided, estimate based on content
         if total_tokens == 0:
@@ -664,11 +672,23 @@ async def chat_completions(
                     logger.info(
                         f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
                     )
+                else:
+                    logger.debug(
+                        f"No transformation needed for model '{original_model}' with provider {attempt_provider}"
+                    )
 
                 request_model = attempt_model
+                logger.info(
+                    f"[STREAM] Creating stream for provider={attempt_provider}, model={request_model}, original_model={original_model}"
+                )
                 try:
                     if attempt_provider == "portkey":
-                        portkey_provider = req.portkey_provider or "openai"
+                        # Extract provider from model ID if it's in @provider/model format
+                        portkey_provider = req.portkey_provider
+                        if not portkey_provider and request_model.startswith("@") and "/" in request_model:
+                            portkey_provider = request_model[1:].split("/")[0]
+                            logger.info(f"[PORTKEY] Extracted provider '{portkey_provider}' from model ID '{request_model}'")
+                        portkey_provider = portkey_provider or "openai"
                         portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
                         stream = await _to_thread(
                             make_portkey_request_openai_stream,
@@ -810,7 +830,12 @@ async def chat_completions(
 
             try:
                 if attempt_provider == "portkey":
-                    portkey_provider = req.portkey_provider or "openai"
+                    # Extract provider from model ID if it's in @provider/model format
+                    portkey_provider = req.portkey_provider
+                    if not portkey_provider and request_model.startswith("@") and "/" in request_model:
+                        portkey_provider = request_model[1:].split("/")[0]
+                        logger.info(f"[PORTKEY] Extracted provider '{portkey_provider}' from model ID '{request_model}'")
+                    portkey_provider = portkey_provider or "openai"
                     portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
