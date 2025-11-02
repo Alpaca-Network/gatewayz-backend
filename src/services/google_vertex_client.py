@@ -261,17 +261,10 @@ def make_google_vertex_request_openai(
                     # Fallback - this shouldn't happen in production
                     request.instances = [request_body]
 
-<<<<<<< HEAD
-        # Make the request
-        logger.info("Calling Vertex AI predict API")
-        response = client.predict(request=request)
-        logger.info("Received raw response from Vertex AI")
-=======
             logger.info("PredictRequest created successfully")
         except Exception as request_error:
             logger.error(f"Failed to create PredictRequest: {request_error}", exc_info=True)
             raise
->>>>>>> origin/main
 
         # Step 6: Make the request
         try:
