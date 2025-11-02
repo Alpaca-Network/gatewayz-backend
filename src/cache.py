@@ -277,15 +277,14 @@ def should_revalidate_in_background(cache: dict) -> bool:
     return not is_cache_fresh(cache) and is_cache_stale_but_usable(cache)
 
 
-def initialize_fal_cache():
-    """Initialize FAL models cache from static catalog
+def initialize_fal_cache_from_catalog():
+    """Load and initialize FAL models cache directly from static catalog
 
-    This function is called from models.py to avoid circular imports.
-    If initialization fails, the cache will be populated lazily on first request.
+    Avoids circular imports by loading catalog directly without normalizer.
+    Raw models are stored in cache; normalization happens on first access.
     """
     try:
         from src.services.fal_image_client import load_fal_models_catalog
-        from src.services.models import normalize_fal_model
 
         # Load raw models from catalog
         raw_models = load_fal_models_catalog()
@@ -294,20 +293,12 @@ def initialize_fal_cache():
             logger.debug("No FAL models found in catalog")
             return
 
-        # Normalize models
-        normalized_models = [
-            normalize_fal_model(model) for model in raw_models if model
-        ]
-
-        if not normalized_models:
-            logger.debug("No valid FAL models after normalization")
-            return
-
-        # Populate cache
-        _fal_models_cache["data"] = normalized_models
+        # Store raw models temporarily - will be normalized on first access
+        # This avoids circular import with models.py
+        _fal_models_cache["data"] = raw_models
         _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
-        logger.debug(f"Initialized FAL models cache with {len(normalized_models)} models")
+        logger.debug(f"Preloaded {len(raw_models)} FAL models from catalog")
 
     except (ImportError, OSError) as error:
-        # Log failure but continue - cache will be populated on first request
+        # Log failure but continue - models will be loaded on first request
         logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {type(error).__name__}")

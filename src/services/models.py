@@ -94,8 +94,8 @@ router = APIRouter()
 # Initialize FAL models cache on module import for better performance
 # This ensures FAL models are available immediately without lazy loading
 try:
-    from src.cache import initialize_fal_cache
-    initialize_fal_cache()
+    from src.cache import initialize_fal_cache_from_catalog
+    initialize_fal_cache_from_catalog()
 except ImportError:
     # Initialization will be deferred to first request if import fails
     logger.debug(f"{_FAL_CACHE_INIT_DEFERRED} on import")
