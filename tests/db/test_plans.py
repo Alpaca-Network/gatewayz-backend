@@ -3,7 +3,7 @@ import sys
 import types
 import importlib
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import pytest
 
 MODULE_PATH = "src.db.plans"  # change if your file lives elsewhere
@@ -308,31 +308,23 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
     # Create a fixed "now" for testing (day 15 to avoid edge cases)
     # This ensures the function's datetime.now() matches our test data
     fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=timezone.utc)
-    
-    # Mock datetime.now() using a proper mock object that preserves datetime functionality
-    # This avoids subclassing datetime which causes reliability issues
+
+    # Mock datetime.now() in the module to return a fixed value
+    # We use monkeypatch.setattr with a mock that preserves datetime functionality
+
+    # Get the original datetime class
     original_datetime = mod.datetime
-    
-    class MockDateTimeModule:
-        """Mock datetime module that preserves all datetime functionality except now()"""
-        def __init__(self, original_dt, fixed_now_value):
-            self._original = original_dt
-            self._fixed_now = fixed_now_value
-            # Copy all attributes from original datetime
-            for attr in dir(original_dt):
-                if not attr.startswith('_') and attr != 'now':
-                    setattr(self, attr, getattr(original_dt, attr))
-        
-        def now(self, tz=None):
-            return self._fixed_now
-        
-        def __call__(self, *args, **kwargs):
-            # Allow datetime() constructor calls
-            return self._original(*args, **kwargs)
-    
-    # Replace datetime in the module with our mock
-    mock_dt_module = MockDateTimeModule(original_datetime, fixed_now)
-    monkeypatch.setattr(mod, "datetime", mock_dt_module)
+
+    # Create a mock that delegates most calls to the real datetime
+    mock_dt = MagicMock(wraps=original_datetime)
+    mock_dt.now = MagicMock(return_value=fixed_now)
+
+    # Set specific methods that need the original implementation
+    mock_dt.fromisoformat = original_datetime.fromisoformat
+    mock_dt.strptime = original_datetime.strptime
+    mock_dt.timezone = original_datetime.timezone
+
+    monkeypatch.setattr(mod, "datetime", mock_dt)
 
     # plan + user_plan
     fake_supabase.table("plans").insert({
