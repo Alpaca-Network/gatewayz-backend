@@ -348,9 +348,11 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
     # Set specific methods that need the original implementation
     mock_dt.fromisoformat = original_datetime.fromisoformat
     mock_dt.strptime = original_datetime.strptime
-    mock_dt.timezone = original_datetime.timezone
 
     monkeypatch.setattr(mod, "datetime", mock_dt)
+
+    # The module also needs access to 'timezone' at module level
+    # No need to patch it since it's imported from datetime module
 
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
