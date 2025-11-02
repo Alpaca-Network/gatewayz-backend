@@ -72,8 +72,8 @@ class _RateLimitMgr:
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.process_openrouter_response')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
 @patch('src.services.pricing.calculate_cost')
 @patch('src.db.users.deduct_credits')
 @patch('src.db.users.record_usage')
@@ -180,8 +180,8 @@ def test_insufficient_credits_non_trial(mock_get_user, mock_enforce_limits, mock
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.process_openrouter_response')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
 def test_trial_valid_usage_tracked(
     mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_track_trial,
     client, payload_basic, auth_headers
@@ -234,7 +234,7 @@ def test_trial_expired_403(mock_get_user, mock_enforce_limits, mock_trial, clien
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
+@patch('src.routes.chat.make_openrouter_request_openai')
 def test_upstream_429_maps_429(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
     """Test that upstream 429 error is properly mapped to 429"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -260,7 +260,7 @@ def test_upstream_429_maps_429(mock_make_request, mock_get_user, mock_enforce_li
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
+@patch('src.routes.chat.make_openrouter_request_openai')
 def test_upstream_401_maps_500_in_your_code(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
     """Test that upstream 401 error is mapped to 500"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -281,17 +281,19 @@ def test_upstream_401_maps_500_in_your_code(mock_make_request, mock_get_user, mo
     assert "authentication" in r.text.lower()
 
 
-@patch('src.services.provider_failover.should_failover')
+@patch('src.routes.chat.build_provider_failover_chain')
+@patch('src.routes.chat.should_failover')
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
-def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, client, payload_basic, auth_headers):
+@patch('src.routes.chat.make_openrouter_request_openai')
+def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_failover_chain, client, payload_basic, auth_headers):
     """Test that upstream request error is mapped to 503"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
-    mock_should_failover.return_value = False
+    mock_should_failover.return_value = False  # Disable failover
+    mock_failover_chain.return_value = ["openrouter"]  # Only try openrouter
 
     def boom(*a, **k):
         raise RequestError("network is down", request=Request("POST", "https://openrouter.example/v1/chat"))
@@ -305,17 +307,19 @@ def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_
     assert "service unavailable" in r.text.lower() or "network" in r.text.lower()
 
 
-@patch('src.services.provider_failover.should_failover')
+@patch('src.routes.chat.build_provider_failover_chain')
+@patch('src.routes.chat.should_failover')
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
-def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, client, payload_basic, auth_headers):
+@patch('src.routes.chat.make_openrouter_request_openai')
+def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_failover_chain, client, payload_basic, auth_headers):
     """Test that upstream timeout is handled properly"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
-    mock_should_failover.return_value = False
+    mock_should_failover.return_value = False  # Disable failover
+    mock_failover_chain.return_value = ["openrouter"]  # Only try openrouter
 
     def boom(*a, **k):
         raise TimeoutException("upstream timeout")
@@ -332,8 +336,8 @@ def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforc
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.process_openrouter_response')
-@patch('src.services.openrouter_client.make_openrouter_request_openai')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
 @patch('src.services.pricing.calculate_cost')
 @patch('src.db.users.deduct_credits')
 @patch('src.db.users.record_usage')
@@ -377,7 +381,7 @@ def test_saves_chat_history_when_session_id(
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.openrouter_client.make_openrouter_request_openai_stream')
+@patch('src.routes.chat.make_openrouter_request_openai_stream')
 @patch('src.services.pricing.calculate_cost')
 @patch('src.db.users.deduct_credits')
 @patch('src.db.users.record_usage')
@@ -442,9 +446,9 @@ def test_streaming_response(
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.featherless_client.make_featherless_request_openai')
-@patch('src.services.huggingface_client.make_huggingface_request_openai')
-@patch('src.services.huggingface_client.process_huggingface_response')
+@patch('src.routes.chat.make_featherless_request_openai')
+@patch('src.routes.chat.make_huggingface_request_openai')
+@patch('src.routes.chat.process_huggingface_response')
 @patch('src.services.pricing.calculate_cost')
 @patch('src.db.users.deduct_credits')
 @patch('src.db.users.record_usage')
@@ -496,9 +500,9 @@ def test_provider_failover_to_huggingface(
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-@patch('src.services.featherless_client.make_featherless_request_openai')
-@patch('src.services.huggingface_client.make_huggingface_request_openai')
-@patch('src.services.huggingface_client.process_huggingface_response')
+@patch('src.routes.chat.make_featherless_request_openai')
+@patch('src.routes.chat.make_huggingface_request_openai')
+@patch('src.routes.chat.process_huggingface_response')
 @patch('src.services.pricing.calculate_cost')
 @patch('src.db.users.deduct_credits')
 @patch('src.db.users.record_usage')
