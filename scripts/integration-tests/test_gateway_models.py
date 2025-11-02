@@ -61,7 +61,7 @@ def main():
     gateways = ['xai', 'near', 'google', 'cerebras', 'nebius', 'novita', 'huggingface']
 
     for gateway in gateways:
-        test_gateway(gateway)
+        check_gateway(gateway)
 
     print_section("Test Complete", 60)
 
