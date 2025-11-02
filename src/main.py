@@ -1,17 +1,17 @@
-import os
 import logging
+import os
 import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from src.services.startup import lifespan
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # Import configuration
 from src.config import Config
-from src.utils.validators import ensure_non_empty_string, ensure_api_key_like
+from src.services.startup import lifespan
+from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -21,30 +21,18 @@ logger = logging.getLogger(__name__)
 ERROR_INVALID_ADMIN_API_KEY = "Invalid admin API key"
 
 # Cache dictionaries for models and providers
-_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600  # 1 hour TTL
-}
+_models_cache = {"data": None, "timestamp": None, "ttl": 3600}  # 1 hour TTL
 
-_huggingface_cache = {
-    "data": {},
-    "timestamp": None,
-    "ttl": 3600  # 1 hour TTL
-}
+_huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600}  # 1 hour TTL
 
-_provider_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600  # 1 hour TTL
-}
+_provider_cache = {"data": None, "timestamp": None, "ttl": 3600}  # 1 hour TTL
 
 
 # Admin key validation
 def get_admin_key(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     """Validate admin API key with security improvements"""
     admin_key = credentials.credentials
-    
+
     # Input validation
     try:
         ensure_non_empty_string(admin_key, "admin API key")
@@ -63,7 +51,7 @@ def get_admin_key(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer
     # Use constant-time comparison to prevent timing attacks
     if not secrets.compare_digest(admin_key, expected_key):
         raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY)
-    
+
     return admin_key
 
 
@@ -72,7 +60,7 @@ def create_app() -> FastAPI:
         title="Gatewayz Universal Inference API",
         description="Gateway for AI model access powered by Gatewayz",
         version="2.0.3",  # Multi-sort strategy for 1204 HuggingFace models + auto :hf-inference suffix
-        lifespan=lifespan
+        lifespan=lifespan,
     )
 
     # Add CORS middleware
@@ -85,7 +73,7 @@ def create_app() -> FastAPI:
         "https://beta.gatewayz.ai",
         "https://staging.gatewayz.ai",
     ]
-    
+
     if Config.IS_PRODUCTION:
         allowed_origins = [
             "https://gatewayz.ai",
@@ -105,10 +93,10 @@ def create_app() -> FastAPI:
         ] + base_origins
 
     # Log CORS configuration for debugging
-    logger.info(f"🌐 CORS Configuration:")
+    logger.info("🌐 CORS Configuration:")
     logger.info(f"   Environment: {Config.APP_ENV}")
     logger.info(f"   Allowed Origins: {allowed_origins}")
-    
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -124,7 +112,7 @@ def create_app() -> FastAPI:
     logger.info("  🗜️  GZip compression middleware enabled (threshold: 1KB)")
 
     # Security
-    security = HTTPBearer()
+    HTTPBearer()
 
     # ==================== Load All Routes ====================
     logger.info("🚀 Loading application routes...")
@@ -149,7 +137,10 @@ def create_app() -> FastAPI:
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
         ("system", "System & Health"),  # Cache management and health monitoring
-        ("optimization_monitor", "Optimization Monitoring"),  # Connection pool, cache, and priority stats
+        (
+            "optimization_monitor",
+            "Optimization Monitoring",
+        ),  # Connection pool, cache, and priority stats
         ("root", "Root/Home"),
         ("auth", "Authentication"),
         ("users", "User Management"),
@@ -168,7 +159,6 @@ def create_app() -> FastAPI:
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
-
     ]
 
     loaded_count = 0
@@ -177,8 +167,8 @@ def create_app() -> FastAPI:
     for module_name, display_name in routes_to_load:
         try:
             # Import the route module
-            module = __import__(f"src.routes.{module_name}", fromlist=['router'])
-            router = getattr(module, 'router')
+            module = __import__(f"src.routes.{module_name}", fromlist=["router"])
+            router = module.router
 
             # Include the router (all routes now follow clean REST patterns)
             app.include_router(router)
@@ -196,6 +186,7 @@ def create_app() -> FastAPI:
             logger.error(f"       Full error details: {repr(e)}")
             print(f"       Full error details: {repr(e)}", flush=True)
             import traceback
+
             tb = traceback.format_exc()
             logger.error(f"       Traceback:\n{tb}")
             print(f"       Traceback:\n{tb}", flush=True)
@@ -212,11 +203,12 @@ def create_app() -> FastAPI:
             logger.error(error_msg)
             print(error_msg, flush=True)  # Force output for debugging
             import traceback
+
             print(f"       Traceback:\n{traceback.format_exc()}", flush=True)
             failed_count += 1
 
     # Log summary
-    logger.info(f"\n📊 Route Loading Summary:")
+    logger.info("\n📊 Route Loading Summary:")
     logger.info(f"   ✅ Loaded: {loaded_count}")
     if failed_count > 0:
         logger.warning(f"   ❌ Failed: {failed_count}")
@@ -227,10 +219,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"}
-        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     # ==================== Startup Event ====================
 
@@ -255,6 +244,7 @@ def create_app() -> FastAPI:
             try:
                 logger.info("  🗄️  Initializing database...")
                 from src.config.supabase_config import init_db
+
                 init_db()
                 logger.info("  ✅ Database initialized")
 
@@ -263,8 +253,8 @@ def create_app() -> FastAPI:
 
             # Set default admin user
             try:
-                from src.db.roles import update_user_role, get_user_role, UserRole
                 from src.config.supabase_config import get_supabase_client
+                from src.db.roles import UserRole, update_user_role
 
                 ADMIN_EMAIL = Config.ADMIN_EMAIL
 
@@ -272,17 +262,19 @@ def create_app() -> FastAPI:
                     logger.warning("  ⚠️  ADMIN_EMAIL not configured in environment variables")
                 else:
                     client = get_supabase_client()
-                    result = client.table('users').select('id, role').eq('email', ADMIN_EMAIL).execute()
+                    result = (
+                        client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
+                    )
 
                     if result.data:
                         user = result.data[0]
-                        current_role = user.get('role', 'user')
+                        current_role = user.get("role", "user")
 
                         if current_role != UserRole.ADMIN:
                             update_user_role(
-                                user_id=user['id'],
+                                user_id=user["id"],
                                 new_role=UserRole.ADMIN,
-                                reason="Default admin setup on startup"
+                                reason="Default admin setup on startup",
                             )
                             logger.info(f"  ✅ Set {ADMIN_EMAIL} as admin")
                         else:
@@ -297,18 +289,21 @@ def create_app() -> FastAPI:
 
                 # Initialize Statsig
                 from src.services.statsig_service import statsig_service
+
                 await statsig_service.initialize()
                 logger.info("  ✅ Statsig analytics initialized")
 
                 # Initialize PostHog
                 from src.services.posthog_service import posthog_service
+
                 posthog_service.initialize()
                 logger.info("  ✅ PostHog analytics initialized")
 
                 # Initialize Braintrust
                 try:
                     from braintrust import init_logger
-                    braintrust_logger = init_logger(project="Gatewayz Backend")
+
+                    init_logger(project="Gatewayz Backend")
                     logger.info("  ✅ Braintrust tracing initialized")
                 except Exception as bt_e:
                     logger.warning(f"  ⚠️  Braintrust initialization warning: {bt_e}")
@@ -332,8 +327,8 @@ def create_app() -> FastAPI:
             logger.error(f"  ❌ Startup initialization failed: {e}")
 
         logger.info("\n🎉 Application startup complete!")
-        logger.info(f"📍 API Documentation: http://localhost:8000/docs")
-        logger.info(f"📍 Health Check: http://localhost:8000/health\n")
+        logger.info("📍 API Documentation: http://localhost:8000/docs")
+        logger.info("📍 Health Check: http://localhost:8000/health\n")
 
     # ==================== Shutdown Event ====================
 
@@ -344,6 +339,7 @@ def create_app() -> FastAPI:
         # Shutdown analytics services gracefully
         try:
             from src.services.statsig_service import statsig_service
+
             await statsig_service.shutdown()
             logger.info("  ✅ Statsig shutdown complete")
         except Exception as e:
@@ -351,6 +347,7 @@ def create_app() -> FastAPI:
 
         try:
             from src.services.posthog_service import posthog_service
+
             posthog_service.shutdown()
             logger.info("  ✅ PostHog shutdown complete")
         except Exception as e:

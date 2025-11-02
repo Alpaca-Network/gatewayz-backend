@@ -1,17 +1,27 @@
-import logging
 import datetime
-from datetime import datetime, timezone
-from typing import List, Optional
+import logging
+from datetime import UTC, datetime
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.db.plans import get_all_plans, get_plan_by_id, get_user_plan, get_user_usage_within_plan_limits, \
-    check_plan_entitlements, assign_user_plan
+from src.db.plans import (
+    assign_user_plan,
+    check_plan_entitlements,
+    get_all_plans,
+    get_plan_by_id,
+    get_user_plan,
+    get_user_usage_within_plan_limits,
+)
 from src.db.rate_limits import get_environment_usage_summary
 from src.db.users import get_user
-from src.schemas import PlanResponse, UserPlanResponse, PlanUsageResponse, PlanEntitlementsResponse, AssignPlanRequest
+from src.schemas import (
+    AssignPlanRequest,
+    PlanEntitlementsResponse,
+    PlanResponse,
+    PlanUsageResponse,
+    UserPlanResponse,
+)
 from src.security.deps import get_api_key, require_admin
-from fastapi import APIRouter
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)
@@ -19,8 +29,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#Plan Management Endpoints
-@router.get("/plans", response_model=List[PlanResponse], tags=["plans"])
+
+# Plan Management Endpoints
+@router.get("/plans", response_model=list[PlanResponse], tags=["plans"])
 async def get_plans():
     """Get all available subscription plans"""
     try:
@@ -54,12 +65,18 @@ async def get_plans():
                     "daily_token_limit": plan.get("daily_token_limit"),
                     "monthly_token_limit": plan.get("monthly_token_limit"),
                     "price_per_month": float(plan.get("price_per_month", 0)),
-                    "yearly_price": float(plan.get("yearly_price", 0)) if plan.get("yearly_price") else None,
-                    "price_per_token": float(plan.get("price_per_token", 0)) if plan.get("price_per_token") else None,
+                    "yearly_price": (
+                        float(plan.get("yearly_price", 0)) if plan.get("yearly_price") else None
+                    ),
+                    "price_per_token": (
+                        float(plan.get("price_per_token", 0))
+                        if plan.get("price_per_token")
+                        else None
+                    ),
                     "is_pay_as_you_go": plan.get("is_pay_as_you_go", False),
                     "max_concurrent_requests": plan.get("max_concurrent_requests", 5),
                     "features": features,
-                    "is_active": plan.get("is_active", True)
+                    "is_active": plan.get("is_active", True),
                 }
                 plan_responses.append(plan_response)
             except Exception as plan_error:
@@ -67,8 +84,8 @@ async def get_plans():
                 continue
 
         # Sort plans by type (Free, Dev, Team, Customize)
-        plan_order = {'free': 0, 'dev': 1, 'team': 2, 'customize': 3}
-        plan_responses.sort(key=lambda x: plan_order.get(x.get('plan_type', 'free'), 999))
+        plan_order = {"free": 0, "dev": 1, "team": 2, "customize": 3}
+        plan_responses.sort(key=lambda x: plan_order.get(x.get("plan_type", "free"), 999))
 
         logger.info(f"Returning {len(plan_responses)} plan responses")
         return plan_responses
@@ -76,6 +93,7 @@ async def get_plans():
     except Exception as e:
         logger.error(f"Error getting plans: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @router.get("/plans/{plan_id}", response_model=PlanResponse, tags=["plans"])
 async def get_plan(plan_id: int):
@@ -91,6 +109,7 @@ async def get_plan(plan_id: int):
     except Exception as e:
         logger.error(f"Error getting plan {plan_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @router.get("/user/plan", response_model=UserPlanResponse, tags=["authentication"])
 async def get_user_plan_endpoint(api_key: str = Depends(get_api_key)):
@@ -112,6 +131,7 @@ async def get_user_plan_endpoint(api_key: str = Depends(get_api_key)):
         logger.error(f"Error getting user plan: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @router.get("/user/plan/usage", response_model=PlanUsageResponse, tags=["authentication"])
 async def get_user_plan_usage(api_key: str = Depends(get_api_key)):
     """Get user's plan usage and limits"""
@@ -132,8 +152,13 @@ async def get_user_plan_usage(api_key: str = Depends(get_api_key)):
         logger.error(f"Error getting user plan usage: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/user/plan/entitlements", response_model=PlanEntitlementsResponse, tags=["authentication"])
-async def get_user_plan_entitlements(api_key: str = Depends(get_api_key), feature: Optional[str] = Query(None)):
+
+@router.get(
+    "/user/plan/entitlements", response_model=PlanEntitlementsResponse, tags=["authentication"]
+)
+async def get_user_plan_entitlements(
+    api_key: str = Depends(get_api_key), feature: str | None = Query(None)
+):
     """Check user's plan entitlements"""
     try:
         user = get_user(api_key)
@@ -149,8 +174,11 @@ async def get_user_plan_entitlements(api_key: str = Depends(get_api_key), featur
         logger.error(f"Error checking user plan entitlements: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @router.post("/admin/assign-plan", tags=["admin"])
-async def assign_plan_to_user(request: AssignPlanRequest, admin_user: dict = Depends(require_admin)):
+async def assign_plan_to_user(
+    request: AssignPlanRequest, admin_user: dict = Depends(require_admin)
+):
     """Assign a plan to a user (Admin only)"""
     try:
         success = assign_user_plan(request.user_id, request.plan_id, request.duration_months)
@@ -164,7 +192,7 @@ async def assign_plan_to_user(request: AssignPlanRequest, admin_user: dict = Dep
             "user_id": request.user_id,
             "plan_id": request.plan_id,
             "duration_months": request.duration_months,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except ValueError as e:
@@ -172,6 +200,7 @@ async def assign_plan_to_user(request: AssignPlanRequest, admin_user: dict = Dep
     except Exception as e:
         logger.error(f"Error assigning plan: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @router.get("/user/environment-usage", tags=["authentication"])
 async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
@@ -187,7 +216,7 @@ async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
             "status": "success",
             "user_id": user["id"],
             "environment_usage": env_usage,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -196,23 +225,27 @@ async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
         logger.error(f"Error getting environment usage: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 # Trial Status Endpoint (Simplified)
+
 
 @router.get("/trial/status", tags=["trial"])
 async def get_trial_status(api_key: str = Depends(get_api_key)):
     """Get the current trial status for the authenticated API key"""
     try:
         from src.services.trial_validation import validate_trial_access
+
         trial_status = validate_trial_access(api_key)
 
         return {
             "success": True,
             "trial_status": trial_status,
-            "message": "Trial status retrieved successfully"
+            "message": "Trial status retrieved successfully",
         }
     except Exception as e:
         logger.error(f"Error getting trial status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @router.get("/subscription/plans", tags=["subscription"])
 async def get_subscription_plans():
@@ -224,32 +257,36 @@ async def get_subscription_plans():
         # Enhance plans with additional information
         enhanced_plans = []
         for plan in plans:
-            plan_type = plan.get('plan_type', 'free')
-            is_pay_as_you_go = plan.get('is_pay_as_you_go', False)
+            plan_type = plan.get("plan_type", "free")
+            is_pay_as_you_go = plan.get("is_pay_as_you_go", False)
 
             enhanced_plan = {
-                "id": plan.get('id'),
-                "name": plan.get('name'),
-                "description": plan.get('description'),
+                "id": plan.get("id"),
+                "name": plan.get("name"),
+                "description": plan.get("description"),
                 "plan_type": plan_type,
-                "monthly_price": float(plan.get('price_per_month', 0)),
-                "yearly_price": float(plan.get('yearly_price', 0)) if plan.get('yearly_price') else None,
-                "price_per_token": float(plan.get('price_per_token', 0)) if plan.get('price_per_token') else None,
+                "monthly_price": float(plan.get("price_per_month", 0)),
+                "yearly_price": (
+                    float(plan.get("yearly_price", 0)) if plan.get("yearly_price") else None
+                ),
+                "price_per_token": (
+                    float(plan.get("price_per_token", 0)) if plan.get("price_per_token") else None
+                ),
                 "is_pay_as_you_go": is_pay_as_you_go,
-                "daily_request_limit": plan.get('daily_request_limit', 0),
-                "monthly_request_limit": plan.get('monthly_request_limit', 0),
-                "daily_token_limit": plan.get('daily_token_limit', 0),
-                "monthly_token_limit": plan.get('monthly_token_limit', 0),
-                "max_concurrent_requests": plan.get('max_concurrent_requests', 5),
-                "features": plan.get('features', []),
-                "is_active": plan.get('is_active', True),
-                "trial_eligible": plan_type == 'free'  # Only the Free plan is trial eligible
+                "daily_request_limit": plan.get("daily_request_limit", 0),
+                "monthly_request_limit": plan.get("monthly_request_limit", 0),
+                "daily_token_limit": plan.get("daily_token_limit", 0),
+                "monthly_token_limit": plan.get("monthly_token_limit", 0),
+                "max_concurrent_requests": plan.get("max_concurrent_requests", 5),
+                "features": plan.get("features", []),
+                "is_active": plan.get("is_active", True),
+                "trial_eligible": plan_type == "free",  # Only the Free plan is trial eligible
             }
             enhanced_plans.append(enhanced_plan)
 
         # Sort plans by price (Free, Dev, Team, Customize)
-        plan_order = {'free': 0, 'dev': 1, 'team': 2, 'customize': 3}
-        enhanced_plans.sort(key=lambda x: plan_order.get(x['plan_type'], 999))
+        plan_order = {"free": 0, "dev": 1, "team": 2, "customize": 3}
+        enhanced_plans.sort(key=lambda x: plan_order.get(x["plan_type"], 999))
 
         return {
             "success": True,
@@ -260,10 +297,9 @@ async def get_subscription_plans():
                 "trial_credits": 10.0,
                 "trial_tokens": 1000000,  # 1M tokens for trial
                 "trial_requests": 10000,  # 10K requests for trial
-                "trial_plan": "free"
-            }
+                "trial_plan": "free",
+            },
         }
     except Exception as e:
         logger.error(f"Error getting subscription plans: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
