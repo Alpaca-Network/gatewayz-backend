@@ -92,13 +92,16 @@ router = APIRouter()
 
 # Initialize FAL models cache on module import
 def _initialize_fal_on_load():
-    """Initialize FAL cache when models module loads"""
+    """Initialize FAL cache when models module loads.
+
+    If initialization fails, FAL models will be loaded lazily on first request.
+    """
     try:
         from src.cache import initialize_fal_cache
         initialize_fal_cache()
-    except (ImportError, AttributeError):
-        # Silently fail if initialization fails - FAL models will be loaded on first request
-        pass
+    except (ImportError, AttributeError) as error:
+        # Log but do not fail - FAL models will be loaded on first request
+        logger.debug(f"FAL cache initialization will be deferred: {error}")
 
 
 _initialize_fal_on_load()
