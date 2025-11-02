@@ -98,7 +98,7 @@ try:
     initialize_fal_cache()
 except ImportError:
     # Initialization will be deferred to first request if import fails
-    pass
+    logger.debug(f"{_FAL_CACHE_INIT_DEFERRED} on import")
 
 
 def load_featherless_catalog_export() -> list:
