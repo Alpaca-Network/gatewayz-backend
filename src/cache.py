@@ -278,7 +278,7 @@ def initialize_fal_cache():
     """Initialize FAL models cache from static catalog
 
     This function is called from models.py to avoid circular imports.
-    If initialization fails, FAL models will be loaded lazily on first request.
+    If initialization fails, the cache will be populated lazily on first request.
     """
     try:
         from src.services.fal_image_client import load_fal_models_catalog
@@ -299,5 +299,5 @@ def initialize_fal_cache():
                 _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
                 logger.debug(f"Initialized FAL models cache with {len(normalized_models)} models")
     except (ImportError, AttributeError, ValueError, TypeError) as error:
-        # Log but do not fail - FAL models will be loaded on first request
+        # Log failure but continue - cache will be populated on first request
         logger.debug(f"FAL cache initialization deferred: {error}")
