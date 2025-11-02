@@ -277,11 +277,6 @@ class TestLogBatchEvents:
             }
         ]
 
-        # Override dependency for anonymous user
-        async def mock_get_current_user_dep():
-            return None
-
-        app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         response = client.post(
             '/v1/analytics/batch',
             json=events_data
