@@ -168,6 +168,7 @@ def mock_supabase_client():
 class TestApiKeyCreation:
     """Test API key creation"""
 
+    @patch('src.security.security.get_audit_logger')
     @patch('src.routes.api_keys.get_user')
     @patch('src.routes.api_keys.validate_api_key_permissions')
     @patch('src.routes.api_keys.create_api_key')
@@ -178,6 +179,7 @@ class TestApiKeyCreation:
         mock_create_key,
         mock_validate_perms,
         mock_get_user,
+        mock_audit_logger,
         client,
         mock_api_key,
         mock_user,
@@ -848,6 +850,7 @@ class TestApiKeyUsage:
 class TestApiKeyIntegration:
     """Test API key management integration scenarios"""
 
+    @patch('src.security.security.get_audit_logger')
     @patch('src.routes.api_keys.get_user')
     @patch('src.routes.api_keys.validate_api_key_permissions')
     @patch('src.routes.api_keys.create_api_key')
@@ -860,6 +863,7 @@ class TestApiKeyIntegration:
         mock_create_key,
         mock_validate_perms,
         mock_get_user,
+        mock_audit_logger,
         client,
         mock_api_key,
         mock_user,
