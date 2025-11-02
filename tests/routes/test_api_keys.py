@@ -172,26 +172,20 @@ class TestApiKeyCreation:
     @patch('src.routes.api_keys.get_user')
     @patch('src.routes.api_keys.validate_api_key_permissions')
     @patch('src.routes.api_keys.create_api_key')
-    @patch('src.routes.api_keys.get_supabase_client')
     def test_create_api_key_success(
         self,
-        mock_get_client,
         mock_create_key,
         mock_validate_perms,
         mock_get_user,
         mock_audit_logger,
         client,
         mock_api_key,
-        mock_user,
-        mock_supabase_client
+        mock_user
     ):
         """Test successful API key creation"""
         mock_get_user.return_value = mock_user
         mock_validate_perms.return_value = True
         mock_create_key.return_value = ('gw_live_newkey123456', 123)
-
-        supabase_client, table_mock = mock_supabase_client
-        mock_get_client.return_value = supabase_client
 
         request_data = {
             'action': 'create',
@@ -855,10 +849,8 @@ class TestApiKeyIntegration:
     @patch('src.routes.api_keys.validate_api_key_permissions')
     @patch('src.routes.api_keys.create_api_key')
     @patch('src.routes.api_keys.get_user_api_keys')
-    @patch('src.routes.api_keys.get_supabase_client')
     def test_complete_key_lifecycle(
         self,
-        mock_get_client,
         mock_get_keys,
         mock_create_key,
         mock_validate_perms,
@@ -866,15 +858,11 @@ class TestApiKeyIntegration:
         mock_audit_logger,
         client,
         mock_api_key,
-        mock_user,
-        mock_supabase_client
+        mock_user
     ):
         """Test complete API key lifecycle: create -> list -> use"""
         mock_get_user.return_value = mock_user
         mock_validate_perms.return_value = True
-
-        supabase_client, table_mock = mock_supabase_client
-        mock_get_client.return_value = supabase_client
 
         # 1. Create new key
         mock_create_key.return_value = ('gw_live_newkey123', 456)
