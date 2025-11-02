@@ -124,6 +124,15 @@ def mod(fake_supabase, monkeypatch):
     plans_mod = types.SimpleNamespace(check_plan_entitlements=lambda user_id: {"monthly_request_limit": 5000})
     monkeypatch.setitem(sys.modules, "src.db.plans", plans_mod)
 
+    # stub audit logger
+    security_mod = types.SimpleNamespace(
+        get_audit_logger=lambda: types.SimpleNamespace(
+            log_api_key_creation=lambda *args, **kwargs: None,
+            log_api_key_deletion=lambda *args, **kwargs: None
+        )
+    )
+    monkeypatch.setitem(sys.modules, "src.security.security", security_mod)
+
     # ensure deterministic secrets.token_urlsafe
     import secrets as real_secrets
     monkeypatch.setattr(real_secrets, "token_urlsafe", lambda n=32: "TOK", raising=True)
