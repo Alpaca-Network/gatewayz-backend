@@ -90,6 +90,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# Initialize FAL models cache on module import
+def _initialize_fal_on_load():
+    """Initialize FAL cache when models module loads"""
+    try:
+        from src.cache import initialize_fal_cache
+        initialize_fal_cache()
+    except Exception:
+        # Silently fail if initialization fails
+        pass
+
+
+_initialize_fal_on_load()
+
+
 def load_featherless_catalog_export() -> list:
     """
     Load Featherless models from a static export CSV if available.

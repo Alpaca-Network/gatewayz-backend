@@ -269,3 +269,30 @@ def is_cache_stale_but_usable(cache: dict) -> bool:
 def should_revalidate_in_background(cache: dict) -> bool:
     """Check if cache should trigger background revalidation"""
     return not is_cache_fresh(cache) and is_cache_stale_but_usable(cache)
+
+
+def initialize_fal_cache():
+    """Initialize FAL models cache from static catalog
+
+    This function is called from models.py to avoid circular imports
+    """
+    try:
+        from src.services.fal_image_client import load_fal_models_catalog
+        from src.services.models import normalize_fal_model
+
+        # Load raw models from catalog
+        raw_models = load_fal_models_catalog()
+
+        if raw_models:
+            # Normalize models
+            normalized_models = [
+                normalize_fal_model(model) for model in raw_models if model
+            ]
+
+            # Populate cache
+            if normalized_models:
+                _fal_models_cache["data"] = normalized_models
+                _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+    except Exception as e:
+        # Silently fail - FAL models will be loaded on first request
+        pass
