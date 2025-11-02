@@ -1,6 +1,9 @@
 """Cache module for storing model and provider data"""
 import threading
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Cache dictionaries for models and providers
 _models_cache = {
@@ -274,7 +277,8 @@ def should_revalidate_in_background(cache: dict) -> bool:
 def initialize_fal_cache():
     """Initialize FAL models cache from static catalog
 
-    This function is called from models.py to avoid circular imports
+    This function is called from models.py to avoid circular imports.
+    If initialization fails, FAL models will be loaded lazily on first request.
     """
     try:
         from src.services.fal_image_client import load_fal_models_catalog
@@ -293,6 +297,7 @@ def initialize_fal_cache():
             if normalized_models:
                 _fal_models_cache["data"] = normalized_models
                 _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
-    except (ImportError, AttributeError, ValueError, TypeError):
-        # Silently fail if initialization fails - FAL models will be loaded on first request
-        pass
+                logger.debug(f"Initialized FAL models cache with {len(normalized_models)} models")
+    except (ImportError, AttributeError, ValueError, TypeError) as error:
+        # Log but do not fail - FAL models will be loaded on first request
+        logger.debug(f"FAL cache initialization deferred: {error}")
