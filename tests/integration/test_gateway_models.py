@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.services.models import get_cached_models
 from src.config import Config
 
-def test_gateway(gateway_name: str):
+def check_gateway(gateway_name: str):
     """Test model fetching for a specific gateway"""
     print(f"\n{'='*60}")
     print(f"Testing {gateway_name.upper()} gateway")
@@ -62,7 +62,7 @@ def main():
     gateways = ['xai', 'near', 'google', 'cerebras', 'nebius', 'novita', 'huggingface']
 
     for gateway in gateways:
-        test_gateway(gateway)
+        check_gateway(gateway)
 
     print(f"\n{'='*60}")
     print("Test Complete")
