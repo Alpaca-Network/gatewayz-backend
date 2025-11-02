@@ -336,6 +336,38 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             # The gateway automatically routes requests to the appropriate provider
             # Using pass-through format - any model ID is supported
             # Minimal mappings to avoid conflicts with other providers during auto-detection
+        },
+        "near": {
+            # Near AI uses simple model names without org prefixes
+            # Strip the org prefix from common model formats
+
+            # DeepSeek models
+            "deepseek-ai/deepseek-v3": "deepseek-v3",
+            "deepseek-ai/deepseek-v3.1": "deepseek-v3.1",
+            "deepseek-ai/deepseek-v3p1": "deepseek-v3.1",
+            "deepseek-ai/deepseek-chat-v3-0324": "deepseek-chat-v3-0324",
+            "deepseek-ai/deepseek-r1": "deepseek-r1",
+
+            # Without org prefix (already correct format)
+            "deepseek-v3": "deepseek-v3",
+            "deepseek-v3.1": "deepseek-v3.1",
+            "deepseek-v3p1": "deepseek-v3.1",
+            "deepseek-chat-v3-0324": "deepseek-chat-v3-0324",
+            "deepseek-r1": "deepseek-r1",
+
+            # Llama models
+            "meta-llama/llama-3-70b": "llama-3-70b",
+            "meta-llama/llama-3.1-70b": "llama-3.1-70b",
+            "meta-llama/llama-3.2-vision-90b": "llama-3.2-vision-90b",
+            "meta-llama/llama-3.3-70b": "llama-3.3-70b",
+
+            # Qwen models
+            "qwen/qwen-2-72b": "qwen-2-72b",
+            "qwen/qwen-2.5-72b": "qwen-2.5-72b",
+
+            # GPT-OSS models
+            "gpt-oss/gpt-oss-120b": "gpt-oss-120b",
+            "gpt-oss/gpt-120b": "gpt-oss-120b",
         }
     }
 
