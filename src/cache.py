@@ -1,69 +1,59 @@
 """Cache module for storing model and provider data"""
-import threading
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 # Cache dictionaries for models and providers
 _models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200  # 2 hours stale-while-revalidate
+    "stale_ttl": 7200,  # 2 hours stale-while-revalidate
 }
 
 _portkey_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 1800,  # 30 minute TTL for Portkey catalog
-    "stale_ttl": 3600
+    "stale_ttl": 3600,
 }
 
 _featherless_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Featherless catalog
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
-_huggingface_cache = {
-    "data": {},
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
-}
+_huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
-_provider_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
-}
+_provider_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
 _chutes_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Chutes catalog
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _groq_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 1800,  # 30 minute TTL for Groq catalog
-    "stale_ttl": 3600
+    "stale_ttl": 3600,
 }
 
 _fireworks_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 1800,  # 30 minute TTL for Fireworks catalog
-    "stale_ttl": 3600
+    "stale_ttl": 3600,
 }
 
 _together_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 1800,  # 30 minute TTL for Together catalog
-    "stale_ttl": 3600
+    "stale_ttl": 3600,
 }
 
 # Modelz cache (for token data)
@@ -71,7 +61,7 @@ _modelz_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 1800,  # 30 minute TTL for Modelz token data
-    "stale_ttl": 3600
+    "stale_ttl": 3600,
 }
 
 
@@ -80,7 +70,7 @@ _deepinfra_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 # Portkey-based individual provider caches
@@ -88,77 +78,72 @@ _google_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _cerebras_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _nebius_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
-_xai_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
-}
+_xai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
 _novita_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _huggingface_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _aimo_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for AIMO catalog
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _near_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Near AI catalog
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _fal_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Fal.ai catalog
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _google_vertex_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Google Vertex AI models
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 _vercel_ai_gateway_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Vercel AI Gateway catalog
-    "stale_ttl": 7200
+    "stale_ttl": 7200,
 }
 
 # BACKWARD COMPATIBILITY: Alias for old cache name
@@ -190,7 +175,7 @@ def get_models_cache(gateway: str):
         "near": _near_models_cache,
         "fal": _fal_models_cache,
         "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-        "modelz": _modelz_cache
+        "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
 
@@ -223,7 +208,7 @@ def clear_models_cache(gateway: str):
         "near": _near_models_cache,
         "fal": _fal_models_cache,
         "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-        "modelz": _modelz_cache
+        "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())
     if cache:
@@ -252,7 +237,7 @@ def is_cache_fresh(cache: dict) -> bool:
     """Check if cache is within fresh TTL"""
     if not cache.get("data") or not cache.get("timestamp"):
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     return cache_age < cache.get("ttl", 3600)
 
 
@@ -260,7 +245,7 @@ def is_cache_stale_but_usable(cache: dict) -> bool:
     """Check if cache is stale but within stale-while-revalidate window"""
     if not cache.get("data") or not cache.get("timestamp"):
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", ttl * 2)
     return ttl <= cache_age < stale_ttl
