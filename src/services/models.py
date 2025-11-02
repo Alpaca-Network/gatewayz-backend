@@ -32,6 +32,7 @@ from src.cache import (
     _vercel_ai_gateway_models_cache,
     is_cache_fresh,
     should_revalidate_in_background,
+    _FAL_CACHE_INIT_DEFERRED,
 )
 from fastapi import APIRouter
 from datetime import datetime, timezone
@@ -101,7 +102,7 @@ def _initialize_fal_on_load():
         initialize_fal_cache()
     except (ImportError, AttributeError) as error:
         # Log but do not fail - cache will be populated on first request
-        logger.debug(f"FAL cache initialization deferred: {error}")
+        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {error}")
 
 
 _initialize_fal_on_load()

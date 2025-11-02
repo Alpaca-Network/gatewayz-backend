@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+# FAL cache initialization messages
+_FAL_CACHE_INIT_DEFERRED = "FAL cache initialization deferred"
+
 # Cache dictionaries for models and providers
 _models_cache = {
     "data": None,
@@ -300,4 +303,4 @@ def initialize_fal_cache():
                 logger.debug(f"Initialized FAL models cache with {len(normalized_models)} models")
     except (ImportError, AttributeError, ValueError, TypeError) as error:
         # Log failure but continue - cache will be populated on first request
-        logger.debug(f"FAL cache initialization deferred: {error}")
+        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {error}")
