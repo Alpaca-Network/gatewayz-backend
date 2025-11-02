@@ -551,7 +551,6 @@ class TestActivityLogEndpoint:
 # TEST CLASS: Authentication
 # ============================================================
 
-@pytest.mark.xfail(reason="Authentication mocking issue - endpoint returns 403")
 class TestActivityAuthentication:
     """Test authentication requirements"""
 
