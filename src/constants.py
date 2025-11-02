@@ -12,7 +12,6 @@ import os
 # Check FRONTEND_URL first (new), then APP_URL (legacy) for backward compatibility
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_URL") or os.environ.get("APP_URL", "https://gatewayz.ai")
 FRONTEND_BETA_URL = "https://beta.gatewayz.ai"
-FRONTEND_STAGING_URL = "https://staging.gatewayz.ai"
 
 # Common frontend paths
 SETTINGS_CREDITS_PATH = "/settings/credits"
