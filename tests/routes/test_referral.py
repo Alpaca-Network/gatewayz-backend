@@ -116,7 +116,9 @@ class TestReferralStats:
             assert data['total_uses'] == 5
             assert data['total_earned'] == 150.0
             assert 'invite_link' in data
-            assert 'gatewayz.ai' in data['invite_link']
+            # Invite link should contain the referral code and a valid URL structure
+            assert 'TEST123' in data['invite_link']
+            assert '/register?ref=' in data['invite_link']
 
     def test_get_referral_stats_requires_auth(self, client):
         """Referral stats requires authentication"""
