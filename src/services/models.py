@@ -100,9 +100,9 @@ def _initialize_fal_on_load():
     try:
         from src.cache import initialize_fal_cache
         initialize_fal_cache()
-    except (ImportError, AttributeError) as error:
+    except ImportError as error:
         # Log but do not fail - cache will be populated on first request
-        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {error}")
+        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {type(error).__name__}")
 
 
 _initialize_fal_on_load()

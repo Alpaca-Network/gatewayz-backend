@@ -290,17 +290,24 @@ def initialize_fal_cache():
         # Load raw models from catalog
         raw_models = load_fal_models_catalog()
 
-        if raw_models:
-            # Normalize models
-            normalized_models = [
-                normalize_fal_model(model) for model in raw_models if model
-            ]
+        if not raw_models:
+            logger.debug("No FAL models found in catalog")
+            return
 
-            # Populate cache
-            if normalized_models:
-                _fal_models_cache["data"] = normalized_models
-                _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
-                logger.debug(f"Initialized FAL models cache with {len(normalized_models)} models")
-    except (ImportError, AttributeError, ValueError, TypeError) as error:
+        # Normalize models
+        normalized_models = [
+            normalize_fal_model(model) for model in raw_models if model
+        ]
+
+        if not normalized_models:
+            logger.debug("No valid FAL models after normalization")
+            return
+
+        # Populate cache
+        _fal_models_cache["data"] = normalized_models
+        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        logger.debug(f"Initialized FAL models cache with {len(normalized_models)} models")
+
+    except (ImportError, OSError) as error:
         # Log failure but continue - cache will be populated on first request
-        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {error}")
+        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {type(error).__name__}")
