@@ -336,14 +336,16 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
     fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=timezone.utc)
 
     # Mock datetime.now() in the module to return a fixed value
-    # Create a custom class that replaces datetime but preserves its methods
-    original_datetime = mod.datetime
+    # We need to patch the datetime object in the module's namespace
+    # (not the datetime class itself, which is immutable)
+    mock_datetime_class = MagicMock()
+    mock_datetime_class.now = MagicMock(return_value=fixed_now)
+    mock_datetime_class.fromisoformat = datetime.fromisoformat
+    mock_datetime_class.strptime = datetime.strptime
+    # Make the mock callable to create datetime instances
+    mock_datetime_class.side_effect = datetime
 
-    # Use patch to replace datetime.now specifically
-    def mock_now(tz=None):
-        return fixed_now
-
-    monkeypatch.setattr(mod.datetime, "now", mock_now)
+    monkeypatch.setattr(mod, "datetime", mock_datetime_class)
 
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
