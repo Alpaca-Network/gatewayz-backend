@@ -289,16 +289,20 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             # Full resource names are constructed by the client
             # Gemini 2.5 models (newest)
             "gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash-preview-09-2025",
-            "gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025",
-            "gemini-2.5-flash-preview": "gemini-2.5-flash-preview-09-2025",
+            "gemini-2.5-flash": "gemini-2.5-flash",
+            "gemini-2.5-flash-preview": "gemini-2.5-flash",
             "google/gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash-preview-09-2025",
-            "google/gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025",
+            "google/gemini-2.5-flash": "gemini-2.5-flash",
             "@google/models/gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash-preview-09-2025",
-            "@google/models/gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025",
+            "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
+            "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+            "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite",
+            "google/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+            "@google/models/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
             "gemini-2.5-pro-preview-09-2025": "gemini-2.5-pro-preview-09-2025",
-            "gemini-2.5-pro": "gemini-2.5-pro-preview-09-2025",
-            "google/gemini-2.5-pro": "gemini-2.5-pro-preview-09-2025",
-            "@google/models/gemini-2.5-pro": "gemini-2.5-pro-preview-09-2025",
+            "gemini-2.5-pro": "gemini-2.5-pro",
+            "google/gemini-2.5-pro": "gemini-2.5-pro",
+            "@google/models/gemini-2.5-pro": "gemini-2.5-pro",
 
             # Gemini 2.0 models
             "gemini-2.0-flash": "gemini-2.0-flash",
