@@ -4,6 +4,7 @@ import types
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient, Request, Response, HTTPStatusError, RequestError, TimeoutException
+from unittest.mock import patch, MagicMock
 
 # ======================================================================
 # >>> CHANGE THIS to the module path where your router + endpoint live:
@@ -14,8 +15,26 @@ api = importlib.import_module(MODULE_PATH)
 
 # Build a FastAPI app including the router under test
 @pytest.fixture(scope="function")
-def app():
+def app(monkeypatch):
     from src.security.deps import get_api_key
+    import src.services.trial_validation as trial_module
+    import src.db.users as users_module
+    import src.db.plans as plans_module
+
+    # Apply patches BEFORE creating the app
+    def mock_validate_trial(api_key):
+        return {"is_valid": True, "is_trial": False, "is_expired": False}
+
+    def mock_get_user(api_key):
+        return {"id": 1, "credits": 100.0, "environment_tag": "live"}
+
+    def mock_enforce_plan_limits(user_id, tokens, env):
+        return {"allowed": True}
+
+    # Patch the actual module functions
+    monkeypatch.setattr(trial_module, "validate_trial_access", mock_validate_trial)
+    monkeypatch.setattr(users_module, "get_user", mock_get_user)
+    monkeypatch.setattr(plans_module, "enforce_plan_limits", mock_enforce_plan_limits)
 
     app = FastAPI()
     app.include_router(api.router)
@@ -76,16 +95,41 @@ class _RateLimitMgr:
 def happy_patches(monkeypatch):
     # Mock API key validation to bypass database check
     from src.security import security
+    import src.services.trial_validation as trial_module
+    import src.db.users as users_module
+    import src.db.plans as plans_module
+
     monkeypatch.setattr(security, "validate_api_key_security", lambda api_key, **kwargs: api_key)
 
-    # DB: user with credits
-    monkeypatch.setattr(api, "get_user", lambda api_key: {"id": 1, "credits": 100.0, "environment_tag": "live"})
+    # Key fix: Mock validate_trial_access at the source module level
+    def mock_validate_trial(api_key):
+        return {
+            "is_valid": True,
+            "is_trial": False,
+            "is_expired": False
+        }
+
+    # Patch both the wrapper and the underlying function
+    monkeypatch.setattr(trial_module, "validate_trial_access", mock_validate_trial)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
+
+    # Also mock get_user to return user with credits
+    def mock_get_user(api_key):
+        return {
+            "id": 1,
+            "credits": 100.0,
+            "environment_tag": "live"
+        }
+
+    monkeypatch.setattr(users_module, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "get_user", mock_get_user)
 
     # Plan limits allowed pre & post
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda user_id, tokens, env: {"allowed": True})
+    def mock_enforce_plan_limits(user_id, tokens, env):
+        return {"allowed": True}
 
-    # Trial: not a trial user
-    monkeypatch.setattr(api, "validate_trial_access", lambda api_key: {"is_valid": True, "is_trial": False})
+    monkeypatch.setattr(plans_module, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
 
     # Rate limit manager that always allows
     mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
@@ -144,7 +188,10 @@ async def test_happy_path_openrouter(app, happy_patches, payload_basic, auth_hea
 
 @pytest.mark.anyio
 async def test_invalid_api_key(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda api_key: None)
+    import src.db.users as users_module
+
+    # Override the default get_user mock to return None (invalid API key)
+    monkeypatch.setattr(users_module, "get_user", lambda api_key: None)
     async with AsyncClient(app=app, base_url="http://test") as ac:
         r = await ac.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
     assert r.status_code == 401
@@ -152,9 +199,13 @@ async def test_invalid_api_key(app, mock_api_key_validation, monkeypatch, payloa
 
 @pytest.mark.anyio
 async def test_plan_limit_exceeded_precheck(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": False, "reason": "plan cap"})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    import src.db.plans as plans_module
+
+    # Override enforce_plan_limits to deny access
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": False, "reason": "plan cap"}
+
+    monkeypatch.setattr(plans_module, "enforce_plan_limits", mock_enforce_plan_limits)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: _RateLimitMgr(True, True))
     async with AsyncClient(app=app, base_url="http://test") as ac:
         r = await ac.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
@@ -163,9 +214,7 @@ async def test_plan_limit_exceeded_precheck(app, mock_api_key_validation, monkey
 
 @pytest.mark.anyio
 async def test_rate_limit_exceeded_precheck(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    # Override rate limit manager to deny access
     mgr = _RateLimitMgr(allowed_pre=False, allowed_final=True)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: mgr)
     async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -175,9 +224,13 @@ async def test_rate_limit_exceeded_precheck(app, mock_api_key_validation, monkey
 
 @pytest.mark.anyio
 async def test_insufficient_credits_non_trial(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 0.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    import src.db.users as users_module
+
+    # Override get_user to return user with zero credits
+    def mock_get_user(k):
+        return {"id": 1, "credits": 0.0, "environment_tag": "live"}
+
+    monkeypatch.setattr(users_module, "get_user", mock_get_user)
     mgr = _RateLimitMgr(True, True)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: mgr)
     async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -188,9 +241,16 @@ async def test_insufficient_credits_non_trial(app, mock_api_key_validation, monk
 @pytest.mark.anyio
 async def test_trial_valid_usage_tracked(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
     # Trial user (valid, not expired) → no credit deduction, track usage called
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 0.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": True, "is_expired": False})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 0.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": True, "is_trial": True, "is_expired": False}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     mgr = _RateLimitMgr(True, True)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: mgr)
 
@@ -222,9 +282,16 @@ async def test_trial_valid_usage_tracked(app, mock_api_key_validation, monkeypat
 
 @pytest.mark.anyio
 async def test_trial_expired_403(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 0.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": False, "is_trial": True, "is_expired": True, "error": "Trial expired", "trial_end_date": "2025-09-01"})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 0.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": False, "is_trial": True, "is_expired": True, "error": "Trial expired", "trial_end_date": "2025-09-01"}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     async with AsyncClient(app=app, base_url="http://test") as ac:
         r = await ac.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
     assert r.status_code == 403
@@ -234,9 +301,16 @@ async def test_trial_expired_403(app, mock_api_key_validation, monkeypatch, payl
 @pytest.mark.anyio
 async def test_upstream_429_maps_429(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
     # Happy DB/trial/plan/rate
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": True, "is_trial": False, "is_expired": False}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: _RateLimitMgr(True, True))
 
     # Make upstream raise HTTPStatusError(429)
@@ -255,9 +329,16 @@ async def test_upstream_429_maps_429(app, mock_api_key_validation, monkeypatch, 
 @pytest.mark.anyio
 async def test_upstream_401_maps_500_in_your_code(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
     # (Matches your current mapping: 401 → 500 "OpenRouter authentication error")
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": True, "is_trial": False, "is_expired": False}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: _RateLimitMgr(True, True))
 
     def boom(*a, **k):
@@ -273,9 +354,16 @@ async def test_upstream_401_maps_500_in_your_code(app, mock_api_key_validation, 
 
 @pytest.mark.anyio
 async def test_upstream_request_error_maps_503(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": True, "is_trial": False, "is_expired": False}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: _RateLimitMgr(True, True))
     monkeypatch.setattr(api, "should_failover", lambda exc: False)
     monkeypatch.setattr(api, "make_huggingface_request_openai", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not failover")))
@@ -291,9 +379,16 @@ async def test_upstream_request_error_maps_503(app, mock_api_key_validation, mon
 
 @pytest.mark.anyio
 async def test_upstream_timeout_maps_504(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": True, "is_trial": False, "is_expired": False}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: _RateLimitMgr(True, True))
     monkeypatch.setattr(api, "should_failover", lambda exc: False)
     monkeypatch.setattr(api, "make_huggingface_request_openai", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not failover")))
@@ -325,9 +420,16 @@ async def test_saves_chat_history_when_session_id(app, happy_patches, payload_ba
 @pytest.mark.anyio
 async def test_streaming_response(app, mock_api_key_validation, monkeypatch, payload_basic, auth_headers):
     # Mock a streaming response
-    monkeypatch.setattr(api, "get_user", lambda k: {"id": 1, "credits": 100.0, "environment_tag": "live"})
-    monkeypatch.setattr(api, "enforce_plan_limits", lambda uid, tok, env: {"allowed": True})
-    monkeypatch.setattr(api, "validate_trial_access", lambda k: {"is_valid": True, "is_trial": False})
+    def mock_get_user(k):
+        return {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    def mock_enforce_plan_limits(uid, tok, env):
+        return {"allowed": True}
+    def mock_validate_trial(k):
+        return {"is_valid": True, "is_trial": False, "is_expired": False}
+
+    monkeypatch.setattr(api, "get_user", mock_get_user)
+    monkeypatch.setattr(api, "enforce_plan_limits", mock_enforce_plan_limits)
+    monkeypatch.setattr(api, "validate_trial_access", mock_validate_trial)
     mgr = _RateLimitMgr(True, True)
     monkeypatch.setattr(api, "get_rate_limit_manager", lambda: mgr)
 
