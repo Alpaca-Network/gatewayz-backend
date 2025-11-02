@@ -1,6 +1,6 @@
 """Cache module for storing model and provider data"""
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 # Cache dictionaries for models and providers
 _models_cache = {
@@ -237,7 +237,7 @@ def is_cache_fresh(cache: dict) -> bool:
     """Check if cache is within fresh TTL"""
     if not cache.get("data") or not cache.get("timestamp"):
         return False
-    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
     return cache_age < cache.get("ttl", 3600)
 
 
@@ -245,7 +245,7 @@ def is_cache_stale_but_usable(cache: dict) -> bool:
     """Check if cache is stale but within stale-while-revalidate window"""
     if not cache.get("data") or not cache.get("timestamp"):
         return False
-    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", ttl * 2)
     return ttl <= cache_age < stale_ttl

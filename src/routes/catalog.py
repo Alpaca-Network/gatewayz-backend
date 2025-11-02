@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -299,7 +299,7 @@ async def get_providers(
             "offset": offset or 0,
             "limit": limit,
             "gateway": gateway_value,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -705,7 +705,7 @@ async def get_models(
             "include_huggingface": include_huggingface,
             "gateway": gateway_value,
             "note": note,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         logger.error(
             f"Returning /models response with keys: {list(result.keys())}, gateway={gateway_value}, first_model={enhanced_models[0]['id'] if enhanced_models else 'none'}"
@@ -829,7 +829,7 @@ async def get_specific_model(
             "model": model_name,
             "gateway": detected_gateway,
             "include_huggingface": include_huggingface,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -985,7 +985,7 @@ async def get_provider_statistics(
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
 
-        return {"success": True, "data": stats, "timestamp": datetime.now(UTC).isoformat()}
+        return {"success": True, "data": stats, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     except HTTPException:
         raise
@@ -1048,7 +1048,7 @@ async def get_gateway_statistics(
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
 
-        return {"success": True, "data": stats, "timestamp": datetime.now(UTC).isoformat()}
+        return {"success": True, "data": stats, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     except HTTPException:
         raise
@@ -1107,7 +1107,7 @@ async def get_trending_models_endpoint(
             "gateway": gateway,
             "time_range": time_range,
             "sort_by": sort_by,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1146,7 +1146,7 @@ async def get_all_gateways_summary_endpoint(
         if "error" in summary:
             raise HTTPException(status_code=500, detail=summary["error"])
 
-        return {"success": True, "data": summary, "timestamp": datetime.now(UTC).isoformat()}
+        return {"success": True, "data": summary, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     except HTTPException:
         raise
@@ -1193,7 +1193,7 @@ async def get_provider_top_models_endpoint(
             "data": top_models,
             "count": len(top_models),
             "time_range": time_range,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1319,7 +1319,7 @@ async def compare_model_across_gateways(
             "savings": savings_info,
             "available_count": sum(1 for c in comparisons if c.get("available")),
             "total_gateways_checked": len(comparisons),
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1424,7 +1424,7 @@ async def batch_compare_models(
             "criteria": criteria,
             "models_compared": len(model_ids),
             "results": results,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1761,7 +1761,7 @@ async def search_models(
                     "order": order,
                 },
             },
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
