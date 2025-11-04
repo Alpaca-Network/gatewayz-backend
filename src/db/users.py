@@ -1,10 +1,10 @@
 import logging
-from typing import Any
-from datetime import datetime, timedelta, UTC
-
-from src.db.api_keys import create_api_key
-from src.config.supabase_config import get_supabase_client
 import secrets
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import create_api_key
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -286,7 +286,7 @@ def log_api_usage_transaction(
         is_trial: Whether user is on trial (if True, cost should be 0 and no credits deducted)
     """
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -351,7 +351,7 @@ def deduct_credits(
         return
 
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:

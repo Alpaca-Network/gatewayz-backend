@@ -1,35 +1,32 @@
 import json
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
-from fastapi import HTTPException
-
-from src.services.models import (
-    get_cached_models,
-    enhance_model_with_provider_info,
-    get_model_count_by_provider,
-    enhance_model_with_huggingface_data,
-    fetch_specific_model,
-)
-from src.services.providers import get_cached_providers, enhance_providers_with_logos_and_sites
 from src.db.gateway_analytics import (
-    get_provider_stats,
-    get_gateway_stats,
-    get_trending_models,
     get_all_gateways_summary,
+    get_gateway_stats,
+    get_provider_stats,
     get_top_models_by_provider,
+    get_trending_models,
+)
+from src.services.models import (
+    enhance_model_with_huggingface_data,
+    enhance_model_with_provider_info,
+    fetch_specific_model,
+    get_cached_models,
+    get_model_count_by_provider,
 )
 from src.services.modelz_client import (
-    fetch_modelz_tokens,
-    get_modelz_model_ids,
     check_model_exists_on_modelz,
+    fetch_modelz_tokens,
     get_modelz_model_details,
+    get_modelz_model_ids,
 )
+from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
 from src.utils.security_validators import sanitize_for_logging
-
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)

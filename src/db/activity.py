@@ -4,7 +4,7 @@ Handles logging and retrieval of user API activity
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client

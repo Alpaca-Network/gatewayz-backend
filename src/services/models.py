@@ -6,14 +6,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter
 
 from src.cache import (
+    _FAL_CACHE_INIT_DEFERRED,
     _aimo_models_cache,
     _cerebras_models_cache,
     _chutes_models_cache,
     _deepinfra_models_cache,
-    _FAL_CACHE_INIT_DEFERRED,
     _fal_models_cache,
     _featherless_models_cache,
     _fireworks_models_cache,
@@ -34,20 +35,18 @@ from src.cache import (
     should_revalidate_in_background,
 )
 from src.config import Config
-from src.services.pricing_lookup import enrich_model_with_pricing
-from src.services.portkey_providers import (
-    fetch_models_from_google,
-    fetch_models_from_google_vertex,
-    fetch_models_from_cerebras,
-    fetch_models_from_nebius,
-    fetch_models_from_xai,
-    fetch_models_from_novita,
-)
 from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
+from src.services.portkey_providers import (
+    fetch_models_from_cerebras,
+    fetch_models_from_google,
+    fetch_models_from_google_vertex,
+    fetch_models_from_nebius,
+    fetch_models_from_novita,
+    fetch_models_from_xai,
+)
+from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
-
-import httpx
 
 logger = logging.getLogger(__name__)
 
