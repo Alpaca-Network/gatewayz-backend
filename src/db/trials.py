@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -128,7 +128,7 @@ def get_trial_analytics() -> dict[str, Any]:
         # Calculate active trials (not expired)
         active_trials = 0
         expired_trials = 0
-        current_time = datetime.now(UTC)
+        current_time = datetime.now(timezone.utc)
 
         for key in trial_keys:
             trial_end_date = key.get("trial_end_date")
@@ -142,7 +142,7 @@ def get_trial_analytics() -> dict[str, Any]:
                     # Ensure both datetimes have timezone info for comparison
                     if end_date.tzinfo is None:
                         # If end_date is naive, assume it's UTC
-                        end_date = end_date.replace(tzinfo=UTC)
+                        end_date = end_date.replace(tzinfo=timezone.utc)
 
                     if end_date > current_time:
                         active_trials += 1
