@@ -68,6 +68,58 @@ XAI_FALLBACK_MODELS = [
 ]
 
 
+def _convert_model_to_dict(model: Any) -> dict | None:
+    """Convert SDK model object to dict - shared helper to reduce duplication
+    
+    Handles Pydantic v1/v2 models, regular objects, and dicts.
+    
+    Args:
+        model: Model object from SDK (Pydantic, dict, or other)
+        
+    Returns:
+        Dictionary representation of the model, or None if conversion fails
+    """
+    if hasattr(model, "model_dump"):
+        # Pydantic v2 model
+        return model.model_dump()
+    elif hasattr(model, "dict"):
+        # Legacy Pydantic v1 model
+        return model.dict()
+    elif hasattr(model, "__dict__"):
+        # Regular object
+        return vars(model)
+    elif isinstance(model, dict):
+        # Already a dict
+        return model
+    else:
+        # Fallback: convert to string id
+        return {"id": str(model)}
+
+
+def _normalize_models_list(models_list: list, provider: str) -> list:
+    """Normalize a list of raw models with error handling
+    
+    Args:
+        models_list: Raw models from provider API
+        provider: Provider name for logging
+        
+    Returns:
+        List of successfully normalized models
+    """
+    normalized_models = []
+    for model in models_list:
+        if not model:
+            continue
+        try:
+            normalized = normalize_portkey_provider_model(model, provider)
+            if normalized:
+                normalized_models.append(normalized)
+        except Exception as normalization_error:
+            logger.warning(f"Failed to normalize {provider} model: {normalization_error}")
+            continue
+    return normalized_models
+
+
 def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict) -> list:
     """Normalize models and cache them - shared helper to reduce duplication
     
@@ -79,9 +131,7 @@ def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict)
     Returns:
         List of normalized and cached models
     """
-    normalized_models = [
-        normalize_portkey_provider_model(model, provider) for model in models_list if model
-    ]
+    normalized_models = _normalize_models_list(models_list, provider)
     
     cache_dict["data"] = normalized_models
     cache_dict["timestamp"] = datetime.now(timezone.utc)
@@ -118,10 +168,7 @@ def _fetch_openai_compatible_models(
         models_response = client.models.list()
         
         # Convert model objects to dicts
-        models_list = [
-            model.model_dump() if hasattr(model, "model_dump") else model.dict()
-            for model in models_response.data
-        ]
+        models_list = [_convert_model_to_dict(model) for model in models_response.data]
         
         if not models_list:
             logger.warning(f"No models returned from {provider_name} API")
@@ -337,32 +384,11 @@ def fetch_models_from_cerebras():
             models_list = []
             for idx, model in enumerate(raw_models):
                 try:
-                    # Log the type of each model object
                     if idx == 0:
-                        logger.debug(
-                            f"First model type: {type(model)}, has model_dump: {hasattr(model, 'model_dump')}, has dict: {hasattr(model, 'dict')}"
-                        )
-
-                    converted_model = None
-                    if hasattr(model, "model_dump"):
-                        # Pydantic v2 model
-                        converted_model = model.model_dump()
-                    elif hasattr(model, "dict"):
-                        # Legacy Pydantic v1 model
-                        converted_model = model.dict()
-                    elif hasattr(model, "__dict__"):
-                        # Regular object
-                        converted_model = vars(model)
-                    elif isinstance(model, dict):
-                        # Already a dict
-                        converted_model = model
-                    else:
-                        # Skip unsupported model objects
-                        logger.warning(
-                            f"Skipping unsupported Cerebras model object of type {type(model)}"
-                        )
-                        continue
-
+                        logger.debug(f"First model type: {type(model)}")
+                    
+                    converted_model = _convert_model_to_dict(model)
+                    
                     # Validate that we got a proper dict with an id
                     if converted_model and isinstance(converted_model, dict):
                         if "id" in converted_model:
@@ -440,18 +466,8 @@ def fetch_models_from_cerebras():
             logger.warning("No models available from Cerebras")
             return None
 
-        normalized_models = []
-        for model in models_list:
-            if not model:
-                continue
-            try:
-                normalized = normalize_portkey_provider_model(model, "cerebras")
-                if normalized:
-                    normalized_models.append(normalized)
-            except Exception as normalization_error:
-                logger.warning(f"Failed to normalize Cerebras model: {normalization_error}")
-                continue
-
+        normalized_models = _normalize_models_list(models_list, "cerebras")
+        
         if not normalized_models:
             logger.warning("No models were successfully normalized from Cerebras")
             return None
@@ -527,18 +543,7 @@ def fetch_models_from_xai():
                 raw_models = raw_models[0].get("data", [])
 
             # Convert SDK model objects to dicts if needed
-            models_list = []
-            for model in raw_models:
-                if hasattr(model, "model_dump"):
-                    models_list.append(model.model_dump())
-                elif hasattr(model, "dict"):
-                    models_list.append(model.dict())
-                elif hasattr(model, "__dict__"):
-                    models_list.append(vars(model))
-                elif isinstance(model, dict):
-                    models_list.append(model)
-                else:
-                    models_list.append({"id": str(model)})
+            models_list = [_convert_model_to_dict(model) for model in raw_models]
 
             if models_list:
                 logger.info(f"Fetched {len(models_list)} models from xAI SDK")
@@ -560,10 +565,7 @@ def fetch_models_from_xai():
                 )
 
                 models_response = client.models.list()
-                models_list = [
-                    model.model_dump() if hasattr(model, "model_dump") else model.dict()
-                    for model in models_response.data
-                ]
+                models_list = [_convert_model_to_dict(model) for model in models_response.data]
 
                 if not models_list:
                     logger.warning("No models returned from xAI API, using fallback models")
