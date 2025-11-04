@@ -5,7 +5,7 @@ Business logic for ping operations with Redis caching
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config.redis_config import get_redis_config
