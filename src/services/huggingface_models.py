@@ -23,7 +23,7 @@ FEATURES:
 
 import logging
 import time
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 import httpx
 
@@ -74,7 +74,7 @@ def fetch_models_from_huggingface_api(
             and _huggingface_models_cache["data"]
             and _huggingface_models_cache["timestamp"]
         ):
-            cache_age = (datetime.now(UTC) - _huggingface_models_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(timezone.utc) - _huggingface_models_cache["timestamp"]).total_seconds()
             if cache_age < _huggingface_models_cache["ttl"]:
                 logger.info(
                     f"Using cached Hugging Face models ({len(_huggingface_models_cache['data'])} models, age: {cache_age:.0f}s)"
@@ -234,7 +234,7 @@ def fetch_models_from_huggingface_api(
         # Cache the results
         if use_cache:
             _huggingface_models_cache["data"] = normalized_models
-            _huggingface_models_cache["timestamp"] = datetime.now(UTC)
+            _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
             logger.info(
                 f"Cached {len(normalized_models)} Hugging Face models with TTL {_huggingface_models_cache['ttl']}s"
             )

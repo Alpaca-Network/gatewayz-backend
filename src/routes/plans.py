@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -191,7 +191,7 @@ async def assign_plan_to_user(
             "user_id": request.user_id,
             "plan_id": request.plan_id,
             "duration_months": request.duration_months,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except ValueError as e:
@@ -215,7 +215,7 @@ async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
             "status": "success",
             "user_id": user["id"],
             "environment_usage": env_usage,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
