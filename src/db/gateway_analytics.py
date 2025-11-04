@@ -4,7 +4,7 @@ Provides functions to analyze usage across different gateways and providers
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client

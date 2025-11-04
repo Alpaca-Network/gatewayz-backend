@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -95,7 +95,9 @@ def create_api_key(
         # Calculate expiration date if specified
         expiration_date = None
         if expiration_days:
-            expiration_date = (datetime.now(UTC) + timedelta(days=expiration_days)).isoformat()
+            expiration_date = (
+                datetime.now(UTC) + timedelta(days=expiration_days)
+            ).isoformat()
 
         # Set default permissions if none provided
         if scope_permissions is None:

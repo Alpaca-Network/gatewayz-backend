@@ -5,7 +5,7 @@ Business logic for ping operations with Redis caching
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.redis_config import get_redis_config
@@ -59,7 +59,11 @@ class PingService:
                 if count is None:
                     count = 0
 
-            return {"message": "pong", "count": count, "timestamp": datetime.now(UTC).isoformat()}
+            return {
+                "message": "pong",
+                "count": count,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
         except Exception as e:
             logger.error(f"Error handling ping: {e}")
@@ -114,7 +118,11 @@ class PingService:
 
         except Exception as e:
             logger.error(f"Error getting ping statistics: {e}")
-            return {"total_pings": 0, "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
+            return {
+                "total_pings": 0,
+                "error": str(e),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
     def reset_counter(self) -> dict[str, Any]:
         """
@@ -139,7 +147,11 @@ class PingService:
 
         except Exception as e:
             logger.error(f"Error resetting counter: {e}")
-            return {"success": False, "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
     def _sync_to_database(self):
         """

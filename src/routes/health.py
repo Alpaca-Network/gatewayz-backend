@@ -6,7 +6,7 @@ and health status across all providers and gateways.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -587,7 +587,10 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.start_monitoring()
-        return {"message": "Health monitoring started", "timestamp": datetime.now(UTC).isoformat()}
+        return {
+            "message": "Health monitoring started",
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to start health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to start health monitoring") from e
@@ -602,7 +605,10 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.stop_monitoring()
-        return {"message": "Health monitoring stopped", "timestamp": datetime.now(UTC).isoformat()}
+        return {
+            "message": "Health monitoring stopped",
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to stop health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop health monitoring") from e

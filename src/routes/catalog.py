@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -1181,7 +1181,11 @@ async def get_all_gateways_summary_endpoint(
         if "error" in summary:
             raise HTTPException(status_code=500, detail=summary["error"])
 
-        return {"success": True, "data": summary, "timestamp": datetime.now(UTC).isoformat()}
+        return {
+            "success": True,
+            "data": summary,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
     except HTTPException:
         raise

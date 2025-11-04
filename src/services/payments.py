@@ -6,7 +6,7 @@ Handles all Stripe payment operations
 
 import logging
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 import stripe
@@ -814,7 +814,10 @@ class StripeService:
             client = get_supabase_client()
 
             client.table("users").update(
-                {"subscription_status": "past_due", "updated_at": datetime.now(UTC).isoformat()}
+                {
+                    "subscription_status": "past_due",
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
             ).eq("id", user_id).execute()
 
             logger.info(f"User {user_id} subscription marked as past_due due to failed payment")

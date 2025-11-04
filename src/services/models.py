@@ -2,7 +2,7 @@ import csv
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
