@@ -1,26 +1,31 @@
 import logging
-from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.api_keys import (
-    create_api_key,
-    delete_api_key,
-    get_api_key_by_id,
-    get_user_all_api_keys_usage,
-    get_user_api_keys,
-    update_api_key,
     validate_api_key_permissions,
+    create_api_key,
+    get_api_key_by_id,
+    update_api_key,
+    get_user_api_keys,
+    get_user_all_api_keys_usage,
+    delete_api_key,
 )
+
 from src.db.users import get_user
+from fastapi import APIRouter
+from datetime import datetime, timezone
+
+from fastapi import Depends, HTTPException
+
 from src.schemas import (
-    ApiKeyResponse,
     CreateApiKeyRequest,
-    DeleteApiKeyRequest,
     UpdateApiKeyRequest,
     UpdateApiKeyResponse,
+    ApiKeyResponse,
+    DeleteApiKeyRequest,
 )
 from src.security.deps import get_api_key
+
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
@@ -206,7 +211,7 @@ async def update_user_api_key_endpoint(
                     "rotated_count": result["rotated_count"],
                     "new_keys": result["new_keys"],
                     "phase4_integration": True,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             except Exception as e:
                 logger.error("Bulk rotation failed: %s", sanitize_for_logging(str(e)))
@@ -264,7 +269,7 @@ async def update_user_api_key_endpoint(
             status="success",
             message=message,
             updated_key=ApiKeyResponse(**updated_key),
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
         )
 
     except HTTPException:
@@ -361,7 +366,7 @@ async def delete_user_api_key(
             "status": "success",
             "message": "API key deleted successfully",
             "deleted_key_id": key_id,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -388,7 +393,7 @@ async def get_user_api_key_usage(api_key: str = Depends(get_api_key)):
         enhanced_usage = usage_stats.copy()
         enhanced_usage["audit_logging"] = {
             "enabled": True,
-            "last_audit_check": datetime.now(UTC).isoformat(),
+            "last_audit_check": datetime.now(timezone.utc).isoformat(),
             "security_events_tracked": True,
             "access_patterns_monitored": True,
         }
