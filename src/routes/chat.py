@@ -1,10 +1,11 @@
-import logging
 import asyncio
-import time
 import json
+import logging
+import time
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-import httpx
 
 # Make braintrust optional for test environments
 try:
@@ -35,85 +36,86 @@ except ImportError:
         return MockSpan()
 
 
+import importlib
+
+import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
+import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
-import src.db.chat_history as chat_history_module
-import src.db.activity as activity_module
+import src.services.rate_limiting as rate_limiting_service
+import src.services.trial_validation as trial_module
+from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
-from src.config import Config
-import importlib
-from src.services.openrouter_client import (
-    make_openrouter_request_openai,
-    process_openrouter_response,
-    make_openrouter_request_openai_stream,
-)
-from src.services.portkey_client import (
-    make_portkey_request_openai,
-    process_portkey_response,
-    make_portkey_request_openai_stream,
-)
-from src.services.featherless_client import (
-    make_featherless_request_openai,
-    process_featherless_response,
-    make_featherless_request_openai_stream,
-)
-from src.services.fireworks_client import (
-    make_fireworks_request_openai,
-    process_fireworks_response,
-    make_fireworks_request_openai_stream,
-)
-from src.services.together_client import (
-    make_together_request_openai,
-    process_together_response,
-    make_together_request_openai_stream,
-)
-from src.services.huggingface_client import (
-    make_huggingface_request_openai,
-    process_huggingface_response,
-    make_huggingface_request_openai_stream,
-)
 from src.services.aimo_client import (
     make_aimo_request_openai,
-    process_aimo_response,
     make_aimo_request_openai_stream,
-)
-from src.services.xai_client import (
-    make_xai_request_openai,
-    process_xai_response,
-    make_xai_request_openai_stream,
+    process_aimo_response,
 )
 from src.services.chutes_client import (
     make_chutes_request_openai,
-    process_chutes_response,
     make_chutes_request_openai_stream,
+    process_chutes_response,
+)
+from src.services.featherless_client import (
+    make_featherless_request_openai,
+    make_featherless_request_openai_stream,
+    process_featherless_response,
+)
+from src.services.fireworks_client import (
+    make_fireworks_request_openai,
+    make_fireworks_request_openai_stream,
+    process_fireworks_response,
 )
 from src.services.google_vertex_client import (
     make_google_vertex_request_openai,
-    process_google_vertex_response,
     make_google_vertex_request_openai_stream,
+    process_google_vertex_response,
 )
-from src.services.near_client import (
-    make_near_request_openai,
-    process_near_response,
-    make_near_request_openai_stream,
-)
-from src.services.vercel_ai_gateway_client import (
-    make_vercel_ai_gateway_request_openai,
-    process_vercel_ai_gateway_response,
-    make_vercel_ai_gateway_request_openai_stream,
+from src.services.huggingface_client import (
+    make_huggingface_request_openai,
+    make_huggingface_request_openai_stream,
+    process_huggingface_response,
 )
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
+from src.services.near_client import (
+    make_near_request_openai,
+    make_near_request_openai_stream,
+    process_near_response,
+)
+from src.services.openrouter_client import (
+    make_openrouter_request_openai,
+    make_openrouter_request_openai_stream,
+    process_openrouter_response,
+)
+from src.services.portkey_client import (
+    make_portkey_request_openai,
+    make_portkey_request_openai_stream,
+    process_portkey_response,
+)
+from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
     map_provider_error,
     should_failover,
 )
-import src.services.rate_limiting as rate_limiting_service
-import src.services.trial_validation as trial_module
-from src.services.pricing import calculate_cost
+from src.services.together_client import (
+    make_together_request_openai,
+    make_together_request_openai_stream,
+    process_together_response,
+)
+from src.services.vercel_ai_gateway_client import (
+    make_vercel_ai_gateway_request_openai,
+    make_vercel_ai_gateway_request_openai_stream,
+    process_vercel_ai_gateway_response,
+)
+from src.services.xai_client import (
+    make_xai_request_openai,
+    make_xai_request_openai_stream,
+    process_xai_response,
+)
 from src.utils.security_validators import sanitize_for_logging
 
 
@@ -1544,13 +1546,15 @@ async def unified_responses(
                             **optional,
                         )
 
-                    async def response_stream_generator():
+                    async def response_stream_generator(
+                        _stream=stream, _request_model=request_model
+                    ):
                         """Transform chat/completions stream to responses format with usage tracking"""
                         async for chunk_data in stream_generator(
-                            stream,
+                            _stream,
                             user,
                             api_key,
-                            request_model,
+                            _request_model,
                             trial,
                             environment_tag,
                             session_id,
