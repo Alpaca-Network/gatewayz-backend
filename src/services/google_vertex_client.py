@@ -18,6 +18,7 @@ from typing import Any
 import google.auth
 import httpx
 from google.auth.transport.requests import Request
+from google.protobuf.json_format import MessageToDict
 from google.oauth2.service_account import Credentials
 
 from src.config import Config
@@ -69,7 +70,7 @@ def get_google_vertex_credentials():
                     logger.warning(
                         f"Failed to decode credentials as base64: {base64_error}. "
                         "Falling back to next credential method.",
-                        exc_info=True
+                        exc_info=True,
                     )
                     # Don't raise - allow fallback to next credential method
                     creds_dict = None
@@ -79,7 +80,9 @@ def get_google_vertex_credentials():
                     credentials = Credentials.from_service_account_info(
                         creds_dict, scopes=VERTEX_AI_SCOPES
                     )
-                    logger.debug("Created Credentials object from service account info with Vertex AI scopes")
+                    logger.debug(
+                        "Created Credentials object from service account info with Vertex AI scopes"
+                    )
                     credentials.refresh(Request())
                     logger.info(
                         "Successfully loaded and validated Google Vertex credentials from GOOGLE_VERTEX_CREDENTIALS_JSON"
@@ -89,7 +92,7 @@ def get_google_vertex_credentials():
                     logger.warning(
                         f"Failed to create/refresh credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {e}. "
                         "Falling back to next credential method.",
-                        exc_info=True
+                        exc_info=True,
                     )
                     # Don't raise - allow fallback to next credential method
 
@@ -109,7 +112,7 @@ def get_google_vertex_credentials():
                 logger.warning(
                     f"Failed to load/refresh credentials from file: {e}. "
                     "Falling back to next credential method.",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # Don't raise - allow fallback to next credential method
 
@@ -443,42 +446,42 @@ def _build_vertex_content(messages: list) -> list:
 
 def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
     """Convert a Vertex AI candidate to OpenAI-compatible format
-    
-    This shared helper function normalizes response data from both protobuf 
+
+    This shared helper function normalizes response data from both protobuf
     and REST API formats to avoid code duplication.
-    
+
     Args:
         candidate: Candidate object from Vertex AI response
         model: Model name used
-        
+
     Returns:
         OpenAI-compatible response dictionary
     """
     logger.debug(f"Normalizing candidate: {json.dumps(candidate, indent=2, default=str)}")
-    
+
     # Extract content from candidate
     content_parts = candidate.get("content", {}).get("parts", [])
     logger.debug(f"Content parts count: {len(content_parts)}")
-    
+
     # Extract text from parts
     text_content = ""
     for part in content_parts:
         if "text" in part:
             text_content += part["text"]
-    
+
     logger.info(f"Extracted text content length: {len(text_content)} characters")
-    
+
     # Warn if content is empty
     if not text_content:
         logger.warning(
             f"Received empty text content from Vertex AI for model {model}. Candidate: {json.dumps(candidate, default=str)}"
         )
-    
+
     # Extract usage information
     usage_metadata = candidate.get("usageMetadata", {})
     prompt_tokens = int(usage_metadata.get("promptTokenCount", 0))
     completion_tokens = int(usage_metadata.get("candidatesTokenCount", 0))
-    
+
     finish_reason = candidate.get("finishReason", "STOP")
     finish_reason_map = {
         "STOP": "stop",
@@ -487,7 +490,7 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
         "RECITATION": "stop",
         "FINISH_REASON_UNSPECIFIED": "unknown",
     }
-    
+
     return {
         "id": f"vertex-{int(time.time() * 1000)}",
         "object": "text_completion",
@@ -546,7 +549,7 @@ def _process_google_vertex_response(response: Any, model: str) -> dict:
             raise ValueError("No candidates in Vertex AI prediction")
 
         candidate = candidates[0]
-        
+
         # Use shared normalization function
         return _normalize_vertex_candidate_to_openai(candidate, model)
 
@@ -599,11 +602,11 @@ def _process_google_vertex_rest_response(response_data: dict, model: str) -> dic
 
         # Get the first candidate
         candidate = candidates[0]
-        
+
         # Merge top-level usage metadata into candidate for consistency with shared function
         if "usageMetadata" in response_data and "usageMetadata" not in candidate:
             candidate["usageMetadata"] = response_data["usageMetadata"]
-        
+
         # Use shared normalization function
         return _normalize_vertex_candidate_to_openai(candidate, model)
 

@@ -11,7 +11,7 @@ Each provider is accessed individually to:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 try:
@@ -103,7 +103,7 @@ class PortkeySDKService:
                 api_key=self.api_key,
                 provider=portkey_provider,
                 # Add tracing for observability
-                trace_id=f"gatewayz-{provider}-{datetime.now(timezone.utc).timestamp()}",
+                trace_id=f"gatewayz-{provider}-{datetime.now(UTC).timestamp()}",
             )
 
             logger.debug(f"Created Portkey client for provider: {provider}")
