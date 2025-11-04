@@ -84,6 +84,23 @@ def _check_api_key(api_key: str | None, provider_name: str) -> bool:
     return True
 
 
+def _handle_http_error(error: Exception, provider_name: str) -> None:
+    """Handle HTTP errors with consistent logging
+    
+    Args:
+        error: The HTTP error exception
+        provider_name: Provider name for logging
+    """
+    import httpx
+    
+    if isinstance(error, httpx.HTTPStatusError):
+        logger.error(
+            f"{provider_name} API HTTP error {error.response.status_code}: {error.response.text[:200]}"
+        )
+    else:
+        logger.error(f"{provider_name} HTTP API error: {error}")
+
+
 def _extract_models_from_response(payload: dict | list, key: str = "data") -> list:
     """Extract models list from API response - handles dict or list formats
     
@@ -316,13 +333,8 @@ def fetch_models_from_google():
 
             logger.info(f"Fetched {len(models_list)} models from Google Generative AI API")
 
-        except httpx.HTTPStatusError as http_error:
-            logger.error(
-                f"Google API HTTP error {http_error.response.status_code}: {http_error.response.text[:200]}"
-            )
-            return None
         except Exception as http_error:
-            logger.error(f"Google HTTP API error: {http_error}")
+            _handle_http_error(http_error, "Google")
             return None
 
         # Normalize the models
@@ -467,13 +479,8 @@ def fetch_models_from_cerebras():
 
                 logger.info(f"Fetched {len(models_list)} models from Cerebras HTTP API")
 
-            except httpx.HTTPStatusError as http_error:
-                logger.error(
-                    f"Cerebras API HTTP error {http_error.response.status_code}: {http_error.response.text[:200]}"
-                )
-                return None
             except Exception as http_error:
-                logger.error(f"Cerebras HTTP API error: {http_error}")
+                _handle_http_error(http_error, "Cerebras")
                 return None
 
         # Normalize the models
