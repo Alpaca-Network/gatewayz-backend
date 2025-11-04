@@ -68,6 +68,40 @@ XAI_FALLBACK_MODELS = [
 ]
 
 
+def _check_api_key(api_key: str | None, provider_name: str) -> bool:
+    """Check if API key is configured - returns False and logs warning if not
+    
+    Args:
+        api_key: API key to check
+        provider_name: Provider name for logging
+        
+    Returns:
+        True if API key exists, False otherwise
+    """
+    if not api_key:
+        logger.warning(f"{provider_name} API key not configured")
+        return False
+    return True
+
+
+def _extract_models_from_response(payload: dict | list, key: str = "data") -> list:
+    """Extract models list from API response - handles dict or list formats
+    
+    Args:
+        payload: API response (dict with models key or list)
+        key: Key to look for in dict (default: "data", can be "models")
+        
+    Returns:
+        List of models, or empty list if extraction fails
+    """
+    if isinstance(payload, dict) and key in payload:
+        return payload.get(key, [])
+    elif isinstance(payload, list):
+        return payload
+    else:
+        return []
+
+
 def _convert_model_to_dict(model: Any) -> dict | None:
     """Convert SDK model object to dict - shared helper to reduce duplication
     
@@ -160,8 +194,7 @@ def _fetch_openai_compatible_models(
     try:
         from openai import OpenAI
         
-        if not api_key:
-            logger.warning(f"{provider_name} API key not configured")
+        if not _check_api_key(api_key, provider_name):
             return None
         
         client = OpenAI(base_url=base_url, api_key=api_key)
@@ -260,8 +293,7 @@ def fetch_models_from_google():
 
         from src.config import Config
 
-        if not Config.GOOGLE_API_KEY:
-            logger.warning("Google API key not configured")
+        if not _check_api_key(Config.GOOGLE_API_KEY, "Google"):
             return None
 
         # Google Generative AI API endpoint
@@ -276,15 +308,7 @@ def fetch_models_from_google():
             response.raise_for_status()
 
             payload = response.json()
-
-            # Handle response format
-            if isinstance(payload, dict) and "models" in payload:
-                models_list = payload.get("models", [])
-            elif isinstance(payload, list):
-                models_list = payload
-            else:
-                logger.warning(f"Unexpected Google API response format: {type(payload)}")
-                models_list = []
+            models_list = _extract_models_from_response(payload, key="models")
 
             if not models_list:
                 logger.warning("No models returned from Google API")
@@ -323,8 +347,7 @@ def fetch_models_from_cerebras():
     try:
         from src.config import Config
 
-        if not Config.CEREBRAS_API_KEY:
-            logger.warning("Cerebras API key not configured")
+        if not _check_api_key(Config.CEREBRAS_API_KEY, "Cerebras"):
             return None
 
         models_list = None
@@ -436,15 +459,7 @@ def fetch_models_from_cerebras():
                 response.raise_for_status()
 
                 payload = response.json()
-
-                # Handle different response formats
-                if isinstance(payload, dict) and "data" in payload:
-                    models_list = payload.get("data", [])
-                elif isinstance(payload, list):
-                    models_list = payload
-                else:
-                    logger.warning(f"Unexpected Cerebras API response format: {type(payload)}")
-                    models_list = []
+                models_list = _extract_models_from_response(payload, key="data")
 
                 if not models_list:
                     logger.warning("No models returned from Cerebras API")
@@ -507,8 +522,7 @@ def fetch_models_from_xai():
     try:
         from src.config import Config
 
-        if not Config.XAI_API_KEY:
-            logger.warning("xAI API key not configured")
+        if not _check_api_key(Config.XAI_API_KEY, "xAI"):
             return None
 
         # Try using the official xAI SDK first
@@ -696,6 +710,10 @@ def normalize_portkey_provider_model(model: dict, provider: str) -> dict:
         return {"source_gateway": provider, f"raw_{provider}": model}
 
 
+# Common generation methods for Gemini models
+_GEMINI_GENERATION_METHODS = ["generateContent", "streamGenerateContent"]
+
+
 def fetch_models_from_google_vertex():
     """
     Fetch available models from Google Vertex AI using the official SDK.
@@ -745,7 +763,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 8192,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"]
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS
             },
             {
                 "id": "gemini-2.5-flash-lite-preview-09-2025",
@@ -754,7 +772,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 8192,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"]
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS
             },
             {
                 "id": "gemini-2.0-flash",
@@ -763,7 +781,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 100000,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"],
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-2.0-flash-thinking",
@@ -772,7 +790,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 100000,
                 "modalities": ["text"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"],
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-2.0-pro",
@@ -781,7 +799,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 4096,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"],
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-1.5-pro",
@@ -790,7 +808,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 8192,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"],
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-1.5-flash",
@@ -799,7 +817,7 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 8192,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"],
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-1.0-pro",
@@ -808,13 +826,13 @@ def fetch_models_from_google_vertex():
                 "max_input_tokens": 32000,
                 "max_output_tokens": 8192,
                 "modalities": ["text"],
-                "supported_generation_methods": ["generateContent", "streamGenerateContent"],
+                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
         ]
 
         logger.info(f"Loaded {len(vertex_models)} Google Vertex AI models")
 
-        # Normalize the models
+        # Normalize the models - use custom normalization for Vertex-specific fields
         normalized_models = []
         for model in vertex_models:
             try:
@@ -859,11 +877,7 @@ def fetch_models_from_google_vertex():
             logger.warning("No models were successfully normalized from Google Vertex AI")
             return None
 
-        _google_vertex_models_cache["data"] = normalized_models
-        _google_vertex_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"✅ Cached {len(normalized_models)} Google Vertex AI models")
-        return _google_vertex_models_cache["data"]
+        return _cache_normalized_models(normalized_models, "google-vertex", _google_vertex_models_cache)
 
     except Exception as e:
         logger.error(f"Failed to fetch models from Google Vertex AI: {e}", exc_info=True)
