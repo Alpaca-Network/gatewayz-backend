@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -79,7 +79,7 @@ async def create_api_key(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status="trial",
             message="API key created successfully!",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     except ValueError as e:
@@ -155,14 +155,14 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
             # Still return the data but log the error
             return {
                 "status": "success",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "data": monitor_data,
                 "warning": "Data retrieved with errors, some information may be incomplete",
             }
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": monitor_data,
         }
 
@@ -219,7 +219,7 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
             "status": "success",
             "message": "Provider cache refreshed successfully",
             "total_providers": len(providers) if providers else 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -232,7 +232,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     try:
         cache_age = None
         if _provider_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
 
         return {
             "status": "success",
@@ -245,7 +245,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
                     len(_provider_cache["data"]) if _provider_cache["data"] else 0
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -259,7 +259,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
     try:
         cache_age = None
         if _huggingface_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _huggingface_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - _huggingface_cache["timestamp"]).total_seconds()
 
         return {
             "huggingface_cache": {
@@ -268,7 +268,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
                 "total_cached_models": len(_huggingface_cache["data"]),
                 "cached_model_ids": list(_huggingface_cache["data"].keys()),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -287,7 +287,7 @@ async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_adm
 
         return {
             "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -337,7 +337,7 @@ async def admin_test_huggingface(
                     ),
                 },
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -393,7 +393,7 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_models": sample_models,
                 "cache_timestamp": _models_cache.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - _models_cache["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - _models_cache["timestamp"]).total_seconds()
                     if _models_cache.get("timestamp")
                     else None
                 ),
@@ -403,13 +403,13 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_providers": sample_providers,
                 "cache_timestamp": _provider_cache.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
                     if _provider_cache.get("timestamp")
                     else None
                 ),
             },
             "provider_matching_test": provider_matching_test,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -492,12 +492,12 @@ async def test_provider_matching():
             "cache_info": {
                 "provider_cache_timestamp": _provider_cache.get("timestamp"),
                 "provider_cache_age": (
-                    (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
                     if _provider_cache.get("timestamp")
                     else None
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -540,7 +540,7 @@ async def test_refresh_providers():
                 "provider_site_url": enhanced_model.get("provider_site_url"),
                 "model_logo_url": enhanced_model.get("model_logo_url"),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -586,7 +586,7 @@ async def test_openrouter_providers():
                 }
                 for p in providers[:5]
             ],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -612,7 +612,7 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         return {
             "status": "success",
             "message": "Rate limit cache cleared successfully. New requests will reload configuration.",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -656,7 +656,7 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
                 "status": "success",
                 "total_users": 0,
                 "users": [],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         users = result.data
@@ -691,7 +691,7 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
                 "subscription_breakdown": subscription_stats,
             },
             "users": users,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -701,32 +701,40 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
 
 @router.get("/admin/credit-transactions", tags=["admin"])
 async def get_all_credit_transactions_admin(
-        limit: int = Query(50, ge=1, le=1000, description="Maximum number of transactions to return"),
-        offset: int = Query(0, ge=0, description="Number of transactions to skip"),
-        user_id: int = Query(None, description="Filter by specific user ID"),
-        transaction_type: str = Query(None, description="Filter by transaction type (trial, purchase, api_usage, admin_credit, admin_debit, refund, bonus, transfer)"),
-        from_date: str = Query(None, description="Start date filter (YYYY-MM-DD or ISO format)"),
-        to_date: str = Query(None, description="End date filter (YYYY-MM-DD or ISO format)"),
-        min_amount: float = Query(None, description="Minimum transaction amount (absolute value)"),
-        max_amount: float = Query(None, description="Maximum transaction amount (absolute value)"),
-        direction: str = Query(None, description="Filter by direction: 'credit' (positive amounts) or 'charge' (negative amounts)"),
-        payment_id: int = Query(None, description="Filter by payment ID"),
-        sort_by: str = Query("created_at", description="Sort field: 'created_at', 'amount', or 'transaction_type'"),
-        sort_order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
-        include_summary: bool = Query(False, description="Include summary analytics in response"),
-        admin_user: dict = Depends(require_admin)
+    limit: int = Query(50, ge=1, le=1000, description="Maximum number of transactions to return"),
+    offset: int = Query(0, ge=0, description="Number of transactions to skip"),
+    user_id: int = Query(None, description="Filter by specific user ID"),
+    transaction_type: str = Query(
+        None,
+        description="Filter by transaction type (trial, purchase, api_usage, admin_credit, admin_debit, refund, bonus, transfer)",
+    ),
+    from_date: str = Query(None, description="Start date filter (YYYY-MM-DD or ISO format)"),
+    to_date: str = Query(None, description="End date filter (YYYY-MM-DD or ISO format)"),
+    min_amount: float = Query(None, description="Minimum transaction amount (absolute value)"),
+    max_amount: float = Query(None, description="Maximum transaction amount (absolute value)"),
+    direction: str = Query(
+        None,
+        description="Filter by direction: 'credit' (positive amounts) or 'charge' (negative amounts)",
+    ),
+    payment_id: int = Query(None, description="Filter by payment ID"),
+    sort_by: str = Query(
+        "created_at", description="Sort field: 'created_at', 'amount', or 'transaction_type'"
+    ),
+    sort_order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
+    include_summary: bool = Query(False, description="Include summary analytics in response"),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get all credit transactions across all users (Admin only)
-    
+
     This endpoint allows admins to view all credit transactions in the system with the same
     advanced filtering capabilities as the user endpoint.
-    
+
     **Differences from user endpoint:**
     - Views ALL users' transactions (unless filtered by user_id)
     - Requires admin authentication
     - Optional user_id filter to view specific user's transactions
-    
+
     **Filters:**
     - `user_id`: Filter by specific user (optional, if not provided shows all users)
     - `transaction_type`: Filter by type (trial, purchase, api_usage, etc.)
@@ -736,7 +744,7 @@ async def get_all_credit_transactions_admin(
     - `payment_id`: Filter by specific payment
     - `sort_by`: Sort by date, amount, or type
     - `sort_order`: 'asc' or 'desc'
-    
+
     **Response includes:**
     - Filtered transactions list (with user_id included)
     - Summary analytics (if include_summary=true)
@@ -744,24 +752,18 @@ async def get_all_credit_transactions_admin(
     try:
         # Validate direction filter
         if direction and direction.lower() not in ("credit", "charge"):
-            raise HTTPException(
-                status_code=400,
-                detail="direction must be 'credit' or 'charge'"
-            )
+            raise HTTPException(status_code=400, detail="direction must be 'credit' or 'charge'")
 
         # Validate sort_by
         if sort_by not in ("created_at", "amount", "transaction_type"):
             raise HTTPException(
                 status_code=400,
-                detail="sort_by must be 'created_at', 'amount', or 'transaction_type'"
+                detail="sort_by must be 'created_at', 'amount', or 'transaction_type'",
             )
 
         # Validate sort_order
         if sort_order.lower() not in ("asc", "desc"):
-            raise HTTPException(
-                status_code=400,
-                detail="sort_order must be 'asc' or 'desc'"
-            )
+            raise HTTPException(status_code=400, detail="sort_order must be 'asc' or 'desc'")
 
         # Get all transactions with filters
         transactions = get_all_transactions(
@@ -782,17 +784,17 @@ async def get_all_credit_transactions_admin(
         # Format transactions (include user_id for admin view)
         formatted_transactions = [
             {
-                "id": txn['id'],
-                "user_id": txn['user_id'],
-                "amount": float(txn['amount']),
-                "transaction_type": txn['transaction_type'],
-                "description": txn.get('description', ''),
-                "balance_before": float(txn['balance_before']),
-                "balance_after": float(txn['balance_after']),
-                "created_at": txn['created_at'],
-                "payment_id": txn.get('payment_id'),
-                "metadata": txn.get('metadata', {}),
-                "created_by": txn.get('created_by'),
+                "id": txn["id"],
+                "user_id": txn["user_id"],
+                "amount": float(txn["amount"]),
+                "transaction_type": txn["transaction_type"],
+                "description": txn.get("description", ""),
+                "balance_before": float(txn["balance_before"]),
+                "balance_after": float(txn["balance_after"]),
+                "created_at": txn["created_at"],
+                "payment_id": txn.get("payment_id"),
+                "metadata": txn.get("metadata", {}),
+                "created_by": txn.get("created_by"),
             }
             for txn in transactions
         ]
@@ -829,7 +831,9 @@ async def get_all_credit_transactions_admin(
             )
             response["summary"] = summary
         elif include_summary and user_id is None:
-            logger.warning("Summary requested but user_id not specified - skipping summary for performance")
+            logger.warning(
+                "Summary requested but user_id not specified - skipping summary for performance"
+            )
 
         return response
 
@@ -894,7 +898,7 @@ async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_a
             "api_keys": api_keys,
             "recent_usage": recent_usage,
             "recent_activity": recent_activity,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:

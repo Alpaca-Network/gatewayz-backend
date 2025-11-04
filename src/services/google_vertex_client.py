@@ -18,6 +18,7 @@ from typing import Any
 import google.auth
 import httpx
 from google.auth.transport.requests import Request
+from google.protobuf.json_format import MessageToDict
 from google.oauth2.service_account import Credentials
 
 from src.config import Config
@@ -63,7 +64,7 @@ def get_google_vertex_credentials():
                     logger.warning(
                         f"Failed to decode credentials as base64: {base64_error}. "
                         "Falling back to next credential method.",
-                        exc_info=True
+                        exc_info=True,
                     )
                     # Don't raise - allow fallback to next credential method
                     creds_dict = None
@@ -81,7 +82,7 @@ def get_google_vertex_credentials():
                     logger.warning(
                         f"Failed to create/refresh credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {e}. "
                         "Falling back to next credential method.",
-                        exc_info=True
+                        exc_info=True,
                     )
                     # Don't raise - allow fallback to next credential method
 
@@ -101,7 +102,7 @@ def get_google_vertex_credentials():
                 logger.warning(
                     f"Failed to load/refresh credentials from file: {e}. "
                     "Falling back to next credential method.",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # Don't raise - allow fallback to next credential method
 
