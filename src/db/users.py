@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -225,7 +225,9 @@ def add_credits_to_user(
         # Update user credits
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -368,7 +370,9 @@ def deduct_credits(
         client = get_supabase_client()
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -839,7 +843,9 @@ def mark_welcome_email_sent(user_id: int) -> bool:
 
         result = (
             client.table("users")
-            .update({"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )

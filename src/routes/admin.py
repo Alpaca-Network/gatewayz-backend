@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -259,7 +259,9 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
     try:
         cache_age = None
         if _huggingface_cache["timestamp"]:
-            cache_age = (datetime.now(UTC) - _huggingface_cache["timestamp"]).total_seconds()
+            cache_age = (
+                datetime.now(UTC) - _huggingface_cache["timestamp"]
+            ).total_seconds()
 
         return {
             "huggingface_cache": {

@@ -30,7 +30,7 @@ HISTORICAL NOTE:
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from src.cache import (

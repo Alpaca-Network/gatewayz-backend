@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -208,9 +208,13 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
 
         # Calculate window starts
         minute_start = now.replace(second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
-        hour_start = now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
+        hour_start = (
+            now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
+        )
         day_start = (
-            now.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
+            now.replace(hour=0, minute=0, second=0, microsecond=0)
+            .replace(tzinfo=UTC)
+            .isoformat()
         )
 
         # Check if this is a new API key (gw_ prefix)
@@ -380,7 +384,9 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
 
         result = (
             client.table("api_keys_new")
-            .update({"rate_limit_config": config, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {"rate_limit_config": config, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("api_key", api_key)
             .execute()
         )
@@ -430,7 +436,9 @@ def bulk_update_rate_limit_configs(user_id: int, config: dict[str, Any]) -> int:
 
         result = (
             client.table("api_keys_new")
-            .update({"rate_limit_config": config, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {"rate_limit_config": config, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("user_id", user_id)
             .execute()
         )

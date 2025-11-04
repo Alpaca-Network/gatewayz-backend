@@ -1,7 +1,7 @@
 import logging
 import secrets
 import string
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -397,7 +397,9 @@ def apply_referral_bonus(
             # Update existing pending referral to completed
             referral_result = (
                 client.table("referrals")
-                .update({"status": "completed", "completed_at": datetime.now(UTC).isoformat()})
+                .update(
+                    {"status": "completed", "completed_at": datetime.now(UTC).isoformat()}
+                )
                 .eq("id", existing_referral.data[0]["id"])
                 .execute()
             )

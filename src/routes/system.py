@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from contextlib import redirect_stdout
-from datetime import UTC, date, datetime
+from datetime import date, datetime, UTC
 from html import escape
 from typing import Any
 
@@ -997,7 +997,11 @@ async def get_cache_status():
                 "has_data": False,
             }
 
-        return {"success": True, "data": cache_status, "timestamp": datetime.now(UTC).isoformat()}
+        return {
+            "success": True,
+            "data": cache_status,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
     except Exception as e:
         logger.error(f"Failed to get cache status: {e}")
@@ -1492,7 +1496,11 @@ async def get_modelz_cache_status():
     """
     try:
         cache_status = get_modelz_cache_status_func()
-        return {"success": True, "data": cache_status, "timestamp": datetime.now(UTC).isoformat()}
+        return {
+            "success": True,
+            "data": cache_status,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to get Modelz cache status: {e}")
         raise HTTPException(
@@ -1529,7 +1537,11 @@ async def refresh_modelz_cache_endpoint():
         logger.info("Refreshing Modelz cache via API endpoint")
         refresh_result = await refresh_modelz_cache()
 
-        return {"success": True, "data": refresh_result, "timestamp": datetime.now(UTC).isoformat()}
+        return {
+            "success": True,
+            "data": refresh_result,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to refresh Modelz cache: {e}")
         raise HTTPException(
