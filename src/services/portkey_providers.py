@@ -633,7 +633,7 @@ def fetch_models_from_novita():
     )
 
 
-def fetch_models_from_hug():
+def fetch_models_from_hug_via_portkey():
     """Fetch models from Hugging Face by filtering Portkey unified catalog"""
     try:
         # Hugging Face models include "llava-hf" and similar patterns
