@@ -1,0 +1,54 @@
+name: Claude on CI failure
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline", "Run Tests"]  # Trigger on both CI workflows
+    types: [completed]
+
+jobs:
+  run_claude_on_failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo at failed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Find associated PR number
+        id: find_pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.payload.workflow_run.head_sha;
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner, repo, commit_sha: sha
+            });
+            if (prs.data.length === 0) {
+              core.warning("No PR found for this commit. Skipping Claude run.");
+              return;
+            }
+            core.setOutput("pr", prs.data[0].number.toString());
+
+      - name: Run Claude Code (failure diagnostics)
+        if: ${{ steps.find_pr.outputs.pr }}
+        uses: anthropics/claude-code-action@v0
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pr_number: ${{ steps.find_pr.outputs.pr }}
+          mode: "review"
+          system_prompt: |
+            You are a CI triage assistant for the Gatewayz backend API. Summarize why the workflow failed,
+            identify the likely source of the error, and suggest minimal code changes to fix it.
+            Focus on immediate blockers.
+
+            Common failure patterns to check:
+            - Test failures (pytest assertion errors, timeout issues)
+            - Linting errors (ruff, black, isort, mypy)
+            - Security scan failures (bandit, safety)
+            - Import/dependency errors
+            - Coverage drops below 25% threshold
+            - Integration test failures (endpoint tests, auth, payments)
+            - Build/startup errors
