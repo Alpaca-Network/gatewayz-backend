@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from contextlib import redirect_stdout
-from datetime import date, datetime, UTC
+from datetime import UTC, date, datetime
 from html import escape
 from typing import Any
 
