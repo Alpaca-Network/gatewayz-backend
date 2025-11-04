@@ -225,7 +225,7 @@ def get_all_models_parallel():
             "openrouter", "portkey", "featherless", "deepinfra",
             "google", "cerebras", "nebius", "xai", "novita",
             "hug", "chutes", "groq", "fireworks", "together",
-            "aimo", "near", "fal"
+            "aimo", "near", "fal", "vercel-ai-gateway"
         ]
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
@@ -269,7 +269,8 @@ def get_all_models_sequential():
     aimo_models = get_cached_models("aimo") or []
     near_models = get_cached_models("near") or []
     fal_models = get_cached_models("fal") or []
-    return openrouter_models + portkey_models + featherless_models + deepinfra_models + google_models + cerebras_models + nebius_models + xai_models + novita_models + hug_models + chutes_models + groq_models + fireworks_models + together_models + aimo_models + near_models + fal_models
+    vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
+    return openrouter_models + portkey_models + featherless_models + deepinfra_models + google_models + cerebras_models + nebius_models + xai_models + novita_models + hug_models + chutes_models + groq_models + fireworks_models + together_models + aimo_models + near_models + fal_models + vercel_ai_gateway_models
 
 
 def get_cached_models(gateway: str = "openrouter"):
