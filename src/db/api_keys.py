@@ -55,10 +55,11 @@ def create_api_key(user_id: int, key_name: str, environment_tag: str = 'live',
 
         # Enforce plan limits on key creation
         entitlements = check_plan_entitlements(user_id)
-        if max_requests and max_requests > entitlements['monthly_request_limit']:
+        monthly_limit = entitlements.get("monthly_request_limit")
+        if max_requests and monthly_limit is not None and max_requests > monthly_limit:
             logger.warning(
-                f"User {user_id} attempted to create key with max_requests {max_requests} exceeding plan limit {entitlements['monthly_request_limit']}")
-            max_requests = entitlements['monthly_request_limit']
+                f"User {user_id} attempted to create key with max_requests {max_requests} exceeding plan limit {monthly_limit}")
+            max_requests = monthly_limit
 
         # Generate new API key with environment tag
         if environment_tag == 'test':
