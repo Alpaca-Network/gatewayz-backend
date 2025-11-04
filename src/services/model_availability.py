@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -281,9 +281,7 @@ class ModelAvailabilityService:
             return False
 
         # Check maintenance
-        if availability.maintenance_until and availability.maintenance_until > datetime.now(
-            UTC
-        ):
+        if availability.maintenance_until and availability.maintenance_until > datetime.now(UTC):
             return False
 
         return availability.status == AvailabilityStatus.AVAILABLE
