@@ -353,6 +353,7 @@ async def get_models(
         aimo_models: List[dict] = []
         near_models: List[dict] = []
         fal_models: List[dict] = []
+        vercel_ai_gateway_models: List[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -456,6 +457,12 @@ async def get_models(
                 logger.error("No Fal models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
+        if gateway_value in ("vercel-ai-gateway", "all"):
+            vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
+            if gateway_value == "vercel-ai-gateway" and not vercel_ai_gateway_models:
+                logger.error("No Vercel AI Gateway models data available from cache")
+                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "portkey":
@@ -490,11 +497,13 @@ async def get_models(
             models = near_models
         elif gateway_value == "fal":
             models = fal_models
+        elif gateway_value == "vercel-ai-gateway":
+            models = vercel_ai_gateway_models
         else:
             # For "all" gateway, merge all models but avoid duplicates from Portkey-based providers
             # Note: google, cerebras, nebius, xai, novita, hug are filtered FROM Portkey models,
             # so we DON'T include them separately in the merge to avoid counting them twice
-            models = merge_models_by_slug(openrouter_models, portkey_models, featherless_models, deepinfra_models, chutes_models, groq_models, fireworks_models, together_models, aimo_models, near_models, fal_models)
+            models = merge_models_by_slug(openrouter_models, portkey_models, featherless_models, deepinfra_models, chutes_models, groq_models, fireworks_models, together_models, aimo_models, near_models, fal_models, vercel_ai_gateway_models)
 
         if not models:
             logger.error("No models data available after applying gateway selection")
@@ -593,6 +602,12 @@ async def get_models(
             aimo_providers = derive_providers_from_models(models_for_providers, "aimo")
             annotated_aimo = annotate_provider_sources(aimo_providers, "aimo")
             provider_groups.append(annotated_aimo)
+
+        if gateway_value in ("vercel-ai-gateway", "all"):
+            models_for_providers = vercel_ai_gateway_models if gateway_value == "all" else models
+            vercel_ai_gateway_providers = derive_providers_from_models(models_for_providers, "vercel-ai-gateway")
+            annotated_vercel_ai_gateway = annotate_provider_sources(vercel_ai_gateway_providers, "vercel-ai-gateway")
+            provider_groups.append(annotated_vercel_ai_gateway)
 
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")

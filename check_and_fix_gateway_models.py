@@ -200,6 +200,15 @@ GATEWAY_CONFIG = {
         'min_expected_models': 50,
         'header_type': 'bearer'
     },
+    'vercel-ai-gateway': {
+        'name': 'Vercel AI Gateway',
+        'url': 'https://ai-gateway.vercel.sh/v1/models',
+        'api_key_env': 'VERCEL_AI_GATEWAY_API_KEY',
+        'api_key': Config.VERCEL_AI_GATEWAY_API_KEY,
+        'cache': _vercel_ai_gateway_models_cache,
+        'min_expected_models': 10,
+        'header_type': 'bearer'
+    },
 }
 
 
