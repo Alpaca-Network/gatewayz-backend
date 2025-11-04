@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -89,7 +89,7 @@ class SlidingWindowRateLimiter:
                     allowed=False,
                     remaining_requests=0,
                     remaining_tokens=0,
-                    reset_time=datetime.now(UTC) + timedelta(seconds=60),
+                    reset_time=datetime.now(timezone.utc) + timedelta(seconds=60),
                     retry_after=60,
                     reason="Concurrency limit exceeded",
                     concurrency_remaining=0,
@@ -102,7 +102,7 @@ class SlidingWindowRateLimiter:
                     allowed=False,
                     remaining_requests=0,
                     remaining_tokens=0,
-                    reset_time=datetime.now(UTC) + timedelta(seconds=burst_check["retry_after"]),
+                    reset_time=datetime.now(timezone.utc) + timedelta(seconds=burst_check["retry_after"]),
                     retry_after=burst_check["retry_after"],
                     reason="Burst limit exceeded",
                     burst_remaining=burst_check["remaining"],
@@ -152,7 +152,7 @@ class SlidingWindowRateLimiter:
                 allowed=True,
                 remaining_requests=config.requests_per_minute,
                 remaining_tokens=config.tokens_per_minute,
-                reset_time=datetime.now(UTC) + timedelta(minutes=1),
+                reset_time=datetime.now(timezone.utc) + timedelta(minutes=1),
                 reason="Rate limit check failed, allowing request",
             )
 
@@ -252,7 +252,7 @@ class SlidingWindowRateLimiter:
         self, api_key: str, config: RateLimitConfig, tokens_used: int
     ) -> dict[str, Any]:
         """Check sliding window rate limits"""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         window_start = now - timedelta(seconds=config.window_size_seconds)
 
         if self.redis_client:
@@ -556,7 +556,7 @@ class RateLimitManager:
         return {
             "requests_remaining": config.requests_per_minute,
             "tokens_remaining": config.tokens_per_minute,
-            "reset_time": int((datetime.now(UTC) + timedelta(minutes=1)).timestamp()),
+            "reset_time": int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp()),
         }
 
 

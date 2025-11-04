@@ -6,7 +6,7 @@ and health status across all providers and gateways.
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -215,7 +215,7 @@ async def perform_health_check(
 
         return {
             "message": "Health check initiated",
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "force_refresh": request.force_refresh,
         }
     except Exception as e:
@@ -244,7 +244,7 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
 
         return {
             "message": "Health check completed",
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "models_checked": models_count,
             "providers_checked": providers_count,
             "system_status": system_health.overall_status.value if system_health else "unknown",
@@ -307,7 +307,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=successful_requests,
             failed_requests=failed_requests,
             error_rate=error_rate,
-            last_updated=system_health.last_updated or datetime.now(UTC),
+            last_updated=system_health.last_updated or datetime.now(timezone.utc),
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
@@ -355,7 +355,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 degraded_models=0,
                 unhealthy_models=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(UTC),
+                last_updated=datetime.now(timezone.utc),
             )
         else:
             # Convert SystemHealthMetrics to SystemHealthResponse
@@ -370,7 +370,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 degraded_models=system_health_metrics.degraded_models,
                 unhealthy_models=system_health_metrics.unhealthy_models,
                 system_uptime=system_health_metrics.system_uptime,
-                last_updated=system_health_metrics.last_updated or datetime.now(UTC),
+                last_updated=system_health_metrics.last_updated or datetime.now(timezone.utc),
             )
 
         # Get providers health
@@ -471,7 +471,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(UTC),
+                last_updated=datetime.now(timezone.utc),
             )
         except Exception as e:
             logger.warning(f"Failed to get uptime metrics, using defaults: {e}")
@@ -485,7 +485,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(UTC),
+                last_updated=datetime.now(timezone.utc),
             )
 
         logger.info("Creating HealthDashboardResponse")
@@ -499,7 +499,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
             providers=providers_status,
             models=models_status,
             uptime_metrics=uptime_metrics,
-            last_updated=system_health.last_updated or datetime.now(UTC),
+            last_updated=system_health.last_updated or datetime.now(timezone.utc),
             monitoring_active=health_monitor.monitoring_active,
         )
 
@@ -529,7 +529,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                 "status": "unknown",
                 "message": "Health data not available - monitoring may not be started",
                 "monitoring_active": health_monitor.monitoring_active,
-                "timestamp": datetime.now(UTC).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         return {
@@ -541,7 +541,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
             "timestamp": (
                 system_health.last_updated.isoformat()
                 if system_health.last_updated
-                else datetime.now(UTC).isoformat()
+                else datetime.now(timezone.utc).isoformat()
             ),
         }
     except Exception as e:
@@ -549,7 +549,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
         return {
             "status": "error",
             "message": "Failed to retrieve health status",
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 
@@ -568,13 +568,13 @@ async def get_monitoring_status(api_key: str = Depends(get_api_key)):
             "availability_data_available": len(availability_service.availability_cache) > 0,
             "health_models_count": len(health_monitor.health_data),
             "availability_models_count": len(availability_service.availability_cache),
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get monitoring status: {e}")
         return {
             "error": "Failed to retrieve monitoring status",
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 
@@ -587,7 +587,7 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.start_monitoring()
-        return {"message": "Health monitoring started", "timestamp": datetime.now(UTC).isoformat()}
+        return {"message": "Health monitoring started", "timestamp": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         logger.error(f"Failed to start health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to start health monitoring") from e
@@ -602,7 +602,7 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.stop_monitoring()
-        return {"message": "Health monitoring stopped", "timestamp": datetime.now(UTC).isoformat()}
+        return {"message": "Health monitoring stopped", "timestamp": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         logger.error(f"Failed to stop health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop health monitoring") from e
