@@ -4,7 +4,7 @@ Provides functions to analyze usage across different gateways and providers
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -358,7 +358,7 @@ def get_top_models_by_provider(
 def _get_time_filter(time_range: str) -> str | None:
     """Convert time range string to ISO timestamp"""
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if time_range == "1h":
             delta = timedelta(hours=1)
