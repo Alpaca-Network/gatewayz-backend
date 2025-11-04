@@ -7,11 +7,11 @@ This module provides validation functions to prevent common security issues:
 - Webhook authenticity verification
 """
 
-import hashlib
 import hmac
-import ipaddress
+import hashlib
 import logging
 from urllib.parse import urlparse
+import ipaddress
 
 logger = logging.getLogger(__name__)
 

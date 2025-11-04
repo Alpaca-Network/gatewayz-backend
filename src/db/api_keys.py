@@ -1,11 +1,11 @@
 import logging
-import secrets
-from datetime import UTC, datetime, timedelta
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
-from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
-from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
+from src.config.supabase_config import get_supabase_client
+import secrets
+from src.utils.crypto import encrypt_api_key, sha256_key_hash, last4
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ def create_api_key(
         # Calculate expiration date if specified
         expiration_date = None
         if expiration_days:
-            expiration_date = (datetime.now(UTC) + timedelta(days=expiration_days)).isoformat()
+            expiration_date = (datetime.now(timezone.utc) + timedelta(days=expiration_days)).isoformat()
 
         # Set default permissions if none provided
         if scope_permissions is None:
@@ -105,7 +105,7 @@ def create_api_key(
         # Set up trial for new users (if this is their first key)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(UTC)
+            trial_start = datetime.now(timezone.utc)
             trial_end = trial_start + timedelta(days=3)
             trial_data = {
                 "is_trial": True,
@@ -153,7 +153,7 @@ def create_api_key(
             "scope_permissions": scope_permissions,
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
-            "last_used_at": datetime.now(UTC).isoformat(),
+            "last_used_at": datetime.now(timezone.utc).isoformat(),
             # New optional encrypted fields (columns added via migration)
             "encrypted_key": encrypted_token,
             "key_version": key_version,
@@ -206,7 +206,7 @@ def create_api_key(
                         "max_requests": max_requests,
                         "is_primary": is_primary,
                     },
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:
@@ -259,7 +259,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
                             days_remaining = max(0, (expiration - now).days)
                     except Exception as date_error:
                         logger.warning(
@@ -354,11 +354,11 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                             "action": "delete",
                             "api_key_id": result.data[0]["id"],
                             "details": {
-                                "deleted_at": datetime.now(UTC).isoformat(),
+                                "deleted_at": datetime.now(timezone.utc).isoformat(),
                                 "key_name": result.data[0].get("key_name", "Unknown"),
                                 "environment_tag": result.data[0].get("environment_tag", "unknown"),
                             },
-                            "timestamp": datetime.now(UTC).isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
                     ).execute()
                 except Exception as e:
@@ -420,7 +420,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
 
                             if expiration < now:
                                 logger.warning(
@@ -543,8 +543,8 @@ def increment_api_key_usage(api_key: str) -> None:
                 client.table("api_keys_new").update(
                     {
                         "requests_used": current_usage + 1,
-                        "last_used_at": datetime.now(UTC).isoformat(),
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "last_used_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("api_key", api_key).execute()
                 return
@@ -565,7 +565,7 @@ def increment_api_key_usage(api_key: str) -> None:
                 client.table("api_keys").update(
                     {
                         "requests_count": current_usage + 1,
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("api_key", api_key).execute()
             else:
@@ -759,7 +759,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         if "expiration_days" in update_data:
             if update_data["expiration_days"] is not None:
                 update_data["expiration_date"] = (
-                    datetime.now(UTC) + timedelta(days=update_data["expiration_days"])
+                    datetime.now(timezone.utc) + timedelta(days=update_data["expiration_days"])
                 ).isoformat()
             else:
                 update_data["expiration_date"] = None
@@ -767,7 +767,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             del update_data["expiration_days"]
 
         # Add timestamp
-        update_data["updated_at"] = datetime.now(UTC).isoformat()
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         # Update the API key
         result = client.table("api_keys_new").update(update_data).eq("id", key_id).execute()
@@ -781,7 +781,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                 client.table("rate_limit_configs").update(
                     {
                         "max_requests": updates["max_requests"],
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("api_key_id", key_id).execute()
             except Exception as e:
@@ -800,9 +800,9 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                         "updated_fields": list(updates.keys()),
                         "old_values": {k: key_data.get(k) for k in updates.keys() if k in key_data},
                         "new_values": updates,
-                        "update_timestamp": datetime.now(UTC).isoformat(),
+                        "update_timestamp": datetime.now(timezone.utc).isoformat(),
                     },
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             ).execute()
         except Exception as e:
@@ -976,7 +976,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
                         expiration_str = expiration_str + "+00:00"
 
                     expiration = datetime.fromisoformat(expiration_str)
-                    now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                    now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
                     days_remaining = max(0, (expiration - now).days)
             except Exception as date_error:
                 logger.warning(
