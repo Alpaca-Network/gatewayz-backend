@@ -469,6 +469,11 @@ def fetch_models_from_xai():
 
             client = Client(api_key=Config.XAI_API_KEY)
 
+            # Check if the SDK has models.list() method, otherwise fallback immediately
+            # The xAI SDK Client doesn't have these methods, so we'll fallback to OpenAI SDK
+            if not (hasattr(client, "models") and hasattr(client.models, "list")) and not hasattr(client, "list_models"):
+                raise AttributeError("xAI SDK Client doesn't support model listing")
+            
             # The SDK's list_models() or models.list() returns a list of model objects
             try:
                 models_response = client.models.list()
@@ -509,7 +514,7 @@ def fetch_models_from_xai():
                 logger.warning("xAI SDK returned empty model list, using fallback")
                 raise ValueError("Empty model list from SDK")
 
-        except (ImportError, ValueError):
+        except (ImportError, ValueError, AttributeError):
             # Fallback to OpenAI SDK with xAI base URL
             try:
                 logger.info(
