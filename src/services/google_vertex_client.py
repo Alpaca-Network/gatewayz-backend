@@ -26,6 +26,12 @@ from src.config import Config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Vertex AI OAuth scopes required for authentication
+VERTEX_AI_SCOPES = [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/aiplatform",
+]
+
 
 def get_google_vertex_credentials():
     """Get Google Cloud credentials for Vertex AI
@@ -70,13 +76,8 @@ def get_google_vertex_credentials():
 
             if creds_dict:
                 try:
-                    # Set explicit scopes for Vertex AI
-                    scopes = [
-                        "https://www.googleapis.com/auth/cloud-platform",
-                        "https://www.googleapis.com/auth/aiplatform",
-                    ]
                     credentials = Credentials.from_service_account_info(
-                        creds_dict, scopes=scopes
+                        creds_dict, scopes=VERTEX_AI_SCOPES
                     )
                     logger.debug("Created Credentials object from service account info with Vertex AI scopes")
                     credentials.refresh(Request())
@@ -98,13 +99,8 @@ def get_google_vertex_credentials():
                 f"Loading Google Vertex credentials from file: {Config.GOOGLE_APPLICATION_CREDENTIALS}"
             )
             try:
-                # Set explicit scopes for Vertex AI
-                scopes = [
-                    "https://www.googleapis.com/auth/cloud-platform",
-                    "https://www.googleapis.com/auth/aiplatform",
-                ]
                 credentials = Credentials.from_service_account_file(
-                    Config.GOOGLE_APPLICATION_CREDENTIALS, scopes=scopes
+                    Config.GOOGLE_APPLICATION_CREDENTIALS, scopes=VERTEX_AI_SCOPES
                 )
                 credentials.refresh(Request())
                 logger.info("Successfully loaded Google Vertex credentials from file")
@@ -119,11 +115,7 @@ def get_google_vertex_credentials():
 
         # Third, try Application Default Credentials (ADC)
         logger.info("Attempting to use Application Default Credentials (ADC)")
-        scopes = [
-            "https://www.googleapis.com/auth/cloud-platform",
-            "https://www.googleapis.com/auth/aiplatform",
-        ]
-        credentials, _ = google.auth.default(scopes=scopes)
+        credentials, _ = google.auth.default(scopes=VERTEX_AI_SCOPES)
         if not credentials.valid:
             credentials.refresh(Request())
         logger.info("Successfully loaded Application Default Credentials")
