@@ -1,52 +1,52 @@
-import logging
-import json
-from pathlib import Path
 import csv
-from typing import Any
+import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
-
-from src.config import Config
-from src.cache import (
-    _huggingface_cache,
-    _models_cache,
-    _portkey_models_cache,
-    _featherless_models_cache,
-    _chutes_models_cache,
-    _groq_models_cache,
-    _fireworks_models_cache,
-    _together_models_cache,
-    _deepinfra_models_cache,
-    _google_models_cache,
-    _google_vertex_models_cache,
-    _cerebras_models_cache,
-    _nebius_models_cache,
-    _xai_models_cache,
-    _novita_models_cache,
-    _huggingface_models_cache,
-    _aimo_models_cache,
-    _near_models_cache,
-    _fal_models_cache,
-    _vercel_ai_gateway_models_cache,
-    is_cache_fresh,
-    should_revalidate_in_background,
-    _FAL_CACHE_INIT_DEFERRED,
-)
-from fastapi import APIRouter
-from datetime import datetime, timezone
-from src.services.pricing_lookup import enrich_model_with_pricing
-from src.services.portkey_providers import (
-    fetch_models_from_google,
-    fetch_models_from_google_vertex,
-    fetch_models_from_cerebras,
-    fetch_models_from_nebius,
-    fetch_models_from_xai,
-    fetch_models_from_novita,
-)
-from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
-from src.services.model_transformations import detect_provider_from_model_id
-from src.utils.security_validators import sanitize_for_logging
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 import httpx
+from fastapi import APIRouter
+
+from src.cache import (
+    _FAL_CACHE_INIT_DEFERRED,
+    _aimo_models_cache,
+    _cerebras_models_cache,
+    _chutes_models_cache,
+    _deepinfra_models_cache,
+    _fal_models_cache,
+    _featherless_models_cache,
+    _fireworks_models_cache,
+    _google_models_cache,
+    _google_vertex_models_cache,
+    _groq_models_cache,
+    _huggingface_cache,
+    _huggingface_models_cache,
+    _models_cache,
+    _near_models_cache,
+    _nebius_models_cache,
+    _novita_models_cache,
+    _portkey_models_cache,
+    _together_models_cache,
+    _vercel_ai_gateway_models_cache,
+    _xai_models_cache,
+    is_cache_fresh,
+    should_revalidate_in_background,
+)
+from src.config import Config
+from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
+from src.services.model_transformations import detect_provider_from_model_id
+from src.services.portkey_providers import (
+    fetch_models_from_cerebras,
+    fetch_models_from_google,
+    fetch_models_from_google_vertex,
+    fetch_models_from_nebius,
+    fetch_models_from_novita,
+    fetch_models_from_xai,
+)
+from src.services.pricing_lookup import enrich_model_with_pricing
+from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +331,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "portkey":
             cache = _portkey_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_portkey()
@@ -339,7 +339,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "featherless":
             cache = _featherless_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_featherless()
@@ -347,7 +347,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "chutes":
             cache = _chutes_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_chutes()
@@ -355,7 +355,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "groq":
             cache = _groq_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_groq()
@@ -363,7 +363,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "fireworks":
             cache = _fireworks_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_fireworks()
@@ -371,7 +371,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "together":
             cache = _together_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_together()
@@ -379,7 +379,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "deepinfra":
             cache = _deepinfra_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_deepinfra()
@@ -387,7 +387,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "google":
             cache = _google_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_google()
@@ -395,7 +395,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "google-vertex":
             cache = _google_vertex_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_google_vertex()
@@ -403,7 +403,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "cerebras":
             cache = _cerebras_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_cerebras()
@@ -411,7 +411,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "nebius":
             cache = _nebius_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_nebius()
@@ -419,7 +419,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "xai":
             cache = _xai_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_xai()
@@ -427,7 +427,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "novita":
             cache = _novita_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_novita()
@@ -437,7 +437,7 @@ def get_cached_models(gateway: str = "openrouter"):
 
             cache = _huggingface_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     # Validate cache has reasonable number of models (should be 500+, not just 9)
                     cache_size = len(cache["data"])
@@ -474,14 +474,14 @@ def get_cached_models(gateway: str = "openrouter"):
             if result and not cache["data"]:
                 logger.info("Manually updating HuggingFace cache after fetch")
                 _huggingface_models_cache["data"] = result
-                _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
+                _huggingface_models_cache["timestamp"] = datetime.now(UTC)
 
             return result
 
         if gateway == "aimo":
             cache = _aimo_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_aimo()
@@ -489,7 +489,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "near":
             cache = _near_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_near()
@@ -497,7 +497,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "fal":
             cache = _fal_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_fal()
@@ -505,7 +505,7 @@ def get_cached_models(gateway: str = "openrouter"):
         if gateway == "vercel-ai-gateway":
             cache = _vercel_ai_gateway_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
             return fetch_models_from_vercel_ai_gateway()
@@ -558,7 +558,7 @@ def fetch_models_from_openrouter():
             if "pricing" in model:
                 model["pricing"] = sanitize_pricing(model["pricing"])
         _models_cache["data"] = models
-        _models_cache["timestamp"] = datetime.now(timezone.utc)
+        _models_cache["timestamp"] = datetime.now(UTC)
 
         return _models_cache["data"]
     except Exception as e:
@@ -598,7 +598,7 @@ def fetch_models_from_portkey():
         ]
 
         _portkey_models_cache["data"] = normalized_models
-        _portkey_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _portkey_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Cached {len(normalized_models)} Portkey models with pricing cross-reference")
         return _portkey_models_cache["data"]
@@ -658,7 +658,7 @@ def fetch_models_from_deepinfra():
         normalized_models = [normalize_deepinfra_model(model) for model in raw_models if model]
 
         _deepinfra_models_cache["data"] = normalized_models
-        _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _deepinfra_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
         return _deepinfra_models_cache["data"]
@@ -813,7 +813,7 @@ def fetch_models_from_featherless():
                 )
 
         _featherless_models_cache["data"] = normalized_models
-        _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _featherless_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
         return _featherless_models_cache["data"]
@@ -904,7 +904,7 @@ def fetch_models_from_chutes():
             normalized_models = [normalize_chutes_model(model) for model in raw_models if model]
 
             _chutes_models_cache["data"] = normalized_models
-            _chutes_models_cache["timestamp"] = datetime.now(timezone.utc)
+            _chutes_models_cache["timestamp"] = datetime.now(UTC)
 
             logger.info(f"Loaded {len(normalized_models)} models from Chutes static catalog")
             return _chutes_models_cache["data"]
@@ -963,7 +963,7 @@ def fetch_models_from_groq():
         normalized_models = [normalize_groq_model(model) for model in raw_models if model]
 
         _groq_models_cache["data"] = normalized_models
-        _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _groq_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Groq models")
         return _groq_models_cache["data"]
@@ -1152,7 +1152,7 @@ def fetch_models_from_fireworks():
         normalized_models = [normalize_fireworks_model(model) for model in raw_models if model]
 
         _fireworks_models_cache["data"] = normalized_models
-        _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fireworks_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
         return _fireworks_models_cache["data"]
@@ -1293,7 +1293,7 @@ def fetch_models_from_together():
         normalized_models = [normalize_together_model(model) for model in raw_models if model]
 
         _together_models_cache["data"] = normalized_models
-        _together_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _together_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Together models")
         return _together_models_cache["data"]
@@ -1419,7 +1419,7 @@ def fetch_models_from_aimo():
         ]
 
         _aimo_models_cache["data"] = normalized_models
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} AIMO models")
         return _aimo_models_cache["data"]
@@ -1573,7 +1573,7 @@ def fetch_models_from_near():
                 normalized_models = [normalize_near_model(model) for model in raw_models if model]
 
                 _near_models_cache["data"] = normalized_models
-                _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+                _near_models_cache["timestamp"] = datetime.now(UTC)
 
                 logger.info(f"Fetched {len(normalized_models)} Near AI models from API")
                 return _near_models_cache["data"]
@@ -1595,7 +1595,7 @@ def fetch_models_from_near():
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
 
         _near_models_cache["data"] = normalized_models
-        _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _near_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Using {len(normalized_models)} fallback Near AI models")
         return _near_models_cache["data"]
@@ -1718,7 +1718,7 @@ def fetch_models_from_fal():
         normalized_models = [normalize_fal_model(model) for model in raw_models if model]
 
         _fal_models_cache["data"] = normalized_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fal_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Fal.ai models from catalog")
         return _fal_models_cache["data"]
@@ -1832,7 +1832,7 @@ def fetch_models_from_vercel_ai_gateway():
         normalized_models = [normalize_vercel_model(model) for model in response.data if model]
 
         _vercel_ai_gateway_models_cache["data"] = normalized_models
-        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Vercel AI Gateway")
         return _vercel_ai_gateway_models_cache["data"]
@@ -2487,7 +2487,7 @@ def fetch_huggingface_model(hugging_face_id: str):
 
         # Cache the result
         _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+        _huggingface_cache["timestamp"] = datetime.now(UTC)
 
         return model_data
     except httpx.HTTPStatusError as e:
