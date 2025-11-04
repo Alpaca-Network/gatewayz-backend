@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -82,7 +82,9 @@ def _log_auth_activity_background(
             },
         )
     except Exception as e:
-        logger.error(f"Background task: Failed to log auth activity for user {user_id}: {e}", exc_info=True)
+        logger.error(
+            f"Background task: Failed to log auth activity for user {user_id}: {e}", exc_info=True
+        )
 
 
 def _log_registration_activity_background(user_id: str, metadata: dict):
@@ -102,7 +104,10 @@ def _log_registration_activity_background(user_id: str, metadata: dict):
             metadata=metadata,
         )
     except Exception as e:
-        logger.error(f"Background task: Failed to log registration activity for user {user_id}: {e}", exc_info=True)
+        logger.error(
+            f"Background task: Failed to log registration activity for user {user_id}: {e}",
+            exc_info=True,
+        )
 
 
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
@@ -240,7 +245,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=existing_user.get("username") or display_name,
                 email=existing_user.get("email") or email,
                 credits=existing_user.get("credits", 0),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
             )
         else:
             # New user - create account
@@ -272,7 +277,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                     ),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "welcome_email_sent": False,
                 }
 
@@ -401,7 +406,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=display_name or user_data["username"],
                 email=email,
                 credits=user_data["credits"],
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
             )
 
     except Exception as e:
@@ -454,7 +459,7 @@ async def register_user(request: UserRegistrationRequest):
                     if hasattr(request.auth_method, "value")
                     else str(request.auth_method)
                 ),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "welcome_email_sent": False,
             }
 
@@ -560,7 +565,7 @@ async def register_user(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     except HTTPException:
@@ -626,7 +631,7 @@ async def reset_password(token: str):
         token_data = token_result.data[0]
         expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
 
-        if datetime.now(timezone.utc).replace(tzinfo=expires_at.tzinfo) > expires_at:
+        if datetime.now(UTC).replace(tzinfo=expires_at.tzinfo) > expires_at:
             raise HTTPException(status_code=400, detail="Reset token has expired")
 
         # Update password (in a real app, you'd hash this)
