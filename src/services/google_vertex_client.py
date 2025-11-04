@@ -80,10 +80,12 @@ def get_google_vertex_credentials():
                 )
                 return credentials
             except Exception as e:
-                logger.error(
-                    f"Failed to create credentials from service account info: {e}", exc_info=True
+                logger.warning(
+                    f"Failed to create/refresh credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {e}. "
+                    "Falling back to next credential method.",
+                    exc_info=True
                 )
-                raise
+                # Don't raise - allow fallback to next credential method
 
         # Second, try file-based credentials (development)
         if Config.GOOGLE_APPLICATION_CREDENTIALS:
@@ -98,8 +100,12 @@ def get_google_vertex_credentials():
                 logger.info("Successfully loaded Google Vertex credentials from file")
                 return credentials
             except Exception as e:
-                logger.error(f"Failed to load credentials from file: {e}", exc_info=True)
-                raise
+                logger.warning(
+                    f"Failed to load/refresh credentials from file: {e}. "
+                    "Falling back to next credential method.",
+                    exc_info=True
+                )
+                # Don't raise - allow fallback to next credential method
 
         # Third, try Application Default Credentials (ADC)
         logger.info("Attempting to use Application Default Credentials (ADC)")
