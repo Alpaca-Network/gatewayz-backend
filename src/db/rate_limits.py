@@ -385,7 +385,10 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
         result = (
             client.table("api_keys_new")
             .update(
-                {"rate_limit_config": config, "updated_at": datetime.now(timezone.utc).isoformat()}
+                {
+                    "rate_limit_config": config,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             )
             .eq("api_key", api_key)
             .execute()
@@ -437,7 +440,10 @@ def bulk_update_rate_limit_configs(user_id: int, config: dict[str, Any]) -> int:
         result = (
             client.table("api_keys_new")
             .update(
-                {"rate_limit_config": config, "updated_at": datetime.now(timezone.utc).isoformat()}
+                {
+                    "rate_limit_config": config,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             )
             .eq("user_id", user_id)
             .execute()
