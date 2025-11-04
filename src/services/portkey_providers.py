@@ -102,6 +102,53 @@ def _handle_http_error(error: Exception, provider_name: str) -> None:
         logger.error(f"{provider_name} HTTP API error: {error}")
 
 
+def _unwrap_sdk_response(models_response: Any) -> list:
+    """Unwrap SDK response to extract raw models list - handles various response formats
+    
+    Args:
+        models_response: SDK response (object with data attr, list, iterator, etc.)
+        
+    Returns:
+        List of raw model objects
+    """
+    # Check if it has a 'data' attribute first (common API response pattern)
+    if hasattr(models_response, "data"):
+        raw_models = models_response.data
+        logger.debug(f"Extracted from .data attribute, type: {type(raw_models)}")
+    # Check if it's already a list
+    elif isinstance(models_response, list):
+        raw_models = models_response
+        logger.debug("Response is already a list")
+    # Convert to list if it's an iterator/generator (but not dict-like)
+    elif hasattr(models_response, "__iter__") and not hasattr(models_response, "items"):
+        raw_models = list(models_response)
+        logger.debug(f"Converted iterator to list, length: {len(raw_models)}")
+    else:
+        # Last resort: try to extract as single item
+        raw_models = [models_response]
+        logger.debug("Wrapped response in list")
+
+    # Additional unwrapping if the data is nested in a dict
+    if isinstance(raw_models, dict) and "data" in raw_models:
+        raw_models = raw_models["data"]
+        logger.debug("Unwrapped data from dict")
+    elif raw_models and len(raw_models) > 0:
+        # Check if first element is a tuple (e.g., from .items() conversion)
+        if (
+            isinstance(raw_models[0], tuple)
+            and len(raw_models[0]) == 2
+            and raw_models[0][0] == "data"
+        ):
+            # Extract the data list from the tuple ('data', [model_list])
+            raw_models = raw_models[0][1]
+            logger.debug("Unwrapped data from tuple format")
+        elif isinstance(raw_models[0], dict) and "data" in raw_models[0]:
+            raw_models = raw_models[0]["data"]
+            logger.debug("Unwrapped data from first element")
+    
+    return raw_models if isinstance(raw_models, list) else []
+
+
 def _extract_models_from_response(payload: dict | list, key: str = "data") -> list:
     """Extract models list from API response - handles dict or list formats
     
@@ -373,48 +420,10 @@ def fetch_models_from_cerebras():
 
             # The SDK's models.list() returns a list of model objects
             models_response = client.models.list()
-
-            # Handle different response formats from the SDK
             logger.debug(f"Cerebras SDK response type: {type(models_response)}")
-
-            # Check if it has a 'data' attribute first (common API response pattern)
-            if hasattr(models_response, "data"):
-                raw_models = models_response.data
-                logger.debug(f"Extracted from .data attribute, type: {type(raw_models)}")
-            # Check if it's already a list
-            elif isinstance(models_response, list):
-                raw_models = models_response
-                logger.debug("Response is already a list")
-            # Convert to list if it's an iterator/generator (but not dict-like)
-            elif hasattr(models_response, "__iter__") and not hasattr(models_response, "items"):
-                raw_models = list(models_response)
-                logger.debug(f"Converted iterator to list, length: {len(raw_models)}")
-            else:
-                # Last resort: try to extract as single item
-                raw_models = [models_response]
-                logger.debug("Wrapped response in list")
-
-            # Additional unwrapping if the data is nested in a dict
-            if isinstance(raw_models, dict) and "data" in raw_models:
-                raw_models = raw_models["data"]
-                logger.debug("Unwrapped data from dict")
-            elif raw_models and len(raw_models) > 0:
-                # Check if first element is a tuple (e.g., from .items() conversion)
-                if (
-                    isinstance(raw_models[0], tuple)
-                    and len(raw_models[0]) == 2
-                    and raw_models[0][0] == "data"
-                ):
-                    # Extract the data list from the tuple ('data', [model_list])
-                    raw_models = raw_models[0][1]
-                    logger.debug("Unwrapped data from tuple format")
-                elif isinstance(raw_models[0], dict) and "data" in raw_models[0]:
-                    raw_models = raw_models[0]["data"]
-                    logger.debug("Unwrapped data from first element")
-
-            logger.info(
-                f"Processing {len(raw_models) if isinstance(raw_models, list) else 'unknown'} raw models from Cerebras SDK"
-            )
+            
+            raw_models = _unwrap_sdk_response(models_response)
+            logger.info(f"Processing {len(raw_models)} raw models from Cerebras SDK")
 
             # Convert SDK model objects to dicts if needed
             models_list = []
