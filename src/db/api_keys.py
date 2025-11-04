@@ -70,11 +70,12 @@ def create_api_key(
 
         # Enforce plan limits on key creation
         entitlements = check_plan_entitlements(user_id)
-        if max_requests and max_requests > entitlements["monthly_request_limit"]:
+        monthly_limit = entitlements.get("monthly_request_limit")
+        if max_requests and monthly_limit is not None and max_requests > monthly_limit:
             logger.warning(
-                f"User {user_id} attempted to create key with max_requests {max_requests} exceeding plan limit {entitlements['monthly_request_limit']}"
+                f"User {user_id} attempted to create key with max_requests {max_requests} exceeding plan limit {monthly_limit}"
             )
-            max_requests = entitlements["monthly_request_limit"]
+            max_requests = monthly_limit
 
         # Generate new API key with environment tag
         if environment_tag == "test":
@@ -580,9 +581,9 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
 
             key_data = key_result.data[0]
 
-            # Calculate requests remaining and usage percentage
-            requests_remaining = max(0, key_data["max_requests"] - key_data.get("requests_used", 0))
-            usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
+               # Calculate requests remaining and usage percentage only when max_requests is set
+            requests_remaining = None
+            usage_percentage = None
 
             if key_data.get("max_requests"):
                 requests_remaining = max(
@@ -622,9 +623,9 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
 
             key_data = key_result.data[0]
 
-            # Calculate requests remaining and usage percentage
-            requests_remaining = max(0, key_data["max_requests"] - key_data.get("requests_used", 0))
-            usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
+            # Calculate requests remaining and usage percentage only when max_requests is set
+            requests_remaining = None
+            usage_percentage = None
 
             if key_data.get("max_requests"):
                 requests_remaining = max(
