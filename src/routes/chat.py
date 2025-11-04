@@ -1546,13 +1546,15 @@ async def unified_responses(
                             **optional,
                         )
 
-                    async def response_stream_generator():
+                    async def response_stream_generator(
+                        _stream=stream, _request_model=request_model
+                    ):
                         """Transform chat/completions stream to responses format with usage tracking"""
                         async for chunk_data in stream_generator(
-                            stream,
+                            _stream,
                             user,
                             api_key,
-                            request_model,
+                            _request_model,
                             trial,
                             environment_tag,
                             session_id,
