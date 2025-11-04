@@ -30,7 +30,7 @@ HISTORICAL NOTE:
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.cache import (
@@ -233,7 +233,7 @@ def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict)
     normalized_models = _normalize_models_list(models_list, provider)
 
     cache_dict["data"] = normalized_models
-    cache_dict["timestamp"] = datetime.now(UTC)
+    cache_dict["timestamp"] = datetime.now(timezone.utc)
 
     logger.info(f"Cached {len(normalized_models)} {provider} models")
     return cache_dict["data"]

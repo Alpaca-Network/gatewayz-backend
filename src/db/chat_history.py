@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -14,14 +14,14 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
 
         # Generate title if not provided
         if not title:
-            title = f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}"
+            title = f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
         session_data = {
             "user_id": user_id,
             "title": title,
             "model": model or "openai/gpt-3.5-turbo",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "is_active": True,
         }
 
@@ -57,7 +57,7 @@ def save_chat_message(
             "content": content,
             "model": model,
             "tokens": tokens,
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
         result = client.table("chat_messages").insert(message_data).execute()
@@ -68,7 +68,7 @@ def save_chat_message(
         message = result.data[0]
 
         # Update session's updated_at timestamp to reflect latest activity
-        update_time = datetime.now(UTC).isoformat()
+        update_time = datetime.now(timezone.utc).isoformat()
         update_data = {"updated_at": update_time}
 
         # If model is provided, also update session model
@@ -168,7 +168,7 @@ def update_chat_session(
     try:
         client = get_supabase_client()
 
-        update_data = {"updated_at": datetime.now(UTC).isoformat()}
+        update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
 
         if title:
             update_data["title"] = title
@@ -203,7 +203,7 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
         # Soft delete - mark as inactive
         result = (
             client.table("chat_sessions")
-            .update({"is_active": False, "updated_at": datetime.now(UTC).isoformat()})
+            .update({"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()})
             .eq("id", session_id)
             .eq("user_id", user_id)
             .execute()
