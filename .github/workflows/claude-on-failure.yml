@@ -30,7 +30,7 @@ jobs:
             }
             core.setOutput("pr", prs.data[0].number.toString());
 
-      - name: Run Claude Code (fix CI failures and push)
+      - name: Run Claude Code (failure diagnostics)
         if: ${{ steps.find_pr.outputs.pr }}
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
         with:
