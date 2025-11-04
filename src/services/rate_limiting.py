@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 

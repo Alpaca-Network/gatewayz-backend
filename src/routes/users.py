@@ -1,20 +1,19 @@
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
-from fastapi import Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+import src.db.credit_transactions as credit_transactions_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
-import src.db.credit_transactions as credit_transactions_module
+import src.services.trial_validation as trial_module
 from src.schemas import (
-    UserProfileResponse,
-    DeleteAccountResponse,
-    UserProfileUpdate,
     DeleteAccountRequest,
+    DeleteAccountResponse,
+    UserProfileResponse,
+    UserProfileUpdate,
 )
 from src.security.deps import get_api_key
-from fastapi import APIRouter
-import src.services.trial_validation as trial_module
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
