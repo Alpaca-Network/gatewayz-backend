@@ -68,6 +68,74 @@ XAI_FALLBACK_MODELS = [
 ]
 
 
+def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict) -> list:
+    """Normalize models and cache them - shared helper to reduce duplication
+    
+    Args:
+        models_list: Raw models from provider API
+        provider: Provider name (e.g., "nebius", "novita")
+        cache_dict: Cache dictionary to store results
+        
+    Returns:
+        List of normalized and cached models
+    """
+    normalized_models = [
+        normalize_portkey_provider_model(model, provider) for model in models_list if model
+    ]
+    
+    cache_dict["data"] = normalized_models
+    cache_dict["timestamp"] = datetime.now(timezone.utc)
+    
+    logger.info(f"Cached {len(normalized_models)} {provider} models")
+    return cache_dict["data"]
+
+
+def _fetch_openai_compatible_models(
+    provider_name: str,
+    base_url: str,
+    api_key: str,
+    cache_dict: dict
+) -> list | None:
+    """Fetch models from OpenAI-compatible API - shared helper for Nebius and Novita
+    
+    Args:
+        provider_name: Display name (e.g., "Nebius", "Novita")
+        base_url: API base URL
+        api_key: API key for authentication
+        cache_dict: Cache dictionary to store results
+        
+    Returns:
+        List of normalized models or None if failed
+    """
+    try:
+        from openai import OpenAI
+        
+        if not api_key:
+            logger.warning(f"{provider_name} API key not configured")
+            return None
+        
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        models_response = client.models.list()
+        
+        # Convert model objects to dicts
+        models_list = [
+            model.model_dump() if hasattr(model, "model_dump") else model.dict()
+            for model in models_response.data
+        ]
+        
+        if not models_list:
+            logger.warning(f"No models returned from {provider_name} API")
+            return None
+        
+        logger.info(f"Fetched {len(models_list)} models from {provider_name} API")
+        
+        return _cache_normalized_models(models_list, provider_name.lower(), cache_dict)
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch models from {provider_name}: {e}", exc_info=True)
+        return None
+
+
 def _filter_portkey_models_by_patterns(patterns: list, provider_name: str):
     """
     Filter Portkey unified models by name patterns and cache them.
@@ -191,27 +259,7 @@ def fetch_models_from_google():
             logger.warning("No models available from Google")
             return None
 
-        normalized_models = []
-        for model in models_list:
-            if not model:
-                continue
-            try:
-                normalized = normalize_portkey_provider_model(model, "google")
-                if normalized:
-                    normalized_models.append(normalized)
-            except Exception as normalization_error:
-                logger.warning(f"Failed to normalize Google model: {normalization_error}")
-                continue
-
-        if not normalized_models:
-            logger.warning("No models were successfully normalized from Google")
-            return None
-
-        _google_models_cache["data"] = normalized_models
-        _google_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} Google models")
-        return _google_models_cache["data"]
+        return _cache_normalized_models(models_list, "google", _google_models_cache)
 
     except Exception as e:
         logger.error(f"Failed to fetch models from Google: {e}", exc_info=True)
@@ -408,11 +456,7 @@ def fetch_models_from_cerebras():
             logger.warning("No models were successfully normalized from Cerebras")
             return None
 
-        _cerebras_models_cache["data"] = normalized_models
-        _cerebras_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} Cerebras models")
-        return _cerebras_models_cache["data"]
+        return _cache_normalized_models(normalized_models, "cerebras", _cerebras_models_cache)
 
     except Exception as e:
         logger.error(f"Failed to fetch models from Cerebras: {e}", exc_info=True)
@@ -426,48 +470,14 @@ def fetch_models_from_nebius():
     Nebius AI Studio provides an OpenAI-compatible API at https://api.studio.nebius.ai/v1/
     Uses the OpenAI Python SDK with a custom base URL.
     """
-    try:
-        from openai import OpenAI
-
-        from src.config import Config
-
-        if not Config.NEBIUS_API_KEY:
-            logger.warning("Nebius API key not configured")
-            return None
-
-        # Use OpenAI SDK with Nebius base URL
-        client = OpenAI(
-            base_url="https://api.studio.nebius.ai/v1/",
-            api_key=Config.NEBIUS_API_KEY,
-        )
-
-        models_response = client.models.list()
-
-        # Convert model objects to dicts
-        models_list = [
-            model.model_dump() if hasattr(model, "model_dump") else model.dict()
-            for model in models_response.data
-        ]
-
-        if not models_list:
-            logger.warning("No models returned from Nebius API")
-            return None
-
-        logger.info(f"Fetched {len(models_list)} models from Nebius API")
-
-        normalized_models = [
-            normalize_portkey_provider_model(model, "nebius") for model in models_list if model
-        ]
-
-        _nebius_models_cache["data"] = normalized_models
-        _nebius_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} Nebius models")
-        return _nebius_models_cache["data"]
-
-    except Exception as e:
-        logger.error(f"Failed to fetch models from Nebius: {e}", exc_info=True)
-        return None
+    from src.config import Config
+    
+    return _fetch_openai_compatible_models(
+        provider_name="Nebius",
+        base_url="https://api.studio.nebius.ai/v1/",
+        api_key=Config.NEBIUS_API_KEY,
+        cache_dict=_nebius_models_cache
+    )
 
 
 def fetch_models_from_xai():
@@ -564,26 +574,13 @@ def fetch_models_from_xai():
                 logger.warning(f"xAI API failed: {openai_error}. Using fallback xAI model list.")
                 models_list = XAI_FALLBACK_MODELS
 
-        normalized_models = [
-            normalize_portkey_provider_model(model, "xai") for model in models_list if model
-        ]
-
-        _xai_models_cache["data"] = normalized_models
-        _xai_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} xAI models")
-        return _xai_models_cache["data"]
+        return _cache_normalized_models(models_list, "xai", _xai_models_cache)
 
     except Exception as e:
         logger.error(f"Failed to fetch models from xAI: {e}", exc_info=True)
         # Return fallback models even on complete failure
-        normalized_models = [
-            normalize_portkey_provider_model(model, "xai") for model in XAI_FALLBACK_MODELS
-        ]
-        _xai_models_cache["data"] = normalized_models
-        _xai_models_cache["timestamp"] = datetime.now(timezone.utc)
-        logger.info(f"Using {len(normalized_models)} fallback xAI models due to error")
-        return _xai_models_cache["data"]
+        logger.info("Using fallback xAI models due to error")
+        return _cache_normalized_models(XAI_FALLBACK_MODELS, "xai", _xai_models_cache)
 
 
 def fetch_models_from_novita():
@@ -593,48 +590,14 @@ def fetch_models_from_novita():
     Novita AI provides an OpenAI-compatible API at https://api.novita.ai/v3/openai
     Uses the OpenAI Python SDK with a custom base URL.
     """
-    try:
-        from openai import OpenAI
-
-        from src.config import Config
-
-        if not Config.NOVITA_API_KEY:
-            logger.warning("Novita API key not configured")
-            return None
-
-        # Use OpenAI SDK with Novita base URL
-        client = OpenAI(
-            base_url="https://api.novita.ai/v3/openai",
-            api_key=Config.NOVITA_API_KEY,
-        )
-
-        models_response = client.models.list()
-
-        # Convert model objects to dicts
-        models_list = [
-            model.model_dump() if hasattr(model, "model_dump") else model.dict()
-            for model in models_response.data
-        ]
-
-        if not models_list:
-            logger.warning("No models returned from Novita API")
-            return None
-
-        logger.info(f"Fetched {len(models_list)} models from Novita API")
-
-        normalized_models = [
-            normalize_portkey_provider_model(model, "novita") for model in models_list if model
-        ]
-
-        _novita_models_cache["data"] = normalized_models
-        _novita_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} Novita models")
-        return _novita_models_cache["data"]
-
-    except Exception as e:
-        logger.error(f"Failed to fetch models from Novita: {e}", exc_info=True)
-        return None
+    from src.config import Config
+    
+    return _fetch_openai_compatible_models(
+        provider_name="Novita",
+        base_url="https://api.novita.ai/v3/openai",
+        api_key=Config.NOVITA_API_KEY,
+        cache_dict=_novita_models_cache
+    )
 
 
 def fetch_models_from_hug():
@@ -647,15 +610,7 @@ def fetch_models_from_hug():
             logger.warning("No Hugging Face models found in Portkey catalog")
             return None
 
-        normalized_models = [
-            normalize_portkey_provider_model(model, "hug") for model in filtered_models if model
-        ]
-
-        _huggingface_models_cache["data"] = normalized_models
-        _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} Hugging Face models from Portkey catalog")
-        return _huggingface_models_cache["data"]
+        return _cache_normalized_models(filtered_models, "hug", _huggingface_models_cache)
 
     except Exception as e:
         logger.error(f"Failed to fetch models from Hugging Face: {e}", exc_info=True)
