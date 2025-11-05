@@ -1,6 +1,6 @@
 import logging
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException
 
@@ -129,7 +129,7 @@ async def user_monitor(api_key: str = Depends(get_api_key)):
 
         return {
             "status": "success",
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "user_id": usage_data["user_id"],
             "api_key": f"{api_key[:10]}...",
             "current_credits": usage_data["current_credits"],

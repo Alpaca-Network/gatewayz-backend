@@ -6,7 +6,7 @@ Handles all Stripe payment operations
 
 import logging
 import os
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import stripe
@@ -163,7 +163,7 @@ class StripeService:
                     "credits": str(credits),
                     **(request.metadata or {}),
                 },
-                expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
+                expires_at=int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp()),
             )
 
             # Update payment with session ID
@@ -180,7 +180,7 @@ class StripeService:
                 status=PaymentStatus.PENDING,
                 amount=request.amount,
                 currency=request.currency.value,
-                expires_at=datetime.fromtimestamp(session.expires_at, tz=UTC),
+                expires_at=datetime.fromtimestamp(session.expires_at, tz=timezone.utc),
             )
 
         except stripe.StripeError as e:
@@ -334,7 +334,7 @@ class StripeService:
                 event_type=event["type"],
                 event_id=event["id"],
                 message=f"Event {event['type']} processed successfully",
-                processed_at=datetime.now(UTC),
+                processed_at=datetime.now(timezone.utc),
             )
 
         except ValueError as e:
@@ -498,7 +498,7 @@ class StripeService:
                 currency=refund.currency,
                 status=refund.status,
                 reason=refund.reason,
-                created_at=datetime.fromtimestamp(refund.created, tz=UTC),
+                created_at=datetime.fromtimestamp(refund.created, tz=timezone.utc),
             )
 
         except stripe.StripeError as e:
@@ -560,7 +560,7 @@ class StripeService:
                 client.table("users").update(
                     {
                         "stripe_customer_id": stripe_customer_id,
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("id", user_id).execute()
 
@@ -647,7 +647,7 @@ class StripeService:
                 "stripe_subscription_id": subscription.id,
                 "stripe_product_id": product_id,
                 "stripe_customer_id": subscription.customer,
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             # Add subscription end date if available
@@ -693,7 +693,7 @@ class StripeService:
             update_data = {
                 "subscription_status": status,
                 "tier": tier,
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             if subscription.current_period_end:
@@ -743,7 +743,7 @@ class StripeService:
                     "subscription_status": "canceled",
                     "tier": "basic",
                     "stripe_subscription_id": None,
-                    "updated_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
@@ -814,7 +814,7 @@ class StripeService:
             client = get_supabase_client()
 
             client.table("users").update(
-                {"subscription_status": "past_due", "updated_at": datetime.now(UTC).isoformat()}
+                {"subscription_status": "past_due", "updated_at": datetime.now(timezone.utc).isoformat()}
             ).eq("id", user_id).execute()
 
             logger.info(f"User {user_id} subscription marked as past_due due to failed payment")

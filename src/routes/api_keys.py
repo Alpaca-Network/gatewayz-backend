@@ -13,7 +13,7 @@ from src.db.api_keys import (
 
 from src.db.users import get_user
 from fastapi import APIRouter
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException
 
