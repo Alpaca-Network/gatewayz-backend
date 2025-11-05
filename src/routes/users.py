@@ -167,11 +167,11 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
                 },
                 "current_usage": {"allowed": True, "reason": "No rate limits configured"},
                 "reset_times": {
-                    "minute": datetime.now(UTC).replace(second=0, microsecond=0)
+                    "minute": datetime.now(timezone.utc).replace(second=0, microsecond=0)
                     + timedelta(minutes=1),
-                    "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+                    "hour": datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
                     + timedelta(hours=1),
-                    "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+                    "day": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                     + timedelta(days=1),
                 },
             }
@@ -191,10 +191,10 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
             },
             "current_usage": current_usage,
             "reset_times": {
-                "minute": datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1),
-                "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+                "minute": datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1),
+                "hour": datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
                 + timedelta(hours=1),
-                "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+                "day": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                 + timedelta(days=1),
             },
         }
@@ -319,7 +319,7 @@ async def delete_user_account_endpoint(
             "status": "success",
             "message": "User account deleted successfully",
             "user_id": str(user["id"]),
-            "timestamp": datetime.now(UTC),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except HTTPException:
