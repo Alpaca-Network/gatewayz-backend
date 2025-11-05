@@ -322,63 +322,51 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
     try:
         client = get_supabase_client()
 
-        # Check if this is a new API key (gw_ prefix)
-        is_new_key = api_key.startswith("gw_")
+        # Delete from the api_keys_new table
+        result = (
+            client.table("api_keys_new")
+            .delete()
+            .eq("api_key", api_key)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
-        if is_new_key:
-            # Delete from the new api_keys_new table
-            result = (
-                client.table("api_keys_new")
-                .delete()
-                .eq("api_key", api_key)
-                .eq("user_id", user_id)
-                .execute()
-            )
+        if result.data:
+            # Also delete associated rate limit configs
+            try:
+                client.table("rate_limit_configs").delete().eq(
+                    "api_key_id", result.data[0]["id"]
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete rate limit configs for key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(str(e)),
+                )
 
-            if result.data:
-                # Also delete associated rate limit configs
-                try:
-                    client.table("rate_limit_configs").delete().eq(
-                        "api_key_id", result.data[0]["id"]
-                    ).execute()
-                except Exception as e:
-                    logger.warning(
-                        "Failed to delete rate limit configs for key %s: %s",
-                        sanitize_for_logging(api_key[:20] + "..."),
-                        sanitize_for_logging(str(e)),
-                    )
+            # Create audit log entry
+            try:
+                client.table("api_key_audit_logs").insert(
+                    {
+                        "user_id": user_id,
+                        "action": "delete",
+                        "api_key_id": result.data[0]["id"],
+                        "details": {
+                            "deleted_at": datetime.now(timezone.utc).isoformat(),
+                            "key_name": result.data[0].get("key_name", "Unknown"),
+                            "environment_tag": result.data[0].get("environment_tag", "unknown"),
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to create audit log for key deletion: %s",
+                    sanitize_for_logging(str(e)),
+                )
 
-                # Create audit log entry
-                try:
-                    client.table("api_key_audit_logs").insert(
-                        {
-                            "user_id": user_id,
-                            "action": "delete",
-                            "api_key_id": result.data[0]["id"],
-                            "details": {
-                                "deleted_at": datetime.now(timezone.utc).isoformat(),
-                                "key_name": result.data[0].get("key_name", "Unknown"),
-                                "environment_tag": result.data[0].get("environment_tag", "unknown"),
-                            },
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ).execute()
-                except Exception as e:
-                    logger.warning(
-                        "Failed to create audit log for key deletion: %s",
-                        sanitize_for_logging(str(e)),
-                    )
-
-                return True
-            else:
-                return False
+            return True
         else:
-            # Legacy keys (non-gw_ prefix) are stored in users table
-            # Cannot delete from api_keys_new as they don't match the prefix pattern
-            logger.warning(
-                "Attempted to delete non-standard API key format: %s",
-                sanitize_for_logging(api_key[:20] + "..."),
-            )
             return False
 
     except Exception as e:
@@ -394,7 +382,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
     try:
         client = get_supabase_client()
 
-        # First, check the api_keys_new table
+        # Check if key exists in api_keys_new table
         try:
             key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
@@ -459,14 +447,18 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 
         except Exception as e:
             logger.warning(
-                "API key validation in api_keys_new failed: %s",
+                "API key validation failed: %s",
                 sanitize_for_logging(str(e)),
             )
 
-        # Fallback: Check if key exists in the users table (for backward compatibility with legacy keys)
+        # Fallback: Check if key exists in the users table (for backward compatibility)
         user = get_user(api_key)
         if user:
-            # This is a legacy key stored in users.api_key column
+            # This is a legacy key - return legacy key info
+            logger.info(
+                "Using legacy key for user %s",
+                sanitize_for_logging(str(user["id"])),
+            )
             return {
                 "user_id": user["id"],
                 "api_key": api_key,
@@ -487,10 +479,13 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 
 def increment_api_key_usage(api_key: str) -> None:
     """Increment the request count for an API key"""
+    # Lazy import to avoid circular dependency
+    from src.db.users import get_user
+
     try:
         client = get_supabase_client()
 
-        # Update usage in the api_keys_new table
+        # Try to increment in the new system first (api_keys_new table)
         try:
             # Check if key exists in api_keys_new table
             existing_key = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
@@ -511,9 +506,6 @@ def increment_api_key_usage(api_key: str) -> None:
             logger.warning(
                 "Failed to update usage in api_keys_new table: %s", sanitize_for_logging(str(e))
             )
-
-        # Legacy keys stored in users table don't need explicit usage tracking
-        # Usage is only tracked for new keys in api_keys_new table
 
     except Exception as e:
         logger.error("Failed to increment API key usage: %s", sanitize_for_logging(str(e)))
@@ -699,9 +691,6 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
 
 def validate_api_key_permissions(api_key: str, required_permission: str, resource: str) -> bool:
     """Validate if an API key has the required permission for a resource"""
-    # Lazy import to avoid circular dependency
-    from src.db.users import get_user
-
     try:
         logger.info(
             "Validating permissions for API key %s - Required: %s on %s",
@@ -729,23 +718,10 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         )
 
         if not key_result.data:
-            # Check legacy users table
-            logger.info(
-                "API key %s not found in api_keys_new, checking legacy user table",
-                sanitize_for_logging(api_key[:15] + "..."),
+            logger.warning(
+                "API key not found in api_keys_new table: %s", sanitize_for_logging(api_key[:10] + "...")
             )
-            user = get_user(api_key)
-            if not user:
-                logger.warning(
-                    "API key not found in any table: %s", sanitize_for_logging(api_key[:10] + "...")
-                )
-                return False
-            # Legacy keys from user table have full permissions
-            logger.info(
-                "Found in legacy user table - granting default permissions for %s",
-                sanitize_for_logging(api_key[:15] + "..."),
-            )
-            return True
+            return False
         else:
             key_data = key_result.data[0]
             logger.info(
