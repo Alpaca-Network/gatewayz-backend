@@ -1013,7 +1013,7 @@ async def get_provider_statistics(
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
 
-        return {"success": True, "data": stats, "timestamp": datetime.now(UTC).isoformat()}
+        return {"success": True, "data": stats, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     except HTTPException:
         raise
@@ -1081,7 +1081,7 @@ async def get_gateway_statistics(
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
 
-        return {"success": True, "data": stats, "timestamp": datetime.now(UTC).isoformat()}
+        return {"success": True, "data": stats, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     except HTTPException:
         raise
@@ -1145,7 +1145,7 @@ async def get_trending_models_endpoint(
             "gateway": gateway,
             "time_range": time_range,
             "sort_by": sort_by,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1184,7 +1184,7 @@ async def get_all_gateways_summary_endpoint(
         if "error" in summary:
             raise HTTPException(status_code=500, detail=summary["error"])
 
-        return {"success": True, "data": summary, "timestamp": datetime.now(UTC).isoformat()}
+        return {"success": True, "data": summary, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     except HTTPException:
         raise
@@ -1229,7 +1229,7 @@ async def get_provider_top_models_endpoint(
             "data": top_models,
             "count": len(top_models),
             "time_range": time_range,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1367,7 +1367,7 @@ async def compare_model_across_gateways(
             "savings": savings_info,
             "available_count": sum(1 for c in comparisons if c.get("available")),
             "total_gateways_checked": len(comparisons),
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1483,7 +1483,7 @@ async def batch_compare_models(
             "criteria": criteria,
             "models_compared": len(model_ids),
             "results": results,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -1810,7 +1810,7 @@ async def search_models(
                     "order": order,
                 },
             },
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
