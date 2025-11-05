@@ -191,8 +191,8 @@ def isolated_test_data(supabase_client, test_prefix):
 @pytest.fixture(autouse=True)
 def skip_if_no_database(request):
     """Skip tests that require database if credentials are not available"""
-    # Skip if test uses in-memory stub (sb fixture)
-    if 'sb' in request.fixturenames:
+    # Skip if test uses in-memory stub (sb fixture or fake_supabase fixture)
+    if 'sb' in request.fixturenames or 'fake_supabase' in request.fixturenames:
         return  # Don't skip tests that use the in-memory stub
 
     # Don't skip health check and ping tests - they don't require a database
