@@ -27,7 +27,7 @@ def log_activity(
     Log an API activity event
 
     Args:
-        user_id: User ID (will be converted to int if needed)
+        user_id: User ID
         model: Model name (e.g., "gpt-4", "claude-3-sonnet")
         provider: Provider name (e.g., "OpenAI", "Anthropic", "Google")
         tokens: Total tokens used
@@ -43,11 +43,8 @@ def log_activity(
     try:
         client = get_supabase_client()
 
-        # Ensure user_id is an integer
-        user_id_int = int(user_id) if not isinstance(user_id, int) else user_id
-
         activity_data = {
-            "user_id": user_id_int,
+            "user_id": user_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "model": model,
             "provider": provider,
@@ -62,18 +59,13 @@ def log_activity(
         result = client.table("activity_log").insert(activity_data).execute()
 
         if result.data:
-            logger.info(f"Activity logged for user {user_id_int}: {model} ({tokens} tokens)")
+            logger.info(f"Activity logged for user {user_id}: {model} ({tokens} tokens)")
             return result.data[0]
-        else:
-            logger.error(
-                f"Failed to log activity: insert returned no data. User: {user_id_int}, Model: {model}, Result: {result}"
-            )
-            return None
+
+        return None
 
     except Exception as e:
-        logger.error(
-            f"Failed to log activity for user {user_id_int}, model {model}: {e}", exc_info=True
-        )
+        logger.error(f"Failed to log activity: {e}")
         # Don't raise - activity logging should not break the main flow
         return None
 

@@ -62,10 +62,7 @@ async def create_session(request: CreateChatSessionRequest, api_key: str = Depen
                 },
             )
         except Exception as e:
-            logger.error(
-                f"Failed to log session creation activity for user {user['id']}, session {session.get('id', 'unknown')}: {e}",
-                exc_info=True,
-            )
+            logger.warning(f"Failed to log session creation activity: {e}")
 
         return ChatSessionResponse(
             success=True, data=session, message="Chat session created successfully"
@@ -265,7 +262,6 @@ async def save_message(
             content=request.content,
             model=request.model,
             tokens=request.tokens,
-            user_id=user["id"],
         )
 
         logger.info(f"Saved message {message['id']} to session {session_id}")

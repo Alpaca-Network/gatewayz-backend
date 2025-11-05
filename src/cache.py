@@ -1,12 +1,6 @@
 """Cache module for storing model and provider data"""
 
-import logging
 from datetime import datetime, timezone
-
-logger = logging.getLogger(__name__)
-
-# FAL cache initialization messages
-_FAL_CACHE_INIT_DEFERRED = "FAL cache initialization deferred"
 
 # Cache dictionaries for models and providers
 _models_cache = {
@@ -152,13 +146,6 @@ _vercel_ai_gateway_models_cache = {
     "stale_ttl": 7200,
 }
 
-_aihubmix_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for AiHubMix catalog
-    "stale_ttl": 7200,
-}
-
 # BACKWARD COMPATIBILITY: Alias for old cache name
 # Some deployed modules may still reference the old name
 _hug_models_cache = _huggingface_models_cache
@@ -188,7 +175,6 @@ def get_models_cache(gateway: str):
         "near": _near_models_cache,
         "fal": _fal_models_cache,
         "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-        "aihubmix": _aihubmix_models_cache,
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -222,7 +208,6 @@ def clear_models_cache(gateway: str):
         "near": _near_models_cache,
         "fal": _fal_models_cache,
         "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-        "aihubmix": _aihubmix_models_cache,
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())
@@ -269,30 +254,3 @@ def is_cache_stale_but_usable(cache: dict) -> bool:
 def should_revalidate_in_background(cache: dict) -> bool:
     """Check if cache should trigger background revalidation"""
     return not is_cache_fresh(cache) and is_cache_stale_but_usable(cache)
-
-
-def initialize_fal_cache_from_catalog():
-    """Load and initialize FAL models cache directly from static catalog
-
-    Avoids circular imports by loading catalog directly without normalizer.
-    Raw models are stored in cache; normalization happens on first access.
-    """
-    try:
-        from src.services.fal_image_client import load_fal_models_catalog
-
-        # Load raw models from catalog
-        raw_models = load_fal_models_catalog()
-
-        if not raw_models:
-            logger.debug("No FAL models found in catalog")
-            return
-
-        # Store raw models temporarily - will be normalized on first access
-        # This avoids circular import with models.py
-        _fal_models_cache["data"] = raw_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
-        logger.debug(f"Preloaded {len(raw_models)} FAL models from catalog")
-
-    except (ImportError, OSError) as error:
-        # Log failure but continue - models will be loaded on first request
-        logger.debug(f"{_FAL_CACHE_INIT_DEFERRED}: {type(error).__name__}")

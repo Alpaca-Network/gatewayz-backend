@@ -4,7 +4,6 @@ Test script to check model fetching for all gateways
 """
 import sys
 import os
-import pytest
 
 # Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -13,8 +12,7 @@ from src.services.models import get_cached_models
 from src.config import Config
 from utils import print_section
 
-@pytest.mark.parametrize("gateway_name", ['xai', 'near', 'google', 'cerebras', 'nebius', 'novita', 'huggingface'])
-def test_gateway(gateway_name: str):
+def check_gateway(gateway_name: str):
     """Test model fetching for a specific gateway"""
     print_section(f"Testing {gateway_name.upper()} gateway", 60)
 

@@ -21,18 +21,14 @@ import json
 import pytest
 import requests
 import base64
-import pytest
 from pathlib import Path
 
 # Configuration
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8000")
 API_KEY = os.getenv("GATEWAY_API_KEY")
 
-# Skip the entire module if GATEWAY_API_KEY is not set
-pytestmark = pytest.mark.skipif(
-    not API_KEY,
-    reason="GATEWAY_API_KEY environment variable not set"
-)
+if not API_KEY:
+    pytest.skip("GATEWAY_API_KEY environment variable must be set", allow_module_level=True)
 
 
 def test_google_vertex_image_generation():
