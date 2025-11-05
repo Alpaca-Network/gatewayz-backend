@@ -22,13 +22,14 @@ FEATURES:
 """
 
 import logging
-from datetime import datetime, timezone
-import httpx
 import time
+from datetime import datetime, timezone
+
+import httpx
 
 from src.cache import _huggingface_models_cache
-from src.services.pricing_lookup import enrich_model_with_pricing
 from src.config import Config
+from src.services.pricing_lookup import enrich_model_with_pricing
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def fetch_models_from_huggingface_api(
     limit: int = None,
     direction: str = "-1",
     sort: str = "downloads",
-    use_cache: bool = True
+    use_cache: bool = True,
 ):
     """
     Fetch models directly from Hugging Face Models API Hub.
@@ -68,16 +69,24 @@ def fetch_models_from_huggingface_api(
     """
     try:
         # Check cache first
-        if use_cache and _huggingface_models_cache["data"] and _huggingface_models_cache["timestamp"]:
+        if (
+            use_cache
+            and _huggingface_models_cache["data"]
+            and _huggingface_models_cache["timestamp"]
+        ):
             cache_age = (datetime.now(timezone.utc) - _huggingface_models_cache["timestamp"]).total_seconds()
             if cache_age < _huggingface_models_cache["ttl"]:
-                logger.info(f"Using cached Hugging Face models ({len(_huggingface_models_cache['data'])} models, age: {cache_age:.0f}s)")
+                logger.info(
+                    f"Using cached Hugging Face models ({len(_huggingface_models_cache['data'])} models, age: {cache_age:.0f}s)"
+                )
                 return _huggingface_models_cache["data"]
 
         logger.info("Fetching models from Hugging Face Models API Hub using multi-sort strategy")
 
         models = []
-        seen_model_ids = set()  # Track unique model IDs to detect duplicates across all sort methods
+        seen_model_ids = (
+            set()
+        )  # Track unique model IDs to detect duplicates across all sort methods
 
         # Strategy: Use multiple sort methods to get different sets of models
         # The API caps at 1000 per request, but different sorts return different models
@@ -85,7 +94,7 @@ def fetch_models_from_huggingface_api(
         # Hugging Face Models API supports 'likes' and 'downloads' as stable sort options.
         # 'trending' intermittently returns 400, so we stick to reliable sorts and rely
         # on ESSENTIAL_MODELS to pull in anything critical that falls outside the top results.
-        sort_methods = ['likes', 'downloads']
+        sort_methods = ["likes", "downloads"]
 
         for sort_method_idx, sort_method in enumerate(sort_methods):
             logger.info(f"Fetching models with sort={sort_method}")
@@ -117,22 +126,42 @@ def fetch_models_from_huggingface_api(
             max_retries = 3
             retry_delay = 1.0  # Start with 1 second delay
 
+            # Use shorter timeout in test mode to prevent test timeouts
+            # Test mode: 8s * 3 attempts + 1s + 2s delays = ~27s total (within 30s test timeout)
+            # Production: 30s timeout for better reliability with slow networks
+            request_timeout = 8.0 if Config.IS_TESTING else 30.0
+
             for attempt in range(max_retries):
                 try:
-                    response = httpx.get(url, params=params, headers=headers, timeout=30.0)
+                    # Use shorter timeout to avoid test timeouts (10s connect, 15s read)
+                    response = httpx.get(url, params=params, headers=headers, timeout=httpx.Timeout(10.0, read=15.0))
                     response.raise_for_status()
                     break  # Success, exit retry loop
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 429:  # Rate limited
                         if attempt < max_retries - 1:
-                            logger.warning(f"Rate limited (429) on sort={sort_method}, attempt {attempt + 1}/{max_retries}. Waiting {retry_delay}s before retry...")
+                            logger.warning(
+                                f"Rate limited (429) on sort={sort_method}, attempt {attempt + 1}/{max_retries}. Waiting {retry_delay}s before retry..."
+                            )
                             time.sleep(retry_delay)
                             retry_delay *= 2  # Exponential backoff
                             continue
                     raise
+                except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as timeout_error:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Timeout fetching with sort={sort_method}, attempt {attempt + 1}/{max_retries}: {timeout_error}. Retrying..."
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    logger.error(f"Timeout after {max_retries} attempts for sort={sort_method}")
+                    raise
                 except Exception as e:
                     if attempt < max_retries - 1:
-                        logger.warning(f"Error fetching with sort={sort_method}, attempt {attempt + 1}/{max_retries}: {e}. Retrying...")
+                        logger.warning(
+                            f"Error fetching with sort={sort_method}, attempt {attempt + 1}/{max_retries}: {e}. Retrying..."
+                        )
                         time.sleep(retry_delay)
                         retry_delay *= 2
                         continue
@@ -160,7 +189,9 @@ def fetch_models_from_huggingface_api(
                 else:
                     duplicates_in_batch += 1
 
-            logger.info(f"Sort={sort_method}: {len(batch_models)} returned, {new_models_in_batch} new, {duplicates_in_batch} duplicates, {len(models)} total unique")
+            logger.info(
+                f"Sort={sort_method}: {len(batch_models)} returned, {new_models_in_batch} new, {duplicates_in_batch} duplicates, {len(models)} total unique"
+            )
 
             # Add a delay between different sort requests to avoid rate limiting
             # Always add delay (required by HF API), but longer if no API key
@@ -186,13 +217,17 @@ def fetch_models_from_huggingface_api(
         normalized_ids = {m.get("id", "").lower() for m in normalized_models}
         for required_model in ESSENTIAL_MODELS:
             if required_model.lower() not in normalized_ids:
-                logger.info(f"Essential Hugging Face model '{required_model}' missing from ranked fetch; retrieving directly")
+                logger.info(
+                    f"Essential Hugging Face model '{required_model}' missing from ranked fetch; retrieving directly"
+                )
                 direct_model = get_huggingface_model_info(required_model)
                 if direct_model:
                     normalized_models.append(direct_model)
                     normalized_ids.add(required_model.lower())
                 else:
-                    logger.warning(f"Failed to retrieve essential Hugging Face model '{required_model}'")
+                    logger.warning(
+                        f"Failed to retrieve essential Hugging Face model '{required_model}'"
+                    )
 
         logger.info(f"Normalized {len(normalized_models)} models")
 
@@ -200,7 +235,9 @@ def fetch_models_from_huggingface_api(
         if use_cache:
             _huggingface_models_cache["data"] = normalized_models
             _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
-            logger.info(f"Cached {len(normalized_models)} Hugging Face models with TTL {_huggingface_models_cache['ttl']}s")
+            logger.info(
+                f"Cached {len(normalized_models)} Hugging Face models with TTL {_huggingface_models_cache['ttl']}s"
+            )
 
         return normalized_models
 
@@ -211,15 +248,21 @@ def fetch_models_from_huggingface_api(
         if e.response.status_code == 401:
             logger.error("❌ Authentication failed - check your HUG_API_KEY environment variable")
         elif e.response.status_code == 403:
-            logger.error("❌ Access forbidden - your HF API key may not have the required permissions")
+            logger.error(
+                "❌ Access forbidden - your HF API key may not have the required permissions"
+            )
         elif e.response.status_code == 429:
-            logger.error("❌ Rate limited by Hugging Face API - consider adding HUG_API_KEY or waiting")
+            logger.error(
+                "❌ Rate limited by Hugging Face API - consider adding HUG_API_KEY or waiting"
+            )
         elif e.response.status_code == 503:
             logger.error("❌ Hugging Face API is temporarily unavailable")
 
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch models from Hugging Face API: {type(e).__name__}: {e}", exc_info=True)
+        logger.error(
+            f"Failed to fetch models from Hugging Face API: {type(e).__name__}: {e}", exc_info=True
+        )
         return None
 
 
@@ -242,7 +285,9 @@ def normalize_huggingface_model(hf_model: dict) -> dict:
 
         # Skip models that are known to be unsupported by HF Inference Router
         if model_id in UNSUPPORTED_MODELS:
-            logger.debug(f"Skipping unsupported model (not available for chat completions): {model_id}")
+            logger.debug(
+                f"Skipping unsupported model (not available for chat completions): {model_id}"
+            )
             return None
 
         # Extract metadata
@@ -361,7 +406,7 @@ def normalize_huggingface_model(hf_model: dict) -> dict:
                 "author": author_name,
                 "url": f"https://huggingface.co/{model_id}",
             },
-            "raw_huggingface": hf_model
+            "raw_huggingface": hf_model,
         }
 
         # Enrich with pricing if available from our lookup table
@@ -398,8 +443,11 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
         if Config.HUG_API_KEY:
             headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
 
+        # Use shorter timeout in test mode to prevent test timeouts
+        request_timeout = 8.0 if Config.IS_TESTING else 30.0
+
         url = "https://huggingface.co/api/models"
-        response = httpx.get(url, params=params, headers=headers, timeout=30.0)
+        response = httpx.get(url, params=params, headers=headers, timeout=request_timeout)
         response.raise_for_status()
 
         models = response.json()
@@ -432,8 +480,11 @@ def get_huggingface_model_info(model_id: str) -> dict:
         if Config.HUG_API_KEY:
             headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
 
+        # Use shorter timeout in test mode to prevent test timeouts
+        request_timeout = 5.0 if Config.IS_TESTING else 10.0
+
         url = f"https://huggingface.co/api/models/{model_id}"
-        response = httpx.get(url, headers=headers, timeout=10.0)
+        response = httpx.get(url, headers=headers, timeout=request_timeout)
         response.raise_for_status()
 
         model_data = response.json()
@@ -468,5 +519,5 @@ def fetch_models_from_hug():
     return fetch_models_from_huggingface_api(
         task=None,  # Fetch all models available on HF Inference
         limit=None,  # Uses multi-sort strategy internally
-        use_cache=True  # Cache results for performance
+        use_cache=True,  # Cache results for performance
     )
