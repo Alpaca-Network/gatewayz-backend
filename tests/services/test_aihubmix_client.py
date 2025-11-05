@@ -1,7 +1,7 @@
 """Unit tests for AiHubMix client"""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from src.services.aihubmix_client import (
     get_aihubmix_client,
     make_aihubmix_request_openai,
