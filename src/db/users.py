@@ -18,7 +18,7 @@ def create_enhanced_user(
         client = get_supabase_client()
 
         # Prepare user data with trial setup
-        trial_start = datetime.now(UTC)
+        trial_start = datetime.now(timezone.utc)
         trial_end = trial_start + timedelta(days=3)
 
         user_data = {
@@ -595,7 +595,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
         len([user for user in users if user.get("credits", 0) > 0])
 
         # Calculate time-based statistics
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)

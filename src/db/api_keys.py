@@ -107,7 +107,7 @@ def create_api_key(
         # Set up trial for new users (if this is their first key)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(UTC)
+            trial_start = datetime.now(timezone.utc)
             trial_end = trial_start + timedelta(days=3)
             trial_data = {
                 "is_trial": True,
@@ -261,7 +261,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
                             days_remaining = max(0, (expiration - now).days)
                     except Exception as date_error:
                         logger.warning(
@@ -422,7 +422,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
 
                             if expiration < now:
                                 logger.warning(
@@ -978,7 +978,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
                         expiration_str = expiration_str + "+00:00"
 
                     expiration = datetime.fromisoformat(expiration_str)
-                    now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                    now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
                     days_remaining = max(0, (expiration - now).days)
             except Exception as date_error:
                 logger.warning(

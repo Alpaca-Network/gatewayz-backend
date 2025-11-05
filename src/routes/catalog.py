@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Query, Response
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
@@ -315,7 +315,7 @@ async def get_providers(
             "offset": offset or 0,
             "limit": limit,
             "gateway": gateway_value,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
@@ -720,7 +720,7 @@ async def get_models(
             "include_huggingface": include_huggingface,
             "gateway": gateway_value,
             "note": note,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         logger.error(
             f"Returning /models response with keys: {list(result.keys())}, gateway={gateway_value}, first_model={enhanced_models[0]['id'] if enhanced_models else 'none'}"
@@ -843,7 +843,7 @@ async def get_specific_model(
             "model": model_name,
             "gateway": detected_gateway,
             "include_huggingface": include_huggingface,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:
