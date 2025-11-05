@@ -23,6 +23,8 @@ class _Table:
         self._select = None
         self._order = None
         self._desc = False
+        self._delete_mode = False  # Track if we're in delete mode
+        self._update_patch = None  # Track update data
 
     # query builders (chainable)
     def select(self, _cols="*"):
@@ -68,24 +70,29 @@ class _Table:
         return self
 
     def update(self, patch):
-        out = []
-        for r in self._filtered():
-            r.update(patch)
-            out.append(r)
-        self._last_update = out
+        self._update_patch = patch
         return self
 
     def delete(self):
-        to_delete = self._filtered()
-        self.store[self.name] = [r for r in self._rows() if r not in to_delete]
-        self._last_delete = to_delete
+        self._delete_mode = True
         return self
 
     def execute(self):
-        if hasattr(self, "_last_update"):
-            return _Result(self._last_update)
-        if hasattr(self, "_last_delete"):
-            return _Result(self._last_delete)
+        # Handle update - defer filtering until execute
+        if self._update_patch is not None:
+            out = []
+            for r in self._filtered():
+                r.update(self._update_patch)
+                out.append(r)
+            return _Result(out)
+
+        # Handle delete - defer filtering until execute
+        if self._delete_mode:
+            to_delete = self._filtered()
+            self.store[self.name] = [r for r in self._rows() if r not in to_delete]
+            return _Result(to_delete)
+
+        # Handle select
         rows = self._filtered()
         if self._order:
             rows.sort(key=lambda r: r.get(self._order), reverse=self._desc)
