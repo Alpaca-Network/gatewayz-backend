@@ -96,7 +96,6 @@ class FakeSupabase:
     def __init__(self):
         self.store = {
             "api_keys_new": [],
-            "api_keys": [],
             "rate_limit_configs": [],
             "api_key_audit_logs": [],
         }
@@ -238,28 +237,25 @@ def test_delete_api_key_new_and_legacy(mod, fake_supabase):
     fake_supabase.table("api_keys_new").insert({
         "user_id": 2, "key_name": "New", "api_key": "gw_live_X", "is_active": True, "requests_used": 0
     }).execute()
-    # legacy key
-    fake_supabase.table("api_keys").insert({
-        "user_id": 2, "key_name": "Legacy", "api_key": "legacy_X", "is_active": True, "requests_used": 0
-    }).execute()
 
     assert mod.delete_api_key("gw_live_X", user_id=2) is True
     assert not fake_supabase.store["api_keys_new"]  # deleted
     # audit log for delete created
     assert fake_supabase.store["api_key_audit_logs"]
-    # legacy path
-    assert mod.delete_api_key("legacy_X", user_id=2) is True
-    assert not fake_supabase.store["api_keys"]
+
+    # legacy keys (non-gw_ prefix) cannot be deleted via api_keys_new
+    # they return False since they don't match the gw_ prefix pattern
+    assert mod.delete_api_key("legacy_X", user_id=2) is False
 
 
-def test_validate_api_key_prefers_api_keys_then_fallback(monkeypatch, mod, fake_supabase):
-    # 1) Found in api_keys (legacy table) and active with not-expired
+def test_validate_api_key_prefers_api_keys_new_then_fallback(monkeypatch, mod, fake_supabase):
+    # 1) Found in api_keys_new
     now = datetime.now(timezone.utc)
-    fake_supabase.table("api_keys").insert({
+    fake_supabase.table("api_keys_new").insert({
         "id": 11,
         "user_id": 777,
-        "key_name": "L1",
-        "api_key": "legacy_1",
+        "key_name": "K1",
+        "api_key": "gw_live_1",
         "is_active": True,
         "expiration_date": (now + timedelta(days=1)).isoformat(),
         "max_requests": 100,
@@ -268,22 +264,21 @@ def test_validate_api_key_prefers_api_keys_then_fallback(monkeypatch, mod, fake_
 
     # Late-imported get_user must exist and return the user for a key
     users_mod = sys.modules["src.db.users"]
-    users_mod.get_user = lambda api_key: {"id": 777} if api_key == "legacy_1" else None
+    users_mod.get_user = lambda api_key: {"id": 777} if api_key == "gw_live_1" else None
 
-    out = mod.validate_api_key("legacy_1")
+    out = mod.validate_api_key("gw_live_1")
     assert out and out["user_id"] == 777 and out["key_id"] == 11
 
-    # 2) Not in api_keys -> fallback create legacy entry if get_user returns a user
+    # 2) Not in api_keys_new -> fallback to legacy users table if get_user returns a user
     users_mod.get_user = lambda api_key: {"id": 888} if api_key == "legacy_2" else None
     out2 = mod.validate_api_key("legacy_2")
     assert out2 and out2["user_id"] == 888 and out2["key_name"] == "Legacy Key"
-    # ensure an entry was inserted
-    rows = [r for r in fake_supabase.store["api_keys"] if r["api_key"] == "legacy_2"]
-    assert rows
+    # legacy key has key_id == 0 since it's from users table, not api_keys_new
+    assert out2["key_id"] == 0
 
 
-def test_increment_api_key_usage_updates_new_or_legacy(monkeypatch, mod, fake_supabase):
-    # new
+def test_increment_api_key_usage_updates_new(monkeypatch, mod, fake_supabase):
+    # new keys in api_keys_new are tracked
     fake_supabase.table("api_keys_new").insert({
         "api_key": "gw_live_Y", "requests_used": 1, "is_active": True
     }).execute()
@@ -291,23 +286,16 @@ def test_increment_api_key_usage_updates_new_or_legacy(monkeypatch, mod, fake_su
     row = fake_supabase.store["api_keys_new"][0]
     assert row["requests_used"] == 2 and row.get("last_used_at")
 
-    # legacy update path: existing row present -> increments requests_count
-    fake_supabase.table("api_keys").insert({
-        "api_key": "legacy_Y", "requests_used": 5, "requests_count": 5, "is_active": True
-    }).execute()
-    mod.increment_api_key_usage("legacy_Y")
-    row2 = [r for r in fake_supabase.store["api_keys"] if r["api_key"] == "legacy_Y"][0]
-    assert row2["requests_count"] == 6
-
-    # legacy insert path: missing row, but get_user returns a user -> inserts new row
+    # legacy keys stored in users table don't get tracked in api_keys_new
+    # they just return after checking api_keys_new
     users_mod = sys.modules["src.db.users"]
     users_mod.get_user = lambda k: {"id": 999} if k == "legacy_insert" else None
     mod.increment_api_key_usage("legacy_insert")
-    ins = [r for r in fake_supabase.store["api_keys"] if r["api_key"] == "legacy_insert"]
-    assert ins and ins[0]["requests_count"] == 1
+    # No new rows in api_keys_new table for legacy keys
+    assert len(fake_supabase.store["api_keys_new"]) == 1
 
 
-def test_get_api_key_usage_stats_new_vs_legacy(mod, fake_supabase):
+def test_get_api_key_usage_stats_new_key(mod, fake_supabase):
     fake_supabase.table("api_keys_new").insert({
         "api_key": "gw_live_S", "key_name": "SKey", "is_active": True,
         "requests_used": 10, "max_requests": 100, "environment_tag": "live",
@@ -316,16 +304,12 @@ def test_get_api_key_usage_stats_new_vs_legacy(mod, fake_supabase):
     out_new = mod.get_api_key_usage_stats("gw_live_S")
     assert out_new["requests_remaining"] == 90
     assert out_new["usage_percentage"] == 10.0
+    assert out_new["environment_tag"] == "live"
 
-    fake_supabase.table("api_keys").insert({
-        "api_key": "legacy_S", "key_name": "LKey", "is_active": True,
-        "requests_count": 7, "max_requests": 100, "created_at": "2025-01-02T00:00:00+00:00",
-        "updated_at": "2025-01-03T00:00:00+00:00"
-    }).execute()
-    out_legacy = mod.get_api_key_usage_stats("legacy_S")
-    assert out_legacy["requests_used"] == 7
-    assert out_legacy["usage_percentage"] == 7.0
-    assert out_legacy["environment_tag"] == "legacy"
+    # legacy keys not found in api_keys_new return "Unknown" stats
+    out_unknown = mod.get_api_key_usage_stats("legacy_S")
+    assert out_unknown["is_active"] is False
+    assert out_unknown["key_name"] == "Unknown"
 
 
 def test_update_api_key_name_uniqueness_and_expiration_and_rate_limit(mod, fake_supabase):
