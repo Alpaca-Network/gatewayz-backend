@@ -261,6 +261,7 @@ async def get_providers(
             "together",
             "fal",
             "aihubmix",
+            "anannas",
         ]
         all_models = {}  # Track models for each gateway
 
