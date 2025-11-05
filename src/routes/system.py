@@ -916,6 +916,7 @@ async def get_cache_status():
             "fireworks",
             "together",
             "aihubmix",
+            "anannas",
         ]
 
         for gateway in gateways:
@@ -1040,6 +1041,7 @@ async def refresh_gateway_cache(
             "together",
             "huggingface",
             "aihubmix",
+            "anannas",
         ]
 
         if gateway not in valid_gateways:
@@ -1172,6 +1174,7 @@ async def clear_all_caches(
                 "fireworks",
                 "together",
                 "aihubmix",
+                "anannas",
             ]
             for gw in gateways:
                 clear_models_cache(gw)
@@ -1286,6 +1289,15 @@ async def check_all_gateways():
                         "APP-Code": os.environ.get("AIHUBMIX_APP_CODE", ""),
                     }
                     if os.environ.get("AIHUBMIX_API_KEY")
+                    else {}
+                ),
+            },
+            "anannas": {
+                "url": "https://api.anannas.ai/v1/models",
+                "api_key": os.environ.get("ANANNAS_API_KEY"),
+                "headers": (
+                    {"Authorization": f"Bearer {os.environ.get('ANANNAS_API_KEY')}"}
+                    if os.environ.get("ANANNAS_API_KEY")
                     else {}
                 ),
             },
