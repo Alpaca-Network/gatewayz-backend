@@ -102,7 +102,8 @@ class SlidingWindowRateLimiter:
                     allowed=False,
                     remaining_requests=0,
                     remaining_tokens=0,
-                    reset_time=datetime.now(timezone.utc) + timedelta(seconds=burst_check["retry_after"]),
+                    reset_time=datetime.now(timezone.utc)
+                    + timedelta(seconds=burst_check["retry_after"]),
                     retry_after=burst_check["retry_after"],
                     reason="Burst limit exceeded",
                     burst_remaining=burst_check["remaining"],

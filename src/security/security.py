@@ -336,9 +336,9 @@ def _validate_key_constraints(
 
     # 6. Update last used timestamp
     try:
-        client.table(table_name).update({"last_used_at": datetime.now(timezone.utc).isoformat()}).eq(
-            "id", key_id
-        ).execute()
+        client.table(table_name).update(
+            {"last_used_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", key_id).execute()
     except Exception as e:
         logger.warning(f"Failed to update last_used_at for key {key_id}: {e}")
 

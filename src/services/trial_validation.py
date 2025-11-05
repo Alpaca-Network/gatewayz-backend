@@ -18,7 +18,7 @@ def _parse_trial_end_utc(s: str) -> datetime:
     if "T" not in s:
         # Date-only -> use end of that day timezone.utc (friendliest interpretation)
         d = datetime.fromisoformat(s)
-        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=UTC)
     # Full datetime
     if s.endswith("Z"):
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
@@ -28,7 +28,7 @@ def _parse_trial_end_utc(s: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt
 
 

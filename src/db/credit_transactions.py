@@ -553,7 +553,7 @@ def get_transaction_summary(
         )
 
         # Calculate average by type
-        for trans_type, type_data in summary["by_type"].items():
+        for _trans_type, type_data in summary["by_type"].items():
             if type_data["count"] > 0:
                 type_data["average_amount"] = type_data["total_amount"] / type_data["count"]
 

@@ -309,7 +309,10 @@ def update_payment_metadata(payment_id: int, metadata: dict[str, Any]) -> dict[s
         existing_metadata = payment.get("metadata", {})
         updated_metadata = {**existing_metadata, **metadata}
 
-        update_data = {"metadata": updated_metadata, "updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data = {
+            "metadata": updated_metadata,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
         result = client.table("payments").update(update_data).eq("id", payment_id).execute()
 
