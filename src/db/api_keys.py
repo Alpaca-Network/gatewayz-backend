@@ -322,56 +322,52 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
     try:
         client = get_supabase_client()
 
-        # Check if this is a new API key (gw_ prefix)
-        is_new_key = api_key.startswith("gw_")
+        # Delete from the api_keys_new table
+        result = (
+            client.table("api_keys_new")
+            .delete()
+            .eq("api_key", api_key)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
-        if is_new_key:
-            # Delete from the new api_keys_new table
-            result = (
-                client.table("api_keys_new")
-                .delete()
-                .eq("api_key", api_key)
-                .eq("user_id", user_id)
-                .execute()
-            )
+        if result.data:
+            # Also delete associated rate limit configs
+            try:
+                client.table("rate_limit_configs").delete().eq(
+                    "api_key_id", result.data[0]["id"]
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete rate limit configs for key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(str(e)),
+                )
 
-            if result.data:
-                # Also delete associated rate limit configs
-                try:
-                    client.table("rate_limit_configs").delete().eq(
-                        "api_key_id", result.data[0]["id"]
-                    ).execute()
-                except Exception as e:
-                    logger.warning(
-                        "Failed to delete rate limit configs for key %s: %s",
-                        sanitize_for_logging(api_key[:20] + "..."),
-                        sanitize_for_logging(str(e)),
-                    )
+            # Create audit log entry
+            try:
+                client.table("api_key_audit_logs").insert(
+                    {
+                        "user_id": user_id,
+                        "action": "delete",
+                        "api_key_id": result.data[0]["id"],
+                        "details": {
+                            "deleted_at": datetime.now(timezone.utc).isoformat(),
+                            "key_name": result.data[0].get("key_name", "Unknown"),
+                            "environment_tag": result.data[0].get("environment_tag", "unknown"),
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to create audit log for key deletion: %s",
+                    sanitize_for_logging(str(e)),
+                )
 
-                # Create audit log entry
-                try:
-                    client.table("api_key_audit_logs").insert(
-                        {
-                            "user_id": user_id,
-                            "action": "delete",
-                            "api_key_id": result.data[0]["id"],
-                            "details": {
-                                "deleted_at": datetime.now(timezone.utc).isoformat(),
-                                "key_name": result.data[0].get("key_name", "Unknown"),
-                                "environment_tag": result.data[0].get("environment_tag", "unknown"),
-                            },
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ).execute()
-                except Exception as e:
-                    logger.warning(
-                        "Failed to create audit log for key deletion: %s",
-                        sanitize_for_logging(str(e)),
-                    )
-
-                return True
-            else:
-                return False
+            return True
+        else:
+            return False
 
     except Exception as e:
         logger.error("Failed to delete API key: %s", sanitize_for_logging(str(e)))
@@ -520,57 +516,14 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        # Check if this is a new API key (gw_ prefix)
-        is_new_key = api_key.startswith("gw_")
+        # Query the api_keys_new table
+        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
-        if is_new_key:
-            # Query the new api_keys_new table
-            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-
-            if not key_result.data:
-                logger.warning(
-                    "API key not found in api_keys_new table: %s",
-                    sanitize_for_logging(api_key[:20] + "..."),
-                )
-                return {
-                    "api_key": api_key,
-                    "key_name": "Unknown",
-                    "is_active": False,
-                    "requests_used": 0,
-                    "max_requests": None,
-                    "requests_remaining": None,
-                    "usage_percentage": None,
-                    "environment_tag": "unknown",
-                    "created_at": None,
-                    "last_used_at": None,
-                }
-
-            key_data = key_result.data[0]
-
-            # Calculate requests remaining and usage percentage
-            requests_remaining = max(0, key_data["max_requests"] - key_data.get("requests_used", 0))
-            usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
-
-            if key_data.get("max_requests"):
-                requests_remaining = max(
-                    0, key_data["max_requests"] - key_data.get("requests_used", 0)
-                )
-                usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
-
-            return {
-                "api_key": api_key,
-                "key_name": key_data.get("key_name", "Unnamed Key"),
-                "is_active": key_data.get("is_active", False),
-                "requests_used": key_data.get("requests_used", 0),
-                "max_requests": key_data.get("max_requests"),
-                "requests_remaining": requests_remaining,
-                "usage_percentage": usage_percentage,
-                "environment_tag": key_data.get("environment_tag", "live"),
-                "created_at": key_data.get("created_at"),
-                "last_used_at": key_data.get("last_used_at"),
-            }
-        else:
-            # No key found in api_keys_new table
+        if not key_result.data:
+            logger.warning(
+                "API key not found in api_keys_new table: %s",
+                sanitize_for_logging(api_key[:20] + "..."),
+            )
             return {
                 "api_key": api_key,
                 "key_name": "Unknown",
@@ -583,6 +536,31 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
                 "created_at": None,
                 "last_used_at": None,
             }
+
+        key_data = key_result.data[0]
+
+        # Calculate requests remaining and usage percentage
+        requests_remaining = None
+        usage_percentage = None
+
+        if key_data.get("max_requests"):
+            requests_remaining = max(
+                0, key_data["max_requests"] - key_data.get("requests_used", 0)
+            )
+            usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
+
+        return {
+            "api_key": api_key,
+            "key_name": key_data.get("key_name", "Unnamed Key"),
+            "is_active": key_data.get("is_active", False),
+            "requests_used": key_data.get("requests_used", 0),
+            "max_requests": key_data.get("max_requests"),
+            "requests_remaining": requests_remaining,
+            "usage_percentage": usage_percentage,
+            "environment_tag": key_data.get("environment_tag", "live"),
+            "created_at": key_data.get("created_at"),
+            "last_used_at": key_data.get("last_used_at"),
+        }
 
     except Exception as e:
         logger.error(
