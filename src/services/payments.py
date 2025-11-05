@@ -180,7 +180,7 @@ class StripeService:
                 status=PaymentStatus.PENDING,
                 amount=request.amount,
                 currency=request.currency.value,
-                expires_at=datetime.fromtimestamp(session.expires_at, tz=timezone.utc),
+                expires_at=datetime.fromtimestamp(session.expires_at, tz=UTC),
             )
 
         except stripe.StripeError as e:
@@ -498,7 +498,7 @@ class StripeService:
                 currency=refund.currency,
                 status=refund.status,
                 reason=refund.reason,
-                created_at=datetime.fromtimestamp(refund.created, tz=timezone.utc),
+                created_at=datetime.fromtimestamp(refund.created, tz=UTC),
             )
 
         except stripe.StripeError as e:
@@ -814,7 +814,10 @@ class StripeService:
             client = get_supabase_client()
 
             client.table("users").update(
-                {"subscription_status": "past_due", "updated_at": datetime.now(timezone.utc).isoformat()}
+                {
+                    "subscription_status": "past_due",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             ).eq("id", user_id).execute()
 
             logger.info(f"User {user_id} subscription marked as past_due due to failed payment")

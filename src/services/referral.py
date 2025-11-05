@@ -397,7 +397,9 @@ def apply_referral_bonus(
             # Update existing pending referral to completed
             referral_result = (
                 client.table("referrals")
-                .update({"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()})
+                .update(
+                    {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}
+                )
                 .eq("id", existing_referral.data[0]["id"])
                 .execute()
             )

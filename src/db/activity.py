@@ -101,7 +101,7 @@ def get_user_activity_stats(
             start_date = datetime.fromisoformat(from_date).replace(tzinfo=timezone.utc).isoformat()
             end_date = (
                 datetime.fromisoformat(to_date)
-                .replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+                .replace(hour=23, minute=59, second=59, tzinfo=UTC)
                 .isoformat()
             )
         elif days:
@@ -254,7 +254,7 @@ def get_user_activity_log(
         if to_date:
             end_date = (
                 datetime.fromisoformat(to_date)
-                .replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+                .replace(hour=23, minute=59, second=59, tzinfo=UTC)
                 .isoformat()
             )
             query = query.lte("timestamp", end_date)

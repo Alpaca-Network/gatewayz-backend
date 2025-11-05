@@ -1,10 +1,10 @@
 import logging
-from typing import Any
-from datetime import datetime, timedelta, timezone
-
-from src.db.api_keys import create_api_key
-from src.config.supabase_config import get_supabase_client
 import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import create_api_key
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -225,7 +225,9 @@ def add_credits_to_user(
         # Update user credits
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -286,7 +288,7 @@ def log_api_usage_transaction(
         is_trial: Whether user is on trial (if True, cost should be 0 and no credits deducted)
     """
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -351,7 +353,7 @@ def deduct_credits(
         return
 
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -368,7 +370,9 @@ def deduct_credits(
         client = get_supabase_client()
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -922,7 +926,9 @@ def mark_welcome_email_sent(user_id: int) -> bool:
 
         result = (
             client.table("users")
-            .update({"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )

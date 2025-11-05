@@ -74,7 +74,9 @@ def fetch_models_from_huggingface_api(
             and _huggingface_models_cache["data"]
             and _huggingface_models_cache["timestamp"]
         ):
-            cache_age = (datetime.now(timezone.utc) - _huggingface_models_cache["timestamp"]).total_seconds()
+            cache_age = (
+                datetime.now(timezone.utc) - _huggingface_models_cache["timestamp"]
+            ).total_seconds()
             if cache_age < _huggingface_models_cache["ttl"]:
                 logger.info(
                     f"Using cached Hugging Face models ({len(_huggingface_models_cache['data'])} models, age: {cache_age:.0f}s)"
@@ -127,14 +129,15 @@ def fetch_models_from_huggingface_api(
             retry_delay = 1.0  # Start with 1 second delay
 
             # Use shorter timeout in test mode to prevent test timeouts
-            # Test mode: 8s * 3 attempts + 1s + 2s delays = ~27s total (within 30s test timeout)
-            # Production: 30s timeout for better reliability with slow networks
-            request_timeout = 8.0 if Config.IS_TESTING else 30.0
+            # Test mode: 10s connect + 15s read = 25s max per attempt
+            # With 3 attempts + retry delays ~27s total (within 30s test timeout)
 
             for attempt in range(max_retries):
                 try:
                     # Use shorter timeout to avoid test timeouts (10s connect, 15s read)
-                    response = httpx.get(url, params=params, headers=headers, timeout=httpx.Timeout(10.0, read=15.0))
+                    response = httpx.get(
+                        url, params=params, headers=headers, timeout=httpx.Timeout(10.0, read=15.0)
+                    )
                     response.raise_for_status()
                     break  # Success, exit retry loop
                 except httpx.HTTPStatusError as e:
@@ -147,7 +150,11 @@ def fetch_models_from_huggingface_api(
                             retry_delay *= 2  # Exponential backoff
                             continue
                     raise
-                except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as timeout_error:
+                except (
+                    httpx.TimeoutException,
+                    httpx.ReadTimeout,
+                    httpx.ConnectTimeout,
+                ) as timeout_error:
                     if attempt < max_retries - 1:
                         logger.warning(
                             f"Timeout fetching with sort={sort_method}, attempt {attempt + 1}/{max_retries}: {timeout_error}. Retrying..."
