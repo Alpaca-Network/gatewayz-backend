@@ -28,6 +28,7 @@ from src.config import Config
 from src.services.huggingface_models import fetch_models_from_hug
 from src.services.models import (
     fetch_models_from_aihubmix,
+    fetch_models_from_anannas,
     fetch_models_from_chutes,
     fetch_models_from_featherless,
     fetch_models_from_fireworks,
@@ -1091,6 +1092,7 @@ async def refresh_gateway_cache(
             "together": fetch_models_from_together,
             "huggingface": fetch_models_from_hug,
             "aihubmix": fetch_models_from_aihubmix,
+            "anannas": fetch_models_from_anannas,
         }
 
         fetch_func = fetch_functions.get(gateway)
