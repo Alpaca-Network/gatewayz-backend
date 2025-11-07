@@ -14,13 +14,14 @@ from fastapi.responses import JSONResponse
 from prometheus_client import REGISTRY, generate_latest
 from starlette.testclient import TestClient
 
-from src.middleware.observability_middleware import (
-    ObservabilityMiddleware,
+from src.middleware.observability_middleware import ObservabilityMiddleware
+from src.services.prometheus_metrics import (
+    http_request_count,
+    http_request_duration,
     fastapi_requests_in_progress,
     fastapi_request_size_bytes,
     fastapi_response_size_bytes,
 )
-from src.services.prometheus_metrics import http_request_count, http_request_duration
 
 
 # ==================== Test Fixtures ====================
