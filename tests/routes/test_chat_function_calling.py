@@ -22,6 +22,7 @@ def mock_user():
         "email": "test@example.com",
         "credits": 1000,
         "plan_id": 1,
+        "environment_tag": "live",
     }
 
 
@@ -35,8 +36,8 @@ class TestChatCompletionsFunctionCalling:
     """Test function calling in /v1/chat/completions endpoint"""
 
     @patch("src.db.users.get_user")
-    @patch("src.services.openrouter_client.make_openrouter_request_openai")
-    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.routes.chat.make_openrouter_request_openai")
+    @patch("src.routes.chat.process_openrouter_response")
     @patch("src.services.rate_limiting.get_rate_limit_manager")
     @patch("src.services.trial_validation.validate_trial_access")
     @patch("src.db.plans.enforce_plan_limits")
@@ -45,8 +46,10 @@ class TestChatCompletionsFunctionCalling:
     @patch("src.db.rate_limits.update_rate_limit_usage")
     @patch("src.db.api_keys.increment_api_key_usage")
     @patch("src.db.activity.log_activity")
+    @patch("src.services.pricing.calculate_cost")
     def test_tools_parameter_extracted(
         self,
+        mock_calculate_cost,
         mock_log_activity,
         mock_increment,
         mock_update_rate,
@@ -65,8 +68,9 @@ class TestChatCompletionsFunctionCalling:
         """Test that tools parameter is correctly extracted from request"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
         mock_enforce_limits.return_value = {"allowed": True}
+        mock_calculate_cost.return_value = 0.01
 
         mock_rl_result = MagicMock()
         mock_rl_result.allowed = True
@@ -139,7 +143,11 @@ class TestChatCompletionsFunctionCalling:
         
         # Verify tools were passed to provider
         assert mock_request.called
-        call_kwargs = mock_request.call_args[1] if len(mock_request.call_args) > 1 else {}
+        call_args = mock_request.call_args
+        if len(call_args) > 1:
+            call_kwargs = call_args[1]
+        else:
+            call_kwargs = {}
         assert "tools" in call_kwargs
         assert call_kwargs["tools"] == tools
 
@@ -161,8 +169,8 @@ class TestChatCompletionsFunctionCalling:
         assert response.status_code in [200, 422]
 
     @patch("src.db.users.get_user")
-    @patch("src.services.openrouter_client.make_openrouter_request_openai")
-    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.routes.chat.make_openrouter_request_openai")
+    @patch("src.routes.chat.process_openrouter_response")
     @patch("src.services.rate_limiting.get_rate_limit_manager")
     @patch("src.services.trial_validation.validate_trial_access")
     @patch("src.db.plans.enforce_plan_limits")
@@ -171,8 +179,10 @@ class TestChatCompletionsFunctionCalling:
     @patch("src.db.rate_limits.update_rate_limit_usage")
     @patch("src.db.api_keys.increment_api_key_usage")
     @patch("src.db.activity.log_activity")
+    @patch("src.services.pricing.calculate_cost")
     def test_multiple_tools_passed_through(
         self,
+        mock_calculate_cost,
         mock_log_activity,
         mock_increment,
         mock_update_rate,
@@ -191,8 +201,9 @@ class TestChatCompletionsFunctionCalling:
         """Test that multiple tools are passed through correctly"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
         mock_enforce_limits.return_value = {"allowed": True}
+        mock_calculate_cost.return_value = 0.01
 
         mock_rl_result = MagicMock()
         mock_rl_result.allowed = True
@@ -269,7 +280,11 @@ class TestChatCompletionsFunctionCalling:
         assert response.status_code == 200
         
         # Verify all tools were passed
-        call_kwargs = mock_request.call_args[1] if len(mock_request.call_args) > 1 else {}
+        call_args = mock_request.call_args
+        if len(call_args) > 1:
+            call_kwargs = call_args[1]
+        else:
+            call_kwargs = {}
         assert "tools" in call_kwargs
         assert len(call_kwargs["tools"]) == 2
 

@@ -22,6 +22,7 @@ def mock_user():
         "email": "test@example.com",
         "credits": 1000,
         "plan_id": 1,
+        "environment_tag": "live",
     }
 
 
@@ -35,8 +36,8 @@ class TestFunctionCallingIntegration:
     """Integration tests for function calling"""
 
     @patch("src.db.users.get_user")
-    @patch("src.services.openrouter_client.make_openrouter_request_openai")
-    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.routes.chat.make_openrouter_request_openai")
+    @patch("src.routes.chat.process_openrouter_response")
     @patch("src.services.rate_limiting.get_rate_limit_manager")
     @patch("src.services.trial_validation.validate_trial_access")
     @patch("src.db.plans.enforce_plan_limits")
@@ -45,8 +46,10 @@ class TestFunctionCallingIntegration:
     @patch("src.db.rate_limits.update_rate_limit_usage")
     @patch("src.db.api_keys.increment_api_key_usage")
     @patch("src.db.activity.log_activity")
+    @patch("src.services.pricing.calculate_cost")
     def test_chat_completions_with_tools(
         self,
+        mock_calculate_cost,
         mock_log_activity,
         mock_increment,
         mock_update_rate,
@@ -65,8 +68,9 @@ class TestFunctionCallingIntegration:
         """Test that tools parameter is passed through to provider"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
         mock_enforce_limits.return_value = {"allowed": True}
+        mock_calculate_cost.return_value = 0.01
 
         mock_rl_result = MagicMock()
         mock_rl_result.allowed = True
@@ -140,17 +144,22 @@ class TestFunctionCallingIntegration:
         # Verify request was made
         assert mock_request.called
         
-        # Get the call arguments
+        # Get the call arguments - check both positional and keyword args
         call_args = mock_request.call_args
-        kwargs = call_args[1] if len(call_args) > 1 else {}
+        # Function is called as: make_openrouter_request_openai(messages, model, **optional)
+        # So tools should be in kwargs
+        if len(call_args) > 1:
+            kwargs = call_args[1]
+        else:
+            kwargs = {}
         
         # Verify tools were passed
         assert "tools" in kwargs, "Tools should be passed to provider function"
         assert kwargs["tools"] == tools, "Tools should match input"
 
     @patch("src.db.users.get_user")
-    @patch("src.services.huggingface_client.make_huggingface_request_openai")
-    @patch("src.services.huggingface_client.process_huggingface_response")
+    @patch("src.routes.chat.make_huggingface_request_openai")
+    @patch("src.routes.chat.process_huggingface_response")
     @patch("src.services.rate_limiting.get_rate_limit_manager")
     @patch("src.services.trial_validation.validate_trial_access")
     @patch("src.db.plans.enforce_plan_limits")
@@ -159,8 +168,10 @@ class TestFunctionCallingIntegration:
     @patch("src.db.rate_limits.update_rate_limit_usage")
     @patch("src.db.api_keys.increment_api_key_usage")
     @patch("src.db.activity.log_activity")
+    @patch("src.services.pricing.calculate_cost")
     def test_huggingface_with_tools(
         self,
+        mock_calculate_cost,
         mock_log_activity,
         mock_increment,
         mock_update_rate,
@@ -179,8 +190,9 @@ class TestFunctionCallingIntegration:
         """Test that HuggingFace receives tools parameter"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
         mock_enforce_limits.return_value = {"allowed": True}
+        mock_calculate_cost.return_value = 0.01
 
         mock_rl_result = MagicMock()
         mock_rl_result.allowed = True
@@ -249,9 +261,12 @@ class TestFunctionCallingIntegration:
         # Verify request was made
         assert mock_request.called
         
-        # Get the call arguments
+        # Get the call arguments - check both positional and keyword args
         call_args = mock_request.call_args
-        kwargs = call_args[1] if len(call_args) > 1 else {}
+        if len(call_args) > 1:
+            kwargs = call_args[1]
+        else:
+            kwargs = {}
         
         # Verify tools were passed
         assert "tools" in kwargs, "Tools should be passed to HuggingFace client"
