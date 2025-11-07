@@ -65,15 +65,17 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         # Normalize path for metrics (group dynamic segments)
         endpoint = self._normalize_path(path)
 
-        # Track request body size
+        # Track request body size using Content-Length header
+        # We use the header instead of reading the body to avoid consuming the stream,
+        # which would prevent downstream handlers from accessing the request body
         try:
-            request_body = await request.body()
-            request_size = len(request_body)
+            content_length = request.headers.get("content-length")
+            request_size = int(content_length) if content_length else 0
             fastapi_request_size_bytes.labels(method=method, endpoint=endpoint).observe(
                 request_size
             )
         except Exception as e:
-            logger.debug(f"Could not read request body for metrics: {e}")
+            logger.debug(f"Could not determine request size from headers: {e}")
             request_size = 0
 
         # Increment in-progress requests gauge
@@ -86,24 +88,30 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             # Call the next middleware/handler
             response = await call_next(request)
 
-            # Track response body size
+            # Track response body size from Content-Length header if available
             try:
-                # For responses with a body_iterator (streaming responses),
-                # we can only estimate size
-                if hasattr(response, "body_iterator"):
-                    # For streaming responses, we can't get the exact size
-                    # but we can track 0 to indicate it was streamed
-                    fastapi_response_size_bytes.labels(
-                        method=method, endpoint=endpoint
-                    ).observe(0)
+                # Try to get content length from response headers
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    response_size = int(content_length)
                 else:
-                    response_size = len(response.body) if hasattr(response, "body") else 0
-                    fastapi_response_size_bytes.labels(
-                        method=method, endpoint=endpoint
-                    ).observe(response_size)
+                    # For responses with a body_iterator (streaming responses),
+                    # we can only estimate size as 0 since we can't measure it
+                    if hasattr(response, "body_iterator"):
+                        response_size = 0
+                    else:
+                        # Fallback: try to get body size if directly accessible
+                        response_size = len(response.body) if hasattr(response, "body") else 0
+
+                fastapi_response_size_bytes.labels(
+                    method=method, endpoint=endpoint
+                ).observe(response_size)
             except Exception as e:
                 logger.debug(f"Could not determine response size: {e}")
-                response_size = 0
+                # Record 0 if we can't determine size
+                fastapi_response_size_bytes.labels(
+                    method=method, endpoint=endpoint
+                ).observe(0)
 
             # Record metrics
             duration = time.time() - start_time
