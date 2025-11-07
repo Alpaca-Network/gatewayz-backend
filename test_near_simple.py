@@ -89,7 +89,8 @@ def test_near_api_directly():
             base_url="https://cloud-api.near.ai/v1"
         )
 
-        print("Sending request to deepseek-v3...")
+        print("Sending request to a Near AI model...")
+        print("  (Note: Replace 'deepseek-v3' with a model from https://cloud.near.ai/models)")
 
         response = client.chat.completions.create(
             model="deepseek-v3",
@@ -137,9 +138,10 @@ def test_near_api_directly():
         print("    -H 'Content-Type: application/json' \\")
         print("    -H 'Authorization: Bearer YOUR_API_KEY' \\")
         print("    -d '{")
-        print("      \"model\": \"near/deepseek-v3\",")
+        print("      \"model\": \"near/your-model-name\",")
         print("      \"messages\": [{\"role\": \"user\", \"content\": \"Hello!\"}]")
         print("    }'")
+        print("\n  Check available models at: https://cloud.near.ai/models")
         return True
     else:
         print("\n✗ Some tests failed.")
