@@ -79,6 +79,7 @@ def reset_metrics():
 # ==================== Path Normalization Tests ====================
 
 
+@pytest.mark.unit
 class TestPathNormalization:
     """Test path normalization to prevent cardinality explosion."""
 
@@ -133,6 +134,7 @@ class TestPathNormalization:
 # ==================== HTTP Request Metrics Tests ====================
 
 
+@pytest.mark.unit
 class TestHTTPMetrics:
     """Test HTTP request metrics collection."""
 
@@ -194,6 +196,7 @@ class TestHTTPMetrics:
 # ==================== In-Progress Gauge Tests ====================
 
 
+@pytest.mark.unit
 class TestInProgressGauge:
     """Test fastapi_requests_in_progress gauge."""
 
@@ -239,6 +242,7 @@ class TestInProgressGauge:
 # ==================== Request/Response Size Tests ====================
 
 
+@pytest.mark.unit
 class TestRequestResponseSize:
     """Test request and response size metrics."""
 
@@ -286,6 +290,7 @@ class TestRequestResponseSize:
 # ==================== Duration Tracking Tests ====================
 
 
+@pytest.mark.unit
 class TestDurationTracking:
     """Test that request duration is properly tracked."""
 
@@ -309,6 +314,7 @@ class TestDurationTracking:
 # ==================== Integration Tests ====================
 
 
+@pytest.mark.unit
 class TestIntegration:
     """Integration tests for the complete middleware flow."""
 
@@ -354,6 +360,7 @@ class TestIntegration:
 # ==================== Edge Case Tests ====================
 
 
+@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
@@ -393,6 +400,7 @@ class TestEdgeCases:
 # ==================== Performance Tests ====================
 
 
+@pytest.mark.unit
 class TestPerformance:
     """Test that middleware doesn't significantly impact performance."""
 
