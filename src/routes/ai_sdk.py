@@ -81,12 +81,12 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
 
     This endpoint provides compatibility with the Vercel AI SDK by accepting
     requests in the standard OpenAI chat completion format and routing them
-    through our OpenRouter integration.
+    through the Vercel AI Gateway.
 
     **Request Format:**
     ```json
     {
-        "model": "gpt-4",
+        "model": "openai/gpt-5",
         "messages": [
             {"role": "user", "content": "Hello!"}
         ],
@@ -116,12 +116,17 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
     }
     ```
 
-    **Supported Models:**
-    Access all models available through OpenRouter, including:
-    - OpenAI: gpt-4, gpt-4-turbo, gpt-3.5-turbo
-    - Anthropic: claude-3-opus, claude-3-sonnet, claude-3-haiku
-    - Meta: llama-2-70b, llama-2-13b
-    - And 100+ more models from 15+ providers
+    **Supported Models (Vercel AI Gateway):**
+    - OpenAI: openai/gpt-5, openai/gpt-4o, openai/gpt-4-turbo
+    - Anthropic: anthropic/claude-sonnet-4.5, anthropic/claude-haiku-4.5
+    - Google: google/gemini-2.5-pro, google/gemini-2.5-flash
+    - xAI: xai/grok-3, xai/grok-2-latest
+    - Meta: meta/llama-3.1-70b, meta/llama-3.1-8b
+    - And models from DeepSeek, Mistral, Cohere, Perplexity, and more
+
+    Model format: `provider/model-name` (e.g., `openai/gpt-5`, `anthropic/claude-sonnet-4.5`)
+
+    For complete model list: https://vercel.com/ai-gateway/models
 
     **Raises:**
         HTTPException: If AI_SDK_API_KEY is not configured or request fails
