@@ -3,6 +3,7 @@ Anthropic Messages API Transformer
 Converts between Anthropic Messages API format and OpenAI Chat Completions format
 """
 
+import json
 import time
 from typing import Any
 
@@ -155,12 +156,46 @@ def transform_openai_to_anthropic(
     }
     stop_reason = stop_reason_map.get(finish_reason, "end_turn")
 
+    # Build content array for Anthropic response
+    content_blocks = []
+
+    # Add text content if present
+    if content:
+        content_blocks.append({"type": "text", "text": content})
+
+    # Handle tool_calls from OpenAI format (convert to Anthropic tool_use blocks)
+    if "tool_calls" in message and message["tool_calls"]:
+        for tool_call in message["tool_calls"]:
+            # Extract tool information
+            tool_name = tool_call.get("function", {}).get("name", "tool")
+            tool_args = tool_call.get("function", {}).get("arguments", "{}")
+            tool_id = tool_call.get("id", f"tool-{int(time.time())}")
+
+            # Parse arguments if they're a string
+            if isinstance(tool_args, str):
+                try:
+                    tool_args = json.loads(tool_args)
+                except (json.JSONDecodeError, TypeError):
+                    tool_args = {}
+
+            # Add tool_use content block in Anthropic format
+            content_blocks.append({
+                "type": "tool_use",
+                "id": tool_id,
+                "name": tool_name,
+                "input": tool_args,
+            })
+
+    # If no content blocks were created, add empty text block
+    if not content_blocks:
+        content_blocks.append({"type": "text", "text": ""})
+
     # Build Anthropic-style response
     anthropic_response = {
         "id": openai_response.get("id", f"msg-{int(time.time())}"),
         "type": "message",
         "role": "assistant",
-        "content": [{"type": "text", "text": content}],
+        "content": content_blocks,
         "model": openai_response.get("model", model),
         "stop_reason": stop_reason,
         "stop_sequence": None,  # Would be populated if stopped by stop sequence
