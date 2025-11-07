@@ -23,28 +23,24 @@ def extract_message_with_tools(choice_message: Any) -> dict[str, Any]:
     Returns:
         Dictionary with role, content, and optionally tool_calls/function_call
     """
-    # Handle dict-based messages (e.g., from HuggingFace)
+    # Extract basic message data
     if isinstance(choice_message, dict):
-        msg = {
-            "role": choice_message.get("role", "assistant"),
-            "content": choice_message.get("content", ""),
-        }
-        if "tool_calls" in choice_message:
-            msg["tool_calls"] = choice_message["tool_calls"]
-        if "function_call" in choice_message:
-            msg["function_call"] = choice_message["function_call"]
-        return msg
+        role = choice_message.get("role", "assistant")
+        content = choice_message.get("content", "")
+        tool_calls = choice_message.get("tool_calls")
+        function_call = choice_message.get("function_call")
+    else:
+        role = choice_message.role
+        content = choice_message.content
+        tool_calls = getattr(choice_message, 'tool_calls', None)
+        function_call = getattr(choice_message, 'function_call', None)
 
-    # Handle object-based messages (e.g., from OpenAI SDK)
-    msg = {"role": choice_message.role, "content": choice_message.content}
-
-    # Include tool_calls if present (for function calling)
-    if hasattr(choice_message, 'tool_calls') and choice_message.tool_calls:
-        msg["tool_calls"] = choice_message.tool_calls
-
-    # Include function_call if present (for legacy function_call format)
-    if hasattr(choice_message, 'function_call') and choice_message.function_call:
-        msg["function_call"] = choice_message.function_call
+    # Build message dict with available fields
+    msg = {"role": role, "content": content}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    if function_call:
+        msg["function_call"] = function_call
 
     return msg
 
