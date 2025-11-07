@@ -2,8 +2,8 @@
 Vercel AI SDK compatibility endpoint.
 
 This route provides a dedicated endpoint for Vercel AI SDK requests.
-The endpoint is compatible with the AI SDK client interface but routes
-requests through our OpenRouter integration for actual model execution.
+The endpoint is compatible with the AI SDK client interface and routes
+requests through the Vercel AI Gateway for actual model execution.
 
 Endpoint: POST /api/chat/ai-sdk
 """
@@ -208,16 +208,18 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
 
             # Stream response chunks
             for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    # Format as SSE (Server-Sent Events)
-                    data = {
-                        "choices": [
-                            {
-                                "delta": {"role": "assistant", "content": chunk.choices[0].delta.content}
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(data)}\n\n"
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = getattr(chunk.choices[0], 'delta', None)
+                    if delta and hasattr(delta, 'content') and delta.content:
+                        # Format as SSE (Server-Sent Events)
+                        data = {
+                            "choices": [
+                                {
+                                    "delta": {"role": "assistant", "content": delta.content}
+                                }
+                            ]
+                        }
+                        yield f"data: {json.dumps(data)}\n\n"
 
             # Send completion signal
             completion_data = {"choices": [{"finish_reason": "stop"}]}
