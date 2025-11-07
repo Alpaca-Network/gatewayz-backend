@@ -6,9 +6,12 @@ This is a simpler version that doesn't require running the full app.
 
 import re
 import json
+from pathlib import Path
 
 # Read the model_transformations.py file
-with open('/root/repo/src/services/model_transformations.py', 'r') as f:
+repo_root = Path(__file__).parent.resolve()
+transformations_file = repo_root / 'src' / 'services' / 'model_transformations.py'
+with open(transformations_file, 'r') as f:
     content = f.read()
 
 # Extract Gemini constants
@@ -132,7 +135,7 @@ for input_model, resolved_model in test_models:
 
 # Export to JSON
 print("\n" + "=" * 90)
-output_file = "/root/repo/google_models_config.json"
+output_file = repo_root / "google_models_config.json"
 with open(output_file, 'w') as f:
     json.dump({
         "timestamp": "2025-11-07",

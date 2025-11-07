@@ -303,7 +303,7 @@ def run_comprehensive_tests():
     print("EXPORTING RESULTS")
     print("=" * 100)
 
-    results_file = "/root/repo/google_models_test_results_comprehensive.json"
+    results_file = repo_root / "google_models_test_results_comprehensive.json"
     with open(results_file, "w") as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),

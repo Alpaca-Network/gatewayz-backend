@@ -6,6 +6,7 @@ This demonstrates how responses are structured in OpenAI-compatible format.
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 # Sample test data for each model
 MODEL_TESTS = {
@@ -152,7 +153,8 @@ def main():
         print(f"{model_name:<30} {response_type:<25} {tokens:<15} {speed:<10}")
 
     # Export all test results
-    output_file = "/root/repo/google_models_response_formats.json"
+    repo_root = Path(__file__).parent.resolve()
+    output_file = repo_root / "google_models_response_formats.json"
     with open(output_file, 'w') as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),
