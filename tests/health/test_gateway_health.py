@@ -23,7 +23,7 @@ sys.path.insert(0, str(project_root))
 import importlib.util
 spec = importlib.util.spec_from_file_location(
     "check_and_fix_gateway_models",
-    str(project_root / "check_and_fix_gateway_models.py")
+    str(project_root / "scripts" / "diagnostic" / "check_and_fix_gateway_models.py")
 )
 check_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check_module)
