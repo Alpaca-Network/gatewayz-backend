@@ -107,12 +107,12 @@ class TestPathNormalization:
         assert result == "/models/gpt-4-turbo"
 
     def test_deep_path_limited(self):
-        """Deep paths should be limited to first 5 segments."""
+        """Deep paths should be limited to first 6 segments."""
         result = ObservabilityMiddleware._normalize_path(
             "/a/b/c/d/e/f/g/h/i/j"
         )
-        # Should be limited to first 5 segments
-        assert len(result.split("/")) <= 6  # +1 for empty string from leading /
+        # Should be limited to first 6 segments
+        assert len(result.split("/")) <= 7  # +1 for empty string from leading /
 
     def test_mixed_path_normalization(self):
         """Mixed paths should normalize ids but keep structure."""
