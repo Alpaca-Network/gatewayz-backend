@@ -68,8 +68,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         # We use the header instead of reading the body to avoid consuming the stream,
         # which would prevent downstream handlers from accessing the request body
         try:
-            content_length = request.headers.get("content-length")
-            request_size = int(content_length) if content_length else 0
+            request_content_length = request.headers.get("content-length")
+            request_size = int(request_content_length) if request_content_length else 0
             fastapi_request_size_bytes.labels(method=method, endpoint=endpoint).observe(
                 request_size
             )
@@ -90,9 +90,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             # Track response body size from Content-Length header if available
             try:
                 # Try to get content length from response headers
-                content_length = response.headers.get("content-length")
-                if content_length:
-                    response_size = int(content_length)
+                response_content_length = response.headers.get("content-length")
+                if response_content_length:
+                    response_size = int(response_content_length)
                 else:
                     # For responses with a body_iterator (streaming responses),
                     # we can only estimate size as 0 since we can't measure it
