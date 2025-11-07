@@ -66,6 +66,16 @@ def client(test_app):
     return TestClient(test_app)
 
 
+@pytest.fixture(autouse=True)
+def reset_metrics():
+    """Reset metrics before each test to avoid interference between tests."""
+    # Reset the in-progress gauge to ensure clean state
+    fastapi_requests_in_progress._metrics.clear()
+    yield
+    # Cleanup after test
+    fastapi_requests_in_progress._metrics.clear()
+
+
 # ==================== Path Normalization Tests ====================
 
 
