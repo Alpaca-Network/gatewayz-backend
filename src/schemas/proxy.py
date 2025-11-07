@@ -37,6 +37,7 @@ class ProxyRequest(BaseModel):
     frequency_penalty: float | None = 0.0
     presence_penalty: float | None = 0.0
     stream: bool | None = False
+    tools: list[dict[str, Any]] | None = None  # Function calling tools
     provider: str | None = None  # Provider selection: "openrouter" or "portkey"
     portkey_provider: str | None = "openai"  # Sub-provider for Portkey
     portkey_virtual_key: str | None = None  # Virtual key for Portkey
@@ -87,6 +88,7 @@ class ResponseRequest(BaseModel):
     frequency_penalty: float | None = 0.0
     presence_penalty: float | None = 0.0
     stream: bool | None = False
+    tools: list[dict[str, Any]] | None = None  # Function calling tools
     response_format: ResponseFormat | None = None
     provider: str | None = None
     portkey_provider: str | None = "openai"
@@ -160,6 +162,7 @@ class MessagesRequest(BaseModel):
     - 'max_tokens' is REQUIRED (not optional)
     - Content can be string or array of content blocks
     - No frequency_penalty or presence_penalty
+    - Supports tool use (function calling)
     """
 
     model: str  # e.g., "claude-sonnet-4-5-20250929"
@@ -172,6 +175,8 @@ class MessagesRequest(BaseModel):
     stop_sequences: list[str] | None = None
     stream: bool | None = False
     metadata: dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None  # Tool definitions for function calling
+    tool_choice: str | dict[str, Any] | None = None  # Tool selection: "auto", "required", or specific tool
 
     # Gateway-specific fields (not part of Anthropic API)
     provider: str | None = None

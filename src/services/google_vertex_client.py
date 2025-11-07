@@ -24,7 +24,6 @@ from google.oauth2.service_account import Credentials
 from src.config import Config
 
 # Initialize logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Vertex AI OAuth scopes required for authentication
@@ -40,8 +39,13 @@ def get_google_vertex_credentials():
     Tries multiple credential sources in order:
     1. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (for Vercel/serverless)
        - Supports both raw JSON and base64-encoded JSON
+       - Explicitly creates service account credentials using from_service_account_info()
+       - This ensures proper access token generation (not id_token)
     2. GOOGLE_APPLICATION_CREDENTIALS file path (for development)
     3. Application Default Credentials (ADC) from google.auth.default()
+    
+    This function is used by all Google Vertex AI services to ensure consistent
+    credential handling across the codebase.
     """
     try:
         # First, try to get credentials from JSON environment variable (Vercel/serverless)
@@ -57,14 +61,15 @@ def get_google_vertex_credentials():
 
             try:
                 # Try to parse as raw JSON first
-                creds_dict = json_module.loads(creds_json_env)
+                creds_json = creds_json_env
+                creds_dict = json_module.loads(creds_json)
                 logger.debug("Credentials parsed as raw JSON")
             except (json_module.JSONDecodeError, ValueError):
                 # If that fails, try base64 decoding
                 try:
                     logger.debug("Attempting to decode credentials as base64")
-                    decoded = base64.b64decode(creds_json_env).decode("utf-8")
-                    creds_dict = json_module.loads(decoded)
+                    creds_json = base64.b64decode(creds_json_env).decode("utf-8")
+                    creds_dict = json_module.loads(creds_json)
                     logger.debug("Credentials successfully decoded from base64 and parsed as JSON")
                 except Exception as base64_error:
                     logger.warning(
@@ -74,21 +79,24 @@ def get_google_vertex_credentials():
                     )
                     # Don't raise - allow fallback to next credential method
                     creds_dict = None
+                    creds_json = None
 
-            if creds_dict:
+            if creds_dict and creds_json:
                 try:
+                    # Explicitly create service account credentials from the JSON
+                    # This ensures we get proper service account credentials that can generate access tokens
                     credentials = Credentials.from_service_account_info(
                         creds_dict, scopes=VERTEX_AI_SCOPES
                     )
-                    logger.debug("Created Credentials object from service account info with Vertex AI scopes")
-                    credentials.refresh(Request())
                     logger.info(
-                        "Successfully loaded and validated Google Vertex credentials from GOOGLE_VERTEX_CREDENTIALS_JSON"
+                        f"Successfully loaded Google Vertex credentials from JSON (service account: {creds_dict.get('client_email', 'unknown')})"
                     )
                     return credentials
+
                 except Exception as e:
+                    error_str = str(e)
                     logger.warning(
-                        f"Failed to create/refresh credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {e}. "
+                        f"Failed to load credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {error_str}. "
                         "Falling back to next credential method.",
                         exc_info=True,
                     )
@@ -103,12 +111,14 @@ def get_google_vertex_credentials():
                 credentials = Credentials.from_service_account_file(
                     Config.GOOGLE_APPLICATION_CREDENTIALS, scopes=VERTEX_AI_SCOPES
                 )
-                credentials.refresh(Request())
+                # Don't refresh here - credentials are valid upon creation
+                # Refresh will happen in get_google_vertex_access_token() when needed
                 logger.info("Successfully loaded Google Vertex credentials from file")
                 return credentials
             except Exception as e:
+                error_str = str(e)
                 logger.warning(
-                    f"Failed to load/refresh credentials from file: {e}. "
+                    f"Failed to load credentials from file: {error_str}. "
                     "Falling back to next credential method.",
                     exc_info=True,
                 )
@@ -122,31 +132,75 @@ def get_google_vertex_credentials():
         logger.info("Successfully loaded Application Default Credentials")
         return credentials
     except Exception as e:
-        logger.error(f"Failed to get Google Cloud credentials: {e}", exc_info=True)
-        logger.error("Please set one of:")
-        logger.error(
-            "  1. GOOGLE_VERTEX_CREDENTIALS_JSON (raw JSON or base64-encoded for serverless)"
+        error_msg = (
+            f"Failed to get Google Cloud credentials: {str(e)}. "
+            "Please configure credentials for Google Vertex AI. Set one of:\n"
+            "  1. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (raw JSON or base64-encoded)\n"
+            "  2. GOOGLE_APPLICATION_CREDENTIALS file path (path to service account JSON)\n"
+            "  3. Configure Application Default Credentials via 'gcloud auth application-default login'\n"
+            "For serverless deployments, use GOOGLE_VERTEX_CREDENTIALS_JSON."
         )
-        logger.error("  2. GOOGLE_APPLICATION_CREDENTIALS (file path for development)")
-        logger.error("  3. Configure Application Default Credentials via gcloud")
-        raise
+        logger.error(error_msg)
+        # Raise ValueError so it gets mapped to a 400 error instead of 502
+        raise ValueError(error_msg) from e
 
 
 def get_google_vertex_access_token():
     """Get Google Vertex AI access token for REST API calls
 
-    Returns an access token that can be used in Authorization headers
-    for REST API requests to the Vertex AI Gemini API.
+    Returns an OAuth2 access token that can be used as a bearer token.
+
+    Supports all credential sources:
+    1. GOOGLE_VERTEX_CREDENTIALS_JSON (raw JSON or base64)
+    2. GOOGLE_APPLICATION_CREDENTIALS (file path)
+    3. Application Default Credentials (ADC)
     """
     try:
-        logger.info("Getting Google Vertex AI credentials")
-        credentials = get_google_vertex_credentials()
-        logger.info("Successfully obtained credentials")
+        logger.info("Getting credentials for Vertex AI access token")
 
-        # Ensure credentials are fresh
+        # Get credentials using existing function that supports all sources
+        credentials = get_google_vertex_credentials()
+
+        # Refresh credentials to get a valid access token
+        from google.auth.transport.requests import Request as AuthRequest
+
+        # Ensure credentials are fresh - refresh if not valid or expired
         if not credentials.valid or credentials.expired:
             logger.info("Refreshing expired or invalid credentials")
-            credentials.refresh(Request())
+            credentials.refresh(AuthRequest())
+            logger.debug("Credentials refreshed successfully")
+
+        # For service account credentials, ensure we get an access token, not id_token
+        # The refresh() method should return an access token when proper scopes are used
+        if hasattr(credentials, 'token') and credentials.token:
+            logger.info(f"Successfully obtained access token (length: {len(credentials.token)} chars)")
+            return credentials.token
+        
+        # If token is not available, try refreshing again
+        logger.warning("Token not available after refresh, attempting refresh again...")
+        credentials.refresh(AuthRequest())
+        
+        if hasattr(credentials, 'token') and credentials.token:
+            logger.info(f"Successfully obtained access token after second refresh (length: {len(credentials.token)} chars)")
+            return credentials.token
+        
+        # Check if we got an id_token instead of access_token (common issue)
+        if hasattr(credentials, 'id_token') and credentials.id_token:
+            error_msg = (
+                "Received id_token instead of access_token. This usually happens when:\n"
+                "1. The service account credentials are not properly configured\n"
+                "2. The scopes are incorrect\n"
+                "3. The credentials file is missing required fields\n\n"
+                "Please ensure you're using a valid service account JSON key file with:\n"
+                "- 'type': 'service_account'\n"
+                "- 'private_key' field\n"
+                "- 'client_email' field\n"
+                "- Proper IAM permissions (roles/aiplatform.user)"
+            )
+            logger.error(error_msg)
+            raise ValueError(f"No access token in response. {error_msg}")
+        
+        raise ValueError("Failed to obtain access token from credentials after refresh")
 
         access_token = credentials.token
 
@@ -167,6 +221,17 @@ def get_google_vertex_access_token():
     except Exception as e:
         logger.error(f"Failed to get Google Vertex access token: {e}")
         raise
+    except Exception as e:
+        logger.error(f"Failed to get Vertex AI access token: {e}", exc_info=True)
+        # Check if the error contains id_token info
+        error_str = str(e)
+        if 'id_token' in error_str.lower():
+            raise ValueError(
+                f"Failed to get Google Vertex access token: {error_str}. "
+                "The credentials returned an id_token instead of an access_token. "
+                "Please ensure you're using a valid service account JSON key file."
+            ) from e
+        raise ValueError(f"Failed to get Google Vertex access token: {str(e)}") from e
 
 
 def transform_google_vertex_model_id(model_id: str) -> str:
@@ -270,7 +335,19 @@ def make_google_vertex_request_openai(
             logger.error(f"Failed to build generation config: {config_error}", exc_info=True)
             raise
 
-        # Step 5: Prepare the request payload
+        # Step 5: Extract tools from kwargs (if provided)
+        tools = kwargs.get("tools")
+        if tools:
+            logger.info(f"Tools parameter detected: {len(tools) if isinstance(tools, list) else 0} tools")
+            logger.warning(
+                "Google Vertex AI function calling support requires transformation from OpenAI format to Gemini format. "
+                "Currently, tools are extracted but not yet transformed. Function calling may not work correctly."
+            )
+            # TODO: Transform OpenAI tools format to Gemini function calling format
+            # Gemini uses a different schema: tools need to be converted to FunctionDeclaration format
+            # See: https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini#function_calling
+
+        # Step 6: Prepare the request payload
         try:
             request_body = {
                 "contents": contents,
@@ -280,12 +357,16 @@ def make_google_vertex_request_openai(
             if generation_config:
                 request_body["generationConfig"] = generation_config
 
+            # Add tools if provided (after transformation - currently not implemented)
+            # if tools:
+            #     request_body["tools"] = transform_openai_tools_to_gemini(tools)
+
             logger.debug(f"Request body prepared with keys: {list(request_body.keys())}")
         except Exception as request_error:
             logger.error(f"Failed to create request body: {request_error}", exc_info=True)
             raise
 
-        # Step 6: Make the REST API request
+        # Step 7: Make the REST API request
         try:
             # Construct the API endpoint URL
             api_endpoint = f"{Config.GOOGLE_VERTEX_LOCATION}-aiplatform.googleapis.com"
@@ -366,7 +447,7 @@ def make_google_vertex_request_openai(
             logger.error(f"Vertex AI REST API call failed: {api_error}", exc_info=True)
             raise
 
-        # Step 7: Process and normalize response
+        # Step 8: Process and normalize response
         try:
             processed_response = _process_google_vertex_rest_response(response_data, model)
             logger.info("Successfully processed Vertex AI response")
@@ -536,23 +617,35 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
     
     # Extract text from parts
     text_content = ""
+    tool_calls = []
     for part in content_parts:
         if "text" in part:
             text_content += part["text"]
-    
+        # Check for tool use in parts (function calling)
+        if "functionCall" in part:
+            tool_call = part["functionCall"]
+            tool_calls.append({
+                "id": f"call_{int(time.time() * 1000)}",
+                "type": "function",
+                "function": {
+                    "name": tool_call.get("name", "unknown"),
+                    "arguments": json.dumps(tool_call.get("args", {}))
+                }
+            })
+
     logger.info(f"Extracted text content length: {len(text_content)} characters")
-    
+
     # Warn if content is empty
-    if not text_content:
+    if not text_content and not tool_calls:
         logger.warning(
             f"Received empty text content from Vertex AI for model {model}. Candidate: {json.dumps(candidate, default=str)}"
         )
-    
+
     # Extract usage information
     usage_metadata = candidate.get("usageMetadata", {})
     prompt_tokens = int(usage_metadata.get("promptTokenCount", 0))
     completion_tokens = int(usage_metadata.get("candidatesTokenCount", 0))
-    
+
     finish_reason = candidate.get("finishReason", "STOP")
     finish_reason_map = {
         "STOP": "stop",
@@ -561,7 +654,12 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
         "RECITATION": "stop",
         "FINISH_REASON_UNSPECIFIED": "unknown",
     }
-    
+
+    # Build message with content and tool_calls if present
+    message = {"role": "assistant", "content": text_content}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+
     return {
         "id": f"vertex-{int(time.time() * 1000)}",
         "object": "text_completion",
@@ -570,7 +668,7 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text_content},
+                "message": message,
                 "finish_reason": finish_reason_map.get(finish_reason, "stop"),
             }
         ],
