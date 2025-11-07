@@ -11,7 +11,7 @@ from typing import Any
 from pathlib import Path
 
 # Add src to path for imports
-repo_root = Path(__file__).parent.resolve()
+repo_root = Path(__file__).parent.parent.parent.resolve()  # Go up 3 levels: integration -> tests -> repo
 sys.path.insert(0, str(repo_root))
 
 from src.config import Config

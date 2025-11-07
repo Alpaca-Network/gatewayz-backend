@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 # Read the model_transformations.py file
-repo_root = Path(__file__).parent.resolve()
+repo_root = Path(__file__).parent.parent.parent.resolve()  # Go up 3 levels: integration -> tests -> repo
 transformations_file = repo_root / 'src' / 'services' / 'model_transformations.py'
 with open(transformations_file, 'r') as f:
     content = f.read()
