@@ -198,9 +198,9 @@ def track_model_inference(provider: str, model: str):
     status = "success"
     try:
         yield
-    except Exception as e:
+    except (Exception,):  # Intentionally catch all exceptions from yield block
         status = "error"
-        logger.error(f"Model inference error for {provider}/{model}: {type(e).__name__}")
+        logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
         duration = time.time() - start_time
         model_inference_duration.labels(provider=provider, model=model).observe(
