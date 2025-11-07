@@ -24,7 +24,6 @@ from google.oauth2.service_account import Credentials
 from src.config import Config
 
 # Initialize logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Vertex AI OAuth scopes required for authentication
@@ -165,9 +164,11 @@ def get_google_vertex_access_token():
         # Refresh credentials to get a valid access token
         from google.auth.transport.requests import Request as AuthRequest
 
-        if not credentials.valid:
-            logger.info("Credentials not valid, refreshing...")
+        # Ensure credentials are fresh - refresh if not valid or expired
+        if not credentials.valid or credentials.expired:
+            logger.info("Refreshing expired or invalid credentials")
             credentials.refresh(AuthRequest())
+            logger.debug("Credentials refreshed successfully")
 
         # For service account credentials, ensure we get an access token, not id_token
         # The refresh() method should return an access token when proper scopes are used
@@ -599,23 +600,35 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
     
     # Extract text from parts
     text_content = ""
+    tool_calls = []
     for part in content_parts:
         if "text" in part:
             text_content += part["text"]
-    
+        # Check for tool use in parts (function calling)
+        if "functionCall" in part:
+            tool_call = part["functionCall"]
+            tool_calls.append({
+                "id": f"call_{int(time.time() * 1000)}",
+                "type": "function",
+                "function": {
+                    "name": tool_call.get("name", "unknown"),
+                    "arguments": json.dumps(tool_call.get("args", {}))
+                }
+            })
+
     logger.info(f"Extracted text content length: {len(text_content)} characters")
-    
+
     # Warn if content is empty
-    if not text_content:
+    if not text_content and not tool_calls:
         logger.warning(
             f"Received empty text content from Vertex AI for model {model}. Candidate: {json.dumps(candidate, default=str)}"
         )
-    
+
     # Extract usage information
     usage_metadata = candidate.get("usageMetadata", {})
     prompt_tokens = int(usage_metadata.get("promptTokenCount", 0))
     completion_tokens = int(usage_metadata.get("candidatesTokenCount", 0))
-    
+
     finish_reason = candidate.get("finishReason", "STOP")
     finish_reason_map = {
         "STOP": "stop",
@@ -624,7 +637,12 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
         "RECITATION": "stop",
         "FINISH_REASON_UNSPECIFIED": "unknown",
     }
-    
+
+    # Build message with content and tool_calls if present
+    message = {"role": "assistant", "content": text_content}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+
     return {
         "id": f"vertex-{int(time.time() * 1000)}",
         "object": "text_completion",
@@ -633,7 +651,7 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text_content},
+                "message": message,
                 "finish_reason": finish_reason_map.get(finish_reason, "stop"),
             }
         ],
