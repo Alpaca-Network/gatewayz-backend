@@ -74,6 +74,26 @@ class AISDKChatResponse(BaseModel):
     usage: Usage
 
 
+def _build_request_kwargs(request: AISDKChatRequest) -> dict:
+    """Build kwargs dictionary for AI SDK request.
+
+    Args:
+        request: The incoming AI SDK chat request
+
+    Returns:
+        dict: Filtered kwargs with None values removed
+    """
+    kwargs = {
+        "max_tokens": request.max_tokens,
+        "temperature": request.temperature,
+        "top_p": request.top_p,
+        "frequency_penalty": request.frequency_penalty,
+        "presence_penalty": request.presence_penalty,
+    }
+    # Remove None values
+    return {k: v for k, v in kwargs.items() if v is not None}
+
+
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
 async def ai_sdk_chat_completion(request: AISDKChatRequest):
     """
@@ -143,16 +163,7 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
             return await _handle_ai_sdk_stream(request)
 
         # Build kwargs for API request
-        kwargs = {
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "frequency_penalty": request.frequency_penalty,
-            "presence_penalty": request.presence_penalty,
-        }
-
-        # Remove None values
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        kwargs = _build_request_kwargs(request)
 
         # Convert messages to dict format
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
@@ -187,16 +198,7 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
     async def stream_response():
         try:
             # Build kwargs for API request
-            kwargs = {
-                "max_tokens": request.max_tokens,
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-                "frequency_penalty": request.frequency_penalty,
-                "presence_penalty": request.presence_penalty,
-            }
-
-            # Remove None values
-            kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            kwargs = _build_request_kwargs(request)
 
             # Convert messages to dict format
             messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
