@@ -94,7 +94,9 @@ class Config:
     # ==================== Monitoring & Observability Configuration ====================
 
     # Prometheus Configuration
-    PROMETHEUS_ENABLED = os.environ.get("PROMETHEUS_ENABLED", "true").lower() in {
+    # Disabled by default - only enable if PROMETHEUS_ENABLED is explicitly set to true
+    # and PROMETHEUS_REMOTE_WRITE_URL is configured
+    PROMETHEUS_ENABLED = os.environ.get("PROMETHEUS_ENABLED", "false").lower() in {
         "1",
         "true",
         "yes",
