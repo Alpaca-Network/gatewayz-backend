@@ -247,7 +247,7 @@ class TestFunctionCallingIntegration:
             }
         ]
 
-        response = client.post(
+        client.post(
             "/v1/chat/completions",
             headers=auth_headers,
             json={
