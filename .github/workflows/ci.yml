@@ -379,33 +379,6 @@ jobs:
               body: '✅ All CI checks passed! This PR is ready to merge and deploy.'
             })
 
-  # Job 5B: Trigger Claude on CI Failure
-  trigger-claude-on-failure:
-    name: Trigger Claude Auto-Fix
-    runs-on: ubuntu-latest
-    needs: [lint, security, coverage, build]
-    if: failure() && github.event_name == 'pull_request'
-    permissions:
-      actions: write
-
-    steps:
-      - name: Trigger claude-on-failure workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              const response = await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'claude-on-failure.yml',
-                ref: context.payload.pull_request.head.ref,
-              });
-              console.log('✅ Claude on-failure workflow triggered');
-            } catch (error) {
-              console.error('Failed to trigger workflow:', error);
-              // Don't fail the job if we can't trigger the workflow
-            }
-
   # Job 6: Railway Deployment Notification
   notify-deployment:
     name: Notify Deployment
