@@ -702,6 +702,16 @@ async def chat_completions(
 
         provider_chain = build_provider_failover_chain(provider)
         model = original_model
+        
+        # Diagnostic logging for tools parameter
+        if "tools" in optional:
+            logger.info(
+                "Tools parameter detected: tools_count=%d, provider=%s, model=%s",
+                len(optional["tools"]) if isinstance(optional["tools"], list) else 0,
+                sanitize_for_logging(provider),
+                sanitize_for_logging(original_model),
+            )
+            logger.debug("Tools content: %s", sanitize_for_logging(str(optional["tools"])[:500]))
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
@@ -1476,6 +1486,16 @@ async def unified_responses(
 
         provider_chain = build_provider_failover_chain(provider)
         model = original_model
+        
+        # Diagnostic logging for tools parameter
+        if "tools" in optional:
+            logger.info(
+                "Tools parameter detected (unified_responses): tools_count=%d, provider=%s, model=%s",
+                len(optional["tools"]) if isinstance(optional["tools"], list) else 0,
+                sanitize_for_logging(provider),
+                sanitize_for_logging(original_model),
+            )
+            logger.debug("Tools content: %s", sanitize_for_logging(str(optional["tools"])[:500]))
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
