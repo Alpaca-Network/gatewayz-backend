@@ -167,21 +167,20 @@ def get_google_vertex_credentials():
 def get_google_vertex_access_token():
     """Get Google Vertex AI access token for REST API calls
 
-    Returns an access token that can be used in Authorization headers
-    for REST API requests to the Vertex AI Gemini API.
+    Returns a self-signed JWT that can be used as a bearer token.
 
-    WORKAROUND: Creates access token manually from service account credentials
-    to avoid id_token vs access_token issues with google.auth library.
+    Service accounts can create self-signed JWTs that are accepted by Google APIs
+    without going through OAuth token exchange. This avoids the id_token vs access_token issue.
     """
     try:
-        logger.info("Getting Google Vertex AI credentials")
+        logger.info("Creating self-signed JWT for Vertex AI")
 
-        # Load service account credentials directly from environment
+        # Load service account credentials
         import base64
         import os
         import json as json_module
-        from google.oauth2 import service_account
-        from google.auth.transport.requests import Request as AuthRequest
+        import time
+        import jwt  # PyJWT library
 
         creds_json_env = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
         if not creds_json_env:
@@ -200,52 +199,39 @@ def get_google_vertex_access_token():
 
         logger.info("Successfully loaded service account credentials")
 
-        # Create credentials with explicit token_uri to force access_token
-        # The key is to use service_account.Credentials directly with proper audience
-        credentials = service_account.Credentials.from_service_account_info(
-            creds_dict,
-            scopes=VERTEX_AI_SCOPES
+        # Extract key info
+        service_account_email = creds_dict.get("client_email")
+        private_key = creds_dict.get("private_key")
+
+        if not service_account_email or not private_key:
+            raise ValueError("Missing client_email or private_key in credentials")
+
+        # Create self-signed JWT
+        # Audience should be the service URL (Vertex AI API)
+        now = int(time.time())
+        payload = {
+            "iss": service_account_email,  # Issuer: service account email
+            "sub": service_account_email,  # Subject: service account email
+            "aud": "https://aiplatform.googleapis.com/",  # Audience: Vertex AI API
+            "iat": now,  # Issued at
+            "exp": now + 3600,  # Expires in 1 hour
+        }
+
+        # Sign the JWT with the private key
+        token = jwt.encode(
+            payload,
+            private_key,
+            algorithm="RS256"
         )
 
-        logger.info("Created service account credentials with scopes")
-
-        # Get token by refreshing
-        try:
-            credentials.refresh(AuthRequest())
-            access_token = credentials.token
-
-            if access_token:
-                logger.info(f"Successfully obtained access token (length: {len(access_token)} chars)")
-                return access_token
-            else:
-                raise ValueError("Token is None after refresh")
-
-        except Exception as refresh_error:
-            error_str = str(refresh_error)
-            logger.error(f"Token refresh failed: {error_str}", exc_info=True)
-
-            # If we get "No access token in response", try using id_token as workaround
-            if "No access token" in error_str or "id_token" in error_str:
-                logger.warning(
-                    "OAuth returned id_token instead of access_token. "
-                    "Attempting to extract and use it as bearer token."
-                )
-
-                # Try to extract id_token from the error message
-                import re
-                id_token_match = re.search(r"'id_token': '([^']+)'", error_str)
-                if id_token_match:
-                    id_token = id_token_match.group(1)
-                    logger.info(f"Extracted id_token (length: {len(id_token)} chars). Using as bearer token.")
-                    return id_token
-
-            raise ValueError(f"Failed to obtain usable token: {error_str}")
+        logger.info(f"Successfully created self-signed JWT (length: {len(token)} chars)")
+        return token
 
     except ValueError:
         raise
     except Exception as e:
-        logger.error(f"Failed to get Google Vertex access token: {e}", exc_info=True)
-        raise ValueError(f"Failed to get Google Vertex access token: {str(e)}") from e
+        logger.error(f"Failed to create self-signed JWT: {e}", exc_info=True)
+        raise ValueError(f"Failed to create self-signed JWT: {str(e)}") from e
 
 
 def transform_google_vertex_model_id(model_id: str) -> str:
