@@ -70,10 +70,10 @@ def client(test_app):
 def reset_metrics():
     """Reset metrics before each test to avoid interference between tests."""
     # Reset the in-progress gauge to ensure clean state
-    fastapi_requests_in_progress._metrics.clear()
+    fastapi_requests_in_progress.clear()
     yield
     # Cleanup after test
-    fastapi_requests_in_progress._metrics.clear()
+    fastapi_requests_in_progress.clear()
 
 
 # ==================== Path Normalization Tests ====================
