@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Add src to path
-repo_root = Path(__file__).parent.resolve()
+repo_root = Path(__file__).parent.parent.parent.resolve()  # Go up 3 levels: integration -> tests -> repo
 sys.path.insert(0, str(repo_root))
 
 # Test data - models to test

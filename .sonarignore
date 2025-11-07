@@ -3,14 +3,5 @@
 scripts/**
 scripts/integration-tests/**
 
-# Ignore Google Vertex AI validation and test scripts
-# These are standalone validation tools not part of core application
-test_google_models.py
-test_models_standalone.py
-test_response_format.py
-validate_google_models.py
-
 # Ignore test data files and JSON configurations
-google_models_config.json
-google_models_response_formats.json
-google_models_test_results_comprehensive.json
+tests/**/google_models_*.json
