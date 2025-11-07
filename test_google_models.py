@@ -6,11 +6,13 @@ and run a test prompt with each one.
 
 import sys
 import json
-import asyncio
+from datetime import datetime
 from typing import Any
+from pathlib import Path
 
 # Add src to path for imports
-sys.path.insert(0, "/root/repo")
+repo_root = Path(__file__).parent.resolve()
+sys.path.insert(0, str(repo_root))
 
 from src.config import Config
 from src.services.google_vertex_client import (
@@ -180,7 +182,7 @@ def main():
     results_file = "/root/repo/google_models_test_results.json"
     with open(results_file, "w") as f:
         json.dump({
-            "timestamp": str(asyncio.get_event_loop().time() if hasattr(asyncio.get_event_loop(), 'time') else 'N/A'),
+            "timestamp": datetime.now().isoformat(),
             "total_models": len(results),
             "successful": successful,
             "failed": failed,
