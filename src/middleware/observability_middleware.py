@@ -165,21 +165,25 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         parts = path.split("/")
         normalized_parts = []
 
-        for i, part in enumerate(parts):
+        for part in parts:
             if not part:  # Skip empty parts from leading/trailing slashes
                 continue
 
-            # Check if this looks like a UUID or ID (hex string or UUID pattern)
-            if len(part) > 10 and (
-                part.isdigit() or
-                all(c in "0123456789abcdef-" for c in part.lower())
-            ):
-                # Replace numeric/UUID segments with {id}
+            # Check if this looks like a numeric ID (all digits)
+            if part.isdigit():
+                # Replace numeric segments with {id}
                 normalized_parts.append("{id}")
-            # Check if it looks like a model name or similar (contains special chars like -)
-            elif "-" in part and len(part) > 10:
-                # Likely a model name or identifier, keep first segment only for grouping
-                # e.g., "gpt-4-turbo" -> "gpt-4-turbo" (keep as is)
+            # Check if this looks like a UUID (hex string with hyphens: 8-4-4-4-12 format)
+            elif (
+                len(part) >= 36
+                and all(c in "0123456789abcdef-" for c in part.lower())
+            ):
+                # Replace UUID segments with {id}
+                normalized_parts.append("{id}")
+            # Check if it looks like a model name or similar (contains hyphens)
+            elif "-" in part and not part.isdigit():
+                # Likely a model name or identifier, keep as is
+                # e.g., "gpt-4-turbo" -> "gpt-4-turbo"
                 normalized_parts.append(part)
             else:
                 # Keep regular path segments
