@@ -63,19 +63,30 @@ def make_together_request_openai_stream(messages, model, **kwargs):
 def process_together_response(response):
     """Process Together response to extract relevant data"""
     try:
+        choices = []
+        for choice in response.choices:
+            msg = {"role": choice.message.role, "content": choice.message.content}
+
+            # Include tool_calls if present (for function calling)
+            if hasattr(choice.message, 'tool_calls') and choice.message.tool_calls:
+                msg["tool_calls"] = choice.message.tool_calls
+
+            # Include function_call if present (for legacy function_call format)
+            if hasattr(choice.message, 'function_call') and choice.message.function_call:
+                msg["function_call"] = choice.message.function_call
+
+            choices.append({
+                "index": choice.index,
+                "message": msg,
+                "finish_reason": choice.finish_reason,
+            })
+
         return {
             "id": response.id,
             "object": response.object,
             "created": response.created,
             "model": response.model,
-            "choices": [
-                {
-                    "index": choice.index,
-                    "message": {"role": choice.message.role, "content": choice.message.content},
-                    "finish_reason": choice.finish_reason,
-                }
-                for choice in response.choices
-            ],
+            "choices": choices,
             "usage": (
                 {
                     "prompt_tokens": response.usage.prompt_tokens,
