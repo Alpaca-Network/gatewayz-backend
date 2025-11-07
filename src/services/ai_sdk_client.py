@@ -1,15 +1,15 @@
 """
 Vercel AI SDK client integration.
 
-This module provides integration with the Vercel AI SDK via the openrouter provider,
-which serves as a compatible endpoint for AI SDK requests.
+This module provides integration with the Vercel AI Gateway, which is the official
+gateway for accessing AI models through Vercel's unified platform.
 
 The Vercel AI SDK is primarily a TypeScript/JavaScript toolkit. For Python backends,
-we route AI SDK requests through our OpenRouter integration which provides the same
-model catalog and features.
+we provide AI SDK compatibility through the Vercel AI Gateway endpoint, which supports
+models from OpenAI, Anthropic, Google, xAI, Meta, and other providers.
 
 Documentation: https://ai-sdk.dev/docs
-OpenRouter Integration: https://openrouter.ai/docs
+Vercel AI Gateway: https://vercel.com/ai-gateway
 """
 
 import logging
@@ -37,11 +37,24 @@ def validate_ai_sdk_api_key() -> str:
 
 
 def get_ai_sdk_client():
-    """Get AI SDK compatible client using OpenRouter.
+    """Get AI SDK compatible client using Vercel AI Gateway.
 
     The Vercel AI SDK is a TypeScript/JavaScript toolkit for building AI applications.
-    Since this is a Python backend, we provide AI SDK compatibility through our
-    OpenRouter integration which offers the same model catalog and features.
+    Since this is a Python backend, we provide AI SDK compatibility through the
+    Vercel AI Gateway which is the official gateway for accessing all Vercel AI models.
+
+    The gateway provides access to models from:
+    - OpenAI (GPT-5, GPT-4o, etc.)
+    - Anthropic (Claude Haiku, Sonnet, Opus)
+    - Google (Gemini)
+    - xAI (Grok)
+    - Meta (Llama)
+    - DeepSeek
+    - Mistral
+    - And many more...
+
+    Base URL: https://ai-gateway.vercel.sh/v1
+    Documentation: https://vercel.com/docs/ai-gateway
 
     Returns:
         OpenAI: OpenAI-compatible client for making AI SDK requests
@@ -52,9 +65,12 @@ def get_ai_sdk_client():
     try:
         api_key = validate_ai_sdk_api_key()
 
-        # Use OpenRouter as the compatible endpoint for AI SDK requests
-        # OpenRouter provides access to 100+ models from multiple providers
-        return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        # Use Vercel AI Gateway as the endpoint for AI SDK requests
+        # The gateway provides OpenAI-compatible API for unified model access
+        return OpenAI(
+            base_url="https://ai-gateway.vercel.sh/v1",
+            api_key=api_key
+        )
     except Exception as e:
         logger.error(f"Failed to initialize AI SDK client: {e}")
         raise

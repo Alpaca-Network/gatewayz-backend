@@ -59,11 +59,11 @@ class TestAISDKEndpoint:
             },
         }
 
-        # Make request
+        # Make request using Vercel AI Gateway model format
         response = client.post(
             "/api/chat/ai-sdk",
             json={
-                "model": "gpt-4",
+                "model": "openai/gpt-5",  # Vercel AI Gateway model format
                 "messages": [{"role": "user", "content": "Hello!"}],
                 "temperature": 0.7,
                 "max_tokens": 100,
@@ -98,7 +98,7 @@ class TestAISDKEndpoint:
         response = client.post(
             "/api/chat/ai-sdk",
             json={
-                "model": "gpt-4",
+                "model": "openai/gpt-5",
                 # Missing required 'messages' field
             },
         )
@@ -120,11 +120,11 @@ class TestAISDKEndpoint:
 
         mock_stream.return_value = iter([mock_chunk1, mock_chunk2])
 
-        # Make streaming request
+        # Make streaming request using Vercel AI Gateway model format
         response = client.post(
             "/api/chat/ai-sdk",
             json={
-                "model": "gpt-4",
+                "model": "openai/gpt-5",  # Vercel AI Gateway model format
                 "messages": [{"role": "user", "content": "Hello!"}],
                 "stream": True,
             },
@@ -135,11 +135,11 @@ class TestAISDKEndpoint:
 
     def test_ai_sdk_endpoint_schema(self):
         """Test that endpoint properly validates request schema"""
-        # Valid request with all optional fields
+        # Valid request with all optional fields using Vercel AI Gateway format
         response = client.post(
             "/api/chat/ai-sdk",
             json={
-                "model": "gpt-4",
+                "model": "anthropic/claude-sonnet-4.5",  # Vercel AI Gateway model format
                 "messages": [
                     {"role": "system", "content": "You are helpful"},
                     {"role": "user", "content": "Hello!"},

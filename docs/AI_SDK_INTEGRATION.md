@@ -36,17 +36,20 @@ Since the Vercel AI SDK is primarily a TypeScript/JavaScript library, this Pytho
            │ OpenAI-compatible request
            ▼
 ┌──────────────────────────────────┐
-│  OpenRouter (OpenAI-compatible)   │
-│  Base URL: api.openrouter.ai      │
+│  Vercel AI Gateway               │
+│  Base URL: ai-gateway.vercel.sh  │
+│  Official unified AI platform    │
 └──────────┬───────────────────────┘
            │ Model inference
            ▼
 ┌──────────────────────────────────┐
 │  AI Model Providers              │
-│  - OpenAI (GPT-4, GPT-3.5)       │
+│  - OpenAI (GPT-5, GPT-4o)        │
 │  - Anthropic (Claude)            │
+│  - Google (Gemini)               │
+│  - xAI (Grok)                    │
 │  - Meta (Llama)                  │
-│  - And 15+ more                  │
+│  - DeepSeek, Mistral, and more   │
 └──────────────────────────────────┘
 ```
 
@@ -137,7 +140,14 @@ data: [DONE]
 ### Environment Variables
 
 **Required**:
-- `AI_SDK_API_KEY`: Your OpenRouter API key for model access
+- `AI_SDK_API_KEY`: Your Vercel AI Gateway API key for model access
+
+**How to Get Your API Key**:
+1. Go to https://vercel.com/ai-gateway
+2. Sign up or log in to your Vercel account
+3. Create a new AI Gateway project
+4. Generate an API key
+5. Use this key as your `AI_SDK_API_KEY`
 
 **Optional**:
 - Set in your deployment environment (Railway, Vercel, Docker, etc.)
@@ -146,14 +156,14 @@ data: [DONE]
 
 #### Local Development
 ```bash
-export AI_SDK_API_KEY="sk-or-..."
+export AI_SDK_API_KEY="your-vercel-ai-gateway-key"
 python src/main.py
 ```
 
 #### Railway
 Add environment variable in Railway dashboard:
 ```
-AI_SDK_API_KEY=sk-or-...
+AI_SDK_API_KEY=your-vercel-ai-gateway-key
 ```
 
 #### Vercel
@@ -168,7 +178,12 @@ Add to `vercel.json` or environment variables:
 
 #### Docker
 ```dockerfile
-ENV AI_SDK_API_KEY=sk-or-...
+ENV AI_SDK_API_KEY=your-vercel-ai-gateway-key
+```
+
+#### .env File
+```bash
+AI_SDK_API_KEY=your-vercel-ai-gateway-key
 ```
 
 ## Usage Examples
@@ -184,7 +199,7 @@ async def chat_with_ai_sdk():
         response = await client.post(
             "https://api.gatewayz.ai/api/chat/ai-sdk",
             json={
-                "model": "gpt-4",
+                "model": "openai/gpt-5",  # Use Vercel AI Gateway model format
                 "messages": [
                     {"role": "user", "content": "Explain quantum computing"}
                 ],
@@ -201,14 +216,19 @@ asyncio.run(chat_with_ai_sdk())
 
 ### Node.js/TypeScript Example
 
-Since the Vercel AI SDK is primarily TypeScript, you'd typically use it directly:
+You can use the Vercel AI SDK directly with the Vercel AI Gateway:
 
 ```typescript
-import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+
+const client = createOpenAI({
+  baseURL: 'https://ai-gateway.vercel.sh/v1',
+  apiKey: process.env.AI_SDK_API_KEY,
+});
 
 const { text } = await generateText({
-  model: openai('gpt-4'),
+  model: client('openai/gpt-5'),  // Use Vercel AI Gateway model format
   messages: [
     { role: 'user', content: 'Explain quantum computing' }
   ],
@@ -217,7 +237,7 @@ const { text } = await generateText({
 console.log(text);
 ```
 
-However, you can also call the Gatewayz endpoint directly:
+Or call the Gatewayz endpoint directly as a compatible fallback:
 
 ```typescript
 const response = await fetch(
@@ -226,7 +246,7 @@ const response = await fetch(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4',
+      model: 'openai/gpt-5',  // Use Vercel AI Gateway model format
       messages: [
         { role: 'user', content: 'Explain quantum computing' }
       ],
@@ -264,37 +284,49 @@ def stream_chat():
 
 ## Supported Models
 
-Through the OpenRouter integration, the following model categories are supported:
+Through the Vercel AI Gateway integration, the following model categories are supported:
 
 ### OpenAI Models
-- `gpt-4`
-- `gpt-4-turbo`
-- `gpt-4-32k`
-- `gpt-3.5-turbo`
-- `gpt-3.5-turbo-16k`
+- `openai/gpt-5`
+- `openai/gpt-5-mini`
+- `openai/gpt-4o`
+- `openai/gpt-4-turbo`
+- `openai/gpt-4-mini`
+- And more OpenAI models
 
 ### Anthropic Models
-- `claude-3-opus`
-- `claude-3-sonnet`
-- `claude-3-haiku`
-- `claude-2.1`
-- `claude-2`
-- `claude-instant`
+- `anthropic/claude-haiku-4.5`
+- `anthropic/claude-sonnet-4.5`
+- `anthropic/claude-sonnet-4`
+- `anthropic/claude-opus`
+- And more Anthropic models
+
+### Google Models
+- `google/gemini-2.5-pro`
+- `google/gemini-2.5-flash`
+- `google/gemini-2.0-flash`
+- And more Google models
+
+### xAI Models
+- `xai/grok-2-latest`
+- `xai/grok-3`
+- And more xAI models
 
 ### Meta Models
-- `llama-2-70b`
-- `llama-2-13b`
-- `llama-2-7b`
+- `meta/llama-3.1-70b`
+- `meta/llama-3.1-8b`
+- And more Meta models
 
 ### Other Models
-- `mistral-large`
-- `mistral-medium`
-- `mistral-small`
-- `mixtral-8x7b`
-- `neural-chat-7b`
-- `and 100+ more..`
+- DeepSeek models
+- Mistral models
+- Cohere models
+- Perplexity models
+- And more...
 
-See `/v1/catalog/models` endpoint for a complete, up-to-date list of available models.
+**Note**: Model format is `provider/model-name` (e.g., `openai/gpt-5`, `anthropic/claude-sonnet-4.5`)
+
+For the complete, up-to-date list of available models, visit https://vercel.com/ai-gateway/models
 
 ## Error Handling
 
@@ -443,10 +475,12 @@ pytest tests/routes/test_ai_sdk.py --cov=src.routes.ai_sdk --cov=src.services.ai
 
 ## Related Documentation
 
-- [OpenRouter Documentation](https://openrouter.ai/docs)
-- [Vercel AI SDK Docs](https://ai-sdk.dev/docs)
-- [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create)
-- [Gatewayz API Documentation](./api.md)
+- [Vercel AI Gateway](https://vercel.com/ai-gateway) - Official unified AI platform
+- [Vercel AI Gateway Models](https://vercel.com/ai-gateway/models) - Complete model catalog
+- [Vercel AI SDK Docs](https://ai-sdk.dev/docs) - TypeScript/JavaScript SDK documentation
+- [AI Gateway Documentation](https://vercel.com/docs/ai-gateway) - Official API documentation
+- [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create) - OpenAI API reference
+- [Gatewayz API Documentation](./api.md) - Gatewayz API reference
 
 ## Support
 
