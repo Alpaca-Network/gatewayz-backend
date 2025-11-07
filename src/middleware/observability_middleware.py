@@ -177,8 +177,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             if part.isdigit():
                 # Replace numeric segments with {id}
                 normalized_parts.append("{id}")
-            # Check if this looks like a hex string ID (mostly hex characters, no hyphens)
-            # This includes UUIDs and hash-like IDs but must be reasonably long
+            # Check if this looks like a UUID (36 chars: 8-4-4-4-12 hex with hyphens)
+            elif len(part) == 36 and all(c in "0123456789abcdef-" for c in part.lower()):
+                # UUID format detected, replace with {id}
+                normalized_parts.append("{id}")
+            # Check if this looks like a hex string ID (hex characters without hyphens)
+            # This includes hash-like IDs but must be reasonably long
             elif len(part) > 8 and all(c in "0123456789abcdef" for c in part.lower()):
                 # Replace hex ID segments with {id}
                 normalized_parts.append("{id}")
@@ -192,7 +196,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 normalized_parts.append(part)
 
         # Limit path length to prevent unbounded cardinality
-        # Take first 10 segments max (most APIs won't go deeper)
-        normalized_parts = normalized_parts[:10]
+        # Take first 5 segments max (split result with empty string = 6 elements max)
+        normalized_parts = normalized_parts[:5]
 
         return "/" + "/".join(normalized_parts)
