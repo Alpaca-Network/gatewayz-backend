@@ -11,9 +11,11 @@ we'll test the core transformation logic that powers the models.
 import json
 import sys
 from datetime import datetime
+from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, '/root/repo')
+repo_root = Path(__file__).parent.resolve()
+sys.path.insert(0, str(repo_root))
 
 # Test data - models to test
 TEST_MODELS = [
