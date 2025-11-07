@@ -171,67 +171,81 @@ def get_google_vertex_access_token():
 
     Service accounts can create self-signed JWTs that are accepted by Google APIs
     without going through OAuth token exchange. This avoids the id_token vs access_token issue.
+
+    Supports all credential sources:
+    1. GOOGLE_VERTEX_CREDENTIALS_JSON (raw JSON or base64)
+    2. GOOGLE_APPLICATION_CREDENTIALS (file path)
+    3. Application Default Credentials (ADC)
     """
     try:
-        logger.info("Creating self-signed JWT for Vertex AI")
+        logger.info("Getting credentials for Vertex AI JWT creation")
 
-        # Load service account credentials
-        import base64
-        import os
-        import json as json_module
-        import time
-        import jwt  # PyJWT library
+        # Get credentials using existing function that supports all sources
+        credentials = get_google_vertex_credentials()
 
-        creds_json_env = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
-        if not creds_json_env:
-            raise ValueError("GOOGLE_VERTEX_CREDENTIALS_JSON environment variable not set")
+        # Check if these are service account credentials
+        from google.oauth2 import service_account
+        from cryptography.hazmat.primitives import serialization
 
-        # Decode credentials
-        try:
-            creds_json = creds_json_env
-            creds_dict = json_module.loads(creds_json)
-        except (json_module.JSONDecodeError, ValueError):
-            try:
-                creds_json = base64.b64decode(creds_json_env).decode("utf-8")
-                creds_dict = json_module.loads(creds_json)
-            except Exception as e:
-                raise ValueError(f"Failed to parse credentials JSON: {e}")
+        if isinstance(credentials, service_account.Credentials):
+            logger.info("Creating self-signed JWT from service account credentials")
 
-        logger.info("Successfully loaded service account credentials")
+            import time
+            import jwt  # PyJWT library
 
-        # Extract key info
-        service_account_email = creds_dict.get("client_email")
-        private_key = creds_dict.get("private_key")
+            # Extract service account email and private key
+            service_account_email = credentials.service_account_email
+            # The private key is stored in the signer
+            private_key_bytes = credentials.signer._key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+            private_key = private_key_bytes.decode('utf-8')
 
-        if not service_account_email or not private_key:
-            raise ValueError("Missing client_email or private_key in credentials")
+            # Create self-signed JWT
+            now = int(time.time())
+            payload = {
+                "iss": service_account_email,  # Issuer: service account email
+                "sub": service_account_email,  # Subject: service account email
+                "aud": "https://aiplatform.googleapis.com/",  # Audience: Vertex AI API
+                "iat": now,  # Issued at
+                "exp": now + 3600,  # Expires in 1 hour
+            }
 
-        # Create self-signed JWT
-        # Audience should be the service URL (Vertex AI API)
-        now = int(time.time())
-        payload = {
-            "iss": service_account_email,  # Issuer: service account email
-            "sub": service_account_email,  # Subject: service account email
-            "aud": "https://aiplatform.googleapis.com/",  # Audience: Vertex AI API
-            "iat": now,  # Issued at
-            "exp": now + 3600,  # Expires in 1 hour
-        }
+            # Sign the JWT with the private key
+            token = jwt.encode(
+                payload,
+                private_key,
+                algorithm="RS256"
+            )
 
-        # Sign the JWT with the private key
-        token = jwt.encode(
-            payload,
-            private_key,
-            algorithm="RS256"
-        )
+            logger.info(f"Successfully created self-signed JWT (length: {len(token)} chars)")
+            return token
+        else:
+            # Not service account credentials (e.g., user credentials from ADC)
+            # Fall back to OAuth token (may have id_token issue, but supports the credential type)
+            logger.warning(
+                "Credentials are not service account credentials. "
+                "Falling back to OAuth token (may not work with Vertex AI). "
+                "For production, use service account credentials."
+            )
+            from google.auth.transport.requests import Request as AuthRequest
 
-        logger.info(f"Successfully created self-signed JWT (length: {len(token)} chars)")
-        return token
+            if not credentials.valid:
+                credentials.refresh(AuthRequest())
+
+            if credentials.token:
+                logger.info(f"Obtained OAuth token (length: {len(credentials.token)} chars)")
+                return credentials.token
+            else:
+                raise ValueError("Failed to obtain token from credentials")
 
     except ValueError:
         raise
     except Exception as e:
-        logger.error(f"Failed to create self-signed JWT: {e}", exc_info=True)
-        raise ValueError(f"Failed to create self-signed JWT: {str(e)}") from e
+        logger.error(f"Failed to get Vertex AI access token: {e}", exc_info=True)
+        raise ValueError(f"Failed to get Vertex AI access token: {str(e)}") from e
 
 
 def transform_google_vertex_model_id(model_id: str) -> str:
