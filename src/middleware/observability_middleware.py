@@ -169,18 +169,20 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             if not part:  # Skip empty parts from leading/trailing slashes
                 continue
 
+            # Remove query string from path segment if present
+            # (middleware receives path without query string, but just in case)
+            part = part.split("?")[0] if "?" in part else part
+
             # Check if this looks like a numeric ID (all digits)
             if part.isdigit():
                 # Replace numeric segments with {id}
                 normalized_parts.append("{id}")
-            # Check if this looks like a UUID (hex string with hyphens: 8-4-4-4-12 format)
-            elif (
-                len(part) >= 36
-                and all(c in "0123456789abcdef-" for c in part.lower())
-            ):
-                # Replace UUID segments with {id}
+            # Check if this looks like a hex string ID (mostly hex characters, no hyphens)
+            # This includes UUIDs and hash-like IDs but must be reasonably long
+            elif len(part) > 8 and all(c in "0123456789abcdef" for c in part.lower()):
+                # Replace hex ID segments with {id}
                 normalized_parts.append("{id}")
-            # Check if it looks like a model name or similar (contains hyphens)
+            # Check if it looks like a model name or similar (contains hyphens but not all digits)
             elif "-" in part and not part.isdigit():
                 # Likely a model name or identifier, keep as is
                 # e.g., "gpt-4-turbo" -> "gpt-4-turbo"
@@ -190,7 +192,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 normalized_parts.append(part)
 
         # Limit path length to prevent unbounded cardinality
-        # Take first 5 segments max
-        normalized_parts = normalized_parts[:5]
+        # Take first 10 segments max (most APIs won't go deeper)
+        normalized_parts = normalized_parts[:10]
 
         return "/" + "/".join(normalized_parts)
