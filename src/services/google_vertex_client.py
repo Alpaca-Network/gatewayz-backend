@@ -40,15 +40,18 @@ def get_google_vertex_credentials():
     Tries multiple credential sources in order:
     1. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (for Vercel/serverless)
        - Supports both raw JSON and base64-encoded JSON
-       - Writes to temp file and uses google.auth.default() for proper token handling
+       - Explicitly creates service account credentials using from_service_account_info()
+       - This ensures proper access token generation (not id_token)
     2. GOOGLE_APPLICATION_CREDENTIALS file path (for development)
     3. Application Default Credentials (ADC) from google.auth.default()
+    
+    This function is used by all Google Vertex AI services to ensure consistent
+    credential handling across the codebase.
     """
     try:
         # First, try to get credentials from JSON environment variable (Vercel/serverless)
         import base64
         import os
-        import tempfile
 
         creds_json_env = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
         if creds_json_env:
