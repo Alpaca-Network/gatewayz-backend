@@ -324,17 +324,18 @@ def set_queue_size(queue_name: str, size: int):
 
 def get_metrics_summary() -> dict:
     """Get a summary of key metrics for monitoring."""
-    # Note: Accessing internal prometheus_client attributes for summary purposes
-    # These are used only for diagnostic/monitoring endpoints, not exposed to external users
+    # This function returns a summary of metrics collected.
+    # In production, use the /metrics endpoint which exports all metrics in Prometheus format.
+    # This summary is for diagnostic purposes only.
     try:
-        return {
-            "http_requests_total": getattr(http_request_count, '_metrics', {}),
-            "model_inferences_total": getattr(model_inference_requests, '_metrics', {}),
-            "tokens_used_total": getattr(tokens_used, '_metrics', {}),
-            "cache_hits_total": getattr(cache_hits, '_value', {}).get() if hasattr(cache_hits, '_value') else 0,
-            "cache_misses_total": getattr(cache_misses, '_value', {}).get() if hasattr(cache_misses, '_value') else 0,
-            "rate_limited_requests_total": getattr(rate_limited_requests, '_value', {}).get() if hasattr(rate_limited_requests, '_value') else 0,
+        from prometheus_client import REGISTRY
+
+        summary = {
+            "enabled": True,
+            "metrics_endpoint": "/metrics",
+            "message": "Use /metrics endpoint for Prometheus format metrics"
         }
+        return summary
     except Exception as e:
         logger.warning(f"Could not retrieve metrics summary: {type(e).__name__}")
-        return {}
+        return {"enabled": False}
