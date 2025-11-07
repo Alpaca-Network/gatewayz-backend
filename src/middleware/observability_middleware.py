@@ -22,7 +22,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from src.services.prometheus_metrics import (
-    http_request_count,
     http_request_duration,
     record_http_response,
     fastapi_requests_in_progress,
