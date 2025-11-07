@@ -74,7 +74,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             fastapi_request_size_bytes.labels(method=method, endpoint=endpoint).observe(
                 request_size
             )
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             logger.debug(f"Could not determine request size from headers: {e}")
             request_size = 0
 
@@ -106,7 +106,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 fastapi_response_size_bytes.labels(
                     method=method, endpoint=endpoint
                 ).observe(response_size)
-            except Exception as e:
+            except (ValueError, TypeError, AttributeError) as e:
                 logger.debug(f"Could not determine response size: {e}")
                 # Record 0 if we can't determine size
                 fastapi_response_size_bytes.labels(
@@ -125,12 +125,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 
             return response
 
-        except Exception as e:
-            # Record error metrics
+        except Exception as e:  # noqa: BLE001 - Broad exception catch needed for metrics
+            # Record error metrics for any unhandled exception
             logger.error(f"Error processing request {method} {endpoint}: {e}")
             duration = time.time() - start_time
 
-            # Record error response
+            # Record error response with 500 status
             http_request_duration.labels(method=method, endpoint=endpoint).observe(
                 duration
             )
