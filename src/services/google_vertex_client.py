@@ -122,14 +122,17 @@ def get_google_vertex_credentials():
         logger.info("Successfully loaded Application Default Credentials")
         return credentials
     except Exception as e:
-        logger.error(f"Failed to get Google Cloud credentials: {e}", exc_info=True)
-        logger.error("Please set one of:")
-        logger.error(
-            "  1. GOOGLE_VERTEX_CREDENTIALS_JSON (raw JSON or base64-encoded for serverless)"
+        error_msg = (
+            f"Failed to get Google Cloud credentials: {str(e)}. "
+            "Please configure credentials for Google Vertex AI. Set one of:\n"
+            "  1. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (raw JSON or base64-encoded)\n"
+            "  2. GOOGLE_APPLICATION_CREDENTIALS file path (path to service account JSON)\n"
+            "  3. Configure Application Default Credentials via 'gcloud auth application-default login'\n"
+            "For serverless deployments, use GOOGLE_VERTEX_CREDENTIALS_JSON."
         )
-        logger.error("  2. GOOGLE_APPLICATION_CREDENTIALS (file path for development)")
-        logger.error("  3. Configure Application Default Credentials via gcloud")
-        raise
+        logger.error(error_msg)
+        # Raise ValueError so it gets mapped to a 400 error instead of 502
+        raise ValueError(error_msg) from e
 
 
 def get_google_vertex_access_token():
@@ -152,8 +155,8 @@ def get_google_vertex_access_token():
 
         # CRITICAL FIX: Validate that token was actually obtained
         if not access_token:
-            raise RuntimeError(
-                "Failed to obtain access token from credentials. Token is None. \n"
+            error_msg = (
+                "Failed to obtain access token from credentials. Token is None. "
                 "This usually means:\n"
                 "  1. Service account credentials are invalid or expired\n"
                 "  2. Credentials lack required IAM permissions (need 'Vertex AI User' role)\n"
@@ -161,12 +164,18 @@ def get_google_vertex_access_token():
                 "  4. Scopes are not properly set during credential initialization\n"
                 "Please verify your GCP project configuration and service account permissions."
             )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
         logger.info("Successfully obtained access token")
         return access_token
-    except Exception as e:
-        logger.error(f"Failed to get Google Vertex access token: {e}")
+    except ValueError:
+        # Re-raise ValueError as-is (will be mapped to 400 by error handler)
         raise
+    except Exception as e:
+        logger.error(f"Failed to get Google Vertex access token: {e}", exc_info=True)
+        # Convert other exceptions to ValueError for proper error handling
+        raise ValueError(f"Failed to get Google Vertex access token: {str(e)}") from e
 
 
 def transform_google_vertex_model_id(model_id: str) -> str:
