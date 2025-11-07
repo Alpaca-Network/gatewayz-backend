@@ -23,17 +23,15 @@ logger = logging.getLogger(__name__)
 # ==================== HTTP Request Metrics ====================
 http_request_count = Counter(
     "http_requests_total",
-    "Total HTTP requests",
+    "Total HTTP requests by method, endpoint and status code",
     ["method", "endpoint", "status_code"],
-    help="Total number of HTTP requests by method, endpoint and status code",
 )
 
 http_request_duration = Histogram(
     "http_request_duration_seconds",
-    "HTTP request duration in seconds",
+    "HTTP request duration in seconds by method and endpoint",
     ["method", "endpoint"],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
-    help="HTTP request duration in seconds by method and endpoint",
 )
 
 # ==================== Model Inference Metrics ====================
@@ -41,7 +39,6 @@ model_inference_requests = Counter(
     "model_inference_requests_total",
     "Total model inference requests",
     ["provider", "model", "status"],
-    help="Total inference requests by provider, model, and status (success/error)",
 )
 
 model_inference_duration = Histogram(
@@ -49,21 +46,18 @@ model_inference_duration = Histogram(
     "Model inference duration in seconds",
     ["provider", "model"],
     buckets=(0.1, 0.5, 1, 2.5, 5, 10, 25, 60),
-    help="Model inference duration in seconds by provider and model",
 )
 
 tokens_used = Counter(
     "tokens_used_total",
     "Total tokens used (input + output)",
     ["provider", "model", "token_type"],
-    help="Total tokens used (input/output) by provider and model",
 )
 
 credits_used = Counter(
     "credits_used_total",
     "Total credits consumed",
     ["provider", "model", "user_id"],
-    help="Total credits used by provider, model, and user",
 )
 
 # ==================== Database Metrics ====================
@@ -71,14 +65,12 @@ database_query_count = Counter(
     "database_queries_total",
     "Total database queries",
     ["table", "operation"],
-    help="Total database queries by table and operation (select/insert/update/delete)",
 )
 
 database_query_duration = Summary(
     "database_query_duration_seconds",
     "Database query duration in seconds",
     ["table"],
-    help="Database query duration in seconds by table",
 )
 
 # ==================== Cache Metrics ====================
@@ -86,21 +78,18 @@ cache_hits = Counter(
     "cache_hits_total",
     "Total cache hits",
     ["cache_name"],
-    help="Total cache hits by cache name",
 )
 
 cache_misses = Counter(
     "cache_misses_total",
     "Total cache misses",
     ["cache_name"],
-    help="Total cache misses by cache name",
 )
 
 cache_size = Gauge(
     "cache_size_bytes",
     "Cache size in bytes",
     ["cache_name"],
-    help="Current cache size in bytes by cache name",
 )
 
 # ==================== Rate Limiting Metrics ====================
@@ -108,14 +97,12 @@ rate_limited_requests = Counter(
     "rate_limited_requests_total",
     "Total rate-limited requests",
     ["api_key", "limit_type"],
-    help="Total requests rejected due to rate limiting by API key and limit type",
 )
 
 current_rate_limit = Gauge(
     "current_rate_limit",
     "Current rate limit status",
     ["api_key", "limit_type"],
-    help="Current rate limit remaining by API key and limit type",
 )
 
 # ==================== Provider Health Metrics ====================
@@ -123,14 +110,12 @@ provider_availability = Gauge(
     "provider_availability",
     "Provider availability status (1=available, 0=unavailable)",
     ["provider"],
-    help="Provider health status (1 for available, 0 for unavailable)",
 )
 
 provider_error_rate = Gauge(
     "provider_error_rate",
     "Provider error rate (0-1)",
     ["provider"],
-    help="Error rate for provider (0 = no errors, 1 = all errors)",
 )
 
 provider_response_time = Histogram(
@@ -138,7 +123,6 @@ provider_response_time = Histogram(
     "Provider response time in seconds",
     ["provider"],
     buckets=(0.1, 0.5, 1, 2.5, 5, 10),
-    help="Provider response time in seconds",
 )
 
 # ==================== Authentication & API Key Metrics ====================
@@ -146,14 +130,12 @@ api_key_usage = Counter(
     "api_key_usage_total",
     "Total API key usage",
     ["api_key_id", "status"],
-    help="Total API key requests by key and status",
 )
 
 active_api_keys = Gauge(
     "active_api_keys",
     "Number of active API keys",
     ["status"],
-    help="Number of active/inactive API keys",
 )
 
 # ==================== Business Metrics ====================
@@ -161,21 +143,18 @@ user_credit_balance = Gauge(
     "user_credit_balance",
     "User credit balance",
     ["user_id", "plan_type"],
-    help="Current credit balance by user and plan type",
 )
 
 trial_status = Gauge(
     "trial_active",
     "Active trials count",
     ["status"],
-    help="Number of active trials by status",
 )
 
 subscription_count = Gauge(
     "subscription_count",
     "Active subscriptions",
     ["plan_type", "billing_cycle"],
-    help="Number of active subscriptions by plan type and billing cycle",
 )
 
 # ==================== System Metrics ====================
@@ -183,14 +162,12 @@ active_connections = Gauge(
     "active_connections",
     "Number of active connections",
     ["connection_type"],
-    help="Number of active connections by type (db/redis/provider)",
 )
 
 queue_size = Gauge(
     "queue_size",
     "Queue size for prioritization",
     ["queue_name"],
-    help="Current size of request queue by queue name",
 )
 
 # ==================== Context Managers & Helpers ====================
