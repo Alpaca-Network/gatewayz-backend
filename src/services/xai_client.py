@@ -1,6 +1,7 @@
 import logging
 
 from src.config import Config
+from src.services.anthropic_transformer import extract_message_with_tools
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)
@@ -75,15 +76,7 @@ def process_xai_response(response):
     try:
         choices = []
         for choice in response.choices:
-            msg = {"role": choice.message.role, "content": choice.message.content}
-
-            # Include tool_calls if present (for function calling)
-            if hasattr(choice.message, 'tool_calls') and choice.message.tool_calls:
-                msg["tool_calls"] = choice.message.tool_calls
-
-            # Include function_call if present (for legacy function_call format)
-            if hasattr(choice.message, 'function_call') and choice.message.function_call:
-                msg["function_call"] = choice.message.function_call
+            msg = extract_message_with_tools(choice.message)
 
             choices.append({
                 "index": choice.index,

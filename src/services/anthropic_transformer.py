@@ -8,6 +8,47 @@ import time
 from typing import Any
 
 
+def extract_message_with_tools(choice_message: Any) -> dict[str, Any]:
+    """
+    Extract message data including role, content, and any tool calls or function calls.
+
+    This is a shared utility function used by all provider response processors to
+    reduce code duplication when extracting message data from OpenAI-compatible responses.
+
+    Handles both object-based messages (with attributes) and dict-based messages.
+
+    Args:
+        choice_message: The message object/dict from a choice in the response
+
+    Returns:
+        Dictionary with role, content, and optionally tool_calls/function_call
+    """
+    # Handle dict-based messages (e.g., from HuggingFace)
+    if isinstance(choice_message, dict):
+        msg = {
+            "role": choice_message.get("role", "assistant"),
+            "content": choice_message.get("content", ""),
+        }
+        if "tool_calls" in choice_message:
+            msg["tool_calls"] = choice_message["tool_calls"]
+        if "function_call" in choice_message:
+            msg["function_call"] = choice_message["function_call"]
+        return msg
+
+    # Handle object-based messages (e.g., from OpenAI SDK)
+    msg = {"role": choice_message.role, "content": choice_message.content}
+
+    # Include tool_calls if present (for function calling)
+    if hasattr(choice_message, 'tool_calls') and choice_message.tool_calls:
+        msg["tool_calls"] = choice_message.tool_calls
+
+    # Include function_call if present (for legacy function_call format)
+    if hasattr(choice_message, 'function_call') and choice_message.function_call:
+        msg["function_call"] = choice_message.function_call
+
+    return msg
+
+
 def transform_anthropic_to_openai(
     messages: list[dict[str, Any]],
     system: str | None = None,
