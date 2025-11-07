@@ -1511,12 +1511,14 @@ async def unified_responses(
                 http_exc = None
                 try:
                     if attempt_provider == "portkey":
-                        base_provider = req.portkey_provider or "openai"
-                        request_model = f"@{base_provider}/{attempt_model}"
+                        portkey_provider = req.portkey_provider or "openai"
+                        portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
                         stream = await _to_thread(
                             make_portkey_request_openai_stream,
                             messages,
                             request_model,
+                            portkey_provider,
+                            portkey_virtual_key,
                             **optional,
                         )
                     elif attempt_provider == "featherless":
@@ -1668,11 +1670,16 @@ async def unified_responses(
             http_exc = None
             try:
                 if attempt_provider == "portkey":
-                    base_provider = req.portkey_provider or "openai"
-                    request_model = f"@{base_provider}/{attempt_model}"
+                    portkey_provider = req.portkey_provider or "openai"
+                    portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
-                            make_portkey_request_openai, messages, request_model, **optional
+                            make_portkey_request_openai,
+                            messages,
+                            request_model,
+                            portkey_provider,
+                            portkey_virtual_key,
+                            **optional,
                         ),
                         timeout=request_timeout,
                     )
