@@ -8,13 +8,17 @@ on:
   workflow_run:
     workflows: ["CI Pipeline", "Run Tests"]  # Trigger on both CI workflows
     types: [completed]
+  # Manual trigger for testing
+  workflow_dispatch:
 
 jobs:
   run_claude_on_failure:
     # Security: Only run for failures from the same repository (not forks)
+    # Skip check if manually triggered (workflow_dispatch) for testing
     if: >
-      ${{ github.event.workflow_run.conclusion == 'failure' &&
-          github.event.workflow_run.head_repository.full_name == github.repository }}
+      ${{ (github.event_name == 'workflow_dispatch') ||
+          (github.event.workflow_run.conclusion == 'failure' &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
 
     # Required permissions for Claude Code action
@@ -30,7 +34,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Check for merge conflicts
@@ -47,6 +51,7 @@ jobs:
           fi
 
       - name: Download workflow run logs
+        if: github.event_name == 'workflow_run'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
@@ -121,6 +126,23 @@ jobs:
               const errorMsg = `Failed to fetch workflow logs: ${error.message}`;
               fs.writeFileSync('failure-logs.md', errorMsg);
             }
+
+      - name: Create placeholder failure logs for manual trigger
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cat > failure-logs.md << 'EOF'
+          # Manual Workflow Trigger
+
+          This workflow was manually triggered for testing purposes.
+
+          Please analyze the repository for common issues:
+          - Linting errors (ruff, black, isort violations)
+          - Type checking errors (mypy)
+          - Test failures
+          - Import/dependency issues
+          - Merge conflicts
+          EOF
+          echo "✅ Placeholder failure logs created"
 
       - name: Validate configuration
         run: |
