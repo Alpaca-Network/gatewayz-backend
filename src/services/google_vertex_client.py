@@ -87,11 +87,22 @@ def get_google_vertex_credentials():
                     )
                     return credentials
                 except Exception as e:
+                    error_str = str(e)
                     logger.warning(
-                        f"Failed to create/refresh credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {e}. "
+                        f"Failed to create/refresh credentials from GOOGLE_VERTEX_CREDENTIALS_JSON: {error_str}. "
                         "Falling back to next credential method.",
                         exc_info=True,
                     )
+                    # Check if this is a permission issue (not just a configuration issue)
+                    if "access_token" in error_str.lower() or "no access token" in error_str.lower():
+                        # Service account has credentials but lacks IAM permissions
+                        error_msg = (
+                            f"Service account credentials are configured, but the account lacks required "
+                            f"IAM permissions. The service account needs the 'Vertex AI User' role. "
+                            f"Error: {error_str}"
+                        )
+                        logger.error(error_msg)
+                        raise ValueError(error_msg)
                     # Don't raise - allow fallback to next credential method
 
         # Second, try file-based credentials (development)
@@ -107,11 +118,21 @@ def get_google_vertex_credentials():
                 logger.info("Successfully loaded Google Vertex credentials from file")
                 return credentials
             except Exception as e:
+                error_str = str(e)
                 logger.warning(
-                    f"Failed to load/refresh credentials from file: {e}. "
+                    f"Failed to load/refresh credentials from file: {error_str}. "
                     "Falling back to next credential method.",
                     exc_info=True,
                 )
+                # Check if this is a permission issue
+                if "access_token" in error_str.lower() or "no access token" in error_str.lower():
+                    error_msg = (
+                        f"Service account from {Config.GOOGLE_APPLICATION_CREDENTIALS} lacks required "
+                        f"IAM permissions. The service account needs the 'Vertex AI User' role. "
+                        f"Error: {error_str}"
+                    )
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
                 # Don't raise - allow fallback to next credential method
 
         # Third, try Application Default Credentials (ADC)
