@@ -196,7 +196,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 normalized_parts.append(part)
 
         # Limit path length to prevent unbounded cardinality
-        # Take first 5 segments max (split result with empty string = 6 elements max)
-        normalized_parts = normalized_parts[:5]
+        # Take first 6 segments max (typical API paths won't exceed this)
+        # For extremely deep paths (>6 segments), this provides cardinality protection
+        normalized_parts = normalized_parts[:6]
 
         return "/" + "/".join(normalized_parts)
