@@ -179,7 +179,7 @@ def main():
 
     # Export results to JSON
     print("\n" + "=" * 80)
-    results_file = "/root/repo/google_models_test_results.json"
+    results_file = repo_root / "google_models_test_results.json"
     with open(results_file, "w") as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),
