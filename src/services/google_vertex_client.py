@@ -81,36 +81,15 @@ def get_google_vertex_credentials():
 
             if creds_dict and creds_json:
                 try:
-                    # Write credentials to a temporary file and use google.auth.default()
-                    # This approach works better than from_service_account_info() for getting access tokens
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                        f.write(creds_json)
-                        temp_creds_path = f.name
-
-                    logger.debug(f"Wrote credentials to temporary file: {temp_creds_path}")
-
-                    # Set GOOGLE_APPLICATION_CREDENTIALS to the temp file
-                    original_gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_path
-
-                    try:
-                        # Use google.auth.default() which handles OAuth correctly
-                        credentials, project_id = google.auth.default(scopes=VERTEX_AI_SCOPES)
-                        logger.info(
-                            f"Successfully loaded Google Vertex credentials via google.auth.default() (project: {project_id})"
-                        )
-                        return credentials
-                    finally:
-                        # Restore original GOOGLE_APPLICATION_CREDENTIALS
-                        if original_gac:
-                            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = original_gac
-                        else:
-                            os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
-                        # Clean up temp file
-                        try:
-                            os.unlink(temp_creds_path)
-                        except Exception:
-                            pass
+                    # Explicitly create service account credentials from the JSON
+                    # This ensures we get proper service account credentials that can generate access tokens
+                    credentials = Credentials.from_service_account_info(
+                        creds_dict, scopes=VERTEX_AI_SCOPES
+                    )
+                    logger.info(
+                        f"Successfully loaded Google Vertex credentials from JSON (service account: {creds_dict.get('client_email', 'unknown')})"
+                    )
+                    return credentials
 
                 except Exception as e:
                     error_str = str(e)
@@ -167,10 +146,7 @@ def get_google_vertex_credentials():
 def get_google_vertex_access_token():
     """Get Google Vertex AI access token for REST API calls
 
-    Returns a self-signed JWT that can be used as a bearer token.
-
-    Service accounts can create self-signed JWTs that are accepted by Google APIs
-    without going through OAuth token exchange. This avoids the id_token vs access_token issue.
+    Returns an OAuth2 access token that can be used as a bearer token.
 
     Supports all credential sources:
     1. GOOGLE_VERTEX_CREDENTIALS_JSON (raw JSON or base64)
@@ -178,74 +154,63 @@ def get_google_vertex_access_token():
     3. Application Default Credentials (ADC)
     """
     try:
-        logger.info("Getting credentials for Vertex AI JWT creation")
+        logger.info("Getting credentials for Vertex AI access token")
 
         # Get credentials using existing function that supports all sources
         credentials = get_google_vertex_credentials()
 
-        # Check if these are service account credentials
-        from google.oauth2 import service_account
-        from cryptography.hazmat.primitives import serialization
+        # Refresh credentials to get a valid access token
+        from google.auth.transport.requests import Request as AuthRequest
 
-        if isinstance(credentials, service_account.Credentials):
-            logger.info("Creating self-signed JWT from service account credentials")
+        if not credentials.valid:
+            logger.info("Credentials not valid, refreshing...")
+            credentials.refresh(AuthRequest())
 
-            import time
-            import jwt  # PyJWT library
-
-            # Extract service account email and private key
-            service_account_email = credentials.service_account_email
-            # The private key is stored in the signer
-            private_key_bytes = credentials.signer._key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+        # For service account credentials, ensure we get an access token, not id_token
+        # The refresh() method should return an access token when proper scopes are used
+        if hasattr(credentials, 'token') and credentials.token:
+            logger.info(f"Successfully obtained access token (length: {len(credentials.token)} chars)")
+            return credentials.token
+        
+        # If token is not available, try refreshing again
+        logger.warning("Token not available after refresh, attempting refresh again...")
+        credentials.refresh(AuthRequest())
+        
+        if hasattr(credentials, 'token') and credentials.token:
+            logger.info(f"Successfully obtained access token after second refresh (length: {len(credentials.token)} chars)")
+            return credentials.token
+        
+        # Check if we got an id_token instead of access_token (common issue)
+        if hasattr(credentials, 'id_token') and credentials.id_token:
+            error_msg = (
+                "Received id_token instead of access_token. This usually happens when:\n"
+                "1. The service account credentials are not properly configured\n"
+                "2. The scopes are incorrect\n"
+                "3. The credentials file is missing required fields\n\n"
+                "Please ensure you're using a valid service account JSON key file with:\n"
+                "- 'type': 'service_account'\n"
+                "- 'private_key' field\n"
+                "- 'client_email' field\n"
+                "- Proper IAM permissions (roles/aiplatform.user)"
             )
-            private_key = private_key_bytes.decode('utf-8')
-
-            # Create self-signed JWT
-            now = int(time.time())
-            payload = {
-                "iss": service_account_email,  # Issuer: service account email
-                "sub": service_account_email,  # Subject: service account email
-                "aud": "https://aiplatform.googleapis.com/",  # Audience: Vertex AI API
-                "iat": now,  # Issued at
-                "exp": now + 3600,  # Expires in 1 hour
-            }
-
-            # Sign the JWT with the private key
-            token = jwt.encode(
-                payload,
-                private_key,
-                algorithm="RS256"
-            )
-
-            logger.info(f"Successfully created self-signed JWT (length: {len(token)} chars)")
-            return token
-        else:
-            # Not service account credentials (e.g., user credentials from ADC)
-            # Fall back to OAuth token (may have id_token issue, but supports the credential type)
-            logger.warning(
-                "Credentials are not service account credentials. "
-                "Falling back to OAuth token (may not work with Vertex AI). "
-                "For production, use service account credentials."
-            )
-            from google.auth.transport.requests import Request as AuthRequest
-
-            if not credentials.valid:
-                credentials.refresh(AuthRequest())
-
-            if credentials.token:
-                logger.info(f"Obtained OAuth token (length: {len(credentials.token)} chars)")
-                return credentials.token
-            else:
-                raise ValueError("Failed to obtain token from credentials")
+            logger.error(error_msg)
+            raise ValueError(f"No access token in response. {error_msg}")
+        
+        raise ValueError("Failed to obtain access token from credentials after refresh")
 
     except ValueError:
         raise
     except Exception as e:
         logger.error(f"Failed to get Vertex AI access token: {e}", exc_info=True)
-        raise ValueError(f"Failed to get Vertex AI access token: {str(e)}") from e
+        # Check if the error contains id_token info
+        error_str = str(e)
+        if 'id_token' in error_str.lower():
+            raise ValueError(
+                f"Failed to get Google Vertex access token: {error_str}. "
+                "The credentials returned an id_token instead of an access_token. "
+                "Please ensure you're using a valid service account JSON key file."
+            ) from e
+        raise ValueError(f"Failed to get Google Vertex access token: {str(e)}") from e
 
 
 def transform_google_vertex_model_id(model_id: str) -> str:
