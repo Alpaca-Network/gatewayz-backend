@@ -24,7 +24,6 @@ from google.oauth2.service_account import Credentials
 from src.config import Config
 
 # Initialize logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Vertex AI OAuth scopes required for authentication
