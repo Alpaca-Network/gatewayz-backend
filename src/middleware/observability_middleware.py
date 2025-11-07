@@ -18,7 +18,6 @@ import time
 from typing import Callable
 
 from fastapi import Request
-from prometheus_client import Gauge, Histogram
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -26,34 +25,12 @@ from src.services.prometheus_metrics import (
     http_request_count,
     http_request_duration,
     record_http_response,
+    fastapi_requests_in_progress,
+    fastapi_request_size_bytes,
+    fastapi_response_size_bytes,
 )
 
 logger = logging.getLogger(__name__)
-
-# ==================== Additional Standard FastAPI Metrics ====================
-
-# In-progress requests gauge - tracks concurrent requests
-fastapi_requests_in_progress = Gauge(
-    "fastapi_requests_in_progress",
-    "Number of HTTP requests currently being processed",
-    ["method", "endpoint"],
-)
-
-# Request body size histogram
-fastapi_request_size_bytes = Histogram(
-    "fastapi_request_size_bytes",
-    "HTTP request body size in bytes",
-    ["method", "endpoint"],
-    buckets=(100, 1000, 10000, 100000, 1000000),
-)
-
-# Response body size histogram
-fastapi_response_size_bytes = Histogram(
-    "fastapi_response_size_bytes",
-    "HTTP response body size in bytes",
-    ["method", "endpoint"],
-    buckets=(100, 1000, 10000, 100000, 1000000),
-)
 
 
 class ObservabilityMiddleware(BaseHTTPMiddleware):
