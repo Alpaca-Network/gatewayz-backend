@@ -14,7 +14,6 @@ Metrics exposed:
 """
 
 import logging
-import os
 import time
 from typing import Callable
 
