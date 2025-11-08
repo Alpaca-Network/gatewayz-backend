@@ -2323,6 +2323,33 @@ def fetch_specific_model_from_fal(provider_name: str, model_name: str):
         return None
 
 
+def fetch_specific_model_from_vercel_ai_gateway(provider_name: str, model_name: str):
+    """Fetch specific model data from Vercel AI Gateway by searching cached catalog"""
+    try:
+        model_id = f"{provider_name}/{model_name}"
+        model_id_lower = model_id.lower()
+
+        # Search in cached Vercel AI Gateway catalog
+        vercel_models = get_cached_models("vercel-ai-gateway")
+        if vercel_models:
+            for model in vercel_models:
+                if model.get("id", "").lower() == model_id_lower:
+                    return model
+
+        logger.warning(
+            "Model %s not found in Vercel AI Gateway catalog", sanitize_for_logging(model_id)
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            "Failed to fetch specific model %s/%s from Vercel AI Gateway: %s",
+            sanitize_for_logging(provider_name),
+            sanitize_for_logging(model_name),
+            sanitize_for_logging(str(e)),
+        )
+        return None
+
+
 def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
@@ -2348,6 +2375,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             "novita",
             "huggingface",
             "fal",
+            "vercel-ai-gateway",
         ]
 
         for gateway in gateways:
@@ -2427,6 +2455,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             "together": fetch_specific_model_from_together,
             "huggingface": fetch_specific_model_from_huggingface,
             "fal": fetch_specific_model_from_fal,
+            "vercel-ai-gateway": fetch_specific_model_from_vercel_ai_gateway,
         }
 
         for candidate in candidate_gateways:
