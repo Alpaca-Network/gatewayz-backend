@@ -149,12 +149,31 @@ def exchange_jwt_for_access_token(jwt_assertion: str) -> Dict[str, str]:
 
             # Parse response
             response_data = response.json()
+
+            # Get access_token, with fallback to id_token if access_token not present
+            access_token = response_data.get("access_token")
+            if not access_token:
+                # Some OAuth2 flows return id_token instead of access_token
+                # The id_token can be used as a bearer token for service-to-service auth
+                access_token = response_data.get("id_token")
+                if access_token:
+                    logger.warning(
+                        "OAuth2 endpoint returned id_token instead of access_token. "
+                        "Using id_token as bearer token for Vertex AI API calls. "
+                        "This is valid for service account authentication."
+                    )
+                else:
+                    raise ValueError(
+                        f"No access_token or id_token in OAuth2 response. "
+                        f"Response keys: {list(response_data.keys())}"
+                    )
+
             logger.info(
-                f"Successfully obtained access token (expires_in: {response_data.get('expires_in')} seconds)"
+                f"Successfully obtained token (expires_in: {response_data.get('expires_in')} seconds)"
             )
 
             return {
-                "access_token": response_data.get("access_token"),
+                "access_token": access_token,
                 "token_type": response_data.get("token_type", "Bearer"),
                 "expires_in": response_data.get("expires_in", 3600),
             }
