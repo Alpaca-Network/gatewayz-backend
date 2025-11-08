@@ -28,9 +28,10 @@ APP_NAME = os.environ.get("APP_NAME", "gatewayz")
 # This metric helps Grafana dashboard populate the app_name variable dropdown
 fastapi_app_info = Info(
     "fastapi_app_info",
-    "FastAPI application information",
-    value={"app_name": APP_NAME}
+    "FastAPI application information"
 )
+# Set the app_name label value after creation
+fastapi_app_info.info({"app_name": APP_NAME})
 
 # ==================== HTTP Request Metrics (Grafana Dashboard Compatible) ====================
 # These metrics are compatible with Grafana FastAPI Observability Dashboard (ID: 16110)
