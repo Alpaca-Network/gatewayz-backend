@@ -393,8 +393,8 @@ class TestCacheStaleness:
 
     def test_cache_stale_custom_ttl(self):
         """Test stale window with custom TTL"""
-        # 25 minutes ago with 30 min TTL and 60 min stale
-        old_time = datetime.now(timezone.utc) - timedelta(minutes=25)
+        # 35 minutes ago with 30 min TTL and 60 min stale (stale but usable)
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=35)
         cache = {
             "data": {"model": "test"},
             "timestamp": old_time,
@@ -505,7 +505,7 @@ class TestShouldRevalidateInBackground:
 class TestInitializeFalCache:
     """Test initialize_fal_cache_from_catalog function"""
 
-    @patch('src.cache.load_fal_models_catalog')
+    @patch('src.services.fal_image_client.load_fal_models_catalog')
     def test_initialize_fal_cache_success(self, mock_load_catalog):
         """Test successful FAL cache initialization"""
         mock_models = [
@@ -525,7 +525,7 @@ class TestInitializeFalCache:
         assert cache_module._fal_models_cache["data"] == mock_models
         assert cache_module._fal_models_cache["timestamp"] is not None
 
-    @patch('src.cache.load_fal_models_catalog')
+    @patch('src.services.fal_image_client.load_fal_models_catalog')
     def test_initialize_fal_cache_empty_catalog(self, mock_load_catalog):
         """Test FAL cache initialization with empty catalog"""
         mock_load_catalog.return_value = []
@@ -538,7 +538,7 @@ class TestInitializeFalCache:
         # Cache should remain empty
         assert cache_module._fal_models_cache["data"] is None
 
-    @patch('src.cache.load_fal_models_catalog')
+    @patch('src.services.fal_image_client.load_fal_models_catalog')
     def test_initialize_fal_cache_import_error(self, mock_load_catalog):
         """Test FAL cache initialization with import error"""
         mock_load_catalog.side_effect = ImportError("Module not found")
@@ -552,7 +552,7 @@ class TestInitializeFalCache:
         # Cache should remain None
         assert cache_module._fal_models_cache["data"] is None
 
-    @patch('src.cache.load_fal_models_catalog')
+    @patch('src.services.fal_image_client.load_fal_models_catalog')
     def test_initialize_fal_cache_os_error(self, mock_load_catalog):
         """Test FAL cache initialization with OS error"""
         mock_load_catalog.side_effect = OSError("File not found")
@@ -565,7 +565,7 @@ class TestInitializeFalCache:
 
         assert cache_module._fal_models_cache["data"] is None
 
-    @patch('src.cache.load_fal_models_catalog')
+    @patch('src.services.fal_image_client.load_fal_models_catalog')
     def test_initialize_fal_cache_timestamp_set(self, mock_load_catalog):
         """Test that FAL cache timestamp is set on successful init"""
         mock_models = [{"id": "fal-ai/test"}]
