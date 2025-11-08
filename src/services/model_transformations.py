@@ -35,7 +35,7 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     Transform model ID from simplified format to provider-specific format.
 
     Now supports multi-provider models - will automatically get the correct
-    provider-specific model ID from the registry.
+    provider-specific model ID from the canonical registry.
 
     NOTE: All model IDs are normalized to lowercase before being sent to providers
     to ensure compatibility. Fireworks requires lowercase, while other providers
@@ -60,24 +60,40 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         Output: "openai/gpt-4"
     """
 
-    # Check multi-provider registry first (if enabled)
+    # Check canonical registry first (if enabled)
     if use_multi_provider:
         try:
-            from src.services.multi_provider_registry import get_registry
+            from src.services.canonical_model_registry import get_canonical_registry
 
-            registry = get_registry()
-            if registry.has_model(model_id):
-                # Get provider-specific model ID from registry
-                model = registry.get_model(model_id)
-                if model:
-                    provider_config = model.get_provider_by_name(provider)
-                    if provider_config:
-                        provider_model_id = provider_config.model_id
-                        logger.info(
-                            f"Multi-provider transform: {model_id} -> {provider_model_id} "
-                            f"(provider: {provider})"
-                        )
-                        return provider_model_id.lower()
+            registry = get_canonical_registry()
+            canonical_model = registry.get_model(model_id)
+
+            if canonical_model:
+                # Get provider-specific model ID from canonical registry
+                provider_config = canonical_model.get_provider_by_name(provider)
+                if provider_config:
+                    provider_model_id = provider_config.model_id
+                    logger.info(
+                        f"Canonical registry transform: {model_id} -> {provider_model_id} "
+                        f"(provider: {provider})"
+                    )
+                    return provider_model_id.lower()
+            else:
+                # Fallback to legacy multi-provider registry
+                from src.services.multi_provider_registry import get_registry
+
+                legacy_registry = get_registry()
+                if legacy_registry.has_model(model_id):
+                    model = legacy_registry.get_model(model_id)
+                    if model:
+                        provider_config = model.get_provider_by_name(provider)
+                        if provider_config:
+                            provider_model_id = provider_config.model_id
+                            logger.info(
+                                f"Legacy multi-provider transform: {model_id} -> {provider_model_id} "
+                                f"(provider: {provider})"
+                            )
+                            return provider_model_id.lower()
         except ImportError:
             pass
         except Exception as e:
@@ -511,7 +527,8 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
     """
     Try to detect which provider a model belongs to based on its ID.
 
-    Now supports multi-provider models with automatic provider selection.
+    Now supports multi-provider models with automatic provider selection from
+    the canonical registry.
 
     Args:
         model_id: The model ID to analyze
@@ -521,7 +538,38 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         The detected provider name, or None if unable to detect
     """
 
-    # Check multi-provider registry first
+    # Check canonical registry first
+    try:
+        from src.services.canonical_model_registry import get_canonical_registry
+
+        canonical_registry = get_canonical_registry()
+        canonical_model = canonical_registry.get_model(model_id)
+
+        if canonical_model:
+            # Model is in canonical registry - select best provider
+            if preferred_provider:
+                provider_config = canonical_model.get_provider_by_name(preferred_provider)
+                if provider_config and provider_config.enabled:
+                    logger.info(
+                        f"Canonical model {model_id}: using preferred provider {preferred_provider}"
+                    )
+                    return preferred_provider
+
+            # Use primary provider (highest priority enabled provider)
+            enabled_providers = canonical_model.get_enabled_providers()
+            if enabled_providers:
+                selected = enabled_providers[0]
+                logger.info(
+                    f"Canonical model {model_id}: selected {selected.name} "
+                    f"(priority {selected.priority})"
+                )
+                return selected.name
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"Error checking canonical registry: {e}")
+
+    # Fallback to legacy multi-provider registry
     try:
         from src.services.multi_provider_registry import get_registry
 
@@ -538,16 +586,14 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
 
             if selected_provider:
                 logger.info(
-                    f"Multi-provider model {model_id}: selected {selected_provider.name} "
+                    f"Legacy multi-provider model {model_id}: selected {selected_provider.name} "
                     f"(priority {selected_provider.priority})"
                 )
                 return selected_provider.name
     except ImportError:
-        # Multi-provider modules not available, fall through to legacy detection
         pass
     except Exception as e:
-        logger.warning(f"Error checking multi-provider registry: {e}")
-        # Fall through to legacy detection
+        logger.warning(f"Error checking legacy multi-provider registry: {e}")
 
     # Apply explicit overrides first
     normalized_id = (model_id or "").lower()
