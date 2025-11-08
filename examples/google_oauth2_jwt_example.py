@@ -170,14 +170,15 @@ def example_with_vertex_ai():
             "Content-Type": "application/json",
         }
 
-        request_body = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": "Hello, how are you?"}],
-                }
-            ],
-        }
+        # Example request body for Vertex AI API:
+        # request_body = {
+        #     "contents": [
+        #         {
+        #             "role": "user",
+        #             "parts": [{"text": "Hello, how are you?"}],
+        #         }
+        #     ],
+        # }
 
         print(f"✓ Access token ready")
         print(f"  URL: {url}")
