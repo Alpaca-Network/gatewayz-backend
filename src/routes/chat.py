@@ -122,6 +122,7 @@ from src.services.provider_failover import (
     map_provider_error,
     should_failover,
 )
+from src.services.multi_provider_registry import get_registry
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.pricing import calculate_cost
@@ -731,7 +732,46 @@ async def chat_completions(
                         break
                 # Otherwise default to openrouter (already set)
 
-        provider_chain = build_provider_failover_chain(provider)
+        # Build provider failover chain - check multi-provider registry first
+        registry = get_registry()
+        canonical_id = registry.resolve_canonical_id(original_model)
+        
+        if canonical_id and registry.has_model(canonical_id):
+            # Use registry-driven provider selection
+            logger.info(
+                f"Using multi-provider routing for model '{original_model}' "
+                f"(canonical: '{canonical_id}')"
+            )
+            
+            # Select primary provider based on request preferences
+            required_features = ["streaming"] if req.stream else None
+            primary = registry.select_provider(
+                model_id=canonical_id,
+                preferred_provider=provider,
+                required_features=required_features,
+            )
+            
+            if primary:
+                # Build provider chain: primary + fallbacks
+                fallbacks = registry.get_fallback_providers(
+                    model_id=canonical_id,
+                    exclude_provider=primary.name,
+                )
+                provider_chain = [primary.name] + [p.name for p in fallbacks[:2]]  # Limit fallbacks
+                logger.info(
+                    f"Multi-provider chain for {canonical_id}: {provider_chain}"
+                )
+            else:
+                # No suitable provider found in registry, use legacy chain
+                logger.warning(
+                    f"No suitable provider found in registry for {canonical_id}, "
+                    f"falling back to legacy chain"
+                )
+                provider_chain = build_provider_failover_chain(provider)
+        else:
+            # Model not in registry, use legacy failover chain
+            provider_chain = build_provider_failover_chain(provider)
+        
         model = original_model
         
         # Diagnostic logging for tools parameter
@@ -748,7 +788,20 @@ async def chat_completions(
         if req.stream:
             last_http_exc = None
             for idx, attempt_provider in enumerate(provider_chain):
-                attempt_model = transform_model_id(original_model, attempt_provider)
+                # Get provider-specific model ID - try registry first, then transform
+                if canonical_id and registry.has_model(canonical_id):
+                    attempt_model = registry.get_provider_model_id(canonical_id, attempt_provider)
+                    if attempt_model:
+                        logger.debug(
+                            f"Registry lookup: {canonical_id} -> {attempt_model} "
+                            f"for provider {attempt_provider}"
+                        )
+                    else:
+                        # Provider not in registry for this model, try transformation
+                        attempt_model = transform_model_id(original_model, attempt_provider)
+                else:
+                    attempt_model = transform_model_id(original_model, attempt_provider)
+                
                 if attempt_model != original_model:
                     logger.info(
                         f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
@@ -898,7 +951,14 @@ async def chat_completions(
         last_http_exc = None
 
         for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
+            # Get provider-specific model ID - try registry first, then transform
+            if canonical_id and registry.has_model(canonical_id):
+                attempt_model = registry.get_provider_model_id(canonical_id, attempt_provider)
+                if not attempt_model:
+                    # Provider not in registry for this model, try transformation
+                    attempt_model = transform_model_id(original_model, attempt_provider)
+            else:
+                attempt_model = transform_model_id(original_model, attempt_provider)
             if attempt_model != original_model:
                 logger.info(
                     f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
@@ -1724,7 +1784,14 @@ async def unified_responses(
         last_http_exc = None
 
         for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
+            # Get provider-specific model ID - try registry first, then transform
+            if canonical_id and registry.has_model(canonical_id):
+                attempt_model = registry.get_provider_model_id(canonical_id, attempt_provider)
+                if not attempt_model:
+                    # Provider not in registry for this model, try transformation
+                    attempt_model = transform_model_id(original_model, attempt_provider)
+            else:
+                attempt_model = transform_model_id(original_model, attempt_provider)
             if attempt_model != original_model:
                 logger.info(
                     f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
