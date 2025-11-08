@@ -29,6 +29,7 @@ from src.services.modelz_client import (
     get_modelz_model_details,
 )
 from src.utils.security_validators import sanitize_for_logging
+from src.services.canonical_model_registry import get_canonical_registry
 
 
 # Initialize logging
@@ -2171,3 +2172,113 @@ async def check_model_on_modelz(
     except Exception as e:
         logger.error(f"Unexpected error in check_model_on_modelz: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to check model on Modelz: {str(e)}")
+
+
+# Multi-Provider Models Endpoints
+@router.get("/v1/multi-provider/models", tags=["multi-provider"])
+async def get_multi_provider_models(
+    provider: Optional[str] = Query(None, description="Filter by provider availability"),
+    query: Optional[str] = Query(None, description="Search query for model name or description"),
+    min_providers: Optional[int] = Query(None, description="Minimum number of providers (default: 1)"),
+    limit: Optional[int] = Query(100, description="Maximum number of models to return"),
+    offset: Optional[int] = Query(0, description="Number of models to skip"),
+):
+    """
+    Get models from the canonical registry with multi-provider support.
+
+    This endpoint exposes models that can be accessed through multiple providers,
+    enabling automatic failover and cost optimization.
+
+    Args:
+        provider: Filter models by provider availability (e.g., 'openrouter', 'fireworks')
+        query: Search models by name, ID, or description
+        min_providers: Return only models with at least this many providers (default: 1)
+        limit: Maximum number of results
+        offset: Pagination offset
+
+    Returns:
+        List of canonical models with their provider configurations
+    """
+    try:
+        registry = get_canonical_registry()
+
+        # Search models with filters
+        models = registry.search_models(
+            query=query,
+            provider=provider,
+        )
+
+        # Filter by minimum providers if specified
+        if min_providers is not None and min_providers > 1:
+            models = [
+                m for m in models
+                if len(m.get_enabled_providers()) >= min_providers
+            ]
+
+        # Sort by number of providers (descending) for multi-provider focus
+        models.sort(key=lambda m: len(m.get_enabled_providers()), reverse=True)
+
+        # Apply pagination
+        paginated = models[offset:offset + limit]
+
+        # Convert to dictionaries for response
+        result_models = [m.to_dict() for m in paginated]
+
+        return {
+            "data": result_models,
+            "total": len(models),
+            "limit": limit,
+            "offset": offset,
+            "registry_stats": registry.get_statistics(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching multi-provider models: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch multi-provider models: {str(e)}")
+
+
+@router.get("/v1/multi-provider/models/{model_id}", tags=["multi-provider"])
+async def get_multi_provider_model(model_id: str):
+    """
+    Get detailed information about a specific model from the canonical registry.
+
+    Args:
+        model_id: Canonical model ID (e.g., 'gpt-4o', 'claude-sonnet-4.5', 'llama-3.3-70b')
+
+    Returns:
+        Detailed model information including all provider configurations
+    """
+    try:
+        registry = get_canonical_registry()
+        model = registry.get_model(model_id)
+
+        if not model:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model '{model_id}' not found in canonical registry"
+            )
+
+        return model.to_dict()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching model {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch model: {str(e)}")
+
+
+@router.get("/v1/multi-provider/stats", tags=["multi-provider"])
+async def get_multi_provider_stats():
+    """
+    Get statistics about the multi-provider model registry.
+
+    Returns:
+        Statistics including total models, multi-provider models, and provider counts
+    """
+    try:
+        registry = get_canonical_registry()
+        return registry.get_statistics()
+
+    except Exception as e:
+        logger.error(f"Error fetching registry stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch registry stats: {str(e)}")

@@ -122,6 +122,13 @@ from src.services.provider_failover import (
     map_provider_error,
     should_failover,
 )
+from src.services.registry_router import (
+    get_provider_chain_for_model,
+    log_provider_attempt,
+    log_provider_success,
+    log_provider_failure,
+    should_attempt_failover,
+)
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.pricing import calculate_cost
@@ -731,9 +738,14 @@ async def chat_completions(
                         break
                 # Otherwise default to openrouter (already set)
 
-        provider_chain = build_provider_failover_chain(provider)
+        # Use registry-driven provider selection with fallback to legacy chain
+        provider_attempts = get_provider_chain_for_model(
+            model_id=original_model,
+            initial_provider=provider,
+            use_registry=True,
+        )
         model = original_model
-        
+
         # Diagnostic logging for tools parameter
         if "tools" in optional:
             logger.info(
