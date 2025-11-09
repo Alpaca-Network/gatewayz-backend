@@ -2,7 +2,7 @@ import logging
 import json
 from pathlib import Path
 import csv
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 from concurrent.futures import ThreadPoolExecutor
 
 from src.config import Config
@@ -27,6 +27,7 @@ from src.cache import (
     _fal_models_cache,
     _vercel_ai_gateway_models_cache,
     _anannas_models_cache,
+    _aihubmix_models_cache,
     is_cache_fresh,
     should_revalidate_in_background,
     _FAL_CACHE_INIT_DEFERRED,
@@ -43,16 +44,54 @@ from src.services.portkey_providers import (
 )
 from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
+from src.services.multi_provider_registry import get_registry
 from src.utils.security_validators import sanitize_for_logging
 
 import httpx
 
 logger = logging.getLogger(__name__)
+_registry = get_registry()
 
 # Modality constants to reduce duplication
 MODALITY_TEXT_TO_TEXT = "text->text"
 MODALITY_TEXT_TO_IMAGE = "text->image"
 MODALITY_TEXT_TO_AUDIO = "text->audio"
+
+
+def _sync_registry(provider: str, models: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+    """
+    Push normalized provider catalogs into the canonical registry.
+    """
+    if not models:
+        return models
+
+    try:
+        _registry.sync_provider_catalog(provider, models)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Failed to sync %s catalog with registry: %s",
+            sanitize_for_logging(provider),
+            sanitize_for_logging(str(exc)),
+        )
+    return models
+
+
+def get_canonical_models(include_disabled: bool = False) -> List[Dict[str, Any]]:
+    """
+    Return the canonical registry snapshot used for aggregated catalog responses.
+    """
+    snapshot = _registry.get_catalog_snapshot()
+    if include_disabled:
+        return snapshot
+
+    filtered: List[Dict[str, Any]] = []
+    for entry in snapshot:
+        trimmed = dict(entry)
+        trimmed["providers"] = [
+            provider for provider in entry.get("providers", []) if provider.get("enabled", True)
+        ]
+        filtered.append(trimmed)
+    return filtered
 
 
 def sanitize_pricing(pricing: dict) -> dict:
@@ -332,7 +371,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_portkey()
+            return _sync_registry("portkey", fetch_models_from_portkey())
 
         if gateway == "featherless":
             cache = _featherless_models_cache
@@ -340,7 +379,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_featherless()
+            return _sync_registry("featherless", fetch_models_from_featherless())
 
         if gateway == "chutes":
             cache = _chutes_models_cache
@@ -348,7 +387,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_chutes()
+            return _sync_registry("chutes", fetch_models_from_chutes())
 
         if gateway == "groq":
             cache = _groq_models_cache
@@ -356,7 +395,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_groq()
+            return _sync_registry("groq", fetch_models_from_groq())
 
         if gateway == "fireworks":
             cache = _fireworks_models_cache
@@ -364,7 +403,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_fireworks()
+            return _sync_registry("fireworks", fetch_models_from_fireworks())
 
         if gateway == "together":
             cache = _together_models_cache
@@ -372,7 +411,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_together()
+            return _sync_registry("together", fetch_models_from_together())
 
         if gateway == "deepinfra":
             cache = _deepinfra_models_cache
@@ -380,7 +419,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_deepinfra()
+            return _sync_registry("deepinfra", fetch_models_from_deepinfra())
 
         if gateway == "google-vertex":
             cache = _google_vertex_models_cache
@@ -388,7 +427,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_google_vertex()
+            return _sync_registry("google-vertex", fetch_models_from_google_vertex())
 
         if gateway == "cerebras":
             cache = _cerebras_models_cache
@@ -396,7 +435,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_cerebras()
+            return _sync_registry("cerebras", fetch_models_from_cerebras())
 
         if gateway == "nebius":
             cache = _nebius_models_cache
@@ -404,7 +443,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_nebius()
+            return _sync_registry("nebius", fetch_models_from_nebius())
 
         if gateway == "xai":
             cache = _xai_models_cache
@@ -412,7 +451,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_xai()
+            return _sync_registry("xai", fetch_models_from_xai())
 
         if gateway == "novita":
             cache = _novita_models_cache
@@ -420,7 +459,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_novita()
+            return _sync_registry("novita", fetch_models_from_novita())
 
         if gateway == "hug" or gateway == "huggingface":
             from src.services.huggingface_models import ESSENTIAL_MODELS
@@ -466,7 +505,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 _huggingface_models_cache["data"] = result
                 _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-            return result
+            return _sync_registry("huggingface", result)
 
         if gateway == "aimo":
             cache = _aimo_models_cache
@@ -474,7 +513,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_aimo()
+            return _sync_registry("aimo", fetch_models_from_aimo())
 
         if gateway == "near":
             cache = _near_models_cache
@@ -482,7 +521,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_near()
+            return _sync_registry("near", fetch_models_from_near())
 
         if gateway == "fal":
             cache = _fal_models_cache
@@ -490,7 +529,7 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_fal()
+            return _sync_registry("fal", fetch_models_from_fal())
 
         if gateway == "vercel-ai-gateway":
             cache = _vercel_ai_gateway_models_cache
@@ -498,7 +537,15 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_vercel_ai_gateway()
+            return _sync_registry("vercel-ai-gateway", fetch_models_from_vercel_ai_gateway())
+
+        if gateway == "aihubmix":
+            cache = _aihubmix_models_cache
+            if cache["data"] and cache["timestamp"]:
+                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                if cache_age < cache["ttl"]:
+                    return cache["data"]
+            return _sync_registry("aihubmix", fetch_models_from_aihubmix())
 
         if gateway == "anannas":
             cache = _anannas_models_cache
@@ -506,11 +553,10 @@ def get_cached_models(gateway: str = "openrouter"):
                 cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
-            return fetch_models_from_anannas()
+            return _sync_registry("anannas", fetch_models_from_anannas())
 
         if gateway == "all":
-            # Fetch all gateways in parallel for improved performance
-            return get_all_models_parallel()
+            return get_canonical_models()
 
         # Default to OpenRouter with stale-while-revalidate
         if is_cache_fresh(_models_cache):
@@ -523,7 +569,7 @@ def get_cached_models(gateway: str = "openrouter"):
             return _models_cache["data"]
 
         # Cache expired or empty, fetch fresh data synchronously
-        return fetch_models_from_openrouter()
+        return _sync_registry("openrouter", fetch_models_from_openrouter())
     except Exception as e:
         logger.error(
             "Error getting cached models for gateway '%s': %s",
@@ -558,7 +604,7 @@ def fetch_models_from_openrouter():
         _models_cache["data"] = models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        return _models_cache["data"]
+        return _sync_registry("openrouter", _models_cache["data"])
     except Exception as e:
         logger.error("Failed to fetch models from OpenRouter: %s", sanitize_for_logging(str(e)))
         return None
@@ -599,7 +645,7 @@ def fetch_models_from_portkey():
         _portkey_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Cached {len(normalized_models)} Portkey models with pricing cross-reference")
-        return _portkey_models_cache["data"]
+        return _sync_registry("portkey", _portkey_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "Portkey HTTP error: %s - %s",
@@ -659,7 +705,7 @@ def fetch_models_from_deepinfra():
         _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
-        return _deepinfra_models_cache["data"]
+        return _sync_registry("deepinfra", _deepinfra_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "DeepInfra HTTP error: %s - %s",
@@ -814,7 +860,7 @@ def fetch_models_from_featherless():
         _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
-        return _featherless_models_cache["data"]
+        return _sync_registry("featherless", _featherless_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "Featherless HTTP error: %s - %s",
@@ -905,7 +951,7 @@ def fetch_models_from_chutes():
             _chutes_models_cache["timestamp"] = datetime.now(timezone.utc)
 
             logger.info(f"Loaded {len(normalized_models)} models from Chutes static catalog")
-            return _chutes_models_cache["data"]
+            return _sync_registry("chutes", _chutes_models_cache["data"])
 
         # If static catalog doesn't exist, try API (if key is configured)
         if Config.CHUTES_API_KEY:
@@ -964,7 +1010,7 @@ def fetch_models_from_groq():
         _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} Groq models")
-        return _groq_models_cache["data"]
+        return _sync_registry("groq", _groq_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "Groq HTTP error: %s - %s",
@@ -1153,7 +1199,7 @@ def fetch_models_from_fireworks():
         _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
-        return _fireworks_models_cache["data"]
+        return _sync_registry("fireworks", _fireworks_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "Fireworks HTTP error: %s - %s",
@@ -1294,7 +1340,7 @@ def fetch_models_from_together():
         _together_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} Together models")
-        return _together_models_cache["data"]
+        return _sync_registry("together", _together_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "Together HTTP error: %s - %s",
@@ -1420,7 +1466,7 @@ def fetch_models_from_aimo():
         _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} AIMO models")
-        return _aimo_models_cache["data"]
+        return _sync_registry("aimo", _aimo_models_cache["data"])
     except httpx.HTTPStatusError as e:
         logger.error(
             "AIMO HTTP error: %s - %s",
@@ -1574,7 +1620,7 @@ def fetch_models_from_near():
                 _near_models_cache["timestamp"] = datetime.now(timezone.utc)
 
                 logger.info(f"Fetched {len(normalized_models)} Near AI models from API")
-                return _near_models_cache["data"]
+                return _sync_registry("near", _near_models_cache["data"])
         except (httpx.HTTPStatusError, httpx.RequestError) as e:
             logger.warning(
                 "Near AI API request failed: %s. Using fallback model list.",
@@ -1596,7 +1642,7 @@ def fetch_models_from_near():
         _near_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Using {len(normalized_models)} fallback Near AI models")
-        return _near_models_cache["data"]
+        return _sync_registry("near", _near_models_cache["data"])
     except Exception as e:
         logger.error(f"Failed to fetch models from Near AI: {e}")
         return []
@@ -1719,7 +1765,7 @@ def fetch_models_from_fal():
         _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} Fal.ai models from catalog")
-        return _fal_models_cache["data"]
+        return _sync_registry("fal", _fal_models_cache["data"])
     except Exception as e:
         logger.error(f"Failed to fetch models from Fal.ai catalog: {e}")
         return []
@@ -1833,7 +1879,7 @@ def fetch_models_from_vercel_ai_gateway():
         _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} models from Vercel AI Gateway")
-        return _vercel_ai_gateway_models_cache["data"]
+        return _sync_registry("vercel-ai-gateway", _vercel_ai_gateway_models_cache["data"])
     except Exception as e:
         logger.error(
             "Failed to fetch models from Vercel AI Gateway: %s", sanitize_for_logging(str(e))
@@ -2699,7 +2745,6 @@ def fetch_models_from_aihubmix():
     AiHubMix provides access to models through a unified OpenAI-compatible endpoint.
     """
     try:
-        from src.cache import _aihubmix_models_cache
         from src.services.aihubmix_client import get_aihubmix_client
 
         client = get_aihubmix_client()
@@ -2716,7 +2761,7 @@ def fetch_models_from_aihubmix():
         _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
-        return _aihubmix_models_cache["data"]
+        return _sync_registry("aihubmix", _aihubmix_models_cache["data"])
     except Exception as e:
         logger.error(
             "Failed to fetch models from AiHubMix: %s", sanitize_for_logging(str(e))
@@ -2792,7 +2837,7 @@ def fetch_models_from_anannas():
         _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Fetched {len(normalized_models)} models from Anannas")
-        return _anannas_models_cache["data"]
+        return _sync_registry("anannas", _anannas_models_cache["data"])
     except Exception as e:
         logger.error(
             "Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e))

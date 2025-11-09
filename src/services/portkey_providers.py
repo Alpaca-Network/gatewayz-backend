@@ -30,7 +30,7 @@ HISTORICAL NOTE:
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from src.cache import (
     _cerebras_models_cache,
@@ -41,8 +41,10 @@ from src.cache import (
     _xai_models_cache,
 )
 from src.services.pricing_lookup import enrich_model_with_pricing
+from src.services.multi_provider_registry import get_registry
 
 logger = logging.getLogger(__name__)
+_registry = get_registry()
 
 
 # xAI fallback models - used when SDK/API is unavailable
@@ -65,6 +67,23 @@ XAI_FALLBACK_MODELS = [
     {"id": "grok-beta", "owned_by": "xAI"},
     {"id": "grok-vision-beta", "owned_by": "xAI"},
 ]
+
+
+def _sync_registry(
+    provider: str, models: Optional[List[Dict[str, Any]]]
+) -> Optional[List[Dict[str, Any]]]:
+    """Best-effort registry synchronization for provider catalogs."""
+    if not models:
+        return models
+    try:
+        _registry.sync_provider_catalog(provider, models)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Registry sync failed for %s: %s",
+            provider,
+            getattr(exc, "message", str(exc))[:200],
+        )
+    return models
 
 
 def _check_api_key(api_key: Optional[str], provider_name: str) -> bool:
@@ -234,7 +253,7 @@ def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict)
     cache_dict["timestamp"] = datetime.now(timezone.utc)
 
     logger.info(f"Cached {len(normalized_models)} {provider} models")
-    return cache_dict["data"]
+    return _sync_registry(provider, cache_dict["data"])
 
 
 def _fetch_openai_compatible_models(
@@ -774,10 +793,15 @@ def fetch_models_from_google_vertex():
         normalized_models = []
         for model in vertex_models:
             try:
+                native_id = model.get("id")
+                canonical_slug = f"google/{native_id}" if native_id else native_id
+
                 normalized = {
-                    "id": model.get("id"),
-                    "name": model.get("id"),
-                    "display_name": model.get("display_name", model.get("id")),
+                    "id": native_id,
+                    "slug": canonical_slug,
+                    "canonical_slug": canonical_slug,
+                    "name": native_id,
+                    "display_name": model.get("display_name", native_id),
                     "description": model.get("description", ""),
                     "architecture": {
                         "modality": (
