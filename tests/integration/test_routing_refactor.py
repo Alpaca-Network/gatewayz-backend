@@ -264,10 +264,7 @@ class TestCircuitBreaker:
 class TestModelPrompting:
     """Test actual model prompting through the API"""
 
-    @pytest.mark.skipif(
-        not pytest.config.getoption("--run-live-tests", default=False),
-        reason="Requires --run-live-tests flag and valid API credentials"
-    )
+    @pytest.mark.skip(reason="Requires live API credentials - use --run-live-tests to enable")
     def test_prompt_gpt4_through_api(self):
         """Test prompting GPT-4 through the chat API"""
         # This requires a valid API key and credits
@@ -455,21 +452,6 @@ class TestCatalogIntegration:
             ]
 
             logger.info(f"Found {len(models_with_providers)} models with provider info")
-
-
-# ============================================================
-# Pytest Configuration
-# ============================================================
-
-
-def pytest_addoption(parser):
-    """Add custom pytest options"""
-    parser.addoption(
-        "--run-live-tests",
-        action="store_true",
-        default=False,
-        help="Run tests that require live API credentials",
-    )
 
 
 # ============================================================
