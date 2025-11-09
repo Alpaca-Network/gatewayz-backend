@@ -333,6 +333,16 @@ class StripeService:
             except (AttributeError, ValueError, TypeError, KeyError):
                 pass
 
+            # Record event as processed immediately after duplicate check to ensure
+            # idempotency even if handlers raise exceptions. This prevents duplicate
+            # processing when Stripe retries the webhook.
+            record_processed_event(
+                event_id=event["id"],
+                event_type=event["type"],
+                user_id=user_id,
+                metadata={"stripe_account": event.get("account")}
+            )
+
             # One-time payment events
             if event["type"] == "checkout.session.completed":
                 self._handle_checkout_completed(event["data"]["object"])
@@ -352,14 +362,6 @@ class StripeService:
                 self._handle_invoice_paid(event["data"]["object"])
             elif event["type"] == "invoice.payment_failed":
                 self._handle_invoice_payment_failed(event["data"]["object"])
-
-            # Record event as processed (idempotency)
-            record_processed_event(
-                event_id=event["id"],
-                event_type=event["type"],
-                user_id=user_id,
-                metadata={"stripe_account": event.get("account")}
-            )
 
             return WebhookProcessingResult(
                 success=True,
