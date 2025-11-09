@@ -33,6 +33,7 @@ client = TestClient(app)
 # ============================================================
 
 
+@pytest.mark.integration
 class TestProviderSelectorBasics:
     """Test basic ProviderSelector functionality"""
 
@@ -74,6 +75,7 @@ class TestProviderSelectorBasics:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestMultiProviderRegistry:
     """Test multi-provider registry functionality"""
 
@@ -130,6 +132,7 @@ class TestMultiProviderRegistry:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestProviderFailover:
     """Test automatic provider failover"""
 
@@ -207,6 +210,7 @@ class TestProviderFailover:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestCircuitBreaker:
     """Test circuit breaker health tracking"""
 
@@ -261,6 +265,7 @@ class TestCircuitBreaker:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestModelPrompting:
     """Test actual model prompting through the API"""
 
@@ -340,6 +345,7 @@ class TestModelPrompting:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestProviderSpecificRouting:
     """Test routing to specific providers"""
 
@@ -395,6 +401,7 @@ class TestProviderSpecificRouting:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestModelTransformation:
     """Test model ID transformation and provider detection"""
 
@@ -421,6 +428,7 @@ class TestModelTransformation:
 # ============================================================
 
 
+@pytest.mark.integration
 class TestCatalogIntegration:
     """Test integration with model catalog"""
 
