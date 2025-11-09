@@ -32,7 +32,3 @@ BEGIN
     WHERE created_at < NOW() - INTERVAL '90 days';
 END;
 $$ LANGUAGE plpgsql;
-
--- Create index for cleanup function
-CREATE INDEX IF NOT EXISTS idx_webhook_events_cleanup ON stripe_webhook_events(created_at)
-WHERE created_at < NOW() - INTERVAL '90 days';
