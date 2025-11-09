@@ -5,7 +5,7 @@ Handles retrieval of subscription product configurations
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -83,7 +83,7 @@ def get_credits_from_tier(tier: str) -> float:
         return 0.0
 
 
-def get_subscription_product(product_id: str) -> Optional[Dict[str, Any]]:
+def get_subscription_product(product_id: str) -> dict[str, Any] | None:
     """
     Get full subscription product configuration
 
@@ -112,7 +112,7 @@ def get_subscription_product(product_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_all_active_products() -> List[Dict[str, Any]]:
+def get_all_active_products() -> list[dict[str, Any]]:
     """
     Get all active subscription products
 
@@ -142,7 +142,7 @@ def add_subscription_product(
     tier: str,
     display_name: str,
     credits_per_month: float,
-    description: Optional[str] = None,
+    description: str | None = None,
     is_active: bool = True
 ) -> bool:
     """
@@ -185,11 +185,11 @@ def add_subscription_product(
 
 def update_subscription_product(
     product_id: str,
-    tier: Optional[str] = None,
-    display_name: Optional[str] = None,
-    credits_per_month: Optional[float] = None,
-    description: Optional[str] = None,
-    is_active: Optional[bool] = None
+    tier: str | None = None,
+    display_name: str | None = None,
+    credits_per_month: float | None = None,
+    description: str | None = None,
+    is_active: bool | None = None
 ) -> bool:
     """
     Update an existing subscription product configuration

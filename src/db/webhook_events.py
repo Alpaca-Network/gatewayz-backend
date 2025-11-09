@@ -6,7 +6,7 @@ Handles storage and retrieval of processed Stripe webhook events for idempotency
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -49,8 +49,8 @@ def is_event_processed(event_id: str) -> bool:
 def record_processed_event(
     event_id: str,
     event_type: str,
-    user_id: Optional[int] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    user_id: int | None = None,
+    metadata: dict[str, Any] | None = None
 ) -> bool:
     """
     Record that a webhook event has been processed
@@ -87,7 +87,7 @@ def record_processed_event(
         return False
 
 
-def get_processed_event(event_id: str) -> Optional[Dict[str, Any]]:
+def get_processed_event(event_id: str) -> dict[str, Any] | None:
     """
     Get details of a processed webhook event
 
