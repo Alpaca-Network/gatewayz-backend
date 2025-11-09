@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - handled gracefully below
     APIConnectionError = APITimeoutError = APIStatusError = AuthenticationError = None
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
 
+# Legacy fallback chain for backward compatibility
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "huggingface",
     "featherless",
@@ -43,10 +44,74 @@ FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 
 
-def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
-    """Return the provider attempt order starting with the initial provider."""
+def build_provider_failover_chain(
+    initial_provider: Optional[str],
+    model_id: Optional[str] = None,
+    use_registry: bool = True,
+    selection_strategy: str = "priority",
+) -> List[str]:
+    """
+    Return the provider attempt order starting with the initial provider.
+
+    Args:
+        initial_provider: The preferred provider to start with
+        model_id: Optional model ID for registry-based failover
+        use_registry: Whether to use canonical registry for failover (default: True)
+        selection_strategy: Strategy for selecting providers (priority, cost, latency, balanced)
+
+    Returns:
+        List of provider names in failover order
+    """
+
     provider = (initial_provider or "").lower()
 
+    # Try to use canonical registry if model_id provided
+    if use_registry and model_id:
+        try:
+            from src.services.canonical_model_registry import get_canonical_registry
+
+            registry = get_canonical_registry()
+
+            # Resolve model ID (handles aliases)
+            canonical_id = registry.resolve_model_id(model_id)
+            canonical_model = registry.get_canonical_model(canonical_id)
+
+            if canonical_model:
+                # Build dynamic chain from registry
+                providers_with_configs = registry.select_providers_with_failover(
+                    model_id=canonical_id,
+                    max_providers=10,  # Get more providers for failover
+                    selection_strategy=selection_strategy,
+                    required_features=None,
+                )
+
+                chain = []
+
+                # If initial provider specified and available, put it first
+                if provider:
+                    # Check if provider is available for this model
+                    for prov_name, _ in providers_with_configs:
+                        if prov_name.lower() == provider:
+                            chain.append(provider)
+                            break
+
+                # Add remaining providers
+                for prov_name, _ in providers_with_configs:
+                    if prov_name.lower() not in chain:
+                        chain.append(prov_name.lower())
+
+                if chain:
+                    logger.debug(
+                        f"Using registry-based failover chain for {model_id}: {chain[:5]}"
+                    )
+                    return chain
+
+        except ImportError:
+            logger.debug("Canonical registry not available, using legacy failover")
+        except Exception as e:
+            logger.warning(f"Failed to use registry for failover: {e}")
+
+    # Fallback to legacy behavior
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
@@ -59,6 +124,63 @@ def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
             chain.append(candidate)
 
     return chain
+
+
+def get_provider_for_model(
+    model_id: str,
+    preferred_provider: Optional[str] = None,
+    required_features: Optional[List[str]] = None,
+) -> Optional[str]:
+    """
+    Get the best provider for a model using the canonical registry.
+
+    Args:
+        model_id: The model to get a provider for
+        preferred_provider: Optional preferred provider
+        required_features: Optional required features
+
+    Returns:
+        Provider name or None if no suitable provider found
+    """
+
+    try:
+        from src.services.canonical_model_registry import get_canonical_registry
+
+        registry = get_canonical_registry()
+
+        # Resolve model ID
+        canonical_id = registry.resolve_model_id(model_id)
+        canonical_model = registry.get_canonical_model(canonical_id)
+
+        if not canonical_model:
+            return None
+
+        # Select best provider
+        providers = registry.select_providers_with_failover(
+            model_id=canonical_id,
+            max_providers=1,
+            selection_strategy="priority",
+            required_features=required_features,
+        )
+
+        if providers:
+            provider_name, _ = providers[0]
+
+            # If preferred provider specified and available, use it
+            if preferred_provider:
+                if preferred_provider.lower() in [p.lower() for p in canonical_model.providers.keys()]:
+                    return preferred_provider.lower()
+
+            return provider_name.lower()
+
+        return None
+
+    except ImportError:
+        logger.debug("Canonical registry not available")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to get provider from registry: {e}")
+        return None
 
 
 def should_failover(http_exc: HTTPException) -> bool:
