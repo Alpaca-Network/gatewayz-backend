@@ -60,28 +60,51 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         Output: "openai/gpt-4"
     """
 
-    # Check multi-provider registry first (if enabled)
+    # Check canonical registry first (if enabled)
     if use_multi_provider:
         try:
-            from src.services.multi_provider_registry import get_registry
+            from src.services.canonical_model_registry import get_canonical_registry
 
-            registry = get_registry()
-            if registry.has_model(model_id):
-                # Get provider-specific model ID from registry
-                model = registry.get_model(model_id)
-                if model:
-                    provider_config = model.get_provider_by_name(provider)
-                    if provider_config:
-                        provider_model_id = provider_config.model_id
-                        logger.info(
-                            f"Multi-provider transform: {model_id} -> {provider_model_id} "
-                            f"(provider: {provider})"
-                        )
-                        return provider_model_id.lower()
+            registry = get_canonical_registry()
+
+            # Resolve model ID (handles aliases)
+            canonical_id = registry.resolve_model_id(model_id)
+            canonical_model = registry.get_canonical_model(canonical_id)
+
+            if canonical_model and provider in canonical_model.providers:
+                # Get provider-specific model ID from canonical registry
+                provider_model_id = canonical_model.provider_model_ids.get(
+                    provider, canonical_model.providers[provider].model_id
+                )
+                logger.info(
+                    f"Canonical transform: {model_id} -> {provider_model_id} "
+                    f"(provider: {provider}, canonical: {canonical_id})"
+                )
+                return provider_model_id.lower()
         except ImportError:
-            pass
+            # Fall back to legacy multi-provider registry
+            try:
+                from src.services.multi_provider_registry import get_registry as get_multi_registry
+
+                multi_registry = get_multi_registry()
+                if multi_registry.has_model(model_id):
+                    # Get provider-specific model ID from legacy registry
+                    model = multi_registry.get_model(model_id)
+                    if model:
+                        provider_config = model.get_provider_by_name(provider)
+                        if provider_config:
+                            provider_model_id = provider_config.model_id
+                            logger.info(
+                                f"Multi-provider transform: {model_id} -> {provider_model_id} "
+                                f"(provider: {provider})"
+                            )
+                            return provider_model_id.lower()
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.warning(f"Error checking multi-provider registry for transform: {e}")
         except Exception as e:
-            logger.warning(f"Error checking multi-provider registry for transform: {e}")
+            logger.warning(f"Error checking canonical registry for transform: {e}")
 
     # Normalize input to lowercase for case-insensitive matching
     # Store original for logging
@@ -521,32 +544,65 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         The detected provider name, or None if unable to detect
     """
 
-    # Check multi-provider registry first
+    # Check canonical registry first
     try:
-        from src.services.multi_provider_registry import get_registry
+        from src.services.canonical_model_registry import get_canonical_registry
 
-        registry = get_registry()
-        if registry.has_model(model_id):
-            # Model is in multi-provider registry
-            from src.services.provider_selector import get_selector
+        registry = get_canonical_registry()
 
-            selector = get_selector()
-            selected_provider = selector.registry.select_provider(
-                model_id=model_id,
-                preferred_provider=preferred_provider,
+        # Resolve model ID (handles aliases)
+        canonical_id = registry.resolve_model_id(model_id)
+        canonical_model = registry.get_canonical_model(canonical_id)
+
+        if canonical_model:
+            # Model is in canonical registry - select best provider
+            providers = registry.select_providers_with_failover(
+                model_id=canonical_id,
+                max_providers=1,
+                selection_strategy="priority",
             )
 
-            if selected_provider:
+            if providers:
+                provider_name, config = providers[0]
+
+                # If preferred provider specified and available, use it
+                if preferred_provider and preferred_provider in canonical_model.providers:
+                    provider_name = preferred_provider
+
                 logger.info(
-                    f"Multi-provider model {model_id}: selected {selected_provider.name} "
-                    f"(priority {selected_provider.priority})"
+                    f"Canonical model {model_id}: selected {provider_name} "
+                    f"(canonical: {canonical_id})"
                 )
-                return selected_provider.name
+                return provider_name
     except ImportError:
-        # Multi-provider modules not available, fall through to legacy detection
-        pass
+        # Fall back to legacy multi-provider registry
+        try:
+            from src.services.multi_provider_registry import get_registry as get_multi_registry
+
+            multi_registry = get_multi_registry()
+            if multi_registry.has_model(model_id):
+                # Model is in multi-provider registry
+                from src.services.provider_selector import get_selector
+
+                selector = get_selector()
+                selected_provider = selector.registry.select_provider(
+                    model_id=model_id,
+                    preferred_provider=preferred_provider,
+                )
+
+                if selected_provider:
+                    logger.info(
+                        f"Multi-provider model {model_id}: selected {selected_provider.name} "
+                        f"(priority {selected_provider.priority})"
+                    )
+                    return selected_provider.name
+        except ImportError:
+            # Multi-provider modules not available, fall through to legacy detection
+            pass
+        except Exception as e:
+            logger.warning(f"Error checking multi-provider registry: {e}")
     except Exception as e:
-        logger.warning(f"Error checking multi-provider registry: {e}")
+        logger.warning(f"Error checking canonical registry: {e}")
         # Fall through to legacy detection
 
     # Apply explicit overrides first
