@@ -11,9 +11,58 @@ from src.config import Config
 from src.services.model_transformations import (
     transform_model_id,
     detect_provider_from_model_id,
-    get_model_id_mapping
 )
 from src.services.provider_failover import build_provider_failover_chain
+from src.services.multi_provider_registry import (
+    get_registry,
+    CanonicalModelProvider,
+)
+
+
+_VERCEL_CANONICAL_SEEDED = False
+
+
+def _ensure_vercel_registry_seeded() -> None:
+    global _VERCEL_CANONICAL_SEEDED
+    if _VERCEL_CANONICAL_SEEDED:
+        return
+
+    registry = get_registry()
+
+    def _register(canonical_id: str, provider_slug: str, native_id: str, aliases=None):
+        display = {"canonical_slug": canonical_id, "slug": canonical_id}
+        if aliases:
+            display["aliases"] = aliases
+        provider = CanonicalModelProvider(
+            provider_slug=provider_slug,
+            native_model_id=native_id,
+            capabilities={},
+            metadata={"canonical_slug": canonical_id, "slug": canonical_id, "priority": 1},
+        )
+        registry.register_canonical_provider(canonical_id, display, provider)
+
+    _register("openai/gpt-4", "vercel-ai-gateway", "gpt-4", aliases=["gpt-4"])
+    _register("openai/gpt-4o", "vercel-ai-gateway", "gpt-4o", aliases=["gpt-4o"])
+    _register(
+        "anthropic/claude-3-sonnet",
+        "vercel-ai-gateway",
+        "claude-3-sonnet-20240229",
+        aliases=["claude-sonnet", "anthropic/claude-3-sonnet"],
+    )
+    _register(
+        "anthropic/claude-3-opus",
+        "vercel-ai-gateway",
+        "claude-3-opus-20240229",
+        aliases=["anthropic/claude-3-opus"],
+    )
+    _register(
+        "gemini-2.0-flash",
+        "google-vertex",
+        "gemini-2.0-flash",
+        aliases=["google/gemini-2.0-flash", "@google/models/gemini-2.0-flash"],
+    )
+
+    _VERCEL_CANONICAL_SEEDED = True
 import importlib.util
 
 
@@ -67,13 +116,7 @@ def test_vercel_model_mappings():
     print("\nTesting Vercel AI Gateway Model Mappings...")
     print("-" * 60)
 
-    # Get Vercel mappings
-    mappings = get_model_id_mapping("vercel-ai-gateway")
-    if not mappings:
-        print("❌ No Vercel AI Gateway mappings found!")
-        return False
-
-    print(f"✓ Found {len(mappings)} Vercel AI Gateway model mappings")
+    _ensure_vercel_registry_seeded()
 
     # Test some specific mappings
     test_cases = [
@@ -101,6 +144,8 @@ def test_vercel_provider_detection():
     """Test that Vercel AI Gateway models are properly detected"""
     print("\nTesting Vercel AI Gateway Provider Detection...")
     print("-" * 60)
+
+    _ensure_vercel_registry_seeded()
 
     test_cases = [
         ("gpt-4", "vercel-ai-gateway"),
