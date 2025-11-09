@@ -15,6 +15,7 @@ from src.services.prometheus_remote_write import (
 )
 from src.services.tempo_otlp import init_tempo_otlp, init_tempo_otlp_fastapi
 from src.services.google_models_config import initialize_google_models
+from src.services.model_registry_config import initialize_canonical_registry
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,17 @@ async def lifespan(app):
     logger.info("Starting health monitoring and observability services...")
 
     try:
-        # Initialize multi-provider models
+        # Initialize canonical model registry with all multi-provider models
+        try:
+            initialize_canonical_registry()
+            logger.info("Canonical model registry initialized with multi-provider support")
+        except Exception as e:
+            logger.warning(f"Canonical registry initialization warning: {e}")
+
+        # Initialize legacy Google models (for backward compatibility)
         try:
             initialize_google_models()
-            logger.info("Multi-provider Google models initialized")
+            logger.info("Legacy multi-provider Google models initialized")
         except Exception as e:
             logger.warning(f"Google models initialization warning: {e}")
 

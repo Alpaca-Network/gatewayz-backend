@@ -731,7 +731,7 @@ async def chat_completions(
                         break
                 # Otherwise default to openrouter (already set)
 
-        provider_chain = build_provider_failover_chain(provider)
+        provider_chain = build_provider_failover_chain(provider, model_id=original_model)
         model = original_model
         
         # Diagnostic logging for tools parameter
@@ -1554,7 +1554,7 @@ async def unified_responses(
                         )
                         break
 
-        provider_chain = build_provider_failover_chain(provider)
+        provider_chain = build_provider_failover_chain(provider, model_id=original_model)
         model = original_model
         
         # Diagnostic logging for tools parameter
