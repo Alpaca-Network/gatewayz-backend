@@ -29,7 +29,7 @@ class TestPaymentFailureDowngrade:
     def mock_supabase_client(self):
         """Mock Supabase client"""
         mock_client = MagicMock()
-        with patch("src.services.payments.get_supabase_client") as mock:
+        with patch("src.config.supabase_config.get_supabase_client") as mock:
             mock.return_value = mock_client
             yield mock_client
 
