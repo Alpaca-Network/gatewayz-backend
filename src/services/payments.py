@@ -326,9 +326,11 @@ class StripeService:
             user_id = None
             try:
                 event_obj = event["data"]["object"]
-                if hasattr(event_obj, "metadata") and event_obj.metadata:
-                    user_id = int(event_obj.metadata.get("user_id", 0)) or None
-            except (AttributeError, ValueError, TypeError):
+                if event_obj.get("metadata"):
+                    user_id_str = event_obj["metadata"].get("user_id")
+                    if user_id_str:
+                        user_id = int(user_id_str)
+            except (AttributeError, ValueError, TypeError, KeyError):
                 pass
 
             # One-time payment events

@@ -6,7 +6,6 @@ Handles retrieval of subscription product configurations
 
 import logging
 from typing import Optional, Dict, Any, List
-from decimal import Decimal
 
 from src.config.supabase_config import get_supabase_client
 
