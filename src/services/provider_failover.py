@@ -28,6 +28,11 @@ except ImportError:  # pragma: no cover - handled gracefully below
     APIConnectionError = APITimeoutError = APIStatusError = AuthenticationError = None
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
 
+# LEGACY: Static fallback priority
+# NOTE: This static priority chain is now a LEGACY FALLBACK used only for models
+# not registered in the multi-provider registry. New multi-provider models should
+# be registered via MultiProviderRegistry with provider configurations, which enables
+# intelligent provider selection via ProviderSelector.execute_with_failover.
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "huggingface",
     "featherless",
@@ -44,7 +49,24 @@ FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 
 
 def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
-    """Return the provider attempt order starting with the initial provider."""
+    """
+    Return the provider attempt order starting with the initial provider.
+
+    LEGACY FALLBACK: This function provides a static provider failover chain and is
+    now used only as a fallback for models not registered in the multi-provider
+    registry.
+
+    For models registered in MultiProviderRegistry, the ProviderSelector class
+    provides intelligent provider selection with automatic failover, circuit
+    breakers, and health tracking. See src/services/provider_selector.py and
+    src/services/multi_provider_registry.py for the recommended approach.
+
+    Args:
+        initial_provider: Provider to try first (if eligible for failover)
+
+    Returns:
+        List of provider names to try in order
+    """
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:

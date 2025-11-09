@@ -127,6 +127,7 @@ from src.services.provider_failover import (
     map_provider_error,
     should_failover,
 )
+from src.services.provider_selector import get_selector
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.pricing import calculate_cost
@@ -213,6 +214,114 @@ def mask_key(k: str) -> str:
 
 async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def _create_provider_executor(messages, optional, req, is_streaming=False):
+    """
+    Create an executor function for ProviderSelector.execute_with_failover.
+
+    This wrapper translates provider-specific calls into a unified callback interface.
+
+    Args:
+        messages: List of message dicts
+        optional: Dict of optional parameters (max_tokens, temperature, etc.)
+        req: The original request object
+        is_streaming: Whether this is a streaming request
+
+    Returns:
+        A synchronous function that takes (provider_name, model_id) and returns the response
+    """
+    def executor(provider_name: str, model_id: str):
+        """Execute provider-specific request synchronously"""
+        if is_streaming:
+            # For streaming, return the stream object
+            if provider_name == "portkey":
+                portkey_provider = req.portkey_provider or "openai"
+                portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
+                return make_portkey_request_openai_stream(
+                    messages, model_id, portkey_provider, portkey_virtual_key, **optional
+                )
+            elif provider_name == "featherless":
+                return make_featherless_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "fireworks":
+                return make_fireworks_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "together":
+                return make_together_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "huggingface":
+                return make_huggingface_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "aimo":
+                return make_aimo_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "xai":
+                return make_xai_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "chutes":
+                return make_chutes_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "near":
+                return make_near_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "google-vertex":
+                return make_google_vertex_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "vercel-ai-gateway":
+                return make_vercel_ai_gateway_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "helicone":
+                return make_helicone_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "aihubmix":
+                return make_aihubmix_request_openai_stream(messages, model_id, **optional)
+            elif provider_name == "anannas":
+                return make_anannas_request_openai_stream(messages, model_id, **optional)
+            else:  # openrouter and default
+                return make_openrouter_request_openai_stream(messages, model_id, **optional)
+        else:
+            # For non-streaming, return raw response
+            if provider_name == "portkey":
+                portkey_provider = req.portkey_provider or "openai"
+                portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
+                resp = make_portkey_request_openai(
+                    messages, model_id, portkey_provider, portkey_virtual_key, **optional
+                )
+                return process_portkey_response(resp)
+            elif provider_name == "featherless":
+                resp = make_featherless_request_openai(messages, model_id, **optional)
+                return process_featherless_response(resp)
+            elif provider_name == "fireworks":
+                resp = make_fireworks_request_openai(messages, model_id, **optional)
+                return process_fireworks_response(resp)
+            elif provider_name == "together":
+                resp = make_together_request_openai(messages, model_id, **optional)
+                return process_together_response(resp)
+            elif provider_name == "huggingface":
+                resp = make_huggingface_request_openai(messages, model_id, **optional)
+                return process_huggingface_response(resp)
+            elif provider_name == "aimo":
+                resp = make_aimo_request_openai(messages, model_id, **optional)
+                return process_aimo_response(resp)
+            elif provider_name == "xai":
+                resp = make_xai_request_openai(messages, model_id, **optional)
+                return process_xai_response(resp)
+            elif provider_name == "chutes":
+                resp = make_chutes_request_openai(messages, model_id, **optional)
+                return process_chutes_response(resp)
+            elif provider_name == "near":
+                resp = make_near_request_openai(messages, model_id, **optional)
+                return process_near_response(resp)
+            elif provider_name == "google-vertex":
+                resp = make_google_vertex_request_openai(messages, model_id, **optional)
+                return process_google_vertex_response(resp)
+            elif provider_name == "vercel-ai-gateway":
+                resp = make_vercel_ai_gateway_request_openai(messages, model_id, **optional)
+                return process_vercel_ai_gateway_response(resp)
+            elif provider_name == "helicone":
+                resp = make_helicone_request_openai(messages, model_id, **optional)
+                return process_helicone_response(resp)
+            elif provider_name == "aihubmix":
+                resp = make_aihubmix_request_openai(messages, model_id, **optional)
+                return process_aihubmix_response(resp)
+            elif provider_name == "anannas":
+                resp = make_anannas_request_openai(messages, model_id, **optional)
+                return process_anannas_response(resp)
+            else:  # openrouter and default
+                resp = make_openrouter_request_openai(messages, model_id, **optional)
+                return process_openrouter_response(resp)
+
+    return executor
 
 
 def _fallback_get_user(api_key: str):
@@ -751,113 +860,32 @@ async def chat_completions(
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
-            last_http_exc = None
-            for idx, attempt_provider in enumerate(provider_chain):
-                attempt_model = transform_model_id(original_model, attempt_provider)
-                if attempt_model != original_model:
+            # Try to use ProviderSelector for multi-provider failover if model is registered
+            selector = get_selector()
+            use_selector = selector.registry.has_model(original_model)
+
+            if use_selector:
+                # Use intelligent provider selection with automatic failover
+                logger.info(
+                    f"Using ProviderSelector for streaming model {original_model} with automatic failover"
+                )
+                executor = _create_provider_executor(messages, optional, req, is_streaming=True)
+
+                result = await _to_thread(
+                    selector.execute_with_failover,
+                    model_id=original_model,
+                    execute_fn=executor,
+                    preferred_provider=provider if provider != original_model else None,
+                )
+
+                if result["success"]:
+                    stream = result["response"]
+                    provider = result["provider"]
+                    model = result["provider_model_id"]
                     logger.info(
-                        f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
+                        f"Streaming request succeeded with provider {provider} for model {original_model} "
+                        f"after {len(result['attempts'])} attempt(s)"
                     )
-
-                request_model = attempt_model
-                try:
-                    if attempt_provider == "portkey":
-                        portkey_provider = req.portkey_provider or "openai"
-                        portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
-                        stream = await _to_thread(
-                            make_portkey_request_openai_stream,
-                            messages,
-                            request_model,
-                            portkey_provider,
-                            portkey_virtual_key,
-                            **optional,
-                        )
-                    elif attempt_provider == "featherless":
-                        stream = await _to_thread(
-                            make_featherless_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "fireworks":
-                        stream = await _to_thread(
-                            make_fireworks_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "together":
-                        stream = await _to_thread(
-                            make_together_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "huggingface":
-                        stream = await _to_thread(
-                            make_huggingface_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "aimo":
-                        stream = await _to_thread(
-                            make_aimo_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "xai":
-                        stream = await _to_thread(
-                            make_xai_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "chutes":
-                        stream = await _to_thread(
-                            make_chutes_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "near":
-                        stream = await _to_thread(
-                            make_near_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "google-vertex":
-                        stream = await _to_thread(
-                            make_google_vertex_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "vercel-ai-gateway":
-                        stream = await _to_thread(
-                            make_vercel_ai_gateway_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "helicone":
-                        stream = await _to_thread(
-                            make_helicone_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "aihubmix":
-                        stream = await _to_thread(
-                            make_aihubmix_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "anannas":
-                        stream = await _to_thread(
-                            make_anannas_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    else:
-                        stream = await _to_thread(
-                            make_openrouter_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-
-                    provider = attempt_provider
-                    model = request_model
                     return StreamingResponse(
                         stream_generator(
                             stream,
@@ -873,6 +901,372 @@ async def chat_completions(
                         ),
                         media_type="text/event-stream",
                     )
+                else:
+                    # All providers failed, raise error with attempt details
+                    logger.error(
+                        f"All providers failed for streaming {original_model}. Attempts: {result['attempts']}"
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"All providers failed: {result.get('error', 'Unknown error')}",
+                    )
+            else:
+                # Legacy fallback: Use static provider chain when model not in multi-provider registry
+                logger.info(
+                    f"Streaming model {original_model} not in registry, using legacy provider failover chain"
+                )
+                last_http_exc = None
+                for idx, attempt_provider in enumerate(provider_chain):
+                    attempt_model = transform_model_id(original_model, attempt_provider)
+                    if attempt_model != original_model:
+                        logger.info(
+                            f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
+                        )
+
+                    request_model = attempt_model
+                    try:
+                        if attempt_provider == "portkey":
+                            portkey_provider = req.portkey_provider or "openai"
+                            portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
+                            stream = await _to_thread(
+                                make_portkey_request_openai_stream,
+                                messages,
+                                request_model,
+                                portkey_provider,
+                                portkey_virtual_key,
+                                **optional,
+                            )
+                        elif attempt_provider == "featherless":
+                            stream = await _to_thread(
+                                make_featherless_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "fireworks":
+                            stream = await _to_thread(
+                                make_fireworks_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "together":
+                            stream = await _to_thread(
+                                make_together_request_openai_stream, messages, request_model, **optional
+                            )
+                        elif attempt_provider == "huggingface":
+                            stream = await _to_thread(
+                                make_huggingface_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "aimo":
+                            stream = await _to_thread(
+                                make_aimo_request_openai_stream, messages, request_model, **optional
+                            )
+                        elif attempt_provider == "xai":
+                            stream = await _to_thread(
+                                make_xai_request_openai_stream, messages, request_model, **optional
+                            )
+                        elif attempt_provider == "chutes":
+                            stream = await _to_thread(
+                                make_chutes_request_openai_stream, messages, request_model, **optional
+                            )
+                        elif attempt_provider == "near":
+                            stream = await _to_thread(
+                                make_near_request_openai_stream, messages, request_model, **optional
+                            )
+                        elif attempt_provider == "google-vertex":
+                            stream = await _to_thread(
+                                make_google_vertex_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "vercel-ai-gateway":
+                            stream = await _to_thread(
+                                make_vercel_ai_gateway_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "helicone":
+                            stream = await _to_thread(
+                                make_helicone_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "aihubmix":
+                            stream = await _to_thread(
+                                make_aihubmix_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        elif attempt_provider == "anannas":
+                            stream = await _to_thread(
+                                make_anannas_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                        else:
+                            stream = await _to_thread(
+                                make_openrouter_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+
+                        provider = attempt_provider
+                        model = request_model
+                        return StreamingResponse(
+                            stream_generator(
+                                stream,
+                                user,
+                                api_key,
+                                model,
+                                trial,
+                                environment_tag,
+                                session_id,
+                                messages,
+                                rate_limit_mgr,
+                                provider,
+                            ),
+                            media_type="text/event-stream",
+                        )
+                    except Exception as exc:
+                        if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                            logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
+                        elif isinstance(exc, httpx.RequestError):
+                            logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
+                        elif isinstance(exc, httpx.HTTPStatusError):
+                            logger.debug(
+                                "Upstream HTTP error (%s): %s",
+                                attempt_provider,
+                                exc.response.status_code,
+                            )
+                        else:
+                            logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
+                        http_exc = map_provider_error(attempt_provider, request_model, exc)
+
+                        last_http_exc = http_exc
+                        if idx < len(provider_chain) - 1 and should_failover(http_exc):
+                            next_provider = provider_chain[idx + 1]
+                            logger.warning(
+                                "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
+                                attempt_provider,
+                                http_exc.status_code,
+                                http_exc.detail,
+                                next_provider,
+                            )
+                            continue
+
+                        raise http_exc
+
+                raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
+
+        # Non-streaming response
+        start = time.monotonic()
+        processed = None
+        last_http_exc = None
+
+        # Try to use ProviderSelector for multi-provider failover if model is registered
+        selector = get_selector()
+        use_selector = selector.registry.has_model(original_model)
+
+        if use_selector:
+            # Use intelligent provider selection with automatic failover
+            logger.info(
+                f"Using ProviderSelector for model {original_model} with automatic failover"
+            )
+            executor = _create_provider_executor(messages, optional, req, is_streaming=False)
+
+            result = await _to_thread(
+                selector.execute_with_failover,
+                model_id=original_model,
+                execute_fn=executor,
+                preferred_provider=provider if provider != original_model else None,
+            )
+
+            if result["success"]:
+                processed = result["response"]
+                provider = result["provider"]
+                model = result["provider_model_id"]
+                logger.info(
+                    f"Request succeeded with provider {provider} for model {original_model} "
+                    f"after {len(result['attempts'])} attempt(s)"
+                )
+            else:
+                # All providers failed, raise error with attempt details
+                logger.error(
+                    f"All providers failed for {original_model}. Attempts: {result['attempts']}"
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"All providers failed: {result.get('error', 'Unknown error')}",
+                )
+        else:
+            # Legacy fallback: Use static provider chain when model not in multi-provider registry
+            logger.info(
+                f"Model {original_model} not in registry, using legacy provider failover chain"
+            )
+            for idx, attempt_provider in enumerate(provider_chain):
+                attempt_model = transform_model_id(original_model, attempt_provider)
+                if attempt_model != original_model:
+                    logger.info(
+                        f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
+                    )
+
+                request_model = attempt_model
+                request_timeout = PROVIDER_TIMEOUTS.get(
+                    attempt_provider, DEFAULT_PROVIDER_TIMEOUT
+                )
+                if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
+                    logger.debug(
+                        "Using extended timeout %ss for provider %s",
+                        request_timeout,
+                        attempt_provider,
+                    )
+
+                try:
+                    if attempt_provider == "portkey":
+                        portkey_provider = req.portkey_provider or "openai"
+                        portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_portkey_request_openai,
+                                messages,
+                                request_model,
+                                portkey_provider,
+                                portkey_virtual_key,
+                                **optional,
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_portkey_response, resp_raw)
+                    elif attempt_provider == "featherless":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_featherless_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_featherless_response, resp_raw)
+                    elif attempt_provider == "fireworks":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_fireworks_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_fireworks_response, resp_raw)
+                    elif attempt_provider == "together":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_together_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_together_response, resp_raw)
+                    elif attempt_provider == "huggingface":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_huggingface_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_huggingface_response, resp_raw)
+                    elif attempt_provider == "aimo":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(make_aimo_request_openai, messages, request_model, **optional),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_aimo_response, resp_raw)
+                    elif attempt_provider == "xai":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(make_xai_request_openai, messages, request_model, **optional),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_xai_response, resp_raw)
+                    elif attempt_provider == "chutes":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(make_chutes_request_openai, messages, request_model, **optional),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_chutes_response, resp_raw)
+                    elif attempt_provider == "near":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(make_near_request_openai, messages, request_model, **optional),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_near_response, resp_raw)
+                    elif attempt_provider == "google-vertex":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_google_vertex_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_google_vertex_response, resp_raw)
+                    elif attempt_provider == "vercel-ai-gateway":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_vercel_ai_gateway_request_openai,
+                                messages,
+                                request_model,
+                                **optional,
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_vercel_ai_gateway_response, resp_raw)
+                    elif attempt_provider == "helicone":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_helicone_request_openai,
+                                messages,
+                                request_model,
+                                **optional,
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_helicone_response, resp_raw)
+                    elif attempt_provider == "aihubmix":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_aihubmix_request_openai,
+                                messages,
+                                request_model,
+                                **optional,
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_aihubmix_response, resp_raw)
+                    elif attempt_provider == "anannas":
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_anannas_request_openai,
+                                messages,
+                                request_model,
+                                **optional,
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_anannas_response, resp_raw)
+                    else:
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_openrouter_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_openrouter_response, resp_raw)
+
+                    provider = attempt_provider
+                    model = request_model
+                    break
                 except Exception as exc:
                     if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
@@ -880,9 +1274,7 @@ async def chat_completions(
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
                     elif isinstance(exc, httpx.HTTPStatusError):
                         logger.debug(
-                            "Upstream HTTP error (%s): %s",
-                            attempt_provider,
-                            exc.response.status_code,
+                            "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
                         )
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
@@ -902,192 +1294,8 @@ async def chat_completions(
 
                     raise http_exc
 
-            raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
-
-        # Non-streaming response
-        start = time.monotonic()
-        processed = None
-        last_http_exc = None
-
-        for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
-            if attempt_model != original_model:
-                logger.info(
-                    f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
-                )
-
-            request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
-                logger.debug(
-                    "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
-                )
-
-            try:
-                if attempt_provider == "portkey":
-                    portkey_provider = req.portkey_provider or "openai"
-                    portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_portkey_request_openai,
-                            messages,
-                            request_model,
-                            portkey_provider,
-                            portkey_virtual_key,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_portkey_response, resp_raw)
-                elif attempt_provider == "featherless":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_featherless_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_featherless_response, resp_raw)
-                elif attempt_provider == "fireworks":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_fireworks_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_fireworks_response, resp_raw)
-                elif attempt_provider == "together":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_together_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_together_response, resp_raw)
-                elif attempt_provider == "huggingface":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_huggingface_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_huggingface_response, resp_raw)
-                elif attempt_provider == "aimo":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_aimo_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_aimo_response, resp_raw)
-                elif attempt_provider == "xai":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_xai_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_xai_response, resp_raw)
-                elif attempt_provider == "chutes":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_chutes_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_chutes_response, resp_raw)
-                elif attempt_provider == "near":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_near_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_near_response, resp_raw)
-                elif attempt_provider == "google-vertex":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_google_vertex_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_google_vertex_response, resp_raw)
-                elif attempt_provider == "vercel-ai-gateway":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_vercel_ai_gateway_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_vercel_ai_gateway_response, resp_raw)
-                elif attempt_provider == "helicone":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_helicone_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_helicone_response, resp_raw)
-                elif attempt_provider == "aihubmix":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_aihubmix_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_aihubmix_response, resp_raw)
-                elif attempt_provider == "anannas":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_anannas_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_anannas_response, resp_raw)
-                else:
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_openrouter_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_openrouter_response, resp_raw)
-
-                provider = attempt_provider
-                model = request_model
-                break
-            except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-                    logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
-                elif isinstance(exc, httpx.RequestError):
-                    logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
-                elif isinstance(exc, httpx.HTTPStatusError):
-                    logger.debug(
-                        "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
-                    )
-                else:
-                    logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
-                http_exc = map_provider_error(attempt_provider, request_model, exc)
-
-                last_http_exc = http_exc
-                if idx < len(provider_chain) - 1 and should_failover(http_exc):
-                    next_provider = provider_chain[idx + 1]
-                    logger.warning(
-                        "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
-                        attempt_provider,
-                        http_exc.status_code,
-                        http_exc.detail,
-                        next_provider,
-                    )
-                    continue
-
-                raise http_exc
-
-        if processed is None:
-            raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
+            if processed is None:
+                raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
 
         elapsed = max(0.001, time.monotonic() - start)
 
