@@ -14,7 +14,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import asyncio
 import httpx
 from fastapi import HTTPException
@@ -27,6 +27,7 @@ from src.services.provider_failover import (
     FALLBACK_ELIGIBLE_PROVIDERS,
     FAILOVER_STATUS_CODES
 )
+from src.services.provider_selector import ProviderAttempt
 
 # Try to import OpenAI SDK exceptions (same pattern as the module)
 try:
@@ -158,6 +159,22 @@ class TestBuildProviderFailoverChain:
 
         # Verify FALLBACK_ELIGIBLE_PROVIDERS matches priority list
         assert FALLBACK_ELIGIBLE_PROVIDERS == set(FALLBACK_PROVIDER_PRIORITY)
+
+    @patch('src.services.provider_failover._selector')
+    def test_chain_with_model_id_uses_registry_plan(self, mock_selector):
+        """Ensure registry-driven plan takes precedence when model_id is provided."""
+        mock_selector.build_attempt_plan.return_value = [
+            ProviderAttempt(provider="google-vertex", provider_model_id="gemini-2.0-flash", priority=1),
+            ProviderAttempt(provider="openrouter", provider_model_id="google/gemini-2.0-flash", priority=2),
+        ]
+
+        chain = build_provider_failover_chain("openrouter", model_id="google/gemini-2.0-flash")
+
+        assert chain == ["google-vertex", "openrouter"]
+        mock_selector.build_attempt_plan.assert_called_once_with(
+            model_id="google/gemini-2.0-flash",
+            preferred_provider="openrouter",
+        )
 
 
 # ============================================================

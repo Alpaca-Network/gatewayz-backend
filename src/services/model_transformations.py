@@ -66,9 +66,10 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
             from src.services.multi_provider_registry import get_registry
 
             registry = get_registry()
-            if registry.has_model(model_id):
+            canonical_id = registry.resolve_canonical_id(model_id) or model_id
+            if registry.has_model(canonical_id):
                 # Get provider-specific model ID from registry
-                model = registry.get_model(model_id)
+                model = registry.get_model(canonical_id)
                 if model:
                     provider_config = model.get_provider_by_name(provider)
                     if provider_config:
@@ -526,13 +527,14 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         from src.services.multi_provider_registry import get_registry
 
         registry = get_registry()
-        if registry.has_model(model_id):
+        canonical_id = registry.resolve_canonical_id(model_id) or model_id
+        if registry.has_model(canonical_id):
             # Model is in multi-provider registry
             from src.services.provider_selector import get_selector
 
             selector = get_selector()
             selected_provider = selector.registry.select_provider(
-                model_id=model_id,
+                model_id=canonical_id,
                 preferred_provider=preferred_provider,
             )
 

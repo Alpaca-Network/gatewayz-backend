@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 from typing import Optional, Dict, List
 
+from src.services.provider_selector import get_selector
+
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
 # translate into HTTP responses. Make these imports optional so the module
@@ -41,10 +43,29 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
+_selector = get_selector()
 
 
-def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
-    """Return the provider attempt order starting with the initial provider."""
+def build_provider_failover_chain(
+    initial_provider: Optional[str],
+    model_id: Optional[str] = None,
+) -> List[str]:
+    """
+    Return the provider attempt order starting with the initial provider.
+
+    When a model_id is supplied, the multi-provider registry drives the attempt
+    plan. Otherwise we fall back to the static provider priority to preserve
+    legacy behaviour (used mainly in tests and administrative flows).
+    """
+    if model_id:
+        attempts = _selector.build_attempt_plan(
+            model_id=model_id,
+            preferred_provider=initial_provider,
+        )
+        chain = [attempt.provider for attempt in attempts if attempt.provider]
+        if chain:
+            return chain
+
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:

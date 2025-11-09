@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Request, Response, HTTPStatusError, RequestError, TimeoutException
 from unittest.mock import patch, MagicMock, Mock
+from src.services.provider_selector import ProviderAttempt
 
 # ======================================================================
 # >>> CHANGE THIS to the module path where your router + endpoint live:
@@ -293,19 +294,21 @@ def test_upstream_401_maps_500_in_your_code(mock_make_request, mock_get_user, mo
     assert "authentication" in r.text.lower()
 
 
-@patch('src.routes.chat.build_provider_failover_chain')
+@patch('src.routes.chat.plan_provider_attempts')
 @patch('src.routes.chat.should_failover')
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
 @patch('src.routes.chat.make_openrouter_request_openai')
-def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_failover_chain, client, payload_basic, auth_headers):
+def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_plan_attempts, client, payload_basic, auth_headers):
     """Test that upstream request error is mapped to 503"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
     mock_should_failover.return_value = False  # Disable failover
-    mock_failover_chain.return_value = ["openrouter"]  # Only try openrouter
+    mock_plan_attempts.return_value = [
+        ProviderAttempt(provider="openrouter", provider_model_id="openrouter/some-model", priority=1)
+    ]
 
     def boom(*a, **k):
         raise RequestError("network is down", request=Request("POST", "https://openrouter.example/v1/chat"))
@@ -319,19 +322,21 @@ def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_
     assert "service unavailable" in r.text.lower() or "network" in r.text.lower()
 
 
-@patch('src.routes.chat.build_provider_failover_chain')
+@patch('src.routes.chat.plan_provider_attempts')
 @patch('src.routes.chat.should_failover')
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
 @patch('src.routes.chat.make_openrouter_request_openai')
-def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_failover_chain, client, payload_basic, auth_headers):
+def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_plan_attempts, client, payload_basic, auth_headers):
     """Test that upstream timeout is handled properly"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
     mock_should_failover.return_value = False  # Disable failover
-    mock_failover_chain.return_value = ["openrouter"]  # Only try openrouter
+    mock_plan_attempts.return_value = [
+        ProviderAttempt(provider="openrouter", provider_model_id="openrouter/some-model", priority=1)
+    ]
 
     def boom(*a, **k):
         raise TimeoutException("upstream timeout")

@@ -28,6 +28,7 @@ from src.services.anthropic_transformer import (
     transform_openai_to_anthropic,
     extract_text_from_content
 )
+from src.services.provider_selector import ProviderAttempt
 
 
 # ============================================================
@@ -658,7 +659,7 @@ class TestMessagesEndpointFailover:
     @patch('src.routes.messages.get_rate_limit_manager')
     @patch('src.routes.messages.make_openrouter_request_openai')
     @patch('src.routes.messages.process_openrouter_response')
-    @patch('src.routes.messages.build_provider_failover_chain')
+    @patch('src.routes.messages.plan_provider_attempts')
     @patch('src.routes.messages.calculate_cost')
     @patch('src.routes.messages.deduct_credits')
     @patch('src.routes.messages.record_usage')
@@ -673,7 +674,7 @@ class TestMessagesEndpointFailover:
         mock_record_usage,
         mock_deduct_credits,
         mock_calculate_cost,
-        mock_build_chain,
+        mock_plan_attempts,
         mock_process_response,
         mock_make_request,
         mock_rate_limit_mgr,
@@ -699,7 +700,10 @@ class TestMessagesEndpointFailover:
         mock_rate_limit_mgr.return_value = rate_limit_mgr_instance
 
         # First provider fails, second succeeds
-        mock_build_chain.return_value = ['openrouter', 'portkey']
+        mock_plan_attempts.return_value = [
+            ProviderAttempt(provider="openrouter", provider_model_id="openrouter/model", priority=1),
+            ProviderAttempt(provider="portkey", provider_model_id="portkey/model", priority=2),
+        ]
         mock_make_request.side_effect = [
             Exception("Provider error"),  # First attempt fails
             mock_openai_response  # Second attempt succeeds

@@ -30,8 +30,10 @@ import httpx
 from src.cache import _huggingface_models_cache
 from src.config import Config
 from src.services.pricing_lookup import enrich_model_with_pricing
+from src.services.multi_provider_registry import get_registry
 
 logger = logging.getLogger(__name__)
+_registry = get_registry()
 
 # Reserved for models that are confirmed to NOT work with HF Inference Router
 # Currently empty - all models fetched from HF API with inference_provider=hf-inference should work
@@ -42,6 +44,17 @@ UNSUPPORTED_MODELS = set()
 ESSENTIAL_MODELS = {
     "katanemo/Arch-Router-1.5B",
 }
+
+
+def _sync_registry(models: list) -> list:
+    """Best-effort sync of Hugging Face catalog with canonical registry."""
+    if not models:
+        return models
+    try:
+        _registry.sync_provider_catalog("huggingface", models)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Registry sync failed for Hugging Face catalog: %s", exc)
+    return models
 
 
 def fetch_models_from_huggingface_api(
@@ -239,7 +252,7 @@ def fetch_models_from_huggingface_api(
                 f"Cached {len(normalized_models)} Hugging Face models with TTL {_huggingface_models_cache['ttl']}s"
             )
 
-        return normalized_models
+        return _sync_registry(normalized_models)
 
     except httpx.HTTPStatusError as e:
         error_body = e.response.text[:500] if e.response.text else "No response body"
