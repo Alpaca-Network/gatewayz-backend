@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
+    "zai-org/glm-4.6-fp8": "near",
 }
 
 # Gemini model name constants to reduce duplication
@@ -419,12 +420,17 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "meta-llama/llama-3.1-70b": "llama-3.1-70b",
             "qwen/qwen-2-72b": "qwen-2-72b",
             "gpt-oss/gpt-oss-120b": "gpt-oss-120b",
+            # GLM models
+            "zai-org/glm-4.6-fp8": "glm-4.6-fp8",
+            "zai-org/glm-4.6": "glm-4.6",
             # Also support without org prefix (pass-through)
             "deepseek-v3": "deepseek-v3",
             "llama-3-70b": "llama-3-70b",
             "llama-3.1-70b": "llama-3.1-70b",
             "qwen-2-72b": "qwen-2-72b",
             "gpt-oss-120b": "gpt-oss-120b",
+            "glm-4.6-fp8": "glm-4.6-fp8",
+            "glm-4.6": "glm-4.6",
         },
     }
 
