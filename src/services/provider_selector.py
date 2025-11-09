@@ -4,6 +4,10 @@ Provider Selector with Automatic Failover
 This module implements intelligent provider selection and automatic failover
 for multi-provider models. When a request fails, it automatically retries
 with the next available provider.
+
+The selector uses the multi-provider registry as the canonical source of truth
+for model and provider information, enabling sophisticated routing decisions
+based on priority, availability, performance, and cost.
 """
 
 import logging
@@ -25,24 +29,34 @@ class ProviderHealthTracker:
     Track provider health and implement circuit breaker pattern.
 
     When a provider fails repeatedly, it can be temporarily disabled
-    to avoid wasting time on dead providers.
+    to avoid wasting time on dead providers. Health tracking includes
+    failure rates, response times, and availability status.
+
+    The tracker integrates with the multi-provider registry to update
+    provider availability in real-time.
     """
 
     def __init__(
         self,
         failure_threshold: int = 5,  # Failures before circuit opens
         timeout_seconds: int = 300,  # Time to wait before retry (5 minutes)
+        response_time_threshold: int = 10000,  # Response time threshold in ms
     ):
         self.failure_threshold = failure_threshold
         self.timeout_seconds = timeout_seconds
+        self.response_time_threshold = response_time_threshold
 
         # Track failures per provider per model
         self._failures: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        # Track response times
+        self._response_times: Dict[str, Dict[str, List[int]]] = defaultdict(lambda: defaultdict(list))
         # Track when providers were disabled
         self._disabled_until: Dict[str, Dict[str, datetime]] = defaultdict(dict)
+        # Track successful requests for performance metrics
+        self._success_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
-    def record_success(self, model_id: str, provider_name: str) -> None:
-        """Record a successful request, resetting failure count"""
+    def record_success(self, model_id: str, provider_name: str, response_time_ms: Optional[int] = None) -> None:
+        """Record a successful request, resetting failure count and updating performance metrics"""
         if model_id in self._failures:
             self._failures[model_id][provider_name] = 0
 
@@ -51,6 +65,15 @@ class ProviderHealthTracker:
             if provider_name in self._disabled_until[model_id]:
                 del self._disabled_until[model_id][provider_name]
                 logger.info(f"Re-enabled {provider_name} for {model_id} after successful request")
+
+        # Track response time
+        if response_time_ms is not None:
+            self._success_counts[model_id][provider_name] += 1
+            response_times = self._response_times[model_id][provider_name]
+            response_times.append(response_time_ms)
+            # Keep only last 100 response times
+            if len(response_times) > 100:
+                response_times.pop(0)
 
     def record_failure(self, model_id: str, provider_name: str) -> bool:
         """
@@ -80,6 +103,27 @@ class ProviderHealthTracker:
 
         return False
 
+    def record_response_time(self, model_id: str, provider_name: str, response_time_ms: int) -> None:
+        """Record response time for performance tracking"""
+        self._response_times[model_id][provider_name].append(response_time_ms)
+        # Keep only last 100 response times
+        if len(self._response_times[model_id][provider_name]) > 100:
+            self._response_times[model_id][provider_name].pop(0)
+
+    def get_average_response_time(self, model_id: str, provider_name: str) -> Optional[float]:
+        """Get average response time for a provider"""
+        response_times = self._response_times[model_id][provider_name]
+        if not response_times:
+            return None
+        return sum(response_times) / len(response_times)
+
+    def get_success_rate(self, model_id: str, provider_name: str) -> float:
+        """Get success rate for a provider (0.0 to 1.0)"""
+        total_requests = self._success_counts[model_id][provider_name] + self._failures[model_id][provider_name]
+        if total_requests == 0:
+            return 1.0  # No requests yet, assume good
+        return self._success_counts[model_id][provider_name] / total_requests
+
     def is_available(self, model_id: str, provider_name: str) -> bool:
         """Check if a provider is currently available (circuit closed)"""
         if model_id not in self._disabled_until:
@@ -99,14 +143,28 @@ class ProviderHealthTracker:
 
         return False
 
+    def get_provider_health(self, model_id: str, provider_name: str) -> Dict[str, Any]:
+        """Get comprehensive health information for a provider"""
+        return {
+            "available": self.is_available(model_id, provider_name),
+            "failure_count": self._failures[model_id][provider_name],
+            "average_response_time_ms": self.get_average_response_time(model_id, provider_name),
+            "success_rate": self.get_success_rate(model_id, provider_name),
+            "disabled_until": self._disabled_until[model_id].get(provider_name),
+        }
+
 
 class ProviderSelector:
     """
     Intelligent provider selector with automatic failover.
 
     This class handles provider selection and implements automatic failover
-    when requests fail. It uses the multi-provider registry to find available
-    providers and tries them in priority order until one succeeds.
+    when requests fail. It uses the multi-provider registry as the canonical
+    source of truth for model information and makes routing decisions based
+    on multiple criteria including priority, availability, performance, and cost.
+
+    The selector integrates with a health tracker to maintain real-time provider
+    health information and implements circuit breaker patterns to avoid failed providers.
     """
 
     def __init__(self):
@@ -121,6 +179,7 @@ class ProviderSelector:
         preferred_provider: Optional[str] = None,
         required_features: Optional[List[str]] = None,
         max_retries: int = 3,
+        max_cost: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Execute a request with automatic failover to alternative providers.
@@ -131,6 +190,7 @@ class ProviderSelector:
             preferred_provider: Optional preferred provider to try first
             required_features: Optional list of required features
             max_retries: Maximum number of providers to try
+            max_cost: Optional maximum cost per 1k tokens
 
         Returns:
             Dict with:
@@ -154,11 +214,12 @@ class ProviderSelector:
                 "attempts": [],
             }
 
-        # Select primary provider
+        # Select primary provider using enhanced criteria
         primary = self.registry.select_provider(
             model_id=model_id,
             preferred_provider=preferred_provider,
             required_features=required_features,
+            max_cost=max_cost,
         )
 
         if not primary:
@@ -203,6 +264,7 @@ class ProviderSelector:
                 "model_id": provider.model_id,
                 "priority": provider.priority,
                 "attempt_number": i + 1,
+                "start_time": time.time(),
             }
 
             try:
@@ -213,18 +275,27 @@ class ProviderSelector:
                 )
 
                 # Execute request with this provider
+                start_time = time.time()
                 response = execute_fn(provider.name, provider.model_id)
+                end_time = time.time()
+                
+                response_time_ms = int((end_time - start_time) * 1000)
 
                 # Success!
-                self.health_tracker.record_success(model_id, provider.name)
+                self.health_tracker.record_success(model_id, provider.name, response_time_ms)
+                # Update provider availability and response time in registry
+                self.registry.update_provider_availability(
+                    model_id, provider.name, True, response_time_ms
+                )
 
                 attempt_info["success"] = True
-                attempt_info["duration_ms"] = 0  # Could be tracked if needed
+                attempt_info["duration_ms"] = response_time_ms
+                attempt_info["end_time"] = end_time
                 attempts.append(attempt_info)
 
                 logger.info(
                     f"✓ Request successful with {provider.name} for {model_id} "
-                    f"(attempt {i + 1}/{len(providers_to_try)})"
+                    f"(attempt {i + 1}/{len(providers_to_try)}, {response_time_ms}ms)"
                 )
 
                 return {
@@ -234,21 +305,29 @@ class ProviderSelector:
                     "provider_model_id": provider.model_id,
                     "error": None,
                     "attempts": attempts,
+                    "response_time_ms": response_time_ms,
                 }
 
             except Exception as e:
                 # Request failed with this provider
+                end_time = time.time()
+                response_time_ms = int((end_time - attempt_info["start_time"]) * 1000)
+                
                 last_error = str(e)
                 attempt_info["success"] = False
                 attempt_info["error"] = last_error
+                attempt_info["duration_ms"] = response_time_ms
+                attempt_info["end_time"] = end_time
                 attempts.append(attempt_info)
 
                 logger.warning(
-                    f"✗ Request failed with {provider.name} for {model_id}: {last_error}"
+                    f"✗ Request failed with {provider.name} for {model_id}: {last_error} ({response_time_ms}ms)"
                 )
 
                 # Record failure and check if circuit breaker should open
                 should_disable = self.health_tracker.record_failure(model_id, provider.name)
+                # Update provider availability in registry
+                self.registry.update_provider_availability(model_id, provider.name, False)
 
                 if should_disable:
                     # Disable this provider in the registry temporarily
@@ -300,7 +379,36 @@ class ProviderSelector:
         if not is_available:
             return {"available": False, "reason": "Circuit breaker open (too many failures)"}
 
-        return {"available": True, "reason": "Provider healthy"}
+        # Get detailed health info
+        health_info = self.health_tracker.get_provider_health(model_id, provider_name)
+        health_info["available"] = True
+        health_info["reason"] = "Provider healthy"
+        return health_info
+
+    def get_provider_performance(self, model_id: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Get performance metrics for all providers of a model.
+
+        Returns:
+            Dictionary mapping provider names to performance metrics
+        """
+        model = self.registry.get_model(model_id)
+        if not model:
+            return {}
+
+        performance = {}
+        for provider in model.get_enabled_providers():
+            health_info = self.health_tracker.get_provider_health(model_id, provider.name)
+            performance[provider.name] = {
+                "availability": health_info["available"],
+                "success_rate": health_info["success_rate"],
+                "average_response_time_ms": health_info["average_response_time_ms"],
+                "failure_count": health_info["failure_count"],
+                "priority": provider.priority,
+                "cost_per_1k_input": provider.cost_per_1k_input,
+                "cost_per_1k_output": provider.cost_per_1k_output,
+            }
+        return performance
 
 
 # Global selector instance
