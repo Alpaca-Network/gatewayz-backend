@@ -7,6 +7,7 @@ with the next available provider.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Optional, Any, Callable, Dict, List
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -18,6 +19,15 @@ from src.services.multi_provider_registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProviderAttempt:
+    """Planned provider attempt for a logical model."""
+
+    provider: str
+    provider_model_id: str
+    priority: int
 
 
 class ProviderHealthTracker:
@@ -113,6 +123,82 @@ class ProviderSelector:
         self.registry = get_registry()
         self.health_tracker = ProviderHealthTracker()
         logger.info("Initialized ProviderSelector with automatic failover")
+
+    def build_attempt_plan(
+        self,
+        model_id: str,
+        preferred_provider: Optional[str] = None,
+        max_attempts: Optional[int] = None,
+    ) -> List[ProviderAttempt]:
+        """
+        Build an ordered list of provider attempts for the given logical model.
+        """
+        canonical_id = self.registry.resolve_canonical_id(model_id) or model_id
+        model = self.registry.get_model(canonical_id)
+
+        if not model:
+            logger.warning(
+                "Model %s not found in registry; falling back to preferred provider %s",
+                model_id,
+                preferred_provider or "openrouter",
+            )
+            fallback_provider = preferred_provider or "openrouter"
+            return [
+                ProviderAttempt(
+                    provider=fallback_provider,
+                    provider_model_id=model_id,
+                    priority=1,
+                )
+            ]
+
+        providers = model.get_enabled_providers()
+        if not providers:
+            logger.error("No enabled providers remain for %s", canonical_id)
+            return []
+
+        preferred_lower = (preferred_provider or "").lower()
+
+        def sort_key(provider: ProviderConfig):
+            is_preferred = provider.name.lower() == preferred_lower if preferred_lower else False
+            return (0 if is_preferred else 1, provider.priority)
+
+        ordered = sorted(providers, key=sort_key)
+
+        attempts: List[ProviderAttempt] = []
+        for provider in ordered:
+            if not self.health_tracker.is_available(canonical_id, provider.name):
+                logger.debug(
+                    "Skipping provider %s for %s due to open circuit breaker",
+                    provider.name,
+                    canonical_id,
+                )
+                continue
+            attempts.append(
+                ProviderAttempt(
+                    provider=provider.name,
+                    provider_model_id=provider.model_id or model_id,
+                    priority=provider.priority,
+                )
+            )
+
+        if not attempts and preferred_provider:
+            logger.warning(
+                "All registry providers unavailable for %s; forcing preferred provider %s",
+                canonical_id,
+                preferred_provider,
+            )
+            attempts.append(
+                ProviderAttempt(
+                    provider=preferred_provider,
+                    provider_model_id=model_id,
+                    priority=1,
+                )
+            )
+
+        if max_attempts:
+            attempts = attempts[:max_attempts]
+
+        return attempts
 
     def execute_with_failover(
         self,
@@ -277,6 +363,17 @@ class ProviderSelector:
             return None
 
         return [p.name for p in model.get_enabled_providers()]
+
+    def record_success(self, model_id: str, provider_name: str) -> None:
+        canonical_id = self.registry.resolve_canonical_id(model_id) or model_id
+        self.health_tracker.record_success(canonical_id, provider_name)
+
+    def record_failure(self, model_id: str, provider_name: str) -> bool:
+        canonical_id = self.registry.resolve_canonical_id(model_id) or model_id
+        should_disable = self.health_tracker.record_failure(canonical_id, provider_name)
+        if should_disable:
+            self.registry.disable_provider(canonical_id, provider_name)
+        return should_disable
 
     def check_provider_health(self, model_id: str, provider_name: str) -> Dict[str, Any]:
         """

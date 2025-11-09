@@ -3,7 +3,7 @@ Anthropic Messages API endpoint
 Compatible with Claude API: https://docs.claude.com/en/api/messages
 """
 
-from typing import Optional
+from typing import Optional, List
 import logging
 import asyncio
 import time
@@ -35,10 +35,10 @@ from src.services.huggingface_client import (
 )
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.provider_failover import (
-    build_provider_failover_chain,
     map_provider_error,
     should_failover,
 )
+from src.services.provider_selector import get_selector, ProviderAttempt
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.pricing import calculate_cost
@@ -53,6 +53,7 @@ from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+provider_selector = get_selector()
 
 
 # Backwards compatibility wrappers
@@ -114,6 +115,19 @@ def validate_trial_access(*args, **kwargs):
 
 def track_trial_usage(*args, **kwargs):
     return trial_module.track_trial_usage(*args, **kwargs)
+
+
+def plan_provider_attempts(model_id: str, preferred_provider: Optional[str]) -> List[ProviderAttempt]:
+    attempts = provider_selector.build_attempt_plan(model_id, preferred_provider)
+    if attempts:
+        return attempts
+    fallback = preferred_provider or "openrouter"
+    logger.warning(
+        "Plan builder returned no attempts for %s; falling back to %s",
+        sanitize_for_logging(model_id),
+        sanitize_for_logging(fallback),
+    )
+    return [ProviderAttempt(provider=fallback, provider_model_id=model_id, priority=1)]
 
 
 def _fallback_get_user(api_key: str):
@@ -375,7 +389,7 @@ async def anthropic_messages(
                             break
                     # Otherwise default to openrouter (already set)
 
-        provider_chain = build_provider_failover_chain(provider)
+        attempt_plan = plan_provider_attempts(original_model, provider)
         model = original_model
 
         # === 3) Call upstream with failover ===
@@ -383,12 +397,19 @@ async def anthropic_messages(
         processed = None
         last_http_exc = None
 
-        for idx, attempt_provider in enumerate(provider_chain):
+        for idx, attempt in enumerate(attempt_plan):
+            attempt_provider = attempt.provider
             logger.debug("Messages failover iteration %s provider=%s", idx, attempt_provider)
-            attempt_model = transform_model_id(original_model, attempt_provider)
+            planned_model_id = attempt.provider_model_id or original_model
+            attempt_model = planned_model_id or original_model
+            if planned_model_id == original_model:
+                attempt_model = transform_model_id(original_model, attempt_provider)
             if attempt_model != original_model:
                 logger.info(
-                    f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
+                    "Transformed model ID from '%s' to '%s' for provider %s",
+                    sanitize_for_logging(original_model),
+                    sanitize_for_logging(attempt_model),
+                    sanitize_for_logging(attempt_provider),
                 )
 
             request_model = attempt_model
@@ -491,6 +512,7 @@ async def anthropic_messages(
                     )
                     processed = await _to_thread(process_openrouter_response, resp_raw)
 
+                provider_selector.record_success(original_model, attempt_provider)
                 provider = attempt_provider
                 model = request_model
                 break
@@ -510,14 +532,15 @@ async def anthropic_messages(
                         sanitize_for_logging(attempt_provider),
                         sanitize_for_logging(str(exc)),
                     )
+                provider_selector.record_failure(original_model, attempt_provider)
                 http_exc = map_provider_error(attempt_provider, request_model, exc)
 
             if http_exc is None:
                 continue
 
             last_http_exc = http_exc
-            if idx < len(provider_chain) - 1 and should_failover(http_exc):
-                next_provider = provider_chain[idx + 1]
+            if idx < len(attempt_plan) - 1 and should_failover(http_exc):
+                next_provider = attempt_plan[idx + 1].provider
                 logger.warning(
                     "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
                     attempt_provider,

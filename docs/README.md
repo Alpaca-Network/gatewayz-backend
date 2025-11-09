@@ -143,6 +143,7 @@ Comprehensive documentation is available in the `docs/` directory:
 - **[Chutes Integration](CHUTES_INTEGRATION.md)** - Chutes provider setup
 - **[Featherless Integration](FEATHERLESS_INTEGRATION.md)** - Featherless provider setup
 - **[Portkey Testing](PORTKEY_TESTING_GUIDE.md)** - Portkey provider testing
+- **[Multi-Provider Registry](MULTI_PROVIDER_REGISTRY.md)** - Canonical model registry ingestion and routing
 
 ### Operations
 - **[Deployment Guide](DEPLOYMENT.md)** - Production deployment instructions
@@ -539,4 +540,3 @@ If you find this project useful, please consider giving it a star! ⭐
 **Built with ❤️ by the AI Gateway team**
 
 *Making AI accessible, secure, and affordable for everyone.*
-
