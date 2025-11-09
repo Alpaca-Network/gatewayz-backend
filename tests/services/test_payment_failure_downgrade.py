@@ -172,7 +172,7 @@ class TestPaymentFailureDowngrade:
         """Test that payment failure logs appropriate warning"""
         import logging
 
-        caplog.set_level(logging.WARNING)
+        caplog.set_level(logging.INFO)  # Capture both WARNING and INFO logs
 
         mock_invoice = Mock(
             id="in_warning_test_123",
