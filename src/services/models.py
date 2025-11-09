@@ -126,6 +126,10 @@ def _register_canonical_records(provider_slug: str, models: Optional[list]) -> N
             if not canonical_id:
                 continue
 
+            canonical_id = str(canonical_id).lower()
+            record["canonical_slug"] = canonical_id
+            record["canonical_id"] = canonical_id
+
             display_metadata = {
                 "name": record.get("name") or record.get("display_name"),
                 "description": record.get("description"),
