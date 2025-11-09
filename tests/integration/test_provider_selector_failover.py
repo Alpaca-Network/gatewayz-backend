@@ -195,7 +195,7 @@ class TestProviderSelectorFailover:
             assert result["provider"] == "openrouter"
 
         # Health tracker should have recorded failures for google-vertex
-        health_status = selector.health_tracker.get_health_status("google-vertex")
+        health_status = selector.check_provider_health("test-model", "google-vertex")
         # The health status may vary based on implementation, so we just check it exists
         assert health_status is not None
         # Verify that google-vertex was tried and failed multiple times
