@@ -415,16 +415,13 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
         "near": {
             # Near AI uses HuggingFace-style model naming with proper case
             # Maps lowercase input variants to actual NEAR model IDs
-            # Most pass through directly with proper capitalization
+            # Reference: https://cloud.near.ai/models for current available models
 
-            # DeepSeek models - map to actual NEAR model ID with proper case
-            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            # DeepSeek models - only DeepSeek-V3.1 is currently available on Near AI
+            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3.1",  # Map v3 to v3.1 (only available)
             "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
-            "deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            "deepseek-v3": "deepseek-ai/DeepSeek-V3.1",
             "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
-            # DeepSeek R1 models
-            "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-            "deepseek-r1": "deepseek-ai/DeepSeek-R1",
 
             # Meta Llama models
             "meta-llama/llama-3-70b": "llama-3-70b",
