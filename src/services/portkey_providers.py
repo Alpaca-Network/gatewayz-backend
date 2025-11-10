@@ -30,7 +30,7 @@ HISTORICAL NOTE:
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional, Union
 
 from src.cache import (
     _cerebras_models_cache,
@@ -67,7 +67,7 @@ XAI_FALLBACK_MODELS = [
 ]
 
 
-def _check_api_key(api_key: str | None, provider_name: str) -> bool:
+def _check_api_key(api_key: Optional[str], provider_name: str) -> bool:
     """Check if API key is configured - returns False and logs warning if not
 
     Args:
@@ -147,7 +147,7 @@ def _unwrap_sdk_response(models_response: Any) -> list:
     return raw_models if isinstance(raw_models, list) else []
 
 
-def _extract_models_from_response(payload: dict | list, key: str = "data") -> list:
+def _extract_models_from_response(payload: Union[dict, list], key: str = "data") -> list:
     """Extract models list from API response - handles dict or list formats
 
     Args:
@@ -165,7 +165,7 @@ def _extract_models_from_response(payload: dict | list, key: str = "data") -> li
         return []
 
 
-def _convert_model_to_dict(model: Any) -> dict | None:
+def _convert_model_to_dict(model: Any) -> Optional[dict]:
     """Convert SDK model object to dict - shared helper to reduce duplication
 
     Handles Pydantic v1/v2 models, regular objects, and dicts.
@@ -239,7 +239,7 @@ def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict)
 
 def _fetch_openai_compatible_models(
     provider_name: str, base_url: str, api_key: str, cache_dict: dict
-) -> list | None:
+) -> Optional[list]:
     """Fetch models from OpenAI-compatible API - shared helper for Nebius and Novita
 
     Args:
@@ -700,16 +700,15 @@ def fetch_models_from_google_vertex():
 
         logger.info("Fetching models from Google Vertex AI Model Registry")
 
-        # Get credentials
-        if Config.GOOGLE_APPLICATION_CREDENTIALS:
-            credentials = Credentials.from_service_account_file(
-                Config.GOOGLE_APPLICATION_CREDENTIALS
-            )
+        # Get credentials using the same method as google_vertex_client
+        # This ensures consistent credential handling across all Google Vertex AI calls
+        from src.services.google_vertex_client import get_google_vertex_credentials
+        
+        credentials = get_google_vertex_credentials()
+        
+        # Refresh credentials if needed to ensure they're valid
+        if not credentials.valid:
             credentials.refresh(Request())
-        else:
-            credentials, _ = google.auth.default()
-            if not credentials.valid:
-                credentials.refresh(Request())
 
         # Initialize Model Registry client
         aiplatform.init(
@@ -719,66 +718,22 @@ def fetch_models_from_google_vertex():
         )
 
         # Common Google Vertex AI models
-        # These are the officially supported models available in Vertex AI
+        # These are the officially supported and generally available models in Vertex AI
+        # Note: Preview models (with -preview- in the name) may not be available in all projects
         vertex_models = [
-            {
-                "id": "gemini-2.5-flash",
-                "display_name": "Gemini 2.5 Flash",
-                "description": "Latest generation fast model with improved capabilities",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 100000,
-                "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
-            {
-                "id": "gemini-2.5-flash-lite",
-                "display_name": "Gemini 2.5 Flash Lite (GA)",
-                "description": "Lightweight, cost-effective model for high-throughput applications (stable version)",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 8192,
-                "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
-            {
-                "id": "gemini-2.5-flash-lite-preview-09-2025",
-                "display_name": "Gemini 2.5 Flash Lite Preview (Sep 2025)",
-                "description": "Preview version with improved performance (887 tokens/sec) and enhanced reasoning capabilities",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 8192,
-                "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
-            {
-                "id": "gemini-2.5-pro",
-                "display_name": "Gemini 2.5 Pro",
-                "description": "Most advanced reasoning model with enhanced capabilities",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 100000,
-                "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
             {
                 "id": "gemini-2.0-flash",
                 "display_name": "Gemini 2.0 Flash",
-                "description": "Fast, efficient model optimized for real-time applications",
+                "description": "Latest stable fast model, optimized for real-time applications",
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 100000,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
-            {
-                "id": "gemini-2.0-flash-thinking",
-                "display_name": "Gemini 2.0 Flash Thinking",
-                "description": "Extended thinking variant for complex reasoning tasks",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 100000,
-                "modalities": ["text"],
                 "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-2.0-pro",
                 "display_name": "Gemini 2.0 Pro",
-                "description": "Advanced reasoning model for complex tasks",
+                "description": "Latest stable advanced reasoning model for complex tasks",
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 4096,
                 "modalities": ["text", "image", "audio", "video"],
@@ -796,7 +751,7 @@ def fetch_models_from_google_vertex():
             {
                 "id": "gemini-1.5-flash",
                 "display_name": "Gemini 1.5 Flash",
-                "description": "Fast model for speed-focused applications",
+                "description": "Fast model optimized for speed and efficiency",
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 8192,
                 "modalities": ["text", "image", "audio", "video"],
@@ -805,7 +760,7 @@ def fetch_models_from_google_vertex():
             {
                 "id": "gemini-1.0-pro",
                 "display_name": "Gemini 1.0 Pro",
-                "description": "Previous generation pro model",
+                "description": "Stable legacy model with good reasoning capabilities",
                 "max_input_tokens": 32000,
                 "max_output_tokens": 8192,
                 "modalities": ["text"],
