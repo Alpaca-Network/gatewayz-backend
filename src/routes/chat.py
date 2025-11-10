@@ -861,8 +861,12 @@ async def chat_completions(
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
             # Try to use ProviderSelector for multi-provider failover if model is registered
-            selector = get_selector()
-            use_selector = selector.registry.has_model(original_model)
+            try:
+                selector = get_selector()
+                use_selector = selector.registry.has_model(original_model)
+            except Exception as e:
+                logger.warning(f"Failed to check registry for model {original_model}: {e}")
+                use_selector = False
 
             if use_selector:
                 # Use intelligent provider selection with automatic failover
@@ -1074,8 +1078,12 @@ async def chat_completions(
         last_http_exc = None
 
         # Try to use ProviderSelector for multi-provider failover if model is registered
-        selector = get_selector()
-        use_selector = selector.registry.has_model(original_model)
+        try:
+            selector = get_selector()
+            use_selector = selector.registry.has_model(original_model)
+        except Exception as e:
+            logger.warning(f"Failed to check registry for model {original_model}: {e}")
+            use_selector = False
 
         if use_selector:
             # Use intelligent provider selection with automatic failover
