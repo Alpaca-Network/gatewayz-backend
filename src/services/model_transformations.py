@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
+    "zai-org/glm-4.6-fp8": "near",
 }
 
 # Gemini model name constants to reduce duplication
@@ -401,12 +402,6 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             # Using pass-through format - any model ID is supported
             # Minimal mappings to avoid conflicts with other providers during auto-detection
         },
-        "helicone": {
-            # Helicone AI Gateway uses standard model identifiers
-            # The gateway provides observability on top of standard provider APIs
-            # Using pass-through format - any model ID is supported
-            # Minimal mappings to avoid conflicts with other providers during auto-detection
-        },
         "aihubmix": {
             # AiHubMix uses OpenAI-compatible model identifiers
             # Pass-through format - any model ID is supported
@@ -419,18 +414,34 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
         },
         "near": {
             # Near AI uses simple model names without org prefixes
-            # Maps org/model format to simple model names
-            "deepseek-ai/deepseek-v3": "deepseek-v3",
+            # Maps org/model format to actual NEAR model IDs
+            # Note: NEAR API returns model IDs like "deepseek-chat-v3-0324", "gpt-oss-120b", etc.
+
+            # DeepSeek models - map to actual NEAR model ID
+            "deepseek-ai/deepseek-v3": "deepseek-chat-v3-0324",
+            "deepseek-ai/deepseek-chat-v3-0324": "deepseek-chat-v3-0324",
+            "deepseek-v3": "deepseek-chat-v3-0324",
+            "deepseek-chat-v3-0324": "deepseek-chat-v3-0324",
+
+            # Meta Llama models
             "meta-llama/llama-3-70b": "llama-3-70b",
             "meta-llama/llama-3.1-70b": "llama-3.1-70b",
-            "qwen/qwen-2-72b": "qwen-2-72b",
-            "gpt-oss/gpt-oss-120b": "gpt-oss-120b",
-            # Also support without org prefix (pass-through)
-            "deepseek-v3": "deepseek-v3",
             "llama-3-70b": "llama-3-70b",
             "llama-3.1-70b": "llama-3.1-70b",
+
+            # Qwen models
+            "qwen/qwen-2-72b": "qwen-2-72b",
             "qwen-2-72b": "qwen-2-72b",
+
+            # GPT-OSS models
+            "gpt-oss/gpt-oss-120b": "gpt-oss-120b",
             "gpt-oss-120b": "gpt-oss-120b",
+
+            # GLM models from Zhipu AI
+            "zai-org/glm-4.6-fp8": "glm-4.6-fp8",
+            "zai-org/glm-4.6": "glm-4.6",
+            "glm-4.6-fp8": "glm-4.6-fp8",
+            "glm-4.6": "glm-4.6",
         },
     }
 
@@ -627,7 +638,6 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "chutes",
         "google-vertex",
         "vercel-ai-gateway",
-        "helicone",
         "aihubmix",
         "anannas",
         "near",
@@ -664,10 +674,6 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         # OpenRouter models (e.g., "openrouter/auto")
         if org == "openrouter":
             return "openrouter"
-
-        # Helicone models (e.g., "helicone/gpt-4o-mini")
-        if org == "helicone":
-            return "helicone"
 
         # DeepSeek models are primarily on Fireworks in this system
         if org == "deepseek-ai" and "deepseek" in model_name.lower():
