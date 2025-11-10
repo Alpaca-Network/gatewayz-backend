@@ -115,15 +115,13 @@ def test_model_chat(api_key: str, model_id: str) -> bool:
 def get_configured_near_models() -> Dict[str, str]:
     """Get the Near model transformations from our codebase"""
     # This mirrors the mappings in src/services/model_transformations.py
+    # Reference: https://cloud.near.ai/models for current available models
     return {
-        # DeepSeek models - use HuggingFace-style naming with proper case
-        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        # DeepSeek models - only DeepSeek-V3.1 is currently available
+        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3.1",  # Map v3 to v3.1
         "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
-        "deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        "deepseek-v3": "deepseek-ai/DeepSeek-V3.1",
         "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
-        # DeepSeek R1 models
-        "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-        "deepseek-r1": "deepseek-ai/DeepSeek-R1",
 
         # Meta Llama models
         "meta-llama/llama-3-70b": "llama-3-70b",
@@ -193,9 +191,7 @@ def compare_and_recommend(available_models: List[Dict], configured_models: Dict[
     print("="*80)
 
     test_models = [
-        "deepseek-ai/DeepSeek-V3",
-        "deepseek-ai/DeepSeek-V3.1",
-        "deepseek-ai/DeepSeek-R1",
+        "deepseek-ai/DeepSeek-V3.1",  # Only available DeepSeek model on Near AI
         "glm-4.6-fp8",
         "gpt-oss-120b",
     ]
