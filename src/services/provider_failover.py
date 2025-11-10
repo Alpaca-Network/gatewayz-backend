@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 from fastapi import HTTPException
 
+from typing import Optional, Dict, List
+
+logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
 # translate into HTTP responses. Make these imports optional so the module
 # still loads if the dependency is absent (e.g. in minimal test environments).
@@ -32,20 +36,21 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "anannas",
     "fireworks",
     "together",
+    "google-vertex",
     "openrouter",
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 
 
-def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
+def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
     """Return the provider attempt order starting with the initial provider."""
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
-    chain: list[str] = []
+    chain: List[str] = []
     if provider:
         chain.append(provider)
 
@@ -70,10 +75,38 @@ def map_provider_error(
     Map upstream exceptions to HTTPException responses.
     Keeps existing status/detail semantics while allowing centralized handling.
     """
+    # Log all upstream errors for debugging
+    logger.warning(
+        f"Provider error: provider={provider}, model={model}, "
+        f"error_type={type(exc).__name__}, error={str(exc)[:200]}"
+    )
+
     if isinstance(exc, HTTPException):
         return exc
 
     if isinstance(exc, ValueError):
+        error_msg = str(exc)
+        # Check if this is a credential/authentication error that should trigger failover
+        credential_keywords = [
+            "access token",
+            "credential",
+            "authentication",
+            "id_token",
+            "service account",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "GOOGLE_VERTEX_CREDENTIALS_JSON",
+        ]
+        if any(keyword.lower() in error_msg.lower() for keyword in credential_keywords):
+            # Map credential errors to 503 to trigger failover to alternative providers
+            logger.info(
+                f"Detected credential error for provider '{provider}': {error_msg[:200]}. "
+                "This will trigger failover to alternative providers."
+            )
+            return HTTPException(
+                status_code=503,
+                detail=f"{provider} credentials not configured or invalid. Trying alternative providers.",
+            )
+        # Other ValueErrors are treated as bad requests
         return HTTPException(status_code=400, detail=str(exc))
 
     # OpenAI SDK exceptions (used for OpenRouter and other compatible providers)
@@ -91,7 +124,7 @@ def map_provider_error(
         except (TypeError, ValueError):
             status = 500
         detail = "Upstream error"
-        headers: dict[str, str] | None = None
+        headers: Optional[Dict[str, str]] = None
 
         if RateLimitError and isinstance(exc, RateLimitError):
             retry_after = None
@@ -116,7 +149,17 @@ def map_provider_error(
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
         elif BadRequestError and isinstance(exc, BadRequestError):
-            detail = "Upstream rejected the request"
+            # Extract actual error message from BadRequestError
+            error_msg = getattr(exc, "message", None) or str(exc)
+            try:
+                # Try to get response body if available
+                if hasattr(exc, "response") and exc.response:
+                    response_text = getattr(exc.response, "text", None)
+                    if response_text:
+                        error_msg = f"{error_msg} | Response: {response_text[:200]}"
+            except Exception:
+                pass
+            detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
             status = 400
         elif status == 403:
             detail = f"{provider} authentication error"
@@ -134,7 +177,7 @@ def map_provider_error(
     if OpenAIError and isinstance(exc, OpenAIError):
         return HTTPException(status_code=502, detail=str(exc))
 
-    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
+    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
         return HTTPException(status_code=504, detail="Upstream timeout")
 
     if isinstance(exc, httpx.HTTPStatusError):
@@ -154,7 +197,14 @@ def map_provider_error(
                 detail=f"Model {model} not found or unavailable on {provider}",
             )
         if 400 <= status < 500:
-            return HTTPException(status_code=400, detail="Upstream rejected the request")
+            # Extract error details from response
+            error_detail = f"Provider '{provider}' rejected request for model '{model}' (HTTP {status})"
+            try:
+                response_body = exc.response.text[:500] if exc.response.text else "No response body"
+                error_detail += f" | Response: {response_body}"
+            except Exception:
+                pass
+            return HTTPException(status_code=400, detail=error_detail)
         return HTTPException(status_code=502, detail="Upstream service error")
 
     if isinstance(exc, httpx.RequestError):

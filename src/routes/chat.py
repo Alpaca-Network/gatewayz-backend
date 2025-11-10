@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 import httpx
 
+from typing import Optional
 # Make braintrust optional for test environments
 try:
     from braintrust import current_span, start_span, traced
@@ -323,7 +324,19 @@ async def stream_generator(
         if total_tokens == 0:
             # Rough estimate: 1 token ≈ 4 characters
             completion_tokens = max(1, len(accumulated_content) // 4)
-            prompt_tokens = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
+
+            # Calculate prompt tokens, handling both string and multimodal content
+            prompt_chars = 0
+            for m in messages:
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    prompt_chars += len(content)
+                elif isinstance(content, list):
+                    # For multimodal content, extract text parts
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            prompt_chars += len(item.get("text", ""))
+            prompt_tokens = max(1, prompt_chars // 4)
             total_tokens = prompt_tokens + completion_tokens
 
         elapsed = max(0.001, time.monotonic() - start_time)
@@ -503,7 +516,7 @@ async def stream_generator(
 async def chat_completions(
     req: ProxyRequest,
     api_key: str = Depends(get_api_key),
-    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
+    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     # === 0) Setup / sanity ===
@@ -574,7 +587,12 @@ async def chat_completions(
 
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
-        if should_release_concurrency:
+
+        # Allow disabling rate limiting for testing (DEV ONLY)
+        import os
+        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
+
+        if should_release_concurrency and not disable_rate_limiting:
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
                 await _to_thread(
@@ -673,7 +691,9 @@ async def chat_completions(
                     f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
                 )
                 provider = override_provider
-                req_provider_missing = False
+            # Mark provider as determined even if it matches the default
+            # This prevents the fallback logic from incorrectly routing to wrong providers
+            req_provider_missing = False
 
         if req_provider_missing:
             # Try to detect provider from model ID using the transformation module
@@ -699,6 +719,7 @@ async def chat_completions(
                     "fireworks",
                     "together",
                     "portkey",
+                    "google-vertex",
                 ]:
                     transformed = transform_model_id(original_model, test_provider)
                     provider_models = get_cached_models(test_provider) or []
@@ -1065,7 +1086,7 @@ async def chat_completions(
             except Exception as e:
                 logger.warning("Failed to track trial usage: %s", e)
 
-        if should_release_concurrency and rate_limit_mgr:
+        if should_release_concurrency and rate_limit_mgr and not disable_rate_limiting:
             try:
                 await rate_limit_mgr.release_concurrency(api_key)
             except Exception as exc:
@@ -1279,7 +1300,7 @@ async def chat_completions(
 async def unified_responses(
     req: ResponseRequest,
     api_key: str = Depends(get_api_key),
-    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
+    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -1494,7 +1515,9 @@ async def unified_responses(
                     f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
                 )
                 provider = override_provider
-                req_provider_missing = False
+            # Mark provider as determined even if it matches the default
+            # This prevents the fallback logic from incorrectly routing to wrong providers
+            req_provider_missing = False
 
         if req_provider_missing:
             # Try to detect provider from model ID using the transformation module
@@ -1517,6 +1540,7 @@ async def unified_responses(
                     "fireworks",
                     "together",
                     "portkey",
+                    "google-vertex",
                 ]:
                     transformed = transform_model_id(original_model, test_provider)
                     provider_models = get_cached_models(test_provider) or []
