@@ -413,15 +413,18 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             # Minimal mappings to avoid conflicts with other providers during auto-detection
         },
         "near": {
-            # Near AI uses simple model names without org prefixes
-            # Maps org/model format to actual NEAR model IDs
-            # Note: NEAR API returns model IDs like "deepseek-chat-v3-0324", "gpt-oss-120b", etc.
+            # Near AI uses HuggingFace-style model naming with proper case
+            # Maps lowercase input variants to actual NEAR model IDs
+            # Most pass through directly with proper capitalization
 
-            # DeepSeek models - map to actual NEAR model ID
-            "deepseek-ai/deepseek-v3": "deepseek-chat-v3-0324",
-            "deepseek-ai/deepseek-chat-v3-0324": "deepseek-chat-v3-0324",
-            "deepseek-v3": "deepseek-chat-v3-0324",
-            "deepseek-chat-v3-0324": "deepseek-chat-v3-0324",
+            # DeepSeek models - map to actual NEAR model ID with proper case
+            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+            "deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+            # DeepSeek R1 models
+            "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+            "deepseek-r1": "deepseek-ai/DeepSeek-R1",
 
             # Meta Llama models
             "meta-llama/llama-3-70b": "llama-3-70b",
@@ -663,7 +666,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         # if org == "google":
         #     return "google-vertex"
 
-        # Near AI models (e.g., "near/deepseek-chat-v3-0324")
+        # Near AI models (e.g., "near/deepseek-ai/DeepSeek-V3", "near/deepseek-ai/DeepSeek-R1")
         if org == "near":
             return "near"
 

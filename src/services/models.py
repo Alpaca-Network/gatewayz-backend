@@ -1750,7 +1750,9 @@ def fetch_models_from_near():
         # Fallback to known Near AI models if API doesn't return results
         logger.info("Using fallback Near AI model list")
         fallback_models = [
-            {"id": "deepseek-chat-v3-0324", "owned_by": "DeepSeek"},
+            {"id": "deepseek-ai/DeepSeek-V3", "owned_by": "DeepSeek"},
+            {"id": "deepseek-ai/DeepSeek-V3.1", "owned_by": "DeepSeek"},
+            {"id": "deepseek-ai/DeepSeek-R1", "owned_by": "DeepSeek"},
             {"id": "gpt-oss-120b", "owned_by": "GPT"},
             {"id": "llama-3-70b", "owned_by": "Meta"},
             {"id": "qwen-2-72b", "owned_by": "Alibaba"},
