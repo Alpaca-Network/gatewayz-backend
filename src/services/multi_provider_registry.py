@@ -1,7 +1,7 @@
 """Multi-provider model registry and canonical catalog support."""
 
 import logging
-from typing import List, Optional, Dict, Any, Iterable
+from typing import List, Optional, Dict, Any, Iterable, Tuple
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,8 @@ class MultiProviderRegistry:
         self._models: Dict[str, MultiProviderModel] = {}
         self._canonical_models: Dict[str, "CanonicalModel"] = {}
         self._canonical_slug_index: Dict[str, str] = {}
+        self._provider_native_index: Dict[Tuple[str, str], str] = {}
+        self._native_index: Dict[str, List[Tuple[str, str]]] = {}
         logger.info("Initialized MultiProviderRegistry")
 
     def register_model(self, model: MultiProviderModel) -> None:
@@ -239,6 +241,8 @@ class MultiProviderRegistry:
         logger.debug("Resetting canonical model registry")
         self._canonical_models.clear()
         self._canonical_slug_index.clear()
+        self._provider_native_index.clear()
+        self._native_index.clear()
 
     def _resolve_canonical_id(self, *candidates: Iterable[Optional[str]]) -> Optional[str]:
         for group in candidates:
@@ -247,7 +251,7 @@ class MultiProviderRegistry:
             for candidate in group:
                 if not candidate:
                     continue
-                existing = self._canonical_slug_index.get(candidate)
+                existing = self._canonical_slug_index.get(str(candidate).lower())
                 if existing:
                     return existing
         return None
@@ -255,7 +259,7 @@ class MultiProviderRegistry:
     def _update_slug_index(self, canonical_id: str, slugs: Iterable[str]) -> None:
         for slug in slugs:
             if slug:
-                self._canonical_slug_index[slug] = canonical_id
+                self._canonical_slug_index[slug.lower()] = canonical_id
 
     def register_canonical_provider(
         self,
@@ -298,6 +302,18 @@ class MultiProviderRegistry:
             or provider.native_model_id
         )
 
+        if resolved_id:
+            resolved_id = resolved_id.lower()
+        else:
+            resolved_id = provider.native_model_id.lower()
+
+        provider.provider_slug = provider.provider_slug.lower()
+
+        if provider.native_model_id:
+            slug_candidates.append(
+                f"{provider.provider_slug}/{provider.native_model_id}".lower()
+            )
+
         existing_id = self._resolve_canonical_id(slug_candidates, [resolved_id])
         if existing_id:
             resolved_id = existing_id
@@ -315,7 +331,113 @@ class MultiProviderRegistry:
         # Update slug index for quick lookup
         self._update_slug_index(resolved_id, slug_candidates + [resolved_id])
 
+        native_key = (provider.native_model_id or "").lower()
+        if native_key:
+            provider_key = (provider.provider_slug, native_key)
+            self._provider_native_index[provider_key] = resolved_id
+            native_providers = self._native_index.setdefault(native_key, [])
+            if provider_key not in native_providers:
+                native_providers.append(provider_key)
+
         return model
+
+    def lookup_canonical_id(self, identifier: Optional[str]) -> Optional[str]:
+        """Resolve any identifier (alias, slug, canonical) to canonical ID."""
+
+        if not identifier:
+            return None
+
+        normalized = identifier.lower()
+
+        if normalized in self._canonical_models:
+            return normalized
+
+        return self._canonical_slug_index.get(normalized)
+
+    def get_canonical_id_for_provider(
+        self, provider_slug: str, native_model_id: str
+    ) -> Optional[str]:
+        """Lookup canonical ID using a provider/native identifier."""
+
+        if not provider_slug or not native_model_id:
+            return None
+
+        key = (provider_slug.lower(), native_model_id.lower())
+        return self._provider_native_index.get(key)
+
+    def get_canonical_provider(
+        self,
+        canonical_id: str,
+        provider_slug: str,
+    ) -> Optional[CanonicalModelProvider]:
+        """Fetch a provider adapter for a canonical model."""
+
+        model = self.get_canonical_model(canonical_id)
+        if not model:
+            return None
+
+        return model.providers.get(provider_slug.lower())
+
+    def select_canonical_provider(
+        self,
+        canonical_id: str,
+        preferred_provider: Optional[str] = None,
+        required_features: Optional[List[str]] = None,
+    ) -> Optional[CanonicalModelProvider]:
+        """Select a provider for a canonical model based on features and priority."""
+
+        model = self.get_canonical_model(canonical_id)
+        if not model:
+            return None
+
+        providers = list(model.providers.values())
+        if not providers:
+            return None
+
+        def _supports(provider: CanonicalModelProvider) -> bool:
+            if not required_features:
+                return True
+            features = provider.capabilities.get("features") or []
+            return all(feature in features for feature in required_features)
+
+        filtered = [p for p in providers if _supports(p)]
+        if not filtered:
+            return None
+
+        if preferred_provider:
+            preferred = preferred_provider.lower()
+            for provider in filtered:
+                if provider.provider_slug == preferred:
+                    return provider
+
+        def _priority(provider: CanonicalModelProvider) -> int:
+            try:
+                return int(provider.metadata.get("priority", 100))
+            except (TypeError, ValueError):
+                return 100
+
+        filtered.sort(key=_priority)
+        return filtered[0]
+
+    def get_providers_for_native_id(
+        self, native_model_id: str
+    ) -> List[Tuple[str, CanonicalModelProvider]]:
+        """Return providers associated with a native model identifier."""
+
+        if not native_model_id:
+            return []
+
+        normalized = native_model_id.lower()
+        provider_entries = self._native_index.get(normalized, [])
+        results: List[Tuple[str, CanonicalModelProvider]] = []
+        for provider_slug, canonical_id in provider_entries:
+            model = self.get_canonical_model(canonical_id)
+            if not model:
+                continue
+            provider = model.providers.get(provider_slug)
+            if provider:
+                results.append((canonical_id, provider))
+        return results
 
     def get_canonical_model(self, canonical_id: str) -> Optional["CanonicalModel"]:
         return self._canonical_models.get(canonical_id)

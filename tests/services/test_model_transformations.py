@@ -1,5 +1,97 @@
 from unittest.mock import patch
+
+from typing import Optional
+
+import pytest
+
 from src.services.model_transformations import transform_model_id, detect_provider_from_model_id
+from src.services.multi_provider_registry import (
+    get_registry,
+    CanonicalModelProvider,
+)
+
+
+def _register_canonical(
+    canonical_id: str,
+    provider_slug: str,
+    native_id: str,
+    aliases: Optional[list] = None,
+    features: Optional[list] = None,
+    priority: int = 1,
+) -> None:
+    registry = get_registry()
+    display = {"canonical_slug": canonical_id, "slug": canonical_id}
+    if aliases:
+        display["aliases"] = aliases
+
+    provider = CanonicalModelProvider(
+        provider_slug=provider_slug,
+        native_model_id=native_id,
+        capabilities={"features": features or []},
+        metadata={"canonical_slug": canonical_id, "slug": canonical_id, "priority": priority},
+    )
+
+    registry.register_canonical_provider(canonical_id, display, provider)
+
+
+@pytest.fixture(autouse=True)
+def seed_canonical_registry():
+    registry = get_registry()
+    registry.reset_canonical_models()
+
+    _register_canonical(
+        "openai/gpt-4",
+        "openrouter",
+        "openai/gpt-4",
+        aliases=["openrouter/openai/gpt-4"],
+    )
+    _register_canonical("openrouter/auto", "openrouter", "openrouter/auto")
+
+    _register_canonical(
+        "anthropic/claude-3-sonnet",
+        "openrouter",
+        "anthropic/claude-3-sonnet-20240229",
+        aliases=["anthropic/claude-3-sonnet"],
+    )
+    _register_canonical(
+        "anthropic/claude-3-sonnet",
+        "portkey",
+        "@anthropic/claude-3-sonnet",
+        aliases=["@anthropic/claude-3-sonnet"],
+        priority=2,
+    )
+
+    fal_aliases = [
+        "fal-ai/stable-diffusion-v15",
+        "fal/some-model",
+        "minimax/video-01",
+        "stabilityai/stable-diffusion-xl",
+        "hunyuan3d/some-model",
+        "meshy/mesh-model",
+        "tripo3d/3d-model",
+    ]
+    _register_canonical(
+        "fal-ai/stable-diffusion-v15",
+        "fal",
+        "fal-ai/stable-diffusion-v15",
+        aliases=fal_aliases,
+    )
+
+    for gemini_id in [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+    ]:
+        aliases = [f"google/{gemini_id}", f"@google/models/{gemini_id}"]
+        _register_canonical(
+            gemini_id,
+            "google-vertex",
+            gemini_id,
+            aliases=aliases,
+        )
+
+    yield
+    registry.reset_canonical_models()
 
 
 def test_openrouter_prefixed_model_keeps_nested_provider():
