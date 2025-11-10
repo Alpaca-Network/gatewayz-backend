@@ -106,11 +106,6 @@ from src.services.vercel_ai_gateway_client import (
     process_vercel_ai_gateway_response,
     make_vercel_ai_gateway_request_openai_stream,
 )
-from src.services.helicone_client import (
-    make_helicone_request_openai,
-    process_helicone_response,
-    make_helicone_request_openai_stream,
-)
 from src.services.aihubmix_client import (
     make_aihubmix_request_openai,
     process_aihubmix_response,
@@ -261,8 +256,6 @@ def _create_provider_executor(messages, optional, req, is_streaming=False):
                 return make_google_vertex_request_openai_stream(messages, model_id, **optional)
             elif provider_name == "vercel-ai-gateway":
                 return make_vercel_ai_gateway_request_openai_stream(messages, model_id, **optional)
-            elif provider_name == "helicone":
-                return make_helicone_request_openai_stream(messages, model_id, **optional)
             elif provider_name == "aihubmix":
                 return make_aihubmix_request_openai_stream(messages, model_id, **optional)
             elif provider_name == "anannas":
@@ -308,9 +301,6 @@ def _create_provider_executor(messages, optional, req, is_streaming=False):
             elif provider_name == "vercel-ai-gateway":
                 resp = make_vercel_ai_gateway_request_openai(messages, model_id, **optional)
                 return process_vercel_ai_gateway_response(resp)
-            elif provider_name == "helicone":
-                resp = make_helicone_request_openai(messages, model_id, **optional)
-                return process_helicone_response(resp)
             elif provider_name == "aihubmix":
                 resp = make_aihubmix_request_openai(messages, model_id, **optional)
                 return process_aihubmix_response(resp)
@@ -995,13 +985,6 @@ async def chat_completions(
                                 request_model,
                                 **optional,
                             )
-                        elif attempt_provider == "helicone":
-                            stream = await _to_thread(
-                                make_helicone_request_openai_stream,
-                                messages,
-                                request_model,
-                                **optional,
-                            )
                         elif attempt_provider == "aihubmix":
                             stream = await _to_thread(
                                 make_aihubmix_request_openai_stream,
@@ -1230,17 +1213,6 @@ async def chat_completions(
                             timeout=request_timeout,
                         )
                         processed = await _to_thread(process_vercel_ai_gateway_response, resp_raw)
-                    elif attempt_provider == "helicone":
-                        resp_raw = await asyncio.wait_for(
-                            _to_thread(
-                                make_helicone_request_openai,
-                                messages,
-                                request_model,
-                                **optional,
-                            ),
-                            timeout=request_timeout,
-                        )
-                        processed = await _to_thread(process_helicone_response, resp_raw)
                     elif attempt_provider == "aihubmix":
                         resp_raw = await asyncio.wait_for(
                             _to_thread(
