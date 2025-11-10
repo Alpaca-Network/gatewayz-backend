@@ -87,6 +87,16 @@ The AI Gateway is built on the following principles:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Canonical Model Registry
+
+Gatewayz now centralizes model naming through the canonical registry located in `src/services/multi_provider_registry.py`. The registry normalizes aliases, provider-native identifiers, and friendly slugs into a single canonical ID so every feature (pricing, routing, analytics) references the same name.
+
+- **Bidirectional lookups** – `lookup_canonical_id` resolves any alias to the shared ID, while `get_canonical_id_for_provider` and `get_providers_for_native_id` allow analytics and catalog responders to pivot from provider payloads back to canonical identifiers.
+- **Feature-aware selection** – `transform_model_id` and `detect_provider_from_model_id` now call into the registry to pick provider adapters. When multiple providers are available, selection respects required feature flags and prioritizes native-ID matches before falling back to configured provider priorities.
+- **Cache consistency** – Model caches populated in `src/services/models.py` stamp each provider payload with `canonical_id`/`canonical_slug` so downstream consumers (pricing, availability monitoring, audits) operate on normalized identifiers even when reading stale cache entries.
+
+These changes eliminate the brittle manual mapping tables that previously lived inside the transformation helpers and make it straightforward to add new providers by simply registering their adapters with the registry.
+
 ## Project Structure
 
 The project follows a clean, modular architecture with clear separation of concerns:
