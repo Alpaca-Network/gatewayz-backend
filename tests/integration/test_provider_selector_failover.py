@@ -213,7 +213,7 @@ class TestProviderSelectorFailover:
         )
 
         assert result["success"] is False
-        assert "not found in registry" in result.get("error", "").lower()
+        assert "not found in multi-provider registry" in result.get("error", "").lower()
 
     def test_max_retries_limit(self, selector):
         """Test that max_retries is respected"""
