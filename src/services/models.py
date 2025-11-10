@@ -2506,7 +2506,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', or None
+        Gateway name: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
     """
     try:
         model_id = f"{provider_name}/{model_name}".lower()
@@ -2527,6 +2527,12 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             "novita",
             "huggingface",
             "fal",
+            "helicone",
+            "vercel-ai-gateway",
+            "aihubmix",
+            "anannas",
+            "near",
+            "aimo",
         ]
 
         for gateway in gateways:
