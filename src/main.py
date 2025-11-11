@@ -12,11 +12,15 @@ from prometheus_client import generate_latest, REGISTRY, CollectorRegistry
 from src.config import Config
 from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL
 from src.services.startup import lifespan
+from src.services.sentry_service import SentryService
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize Sentry error tracking
+SentryService.initialize()
 
 # Constants
 ERROR_INVALID_ADMIN_API_KEY = "Invalid admin API key"
@@ -248,7 +252,37 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
+        # Log error
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+        # Capture in Sentry with context
+        try:
+            from src.services.sentry_service import SentryService
+
+            # Add request context
+            SentryService.set_request_context(
+                endpoint=str(request.url.path),
+                method=request.method
+            )
+
+            # Add breadcrumb
+            SentryService.add_breadcrumb(
+                message=f"Unhandled exception in {request.method} {request.url.path}",
+                category="error",
+                level="error",
+                data={
+                    "url": str(request.url),
+                    "method": request.method,
+                    "client": request.client.host if request.client else None
+                }
+            )
+
+            # Capture exception
+            SentryService.capture_exception(exc)
+        except Exception as sentry_error:
+            # Don't let Sentry errors break the error handler
+            logger.warning(f"Failed to capture exception in Sentry: {sentry_error}")
+
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     # ==================== Startup Event ====================

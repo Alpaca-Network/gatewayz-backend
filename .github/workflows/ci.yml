@@ -332,6 +332,8 @@ jobs:
           pip install --no-index --find-links=.cache/wheels -r requirements.txt
 
       - name: Test application startup
+        env:
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           # Quick startup test (don't start server, just import)
           python -c "from src.main import app; print('✅ App imports successfully')"
