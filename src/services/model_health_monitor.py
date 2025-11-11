@@ -6,6 +6,7 @@ and health status across all providers and gateways.
 """
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import asdict, dataclass
@@ -14,6 +15,8 @@ from enum import Enum
 from typing import Any, Optional, Dict, List
 
 from typing import Optional
+
+from src.config.redis_config import get_redis_client
 logger = logging.getLogger(__name__)
 
 
@@ -91,10 +94,263 @@ class SystemHealthMetrics:
     last_updated: Optional[datetime] = None
 
 
+class HealthDataStore:
+    """Durable storage for model, provider, and system health metrics."""
+
+    MODEL_HASH_KEY = "model_health_monitor:models"
+    PROVIDER_HASH_KEY = "model_health_monitor:providers"
+    SYSTEM_KEY = "model_health_monitor:system"
+
+    def _get_client(self):
+        """Get a Redis client instance if available."""
+        try:
+            return get_redis_client()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to get Redis client for health data store: %s", exc)
+            return None
+
+    @staticmethod
+    def _encode_datetime(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+    @staticmethod
+    def _decode_datetime(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            logger.warning("Failed to parse datetime value '%s' from health store", value)
+            return None
+
+    def _serialize_model(self, metrics: ModelHealthMetrics) -> Dict[str, Any]:
+        return {
+            "model_id": metrics.model_id,
+            "provider": metrics.provider,
+            "gateway": metrics.gateway,
+            "status": metrics.status.value,
+            "response_time_ms": metrics.response_time_ms,
+            "success_rate": metrics.success_rate,
+            "last_checked": self._encode_datetime(metrics.last_checked),
+            "last_success": self._encode_datetime(metrics.last_success),
+            "last_failure": self._encode_datetime(metrics.last_failure),
+            "error_count": metrics.error_count,
+            "total_requests": metrics.total_requests,
+            "avg_response_time_ms": metrics.avg_response_time_ms,
+            "uptime_percentage": metrics.uptime_percentage,
+            "error_message": metrics.error_message,
+        }
+
+    def _deserialize_model(self, payload: str) -> Optional[ModelHealthMetrics]:
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Invalid model health payload encountered: %s", payload)
+            return None
+
+        try:
+            return ModelHealthMetrics(
+                model_id=data["model_id"],
+                provider=data["provider"],
+                gateway=data["gateway"],
+                status=HealthStatus(data["status"]),
+                response_time_ms=data.get("response_time_ms"),
+                success_rate=data.get("success_rate", 0.0),
+                last_checked=self._decode_datetime(data.get("last_checked")),
+                last_success=self._decode_datetime(data.get("last_success")),
+                last_failure=self._decode_datetime(data.get("last_failure")),
+                error_count=data.get("error_count", 0),
+                total_requests=data.get("total_requests", 0),
+                avg_response_time_ms=data.get("avg_response_time_ms"),
+                uptime_percentage=data.get("uptime_percentage", 0.0),
+                error_message=data.get("error_message"),
+            )
+        except KeyError as exc:
+            logger.warning("Incomplete model health payload missing %s: %s", exc, payload)
+            return None
+
+    def _serialize_provider(self, metrics: ProviderHealthMetrics) -> Dict[str, Any]:
+        return {
+            "provider": metrics.provider,
+            "gateway": metrics.gateway,
+            "status": metrics.status.value,
+            "total_models": metrics.total_models,
+            "healthy_models": metrics.healthy_models,
+            "degraded_models": metrics.degraded_models,
+            "unhealthy_models": metrics.unhealthy_models,
+            "avg_response_time_ms": metrics.avg_response_time_ms,
+            "overall_uptime": metrics.overall_uptime,
+            "last_checked": self._encode_datetime(metrics.last_checked),
+            "error_message": metrics.error_message,
+        }
+
+    def _deserialize_provider(self, payload: str) -> Optional[ProviderHealthMetrics]:
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Invalid provider health payload encountered: %s", payload)
+            return None
+
+        try:
+            return ProviderHealthMetrics(
+                provider=data["provider"],
+                gateway=data["gateway"],
+                status=ProviderStatus(data["status"]),
+                total_models=data.get("total_models", 0),
+                healthy_models=data.get("healthy_models", 0),
+                degraded_models=data.get("degraded_models", 0),
+                unhealthy_models=data.get("unhealthy_models", 0),
+                avg_response_time_ms=data.get("avg_response_time_ms"),
+                overall_uptime=data.get("overall_uptime", 0.0),
+                last_checked=self._decode_datetime(data.get("last_checked")),
+                error_message=data.get("error_message"),
+            )
+        except KeyError as exc:
+            logger.warning("Incomplete provider health payload missing %s: %s", exc, payload)
+            return None
+
+    def _serialize_system(self, metrics: SystemHealthMetrics) -> Dict[str, Any]:
+        return {
+            "overall_status": metrics.overall_status.value,
+            "total_providers": metrics.total_providers,
+            "healthy_providers": metrics.healthy_providers,
+            "degraded_providers": metrics.degraded_providers,
+            "unhealthy_providers": metrics.unhealthy_providers,
+            "total_models": metrics.total_models,
+            "healthy_models": metrics.healthy_models,
+            "degraded_models": metrics.degraded_models,
+            "unhealthy_models": metrics.unhealthy_models,
+            "system_uptime": metrics.system_uptime,
+            "last_updated": self._encode_datetime(metrics.last_updated),
+        }
+
+    def _deserialize_system(self, payload: str) -> Optional[SystemHealthMetrics]:
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Invalid system health payload encountered: %s", payload)
+            return None
+
+        try:
+            return SystemHealthMetrics(
+                overall_status=HealthStatus(data["overall_status"]),
+                total_providers=data.get("total_providers", 0),
+                healthy_providers=data.get("healthy_providers", 0),
+                degraded_providers=data.get("degraded_providers", 0),
+                unhealthy_providers=data.get("unhealthy_providers", 0),
+                total_models=data.get("total_models", 0),
+                healthy_models=data.get("healthy_models", 0),
+                degraded_models=data.get("degraded_models", 0),
+                unhealthy_models=data.get("unhealthy_models", 0),
+                system_uptime=data.get("system_uptime", 0.0),
+                last_updated=self._decode_datetime(data.get("last_updated")),
+            )
+        except KeyError as exc:
+            logger.warning("Incomplete system health payload missing %s: %s", exc, payload)
+            return None
+
+    def load_models(self) -> Dict[str, ModelHealthMetrics]:
+        client = self._get_client()
+        if not client:
+            return {}
+
+        try:
+            raw_models = client.hgetall(self.MODEL_HASH_KEY)
+        except Exception as exc:
+            logger.warning("Failed to load model health from Redis: %s", exc)
+            return {}
+
+        models: Dict[str, ModelHealthMetrics] = {}
+        for key, payload in raw_models.items():
+            metrics = self._deserialize_model(payload)
+            if metrics:
+                models[key] = metrics
+        return models
+
+    def save_model(self, key: str, metrics: ModelHealthMetrics) -> bool:
+        client = self._get_client()
+        if not client:
+            return False
+
+        try:
+            client.hset(self.MODEL_HASH_KEY, key, json.dumps(self._serialize_model(metrics)))
+            return True
+        except Exception as exc:
+            logger.warning("Failed to persist model health for %s: %s", key, exc)
+            return False
+
+    def load_providers(self) -> Dict[str, ProviderHealthMetrics]:
+        client = self._get_client()
+        if not client:
+            return {}
+
+        try:
+            raw_providers = client.hgetall(self.PROVIDER_HASH_KEY)
+        except Exception as exc:
+            logger.warning("Failed to load provider health from Redis: %s", exc)
+            return {}
+
+        providers: Dict[str, ProviderHealthMetrics] = {}
+        for key, payload in raw_providers.items():
+            metrics = self._deserialize_provider(payload)
+            if metrics:
+                providers[key] = metrics
+        return providers
+
+    def save_providers(self, providers: Dict[str, ProviderHealthMetrics]) -> bool:
+        client = self._get_client()
+        if not client:
+            return False
+
+        try:
+            mapping = {key: json.dumps(self._serialize_provider(metrics)) for key, metrics in providers.items()}
+            pipe = client.pipeline()
+            pipe.delete(self.PROVIDER_HASH_KEY)
+            if mapping:
+                pipe.hset(self.PROVIDER_HASH_KEY, mapping=mapping)
+            pipe.execute()
+            return True
+        except Exception as exc:
+            logger.warning("Failed to persist provider health: %s", exc)
+            return False
+
+    def load_system(self) -> Optional[SystemHealthMetrics]:
+        client = self._get_client()
+        if not client:
+            return None
+
+        try:
+            payload = client.get(self.SYSTEM_KEY)
+        except Exception as exc:
+            logger.warning("Failed to load system health from Redis: %s", exc)
+            return None
+
+        if not payload:
+            return None
+
+        return self._deserialize_system(payload)
+
+    def save_system(self, metrics: Optional[SystemHealthMetrics]) -> bool:
+        client = self._get_client()
+        if not client:
+            return False
+
+        try:
+            if metrics is None:
+                client.delete(self.SYSTEM_KEY)
+            else:
+                client.set(self.SYSTEM_KEY, json.dumps(self._serialize_system(metrics)))
+            return True
+        except Exception as exc:
+            logger.warning("Failed to persist system health: %s", exc)
+            return False
+
+
 class ModelHealthMonitor:
     """Main health monitoring service"""
 
-    def __init__(self):
+    def __init__(self, store: Optional[HealthDataStore] = None):
+        self.store = store or HealthDataStore()
         self.health_data: Dict[str, ModelHealthMetrics] = {}
         self.provider_data: Dict[str, ProviderHealthMetrics] = {}
         self.system_data: Optional[SystemHealthMetrics] = None
@@ -110,6 +366,25 @@ class ModelHealthMonitor:
             "max_tokens": 10,
             "temperature": 0.1,
         }
+
+        self._load_persistent_state()
+
+    def _load_persistent_state(self):
+        """Initialize in-memory caches from the durable store."""
+        try:
+            stored_models = self.store.load_models()
+            if stored_models:
+                self.health_data.update(stored_models)
+
+            stored_providers = self.store.load_providers()
+            if stored_providers:
+                self.provider_data.update(stored_providers)
+
+            stored_system = self.store.load_system()
+            if stored_system:
+                self.system_data = stored_system
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load persistent health state: %s", exc)
 
     async def start_monitoring(self):
         """Start the health monitoring service"""
@@ -391,6 +666,12 @@ class ModelHealthMonitor:
             # Create new health data
             self.health_data[model_key] = health_metrics
 
+        # Persist to durable store for cross-process resilience
+        try:
+            self.store.save_model(model_key, self.health_data[model_key])
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist model health for %s: %s", model_key, exc)
+
     async def _update_provider_metrics(self):
         """Update provider-level health metrics"""
         provider_stats = {}
@@ -428,6 +709,8 @@ class ModelHealthMonitor:
             stats["success_rates"].append(health_data.success_rate)
 
         # Create provider health metrics
+        new_provider_data: Dict[str, ProviderHealthMetrics] = {}
+
         for provider_key, stats in provider_stats.items():
             # Calculate overall status
             if stats["unhealthy_models"] == 0:
@@ -460,7 +743,14 @@ class ModelHealthMonitor:
                 last_checked=datetime.now(timezone.utc),
             )
 
-            self.provider_data[provider_key] = provider_metrics
+            new_provider_data[provider_key] = provider_metrics
+
+        self.provider_data = new_provider_data
+
+        try:
+            self.store.save_providers(self.provider_data)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist provider health: %s", exc)
 
     async def _update_system_metrics(self):
         """Update system-level health metrics"""
@@ -512,6 +802,11 @@ class ModelHealthMonitor:
             system_uptime=system_uptime,
             last_updated=datetime.now(timezone.utc),
         )
+
+        try:
+            self.store.save_system(self.system_data)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist system health: %s", exc)
 
     def get_model_health(self, model_id: str, gateway: str = None) -> Optional[ModelHealthMetrics]:
         """Get health metrics for a specific model"""

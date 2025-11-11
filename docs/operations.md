@@ -2,6 +2,36 @@
 
 ## Health Monitoring
 
+### Persistent Health Store Deployment
+
+Gatewayz now persists `ModelHealthMonitor` and `ModelAvailabilityService` state in Redis.
+This keeps circuit breakers and health metrics available across process restarts.
+
+#### 1. Provision Redis
+- Create a Redis instance (managed cloud service or self-hosted) with persistence enabled.
+- Record the connection string, password, database index, and TLS settings if required.
+
+#### 2. Configure Environment
+- Set the following environment variables for each runtime environment before deploying the code:
+  - `REDIS_URL` **or** (`REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`).
+  - Optional tuning: `REDIS_MAX_CONNECTIONS`, `REDIS_SOCKET_TIMEOUT`, `REDIS_SOCKET_CONNECT_TIMEOUT`.
+- Redeploy the application so the new variables are available before the monitor starts.
+
+#### 3. Warm and Validate
+- After deployment, trigger an on-demand health check run (e.g., call the admin job that executes model health checks) to populate Redis immediately.
+- Use `redis-cli PING` or `redis-cli --scan --pattern 'model_health_monitor:*'` to confirm keys exist.
+- Verify the availability cache: `redis-cli HLEN model_availability:availability` should return a non-zero value once checks complete.
+
+#### 4. Migration Considerations
+- No historical data migration is required; existing in-memory metrics will repopulate on the first scheduled health check.
+- During rollout, ensure Redis is reachable before starting new application instances to avoid falling back to ephemeral in-memory caches.
+- For blue/green or canary deployments, point all instances at the same Redis instance to share breaker state.
+
+#### 5. Ongoing Monitoring
+- Add Redis health probes to existing monitoring (e.g., Prometheus `redis_up` or managed service alerts).
+- Track key growth: `model_health_monitor:models`, `model_health_monitor:providers`, `model_health_monitor:system`, and `model_availability:circuit_breakers` should reflect expected cardinality.
+- Configure alerts for replication lag / persistence failures if using managed Redis to prevent loss of breaker state.
+
 ### Health Check Endpoint
 **GET** `/health`
 - **Purpose**: System health and dependency status
