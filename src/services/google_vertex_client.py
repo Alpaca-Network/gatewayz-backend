@@ -183,7 +183,19 @@ def make_google_vertex_request_openai(
             logger.error(f"Failed to build generation config: {config_error}", exc_info=True)
             raise
 
-        # Step 5: Convert messages to Vertex AI format
+        # Step 5: Extract tools from kwargs (if provided)
+        tools = kwargs.get("tools")
+        if tools:
+            logger.info(f"Tools parameter detected: {len(tools) if isinstance(tools, list) else 0} tools")
+            logger.warning(
+                "Google Vertex AI function calling support requires transformation from OpenAI format to Gemini format. "
+                "Currently, tools are extracted but not yet transformed. Function calling may not work correctly."
+            )
+            # TODO: Transform OpenAI tools format to Gemini function calling format
+            # Gemini uses a different schema: tools need to be converted to FunctionDeclaration format
+            # See: https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini#function_calling
+
+        # Step 6: Convert messages to Vertex AI format
         try:
             # Extract the last user message as the prompt
             # For simplicity, we'll combine all messages into a single prompt
@@ -204,7 +216,7 @@ def make_google_vertex_request_openai(
             logger.error(f"Failed to build prompt: {content_error}", exc_info=True)
             raise
 
-        # Step 6: Make the API call
+        # Step 7: Make the API call
         try:
             logger.info("Calling GenerativeModel.generate_content()")
             response = gemini_model.generate_content(
@@ -217,7 +229,7 @@ def make_google_vertex_request_openai(
             logger.error(f"Vertex AI API call failed: {api_error}", exc_info=True)
             raise
 
-        # Step 7: Process and normalize response
+        # Step 8: Process and normalize response
         try:
             processed_response = _process_google_vertex_sdk_response(response, model)
             logger.info("Successfully processed Vertex AI response")
