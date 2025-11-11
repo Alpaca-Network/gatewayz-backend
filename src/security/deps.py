@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.db.users import get_user
 from src.security.security import audit_logger, validate_api_key_security
+from src.services.sentry_service import SentryService
 
 from typing import Optional
 logger = logging.getLogger(__name__)
@@ -76,6 +77,18 @@ async def get_api_key(
                 ip_address=client_ip or "unknown",
                 user_agent=user_agent,
             )
+
+            # Set user context for Sentry error tracking
+            try:
+                SentryService.set_user_context(
+                    user_id=str(user["id"]),
+                    email=user.get("email"),
+                    api_key_id=str(user.get("key_id", 0)),
+                    credits=user.get("credits"),
+                    plan=user.get("plan")
+                )
+            except Exception as e:
+                logger.debug(f"Failed to set Sentry user context: {e}")
 
         return validated_key
 

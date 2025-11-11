@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 import httpx
 
 from typing import Optional
+from src.services.sentry_service import SentryService, add_breadcrumb
 # Make braintrust optional for test environments
 try:
     from braintrust import current_span, start_span, traced
@@ -538,6 +539,23 @@ async def chat_completions(
             api_key = auth_header.split(" ", 1)[1].strip()
 
     logger.info("chat_completions start (api_key=%s, model=%s)", mask_key(api_key), req.model)
+
+    # Set request context for Sentry error tracking
+    try:
+        SentryService.set_request_context(
+            endpoint="/v1/chat/completions",
+            method="POST",
+            model=req.model,
+            stream=req.stream
+        )
+        add_breadcrumb(
+            message=f"Chat completion request for model: {req.model}",
+            category="inference",
+            level="info",
+            data={"model": req.model, "stream": req.stream}
+        )
+    except Exception as e:
+        logger.debug(f"Failed to set Sentry context: {e}")
 
     # Start Braintrust span for this request
     span = start_span(name=f"chat_{req.model}", type="llm")

@@ -146,6 +146,21 @@ class Config:
         "http://loki:3100/loki/api/v1/push",
     )
 
+    # Sentry Configuration
+    SENTRY_DSN = os.environ.get("SENTRY_DSN")
+    SENTRY_ENABLED = os.environ.get("SENTRY_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    SENTRY_TRACES_SAMPLE_RATE = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+    SENTRY_PROFILES_SAMPLE_RATE = float(os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "0.1"))
+    RELEASE_SHA = os.environ.get(
+        "RELEASE_SHA",
+        os.environ.get("VERCEL_GIT_COMMIT_SHA", os.environ.get("RAILWAY_GIT_COMMIT_SHA", "unknown"))
+    )
+    SERVICE_NAME = os.environ.get("SERVICE_NAME", "gatewayz-api")
+
     @classmethod
     def get_portkey_virtual_key(cls, provider: Optional[str] = None) -> Optional[str]:
         """
