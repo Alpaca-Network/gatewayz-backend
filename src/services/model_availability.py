@@ -9,6 +9,7 @@ This service provides improved reliability for model availability by:
 """
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -17,6 +18,9 @@ from enum import Enum
 from typing import Any, Optional, Dict, List
 
 from typing import Optional
+
+from src.config.redis_config import get_redis_client
+from src.services.model_health_monitor import HealthDataStore
 logger = logging.getLogger(__name__)
 
 
@@ -121,10 +125,145 @@ class CircuitBreaker:
             self.state = CircuitBreakerState.OPEN
 
 
+class AvailabilityStateStore:
+    """Durable storage for availability and circuit breaker state."""
+
+    CIRCUIT_BREAKER_KEY = "model_availability:circuit_breakers"
+    AVAILABILITY_KEY = "model_availability:availability"
+
+    @staticmethod
+    def _get_client():
+        try:
+            return get_redis_client()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to get Redis client for availability store: %s", exc)
+            return None
+
+    @staticmethod
+    def _encode_datetime(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+    @staticmethod
+    def _decode_datetime(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            logger.warning("Failed to parse datetime '%s' from availability store", value)
+            return None
+
+    def load_circuit_breakers(self) -> Dict[str, Dict[str, Any]]:
+        client = self._get_client()
+        if not client:
+            return {}
+
+        try:
+            raw_breakers = client.hgetall(self.CIRCUIT_BREAKER_KEY)
+        except Exception as exc:
+            logger.warning("Failed to load circuit breaker state: %s", exc)
+            return {}
+
+        states: Dict[str, Dict[str, Any]] = {}
+        for key, payload in raw_breakers.items():
+            try:
+                states[key] = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Invalid circuit breaker payload encountered: %s", payload)
+        return states
+
+    def save_circuit_breaker(self, key: str, breaker: "CircuitBreaker") -> bool:
+        client = self._get_client()
+        if not client:
+            return False
+
+        payload = {
+            "failure_threshold": breaker.failure_threshold,
+            "recovery_timeout": breaker.recovery_timeout,
+            "success_threshold": breaker.success_threshold,
+            "failure_count": breaker.failure_count,
+            "success_count": breaker.success_count,
+            "last_failure_time": breaker.last_failure_time,
+            "state": breaker.state.value,
+        }
+
+        try:
+            client.hset(self.CIRCUIT_BREAKER_KEY, key, json.dumps(payload))
+            return True
+        except Exception as exc:
+            logger.warning("Failed to persist circuit breaker %s: %s", key, exc)
+            return False
+
+    def load_availability(self) -> Dict[str, "ModelAvailability"]:
+        client = self._get_client()
+        if not client:
+            return {}
+
+        try:
+            raw_availability = client.hgetall(self.AVAILABILITY_KEY)
+        except Exception as exc:
+            logger.warning("Failed to load model availability cache: %s", exc)
+            return {}
+
+        availability: Dict[str, ModelAvailability] = {}
+        for key, payload in raw_availability.items():
+            try:
+                data = json.loads(payload)
+                availability[key] = ModelAvailability(
+                    model_id=data["model_id"],
+                    provider=data["provider"],
+                    gateway=data["gateway"],
+                    status=AvailabilityStatus(data["status"]),
+                    last_checked=self._decode_datetime(data.get("last_checked")) or datetime.now(timezone.utc),
+                    success_rate=data.get("success_rate", 0.0),
+                    response_time_ms=data.get("response_time_ms"),
+                    error_count=data.get("error_count", 0),
+                    circuit_breaker_state=CircuitBreakerState(data.get("circuit_breaker_state", CircuitBreakerState.CLOSED.value)),
+                    fallback_models=data.get("fallback_models", []),
+                    maintenance_until=self._decode_datetime(data.get("maintenance_until")),
+                    error_message=data.get("error_message"),
+                )
+            except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+                logger.warning("Invalid availability payload encountered: %s", payload)
+        return availability
+
+    def save_availability(self, key: str, availability: "ModelAvailability") -> bool:
+        client = self._get_client()
+        if not client:
+            return False
+
+        payload = {
+            "model_id": availability.model_id,
+            "provider": availability.provider,
+            "gateway": availability.gateway,
+            "status": availability.status.value,
+            "last_checked": self._encode_datetime(availability.last_checked),
+            "success_rate": availability.success_rate,
+            "response_time_ms": availability.response_time_ms,
+            "error_count": availability.error_count,
+            "circuit_breaker_state": availability.circuit_breaker_state.value,
+            "fallback_models": availability.fallback_models,
+            "maintenance_until": self._encode_datetime(availability.maintenance_until),
+            "error_message": availability.error_message,
+        }
+
+        try:
+            client.hset(self.AVAILABILITY_KEY, key, json.dumps(payload))
+            return True
+        except Exception as exc:
+            logger.warning("Failed to persist availability for %s: %s", key, exc)
+            return False
+
 class ModelAvailabilityService:
     """Enhanced model availability service"""
 
-    def __init__(self):
+    def __init__(
+        self,
+        health_store: Optional[HealthDataStore] = None,
+        state_store: Optional[AvailabilityStateStore] = None,
+    ):
+        self.health_store = health_store or HealthDataStore()
+        self.state_store = state_store or AvailabilityStateStore()
         self.availability_cache: Dict[str, ModelAvailability] = {}
         self.circuit_breakers: Dict[str, CircuitBreaker] = {}
         self.fallback_mappings: Dict[str, List[str]] = {}
@@ -133,6 +272,7 @@ class ModelAvailabilityService:
 
         # Load fallback mappings
         self._load_fallback_mappings()
+        self._load_persistent_state()
 
     def _load_fallback_mappings(self):
         """Load fallback model mappings"""
@@ -146,6 +286,34 @@ class ModelAvailabilityService:
             "llama-3-70b": ["llama-3-8b", "claude-3-sonnet", "gpt-3.5-turbo"],
             "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"],
         }
+
+    def _load_persistent_state(self):
+        """Restore cached availability and circuit breaker state from durable storage."""
+        try:
+            persisted_availability = self.state_store.load_availability()
+            if persisted_availability:
+                self.availability_cache.update(persisted_availability)
+
+            persisted_breakers = self.state_store.load_circuit_breakers()
+            for key, state in persisted_breakers.items():
+                breaker = CircuitBreaker(
+                    failure_threshold=state.get("failure_threshold", self.config.failure_threshold),
+                    recovery_timeout=state.get("recovery_timeout", self.config.recovery_timeout),
+                    success_threshold=state.get("success_threshold", self.config.success_threshold),
+                )
+                breaker.failure_count = state.get("failure_count", 0)
+                breaker.success_count = state.get("success_count", 0)
+                breaker.last_failure_time = state.get("last_failure_time")
+
+                state_value = state.get("state", CircuitBreakerState.CLOSED.value)
+                try:
+                    breaker.state = CircuitBreakerState(state_value)
+                except ValueError:
+                    breaker.state = CircuitBreakerState.CLOSED
+
+                self.circuit_breakers[key] = breaker
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load persistent availability state: %s", exc)
 
     async def start_monitoring(self):
         """Start availability monitoring"""
@@ -176,10 +344,14 @@ class ModelAvailabilityService:
     async def _check_model_availability(self):
         """Check availability of all models"""
         try:
-            # Get models from health monitor
-            from src.services.model_health_monitor import health_monitor
+            models_map = self.health_store.load_models()
+            if models_map:
+                models_health = list(models_map.values())
+            else:
+                # Fallback to in-memory monitor if durable store unavailable
+                from src.services.model_health_monitor import health_monitor
 
-            models_health = health_monitor.get_all_models_health()
+                models_health = health_monitor.get_all_models_health()
 
             for model_health in models_health:
                 await self._update_model_availability(model_health)
@@ -217,6 +389,11 @@ class ModelAvailabilityService:
         else:
             circuit_breaker.record_failure()
 
+        try:
+            self.state_store.save_circuit_breaker(model_key, circuit_breaker)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist circuit breaker state for %s: %s", model_key, exc)
+
         # Get fallback models
         fallback_models = self.fallback_mappings.get(model_health.model_id, [])
 
@@ -236,6 +413,11 @@ class ModelAvailabilityService:
         )
 
         self.availability_cache[model_key] = availability
+
+        try:
+            self.state_store.save_availability(model_key, availability)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to persist availability state for %s: %s", model_key, exc)
 
     def get_model_availability(
         self, model_id: str, gateway: str = None
