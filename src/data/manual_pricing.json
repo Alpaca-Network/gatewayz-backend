@@ -83,26 +83,26 @@
   },
   "near": {
     "deepseek-ai/DeepSeek-V3.1": {
-      "prompt": "0.56",
-      "completion": "1.68",
+      "prompt": "1.00",
+      "completion": "2.50",
       "request": "0",
       "image": "0"
     },
     "openai/gpt-oss-120b": {
-      "prompt": "0.15",
+      "prompt": "0.20",
       "completion": "0.60",
       "request": "0",
       "image": "0"
     },
     "Qwen/Qwen3-30B-A3B-Instruct-2507": {
-      "prompt": "0.06",
-      "completion": "0.22",
+      "prompt": "0.15",
+      "completion": "0.45",
       "request": "0",
       "image": "0"
     },
     "zai-org/GLM-4.6": {
-      "prompt": "0.60",
-      "completion": "2.20",
+      "prompt": "0.75",
+      "completion": "2.00",
       "request": "0",
       "image": "0"
     }
@@ -115,10 +115,7 @@
       "https://featherless.ai/pricing",
       "https://chutes.ai/pricing",
       "https://console.anyscale.com/services (Alpaca Network via Anyscale)",
-      "https://api-docs.deepseek.com/quick_start/pricing",
-      "https://artificialanalysis.ai/models/gpt-oss-120b",
-      "https://pricepertoken.com/pricing-page/model/qwen-qwen3-30b-a3b",
-      "https://artificialanalysis.ai/models/glm-4-6-reasoning/providers"
+      "https://cloud.near.ai/models"
     ],
     "currency": "USD",
     "units": "per 1M tokens (unless specified otherwise)"
