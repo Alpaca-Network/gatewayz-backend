@@ -13,11 +13,10 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
-from typing import Any, Optional, Dict, List
+from typing import Any
 
-from typing import Optional
 
 from src.config.redis_config import get_redis_client
 from src.services.model_health_monitor import HealthDataStore
@@ -52,12 +51,12 @@ class ModelAvailability:
     status: AvailabilityStatus
     last_checked: datetime
     success_rate: float
-    response_time_ms: Optional[float]
+    response_time_ms: float | None
     error_count: int
     circuit_breaker_state: CircuitBreakerState
-    fallback_models: List[str]
-    maintenance_until: Optional[datetime] = None
-    error_message: Optional[str] = None
+    fallback_models: list[str]
+    maintenance_until: datetime | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -140,11 +139,11 @@ class AvailabilityStateStore:
             return None
 
     @staticmethod
-    def _encode_datetime(value: Optional[datetime]) -> Optional[str]:
+    def _encode_datetime(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
 
     @staticmethod
-    def _decode_datetime(value: Optional[str]) -> Optional[datetime]:
+    def _decode_datetime(value: str | None) -> datetime | None:
         if not value:
             return None
         try:
@@ -153,7 +152,7 @@ class AvailabilityStateStore:
             logger.warning("Failed to parse datetime '%s' from availability store", value)
             return None
 
-    def load_circuit_breakers(self) -> Dict[str, Dict[str, Any]]:
+    def load_circuit_breakers(self) -> dict[str, dict[str, Any]]:
         client = self._get_client()
         if not client:
             return {}
@@ -164,7 +163,7 @@ class AvailabilityStateStore:
             logger.warning("Failed to load circuit breaker state: %s", exc)
             return {}
 
-        states: Dict[str, Dict[str, Any]] = {}
+        states: dict[str, dict[str, Any]] = {}
         for key, payload in raw_breakers.items():
             try:
                 states[key] = json.loads(payload)
@@ -194,7 +193,7 @@ class AvailabilityStateStore:
             logger.warning("Failed to persist circuit breaker %s: %s", key, exc)
             return False
 
-    def load_availability(self) -> Dict[str, "ModelAvailability"]:
+    def load_availability(self) -> dict[str, "ModelAvailability"]:
         client = self._get_client()
         if not client:
             return {}
@@ -205,7 +204,7 @@ class AvailabilityStateStore:
             logger.warning("Failed to load model availability cache: %s", exc)
             return {}
 
-        availability: Dict[str, ModelAvailability] = {}
+        availability: dict[str, ModelAvailability] = {}
         for key, payload in raw_availability.items():
             try:
                 data = json.loads(payload)
@@ -214,7 +213,7 @@ class AvailabilityStateStore:
                     provider=data["provider"],
                     gateway=data["gateway"],
                     status=AvailabilityStatus(data["status"]),
-                    last_checked=self._decode_datetime(data.get("last_checked")) or datetime.now(timezone.utc),
+                    last_checked=self._decode_datetime(data.get("last_checked")) or datetime.now(UTC),
                     success_rate=data.get("success_rate", 0.0),
                     response_time_ms=data.get("response_time_ms"),
                     error_count=data.get("error_count", 0),
@@ -259,14 +258,14 @@ class ModelAvailabilityService:
 
     def __init__(
         self,
-        health_store: Optional[HealthDataStore] = None,
-        state_store: Optional[AvailabilityStateStore] = None,
+        health_store: HealthDataStore | None = None,
+        state_store: AvailabilityStateStore | None = None,
     ):
         self.health_store = health_store or HealthDataStore()
         self.state_store = state_store or AvailabilityStateStore()
-        self.availability_cache: Dict[str, ModelAvailability] = {}
-        self.circuit_breakers: Dict[str, CircuitBreaker] = {}
-        self.fallback_mappings: Dict[str, List[str]] = {}
+        self.availability_cache: dict[str, ModelAvailability] = {}
+        self.circuit_breakers: dict[str, CircuitBreaker] = {}
+        self.fallback_mappings: dict[str, list[str]] = {}
         self.config = AvailabilityConfig()
         self.monitoring_active = False
 
@@ -403,7 +402,7 @@ class ModelAvailabilityService:
             provider=model_health.provider,
             gateway=model_health.gateway,
             status=availability_status,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=model_health.success_rate,
             response_time_ms=model_health.response_time_ms,
             error_count=model_health.error_count,
@@ -421,7 +420,7 @@ class ModelAvailabilityService:
 
     def get_model_availability(
         self, model_id: str, gateway: str = None
-    ) -> Optional[ModelAvailability]:
+    ) -> ModelAvailability | None:
         """Get availability for a specific model"""
         if gateway:
             model_key = f"{gateway}:{model_id}"
@@ -435,7 +434,7 @@ class ModelAvailabilityService:
 
     def get_available_models(
         self, gateway: str = None, provider: str = None
-    ) -> List[ModelAvailability]:
+    ) -> list[ModelAvailability]:
         """Get all available models"""
         available = []
 
@@ -449,7 +448,7 @@ class ModelAvailabilityService:
 
         return available
 
-    def get_fallback_models(self, model_id: str) -> List[str]:
+    def get_fallback_models(self, model_id: str) -> list[str]:
         """Get fallback models for a given model"""
         return self.fallback_mappings.get(model_id, [])
 
@@ -464,12 +463,12 @@ class ModelAvailabilityService:
             return False
 
         # Check maintenance
-        if availability.maintenance_until and availability.maintenance_until > datetime.now(timezone.utc):
+        if availability.maintenance_until and availability.maintenance_until > datetime.now(UTC):
             return False
 
         return availability.status == AvailabilityStatus.AVAILABLE
 
-    def get_best_available_model(self, preferred_model: str, gateway: str = None) -> Optional[str]:
+    def get_best_available_model(self, preferred_model: str, gateway: str = None) -> str | None:
         """Get the best available model, with fallbacks"""
         # Check if preferred model is available
         if self.is_model_available(preferred_model, gateway):
@@ -491,7 +490,7 @@ class ModelAvailabilityService:
 
         return None
 
-    def get_availability_summary(self) -> Dict[str, Any]:
+    def get_availability_summary(self) -> dict[str, Any]:
         """Get availability summary"""
         total_models = len(self.availability_cache)
         available_models = len(
@@ -542,7 +541,7 @@ class ModelAvailabilityService:
             ),
             "gateway_stats": gateway_stats,
             "monitoring_active": self.monitoring_active,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     def set_maintenance_mode(self, model_id: str, gateway: str, until: datetime):
