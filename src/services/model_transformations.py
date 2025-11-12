@@ -124,6 +124,14 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'near/' prefix: '{model_id}' -> '{stripped}' for Near")
         model_id = stripped
 
+    # Special handling for AIMO: strip 'aimo/' prefix if present
+    # AIMO models need to be in provider_pubkey:model_name format for actual API calls
+    # The aimo_native_id field contains the correct format
+    if provider_lower == "aimo" and model_id.startswith("aimo/"):
+        stripped = model_id[len("aimo/") :]
+        logger.info(f"Stripped 'aimo/' prefix: '{model_id}' -> '{stripped}' for AIMO")
+        model_id = stripped
+
     # Get the mapping for this provider
     mapping = get_model_id_mapping(provider_lower)
 
@@ -433,18 +441,36 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "gpt-oss/gpt-oss-120b": "openai/gpt-oss-120b",
             "gpt-oss-120b": "openai/gpt-oss-120b",
 
-            # Qwen models - using Qwen3-30B (actual available model)
+            # Qwen models
+            "qwen/qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",  # Map old qwen-2-72b to qwen-3-30b
+            "qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            # Qwen3 models - proper case required
             "qwen/qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
             "qwen/qwen-3-30b-instruct": "Qwen/Qwen3-30B-A3B-Instruct-2507",
             "qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "qwen/qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",  # Map old qwen-2-72b to qwen-3-30b
-            "qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen/qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen/qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+            "qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
 
             # GLM models from Zhipu AI
             "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6",
             "zai-org/glm-4.6": "zai-org/GLM-4.6",
             "glm-4.6-fp8": "zai-org/GLM-4.6",
             "glm-4.6": "zai-org/GLM-4.6",
+        },
+        "alpaca-network": {
+            # Alpaca Network uses Anyscale infrastructure with DeepSeek models
+            # Service: deepseek-v3-1 via https://deepseek-v3-1-b18ty.cld-kvytpjjrw13e2gvq.s.anyscaleuserdata.com
+
+            # DeepSeek V3.1 models
+            "deepseek-ai/deepseek-v3.1": "deepseek-v3-1",
+            "deepseek-ai/deepseek-v3": "deepseek-v3-1",  # Map v3 to v3.1
+            "deepseek/deepseek-v3.1": "deepseek-v3-1",
+            "deepseek/deepseek-v3": "deepseek-v3-1",
+            "deepseek-v3.1": "deepseek-v3-1",
+            "deepseek-v3": "deepseek-v3-1",
+            "deepseek-v3-1": "deepseek-v3-1",  # Direct service name
         },
     }
 
@@ -645,6 +671,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "aihubmix",
         "anannas",
         "near",
+        "alpaca-network",
         "fal",
     ]:
         mapping = get_model_id_mapping(provider)
@@ -682,6 +709,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         # Helicone models (e.g., "helicone/gpt-4o-mini")
         if org == "helicone":
             return "helicone"
+
+        # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
+        if org == "alpaca-network" or org == "alpaca":
+            return "alpaca-network"
 
         # DeepSeek models are primarily on Fireworks in this system
         if org == "deepseek-ai" and "deepseek" in model_name.lower():

@@ -28,6 +28,7 @@ from src.cache import (
     _vercel_ai_gateway_models_cache,
     _helicone_models_cache,
     _anannas_models_cache,
+    _aihubmix_models_cache,
     _multi_provider_catalog_cache,
     is_cache_fresh,
     should_revalidate_in_background,
@@ -390,6 +391,7 @@ def get_all_models_parallel():
             "fal",
             "helicone",
             "anannas",
+            "aihubmix",
         ]
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
@@ -438,6 +440,7 @@ def get_all_models_sequential():
     fal_models = get_cached_models("fal") or []
     helicone_models = get_cached_models("helicone") or []
     anannas_models = get_cached_models("anannas") or []
+    aihubmix_models = get_cached_models("aihubmix") or []
     return (
         openrouter_models
         + portkey_models
@@ -457,6 +460,7 @@ def get_all_models_sequential():
         + fal_models
         + helicone_models
         + anannas_models
+        + aihubmix_models
     )
 
 
@@ -676,6 +680,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_anannas()
             _register_canonical_records("anannas", result)
+            return result
+
+        if gateway == "aihubmix":
+            cached = _fresh_cached_models(_aihubmix_models_cache, "aihubmix")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_aihubmix()
+            _register_canonical_records("aihubmix", result)
             return result
 
         if gateway == "all":
@@ -1604,10 +1616,26 @@ def fetch_models_from_aimo():
             if model and (normalized := normalize_aimo_model(model)) is not None
         ]
 
-        _aimo_models_cache["data"] = normalized_models
+        # Deduplicate models by canonical_slug (same model from different AIMO providers)
+        # Keep only the first occurrence of each unique model
+        seen_models = {}
+        deduplicated_models = []
+        for model in normalized_models:
+            canonical_slug = model.get("canonical_slug")
+            if canonical_slug and canonical_slug not in seen_models:
+                seen_models[canonical_slug] = True
+                deduplicated_models.append(model)
+            elif not canonical_slug:
+                # If no canonical slug, keep it (shouldn't happen but be safe)
+                deduplicated_models.append(model)
+
+        logger.info(
+            f"Fetched {len(normalized_models)} AIMO models, deduplicated to {len(deduplicated_models)} unique models"
+        )
+
+        _aimo_models_cache["data"] = deduplicated_models
         _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Fetched {len(normalized_models)} AIMO models")
         return _aimo_models_cache["data"]
     except httpx.HTTPStatusError as e:
         logger.error(
@@ -1635,6 +1663,15 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
         logger.warning("AIMO model missing 'name' field: %s", sanitize_for_logging(str(aimo_model)))
         return None
 
+    # Normalize model name by stripping common provider prefixes
+    # AIMO may return model names like "google/gemini-2.5-pro" or just "gemini-2.5-pro"
+    model_name_normalized = model_name
+    provider_prefixes = ["google/", "openai/", "anthropic/", "meta/", "meta-llama/", "mistralai/"]
+    for prefix in provider_prefixes:
+        if model_name.lower().startswith(prefix):
+            model_name_normalized = model_name[len(prefix):]
+            break
+
     # Get provider information (use first provider if multiple)
     providers = aimo_model.get("providers", [])
     if not providers:
@@ -1646,17 +1683,22 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     provider_id = provider.get("id")
     provider_name = provider.get("name", "unknown")
 
-    # Construct model ID in AIMO format: provider_pubkey:model_name
-    model_id = f"{provider_id}:{model_name}"
+    # Create user-friendly model ID in format: aimo/model_name
+    # Use the normalized model name (without provider prefix) for consistency
+    # Store the original AIMO format (provider_pubkey:model_name) in raw metadata
+    original_aimo_id = f"{provider_id}:{model_name}"
+    model_id = f"aimo/{model_name_normalized}"
 
     slug = model_id
-    # Extract provider from model ID (format: provider_pubkey:model_name)
+    # Always use "aimo" as the provider slug for AIMO Network models
     provider_slug = "aimo"
-    if ":" in model_id:
-        provider_slug = model_id.split(":")[0]
 
-    display_name = aimo_model.get("display_name") or model_name.replace("-", " ").title()
-    base_description = f"AIMO Network decentralized model {model_name} provided by {provider_name}."
+    # Create canonical slug from the base model name (without the provider prefix)
+    # This allows the model to be grouped with same models from other providers
+    canonical_slug = model_name_normalized.lower()
+
+    display_name = aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    base_description = f"AIMO Network decentralized model {model_name_normalized} provided by {provider_name}."
     description = base_description
 
     context_length = aimo_model.get("context_length", 0)
@@ -1702,7 +1744,7 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     normalized = {
         "id": slug,
         "slug": slug,
-        "canonical_slug": slug,
+        "canonical_slug": canonical_slug,
         "hugging_face_id": None,
         "name": display_name,
         "created": aimo_model.get("created"),
@@ -1719,6 +1761,7 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
         "model_logo_url": None,
         "source_gateway": "aimo",
         "raw_aimo": aimo_model,
+        "aimo_native_id": original_aimo_id,  # Store original AIMO format for routing
     }
 
     return enrich_model_with_pricing(normalized, "aimo")
@@ -1873,7 +1916,7 @@ def normalize_near_model(near_model: dict) -> dict:
         "source_gateway": "near",
         "raw_near": near_model,
         # Mark all Near AI models as private
-        "is_private": True,
+        "is_private": True,  # NEAR models support private inference
         "tags": ["Private"],
         # Highlight security features as metadata
         "security_features": {
@@ -2009,6 +2052,11 @@ def fetch_models_from_vercel_ai_gateway():
     through a unified OpenAI-compatible endpoint.
     """
     try:
+        # Check if API key is configured
+        if not Config.VERCEL_AI_GATEWAY_API_KEY:
+            logger.warning("Vercel AI Gateway API key not configured - skipping model fetch")
+            return []
+
         from src.services.vercel_ai_gateway_client import get_vercel_ai_gateway_client
 
         client = get_vercel_ai_gateway_client()
@@ -2898,7 +2946,11 @@ def fetch_models_from_aihubmix():
     AiHubMix provides access to models through a unified OpenAI-compatible endpoint.
     """
     try:
-        from src.cache import _aihubmix_models_cache
+        # Check if API key is configured
+        if not Config.AIHUBMIX_API_KEY or not Config.AIHUBMIX_APP_CODE:
+            logger.warning("AiHubMix API key or APP-Code not configured - skipping model fetch")
+            return []
+
         from src.services.aihubmix_client import get_aihubmix_client
 
         client = get_aihubmix_client()
@@ -2976,6 +3028,11 @@ def fetch_models_from_helicone():
     through a unified OpenAI-compatible endpoint with observability features.
     """
     try:
+        # Check if API key is configured
+        if not Config.HELICONE_API_KEY:
+            logger.warning("Helicone API key not configured - skipping model fetch")
+            return []
+
         from src.services.helicone_client import get_helicone_client
 
         client = get_helicone_client()
@@ -3118,6 +3175,11 @@ def fetch_models_from_anannas():
     Anannas provides access to various models through a unified OpenAI-compatible endpoint.
     """
     try:
+        # Check if API key is configured
+        if not Config.ANANNAS_API_KEY:
+            logger.warning("Anannas API key not configured - skipping model fetch")
+            return []
+
         from src.services.anannas_client import get_anannas_client
 
         client = get_anannas_client()
