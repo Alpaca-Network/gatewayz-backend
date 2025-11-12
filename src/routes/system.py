@@ -103,6 +103,8 @@ def get_cacheable_gateways() -> List[str]:
 
     Returns all gateways from GATEWAY_CONFIG that have cache support,
     automatically including new gateways as they're added.
+
+    Note: deepinfra is excluded as it only supports on-demand fetching.
     """
     # Map of gateway names to their fetch functions
     # Only include gateways that have fetch functions implemented
@@ -112,7 +114,7 @@ def get_cacheable_gateways() -> List[str]:
         "anannas": fetch_models_from_anannas,
         "cerebras": fetch_models_from_cerebras,
         "chutes": fetch_models_from_chutes,
-        "deepinfra": fetch_models_from_deepinfra,
+        # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
         "fal": fetch_models_from_fal,
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
@@ -135,6 +137,7 @@ def get_fetch_function(gateway: str):
     Get the fetch function for a specific gateway.
 
     Returns the appropriate fetch function or None if not available.
+    Note: deepinfra is excluded as it only supports on-demand fetching.
     """
     fetch_functions = {
         "aihubmix": fetch_models_from_aihubmix,
@@ -142,7 +145,7 @@ def get_fetch_function(gateway: str):
         "anannas": fetch_models_from_anannas,
         "cerebras": fetch_models_from_cerebras,
         "chutes": fetch_models_from_chutes,
-        "deepinfra": fetch_models_from_deepinfra,
+        # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
         "fal": fetch_models_from_fal,
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
