@@ -166,9 +166,13 @@ class AvailabilityStateStore:
         states: dict[str, dict[str, Any]] = {}
         for key, payload in raw_breakers.items():
             try:
-                states[key] = json.loads(payload)
+                state = json.loads(payload)
             except (json.JSONDecodeError, TypeError):
                 logger.warning("Invalid circuit breaker payload encountered: %s", payload)
+                continue
+
+            normalized_key = key.decode("utf-8") if isinstance(key, bytes) else key
+            states[normalized_key] = state
         return states
 
     def save_circuit_breaker(self, key: str, breaker: "CircuitBreaker") -> bool:
@@ -208,7 +212,8 @@ class AvailabilityStateStore:
         for key, payload in raw_availability.items():
             try:
                 data = json.loads(payload)
-                availability[key] = ModelAvailability(
+                normalized_key = key.decode("utf-8") if isinstance(key, bytes) else key
+                availability[normalized_key] = ModelAvailability(
                     model_id=data["model_id"],
                     provider=data["provider"],
                     gateway=data["gateway"],
