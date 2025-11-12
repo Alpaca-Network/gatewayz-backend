@@ -262,8 +262,11 @@ class HealthDataStore:
         models: dict[str, ModelHealthMetrics] = {}
         for key, payload in raw_models.items():
             metrics = self._deserialize_model(payload)
-            if metrics:
-                models[key] = metrics
+            if not metrics:
+                continue
+
+            normalized_key = key.decode("utf-8") if isinstance(key, bytes) else key
+            models[normalized_key] = metrics
         return models
 
     def save_model(self, key: str, metrics: ModelHealthMetrics) -> bool:
@@ -292,8 +295,11 @@ class HealthDataStore:
         providers: dict[str, ProviderHealthMetrics] = {}
         for key, payload in raw_providers.items():
             metrics = self._deserialize_provider(payload)
-            if metrics:
-                providers[key] = metrics
+            if not metrics:
+                continue
+
+            normalized_key = key.decode("utf-8") if isinstance(key, bytes) else key
+            providers[normalized_key] = metrics
         return providers
 
     def save_providers(self, providers: dict[str, ProviderHealthMetrics]) -> bool:
