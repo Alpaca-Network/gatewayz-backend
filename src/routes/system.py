@@ -1280,13 +1280,15 @@ async def refresh_gateway_cache(
     """
     try:
         gateway = gateway.lower()
-        # Get cacheable gateways dynamically (those with fetch functions)
-        valid_gateways = get_cacheable_gateways()
+        # Get all gateway names for validation (includes deepinfra for special handling)
+        all_gateways = get_all_gateway_names()
 
-        if gateway not in valid_gateways:
+        if gateway not in all_gateways:
+            # Get cacheable gateways for error message
+            valid_gateways = get_cacheable_gateways()
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid gateway. Must be one of: {', '.join(valid_gateways)}",
+                detail=f"Invalid gateway. Must be one of: {', '.join(sorted(valid_gateways + ['deepinfra']))}",
             )
 
         # Check if refresh is needed
