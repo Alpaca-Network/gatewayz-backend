@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timezone
 
 import pytest
@@ -17,7 +18,18 @@ async def test_health_checks_respect_gateway_concurrency(monkeypatch):
     monitor.timeout = 5
 
     models = [
-        {"id": f"model-{i}", "provider": "provider-a", "gateway": "gateway-a"}
+        {
+            "id": f"model-a-{i}",
+            "provider": "provider-a",
+            "gateway": "gateway-a",
+        }
+        for i in range(10)
+    ] + [
+        {
+            "id": f"model-b-{i}",
+            "provider": "provider-b",
+            "gateway": "gateway-a",
+        }
         for i in range(10)
     ]
 
@@ -30,21 +42,30 @@ async def test_health_checks_respect_gateway_concurrency(monkeypatch):
     async def fake_update_system_metrics(self):
         return None
 
-    active_counts = {"gateway-a": 0}
-    peak_counts = {"gateway-a": 0}
+    active_counts = defaultdict(lambda: defaultdict(int))
+    peak_counts = defaultdict(lambda: defaultdict(int))
+    concurrent_providers = set()
     lock = asyncio.Lock()
 
     async def fake_check_model_health(self, model):
+        gateway = model["gateway"]
+        provider = model["provider"]
+
         async with lock:
-            active_counts[model["gateway"]] += 1
-            peak_counts[model["gateway"]] = max(
-                peak_counts[model["gateway"]], active_counts[model["gateway"]]
+            active_counts[gateway][provider] += 1
+            peak_counts[gateway][provider] = max(
+                peak_counts[gateway][provider], active_counts[gateway][provider]
             )
+            if (
+                active_counts[gateway]["provider-a"] > 0
+                and active_counts[gateway]["provider-b"] > 0
+            ):
+                concurrent_providers.add(gateway)
 
         await asyncio.sleep(0.05)
 
         async with lock:
-            active_counts[model["gateway"]] -= 1
+            active_counts[gateway][provider] -= 1
 
         return ModelHealthMetrics(
             model_id=model["id"],
@@ -63,6 +84,14 @@ async def test_health_checks_respect_gateway_concurrency(monkeypatch):
 
     await monitor._perform_health_checks()
 
-    assert peak_counts["gateway-a"] <= monitor.concurrency_per_gateway
-    # With more queued models than the limit, the semaphore should saturate at the configured limit
-    assert peak_counts["gateway-a"] == monitor.concurrency_per_gateway
+    for provider in ("provider-a", "provider-b"):
+        assert (
+            peak_counts["gateway-a"][provider] <= monitor.concurrency_per_gateway
+        )
+        # With more queued models than the limit, the semaphore should saturate at the configured limit
+        assert (
+            peak_counts["gateway-a"][provider] == monitor.concurrency_per_gateway
+        )
+
+    # Multiple providers on the same gateway should still run in parallel when capacity is available
+    assert "gateway-a" in concurrent_providers
