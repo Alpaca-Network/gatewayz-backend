@@ -380,19 +380,7 @@ async def check_single_gateway(
         gateway_result["final_status"] = "unconfigured"
         return gateway_result
 
-    # Test 1: Direct endpoint test (async)
-    endpoint_success, endpoint_msg, endpoint_count = await test_gateway_endpoint(gateway_name, config)
-    gateway_result["endpoint_test"] = {
-        "success": endpoint_success,
-        "message": endpoint_msg,
-        "model_count": endpoint_count,
-    }
-
-    if verbose:
-        status_icon = "✅" if endpoint_success else "❌"
-        logger.info(f"  Endpoint: {status_icon} {endpoint_msg}")
-
-    # Test 2: Cache test (sync, but fast)
+    # Test cache first (fast, local check)
     cache_success, cache_msg, cache_count, cached_models = test_gateway_cache(gateway_name, config)
     gateway_result["cache_test"] = {
         "success": cache_success,
@@ -403,6 +391,31 @@ async def check_single_gateway(
     if verbose:
         status_icon = "✅" if cache_success else "❌"
         logger.info(f"  Cache: {status_icon} {cache_msg}")
+
+    # Only test endpoint if cache is unhealthy (optimization to prevent timeouts)
+    # This skips slow HTTP calls when cache is already good
+    if cache_success:
+        # Cache is healthy, skip endpoint check for performance
+        gateway_result["endpoint_test"] = {
+            "success": None,
+            "message": "Skipped (cache healthy)",
+            "model_count": None,
+        }
+        endpoint_success = False  # Not tested, but we have cache
+        if verbose:
+            logger.info(f"  Endpoint: ⏭️ Skipped (cache healthy)")
+    else:
+        # Cache is not healthy, check endpoint
+        endpoint_success, endpoint_msg, endpoint_count = await test_gateway_endpoint(gateway_name, config)
+        gateway_result["endpoint_test"] = {
+            "success": endpoint_success,
+            "message": endpoint_msg,
+            "model_count": endpoint_count,
+        }
+
+        if verbose:
+            status_icon = "✅" if endpoint_success else "❌"
+            logger.info(f"  Endpoint: {status_icon} {endpoint_msg}")
 
     # Determine if gateway is healthy
     is_healthy = endpoint_success or cache_success
