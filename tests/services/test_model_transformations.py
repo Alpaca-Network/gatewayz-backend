@@ -75,3 +75,27 @@ def test_detect_provider_portkey_models():
     for model_id, expected in test_cases:
         result = detect_provider_from_model_id(model_id)
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_z_ai_glm_with_exacto_suffix():
+    """Test that z-ai/glm-4.6:exacto is correctly detected and transformed"""
+    # Test provider detection
+    result = detect_provider_from_model_id("z-ai/glm-4.6:exacto")
+    assert result == "near", f"Expected 'near' for z-ai/glm-4.6:exacto, got {result}"
+
+    # Test model transformation
+    transformed = transform_model_id("z-ai/glm-4.6:exacto", "near")
+    assert transformed == "zai-org/GLM-4.6", f"Expected 'zai-org/GLM-4.6', got {transformed}"
+
+
+def test_colon_suffix_stripping():
+    """Test that colon-based suffixes are stripped from model IDs"""
+    test_cases = [
+        ("z-ai/glm-4.6:exacto", "near", "zai-org/GLM-4.6"),
+        ("z-ai/glm-4.6:free", "near", "zai-org/GLM-4.6"),
+        ("z-ai/glm-4.6-fp8:exacto", "near", "zai-org/GLM-4.6"),
+    ]
+
+    for model_id, provider, expected in test_cases:
+        result = transform_model_id(model_id, provider)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"

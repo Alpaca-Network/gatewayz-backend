@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    "z-ai/glm-4.6": "near",  # Alias for zai-org (Zhipu AI shorthand)
 }
 
 # Gemini model name constants to reduce duplication
@@ -91,6 +92,14 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
 
     if original_model_id != model_id:
         logger.debug(f"Normalized model ID to lowercase: '{original_model_id}' -> '{model_id}'")
+
+    # Strip colon-based suffixes (e.g., :exacto, :free, :extended)
+    # These are typically quantization or variant specifiers
+    if ":" in model_id:
+        base_model = model_id.split(":", 1)[0]
+        suffix = model_id.split(":", 1)[1]
+        logger.info(f"Stripped colon suffix from model ID: '{model_id}' -> '{base_model}' (suffix: ':{suffix}')")
+        model_id = base_model
 
     # If already in full Fireworks path format, return as-is (already lowercase)
     if model_id.startswith("accounts/fireworks/models/"):
@@ -456,6 +465,8 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             # GLM models from Zhipu AI
             "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6",
             "zai-org/glm-4.6": "zai-org/GLM-4.6",
+            "z-ai/glm-4.6-fp8": "zai-org/GLM-4.6",  # z-ai is shorthand alias for zai-org
+            "z-ai/glm-4.6": "zai-org/GLM-4.6",
             "glm-4.6-fp8": "zai-org/GLM-4.6",
             "glm-4.6": "zai-org/GLM-4.6",
         },
