@@ -146,6 +146,20 @@ class Config:
         "http://loki:3100/loki/api/v1/push",
     )
 
+    # Model Health Monitoring Configuration
+    MODEL_HEALTH_CHECK_INTERVAL = int(
+        os.environ.get("MODEL_HEALTH_CHECK_INTERVAL", "300")
+    )
+    MODEL_HEALTH_CHECK_TIMEOUT = float(
+        os.environ.get("MODEL_HEALTH_CHECK_TIMEOUT", "30")
+    )
+    MODEL_HEALTH_REQUEST_TIMEOUT = float(
+        os.environ.get("MODEL_HEALTH_REQUEST_TIMEOUT", "30")
+    )
+    MODEL_HEALTH_CONCURRENCY_PER_GATEWAY = int(
+        os.environ.get("MODEL_HEALTH_CONCURRENCY_PER_GATEWAY", "5")
+    )
+
     @classmethod
     def get_portkey_virtual_key(cls, provider: Optional[str] = None) -> Optional[str]:
         """

@@ -11,9 +11,9 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
-from typing import Optional
+from src.config.config import Config
 logger = logging.getLogger(__name__)
 
 
@@ -99,10 +99,18 @@ class ModelHealthMonitor:
         self.provider_data: Dict[str, ProviderHealthMetrics] = {}
         self.system_data: Optional[SystemHealthMetrics] = None
         self.monitoring_active = False
-        self.check_interval = 300  # 5 minutes
-        self.timeout = 30  # 30 seconds
+        self.check_interval = Config.MODEL_HEALTH_CHECK_INTERVAL
+        self.timeout = Config.MODEL_HEALTH_CHECK_TIMEOUT
         self.health_threshold = 0.95  # 95% success rate threshold
         self.response_time_threshold = 10000  # 10 seconds
+        self.request_timeout = Config.MODEL_HEALTH_REQUEST_TIMEOUT
+        concurrency_setting = Config.MODEL_HEALTH_CONCURRENCY_PER_GATEWAY
+        self.concurrency_per_gateway = concurrency_setting if concurrency_setting > 0 else 1
+        self._semaphore_lock = asyncio.Lock()
+        self._gateway_provider_semaphores: Dict[
+            str, Dict[str, asyncio.Semaphore]
+        ] = {}
+        self._semaphore_limits: Dict[Tuple[str, str], int] = {}
 
         # Test payload for health checks
         self.test_payload = {
@@ -145,10 +153,15 @@ class ModelHealthMonitor:
         # Get all available models from different gateways
         models_to_check = await self._get_models_to_check()
 
-        # Perform health checks in parallel
+        # Perform health checks in parallel with gateway-scoped concurrency limits
         tasks = []
         for model in models_to_check:
-            task = asyncio.create_task(self._check_model_health(model))
+            gateway = model.get("gateway", "unknown")
+            provider = model.get("provider") or model.get("provider_slug") or "unknown"
+            semaphore = await self._get_gateway_provider_semaphore(gateway, provider)
+            task = asyncio.create_task(
+                self._execute_with_gateway_limits(model, semaphore)
+            )
             tasks.append(task)
 
         # Wait for all checks to complete
@@ -166,6 +179,21 @@ class ModelHealthMonitor:
         await self._update_system_metrics()
 
         logger.info(f"Health checks completed. Checked {len(models_to_check)} models")
+
+    async def _get_gateway_provider_semaphore(
+        self, gateway: str, provider: str
+    ) -> asyncio.Semaphore:
+        limit = self.concurrency_per_gateway if self.concurrency_per_gateway > 0 else 1
+        key = (gateway, provider)
+        async with self._semaphore_lock:
+            provider_map = self._gateway_provider_semaphores.setdefault(gateway, {})
+            semaphore = provider_map.get(provider)
+            cached_limit = self._semaphore_limits.get(key)
+            if semaphore is None or cached_limit != limit:
+                semaphore = asyncio.Semaphore(limit)
+                provider_map[provider] = semaphore
+                self._semaphore_limits[key] = limit
+        return semaphore
 
     async def _get_models_to_check(self) -> List[Dict[str, Any]]:
         """Get list of models to check for health monitoring"""
@@ -214,6 +242,32 @@ class ModelHealthMonitor:
             logger.error(f"Failed to get models for health checking: {e}")
 
         return models
+
+    async def _execute_with_gateway_limits(
+        self, model: Dict[str, Any], semaphore: asyncio.Semaphore
+    ) -> Optional[ModelHealthMetrics]:
+        async with semaphore:
+            timeout = self.timeout if self.timeout and self.timeout > 0 else None
+            try:
+                if timeout:
+                    return await asyncio.wait_for(
+                        self._check_model_health(model), timeout=timeout
+                    )
+                return await self._check_model_health(model)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Health check timed out for %s via %s",
+                    model.get("id"),
+                    model.get("gateway"),
+                )
+                return ModelHealthMetrics(
+                    model_id=model.get("id", "unknown"),
+                    provider=model.get("provider", "unknown"),
+                    gateway=model.get("gateway", "unknown"),
+                    status=HealthStatus.UNHEALTHY,
+                    error_message="Health check timed out",
+                    last_checked=datetime.now(timezone.utc),
+                )
 
     async def _check_model_health(self, model: Dict[str, Any]) -> Optional[ModelHealthMetrics]:
         """Check health of a specific model"""
@@ -301,7 +355,7 @@ class ModelHealthMonitor:
                 }
 
             # Perform the actual HTTP request
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 start_time = time.time()
 
                 try:
