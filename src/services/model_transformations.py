@@ -440,11 +440,11 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "qwen/qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",  # Map old qwen-2-72b to qwen-3-30b
             "qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
 
-            # GLM models from Zhipu AI (keep for compatibility, though currently unavailable)
-            "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6-FP8",
-            "zai-org/glm-4.6": "zai-org/GLM-4.6-FP8",
-            "glm-4.6-fp8": "zai-org/GLM-4.6-FP8",
-            "glm-4.6": "zai-org/GLM-4.6-FP8",
+            # GLM models from Zhipu AI
+            "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6",
+            "zai-org/glm-4.6": "zai-org/GLM-4.6",
+            "glm-4.6-fp8": "zai-org/GLM-4.6",
+            "glm-4.6": "zai-org/GLM-4.6",
         },
     }
 
