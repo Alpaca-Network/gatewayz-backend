@@ -78,24 +78,24 @@ def test_detect_provider_portkey_models():
 
 
 def test_z_ai_glm_with_exacto_suffix():
-    """Test that z-ai/glm-4.6:exacto is correctly detected and transformed"""
-    # Test provider detection
+    """Test that z-ai/glm-4.6:exacto is correctly detected as OpenRouter"""
+    # Test provider detection - :exacto suffix indicates OpenRouter
     result = detect_provider_from_model_id("z-ai/glm-4.6:exacto")
-    assert result == "near", f"Expected 'near' for z-ai/glm-4.6:exacto, got {result}"
+    assert result == "openrouter", f"Expected 'openrouter' for z-ai/glm-4.6:exacto, got {result}"
 
-    # Test model transformation
-    transformed = transform_model_id("z-ai/glm-4.6:exacto", "near")
-    assert transformed == "zai-org/GLM-4.6", f"Expected 'zai-org/GLM-4.6', got {transformed}"
+    # Test model transformation - OpenRouter passes through as-is (lowercase)
+    transformed = transform_model_id("z-ai/glm-4.6:exacto", "openrouter")
+    assert transformed == "z-ai/glm-4.6:exacto", f"Expected 'z-ai/glm-4.6:exacto', got {transformed}"
 
 
-def test_colon_suffix_stripping():
-    """Test that colon-based suffixes are stripped from model IDs"""
+def test_openrouter_colon_suffix_variants():
+    """Test that OpenRouter models with colon suffixes are correctly detected"""
     test_cases = [
-        ("z-ai/glm-4.6:exacto", "near", "zai-org/GLM-4.6"),
-        ("z-ai/glm-4.6:free", "near", "zai-org/GLM-4.6"),
-        ("z-ai/glm-4.6-fp8:exacto", "near", "zai-org/GLM-4.6"),
+        ("z-ai/glm-4.6:exacto", "openrouter"),
+        ("google/gemini-2.0-flash-exp:free", "openrouter"),
+        ("anthropic/claude-3-opus:extended", "openrouter"),
     ]
 
-    for model_id, provider, expected in test_cases:
-        result = transform_model_id(model_id, provider)
-        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+    for model_id, expected_provider in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected_provider, f"Expected '{expected_provider}' for {model_id}, got {result}"
