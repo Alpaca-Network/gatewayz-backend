@@ -150,11 +150,13 @@ class ModelHealthMonitor:
 
         # Perform health checks in parallel with gateway-scoped concurrency limits
         tasks = []
-        gateway_semaphores: Dict[str, asyncio.Semaphore] = {}
+        gateway_semaphores: Dict[str, Dict[str, asyncio.Semaphore]] = {}
         for model in models_to_check:
             gateway = model.get("gateway", "unknown")
-            semaphore = gateway_semaphores.setdefault(
-                gateway,
+            provider = model.get("provider") or model.get("provider_slug") or "unknown"
+            provider_semaphores = gateway_semaphores.setdefault(gateway, {})
+            semaphore = provider_semaphores.setdefault(
+                provider,
                 asyncio.Semaphore(self.concurrency_per_gateway),
             )
             task = asyncio.create_task(
