@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.config.config import Config
 logger = logging.getLogger(__name__)
@@ -106,6 +106,11 @@ class ModelHealthMonitor:
         self.request_timeout = Config.MODEL_HEALTH_REQUEST_TIMEOUT
         concurrency_setting = Config.MODEL_HEALTH_CONCURRENCY_PER_GATEWAY
         self.concurrency_per_gateway = concurrency_setting if concurrency_setting > 0 else 1
+        self._semaphore_lock = asyncio.Lock()
+        self._gateway_provider_semaphores: Dict[
+            str, Dict[str, asyncio.Semaphore]
+        ] = {}
+        self._semaphore_limits: Dict[Tuple[str, str], int] = {}
 
         # Test payload for health checks
         self.test_payload = {
@@ -150,15 +155,10 @@ class ModelHealthMonitor:
 
         # Perform health checks in parallel with gateway-scoped concurrency limits
         tasks = []
-        gateway_semaphores: Dict[str, Dict[str, asyncio.Semaphore]] = {}
         for model in models_to_check:
             gateway = model.get("gateway", "unknown")
             provider = model.get("provider") or model.get("provider_slug") or "unknown"
-            provider_semaphores = gateway_semaphores.setdefault(gateway, {})
-            semaphore = provider_semaphores.setdefault(
-                provider,
-                asyncio.Semaphore(self.concurrency_per_gateway),
-            )
+            semaphore = await self._get_gateway_provider_semaphore(gateway, provider)
             task = asyncio.create_task(
                 self._execute_with_gateway_limits(model, semaphore)
             )
@@ -179,6 +179,21 @@ class ModelHealthMonitor:
         await self._update_system_metrics()
 
         logger.info(f"Health checks completed. Checked {len(models_to_check)} models")
+
+    async def _get_gateway_provider_semaphore(
+        self, gateway: str, provider: str
+    ) -> asyncio.Semaphore:
+        limit = self.concurrency_per_gateway if self.concurrency_per_gateway > 0 else 1
+        key = (gateway, provider)
+        async with self._semaphore_lock:
+            provider_map = self._gateway_provider_semaphores.setdefault(gateway, {})
+            semaphore = provider_map.get(provider)
+            cached_limit = self._semaphore_limits.get(key)
+            if semaphore is None or cached_limit != limit:
+                semaphore = asyncio.Semaphore(limit)
+                provider_map[provider] = semaphore
+                self._semaphore_limits[key] = limit
+        return semaphore
 
     async def _get_models_to_check(self) -> List[Dict[str, Any]]:
         """Get list of models to check for health monitoring"""
