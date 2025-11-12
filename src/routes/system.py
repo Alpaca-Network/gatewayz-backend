@@ -49,7 +49,7 @@ from src.services.portkey_providers import (
 )
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
-from src.services.pricing_lookup import get_model_pricing
+from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -1829,4 +1829,44 @@ async def clear_modelz_cache_endpoint():
         logger.error(f"Failed to clear Modelz cache: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to clear Modelz cache: {str(e)}"
+        ) from e
+
+
+@router.post("/cache/pricing/refresh", tags=["cache", "pricing"])
+async def refresh_pricing_cache_endpoint():
+    """
+    Force refresh the pricing cache by reloading from the manual pricing file.
+
+    This endpoint:
+    - Clears the existing pricing cache
+    - Reloads pricing data from manual_pricing.json
+    - Updates the in-memory pricing cache
+
+    **Example Response:**
+    ```json
+    {
+      "success": true,
+      "message": "Pricing cache refreshed successfully",
+      "providers_loaded": 15,
+      "timestamp": "2024-01-15T10:30:45.123Z"
+    }
+    ```
+    """
+    try:
+        logger.info("Refreshing pricing cache via API endpoint")
+        pricing_data = refresh_pricing_cache()
+
+        # Count providers (excluding metadata)
+        provider_count = len([k for k in pricing_data.keys() if k != "_metadata"])
+
+        return {
+            "success": True,
+            "message": "Pricing cache refreshed successfully",
+            "providers_loaded": provider_count,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to refresh pricing cache: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to refresh pricing cache: {str(e)}"
         ) from e
