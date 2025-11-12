@@ -33,9 +33,14 @@ from src.services.models import (
     fetch_models_from_featherless,
     fetch_models_from_fireworks,
     fetch_models_from_groq,
+    fetch_models_from_near,
     fetch_models_from_openrouter,
     fetch_models_from_portkey,
     fetch_models_from_together,
+)
+from src.services.portkey_providers import (
+    fetch_models_from_cerebras,
+    fetch_models_from_nebius,
 )
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
@@ -174,7 +179,6 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
     for gateway_id in sorted(gateways.keys()):
         data = gateways[gateway_id] or {}
         name = data.get("name") or gateway_id.title()
-        final_status = data.get("final_status", "unknown")
         configured = "Yes" if data.get("configured") else "No"
 
         endpoint_test = data.get("endpoint_test") or {}
@@ -192,6 +196,15 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         cache_details = cache_msg
         if cache_count is not None:
             cache_details += f" (models: {cache_count})"
+
+        # Recalculate final_status based on endpoint and cache test results
+        # Final status is only "healthy" if BOTH tests pass
+        if not data.get("configured"):
+            final_status = "unconfigured"
+        elif endpoint_test.get("success") and cache_test.get("success"):
+            final_status = "healthy"
+        else:
+            final_status = "unhealthy"
 
         # Make badges clickable for refresh actions
         endpoint_badge_html = f'''
@@ -236,8 +249,9 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
 
         # Get models from cache test
         models = cache_test.get("models", [])
+        has_models = models and len(models) > 0
         models_html = ""
-        if models and len(models) > 0:
+        if has_models:
             model_items = []
             for model in models:
                 pricing_info: Optional[Dict[str, Any]] = None
@@ -317,11 +331,11 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
             </tr>
             {models_row}
             """.format(
-                clickable_class="clickable" if models_html else "",
-                onclick=f"onclick=\"toggleModels('{escape(gateway_id)}')\"" if models_html else "",
+                clickable_class="clickable" if has_models else "",
+                onclick=f"onclick=\"toggleModels('{escape(gateway_id)}')\"" if has_models else "",
                 gateway_attr=escape(gateway_id),
                 name=escape(name),
-                expand_icon='<span class="expand-icon">▶</span>' if models_html else "",
+                expand_icon='<span class="expand-icon">▶</span>' if has_models else "",
                 configured=escape(configured),
                 endpoint_badge_cell=endpoint_badge_html,
                 cache_badge_cell=cache_badge_html,
@@ -1058,6 +1072,9 @@ async def get_cache_status():
             "together",
             "aihubmix",
             "anannas",
+            "near",
+            "nebius",
+            "cerebras",
         ]
 
         for gateway in gateways:
@@ -1183,6 +1200,9 @@ async def refresh_gateway_cache(
             "huggingface",
             "aihubmix",
             "anannas",
+            "near",
+            "nebius",
+            "cerebras",
         ]
 
         if gateway not in valid_gateways:
@@ -1233,6 +1253,9 @@ async def refresh_gateway_cache(
             "huggingface": fetch_models_from_hug,
             "aihubmix": fetch_models_from_aihubmix,
             "anannas": fetch_models_from_anannas,
+            "near": fetch_models_from_near,
+            "nebius": fetch_models_from_nebius,
+            "cerebras": fetch_models_from_cerebras,
         }
 
         fetch_func = fetch_functions.get(gateway)
@@ -1317,6 +1340,9 @@ async def clear_all_caches(
                 "together",
                 "aihubmix",
                 "anannas",
+                "near",
+                "nebius",
+                "cerebras",
             ]
             for gw in gateways:
                 clear_models_cache(gw)
