@@ -7,7 +7,10 @@ import os
 from cerebras.cloud.sdk import Cerebras
 
 # Initialize Cerebras client
-api_key = os.getenv("CEREBRAS_API_KEY", "csk-p4ykxep6rr5cnfd3jtj8w68yt82h22yjy9rmje2k6e2em2t6")
+api_key = os.getenv("CEREBRAS_API_KEY")
+if not api_key:
+    print("Error: CEREBRAS_API_KEY environment variable not set")
+    exit(1)
 client = Cerebras(api_key=api_key)
 
 print("=" * 80)
