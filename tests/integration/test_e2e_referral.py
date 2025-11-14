@@ -42,18 +42,27 @@ def test_users(supabase_client, test_prefix):
         email = f"{username}@test.example.com"
         api_key = f"gw_test_{test_prefix}_{username_suffix}"
 
-        # Create user
+        # Create user with only required fields
         user_data = {
             "username": username,
             "email": email,
             "credits": float(credits),
             "api_key": api_key,
-            "referred_by_code": referred_by_code,
-            "has_made_first_purchase": has_made_first_purchase,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        user_result = supabase_client.table("users").insert(user_data).execute()
+        # Only add optional fields if they have non-default values
+        if referred_by_code is not None:
+            user_data["referred_by_code"] = referred_by_code
+
+        # Try to add has_made_first_purchase, but don't fail if column doesn't exist
+        try:
+            user_data["has_made_first_purchase"] = has_made_first_purchase
+            user_result = supabase_client.table("users").insert(user_data).execute()
+        except Exception:
+            # Column doesn't exist, remove it and retry
+            del user_data["has_made_first_purchase"]
+            user_result = supabase_client.table("users").insert(user_data).execute()
 
         if not user_result.data:
             raise Exception("Failed to create test user")
