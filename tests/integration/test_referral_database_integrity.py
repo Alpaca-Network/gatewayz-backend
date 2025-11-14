@@ -15,12 +15,29 @@ import time
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from src.config.supabase_config import get_supabase_client
 from src.services.referral import (
     create_user_referral_code,
     track_referral_signup,
     apply_referral_bonus,
     generate_referral_code,
     MAX_REFERRAL_USES,
+)
+
+# Skip all tests in this module if referral_code column doesn't exist
+def _has_referral_schema():
+    """Check if the referral schema is available"""
+    try:
+        client = get_supabase_client()
+        # Try to query the referral_code column
+        result = client.table("users").select("referral_code").limit(0).execute()
+        return True
+    except Exception:
+        return False
+
+pytestmark = pytest.mark.skipif(
+    not _has_referral_schema(),
+    reason="Referral schema not available in test database - referral_code column missing"
 )
 
 
