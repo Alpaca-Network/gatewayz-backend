@@ -200,3 +200,26 @@ class Config:
     def get_supabase_config(cls):
         """Get Supabase configuration as a tuple"""
         return cls.SUPABASE_URL, cls.SUPABASE_KEY
+
+    @classmethod
+    def validate_critical_env_vars(cls) -> tuple[bool, list[str]]:
+        """
+        Validate that all critical environment variables are set.
+
+        Returns:
+            tuple: (is_valid, missing_vars)
+                - is_valid: bool indicating if all critical vars are present
+                - missing_vars: list of missing variable names
+        """
+        critical_vars = {
+            "SUPABASE_URL": cls.SUPABASE_URL,
+            "SUPABASE_KEY": cls.SUPABASE_KEY,
+            "REDIS_URL": cls.REDIS_URL,
+            "ENCRYPTION_KEY": cls.ENCRYPTION_KEY,
+            "JWT_SECRET": cls.JWT_SECRET,
+        }
+
+        missing = [name for name, value in critical_vars.items() if not value]
+        is_valid = len(missing) == 0
+
+        return is_valid, missing
