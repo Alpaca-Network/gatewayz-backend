@@ -158,6 +158,24 @@ jobs:
           pip install --no-index --find-links=.cache/wheels -r requirements.txt
           pip install --no-index --find-links=.cache/wheels pytest pytest-cov pytest-xdist pytest-split
 
+      # Setup Supabase for integration tests
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase local instance
+        run: |
+          supabase init || echo "Supabase already initialized"
+          supabase start
+        continue-on-error: false
+
+      - name: Apply database migrations
+        run: |
+          # Apply all migrations to test database
+          supabase db reset --db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        continue-on-error: false
+
       # Pull down prior test timing data to split by duration
       - name: Restore pytest timings
         uses: actions/download-artifact@v4
@@ -177,9 +195,10 @@ jobs:
       - name: Run tests shard ${{ matrix.shard }}
         env:
           PYTEST_SPLIT_DURATION_FILE: .pytest-split-durations
-          # Test environment variables
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || 'test-key' }}
+          # Test environment variables - use local Supabase
+          SUPABASE_URL: http://127.0.0.1:54321
+          SUPABASE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+          SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'test-key' }}
           PORTKEY_API_KEY: ${{ secrets.PORTKEY_API_KEY || 'test-key' }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'test-encryption-key-32-bytes!' }}
