@@ -244,6 +244,11 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+      - name: Stop Supabase
+        if: always()
+        run: |
+          supabase stop || true
+
   # Job 3B: Merge coverage reports
   coverage:
     name: Coverage Report
