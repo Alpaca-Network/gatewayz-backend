@@ -46,7 +46,7 @@ def test_users(supabase_client, test_prefix):
         user_data = {
             "username": username,
             "email": email,
-            "credits": float(credits),
+            "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

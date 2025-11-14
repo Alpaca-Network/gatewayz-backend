@@ -42,7 +42,7 @@ def test_auth_users(supabase_client, test_prefix):
         user_data = {
             "username": username,
             "email": email,
-            "credits": float(credits),
+            "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -134,15 +134,15 @@ class TestAuthRegistrationReferralIntegration:
         )
 
         # Prepare auth request
-        from src.schemas.auth import PrivyAuthRequest, PrivyUser, LinkedAccount
+        from src.schemas.auth import PrivyAuthRequest, PrivyUserData, PrivyLinkedAccount
 
-        privy_user = PrivyUser(
+        privy_user = PrivyUserData(
             id="did:privy:test123",
             created_at=1234567890,
             linked_accounts=[
-                LinkedAccount(
+                PrivyLinkedAccount(
                     type="email",
-                    address="newuser@example.com",
+                    email="newuser@example.com",
                     verified_at=1234567890
                 )
             ]
@@ -150,6 +150,7 @@ class TestAuthRegistrationReferralIntegration:
 
         auth_request = PrivyAuthRequest(
             user=privy_user,
+            token="test_token_123",  # Required field
             is_new_user=True,
             email="newuser@example.com",
             referral_code=alice_code  # Include referral code
@@ -207,15 +208,15 @@ class TestAuthRegistrationReferralIntegration:
             None  # referrer
         )
 
-        from src.schemas.auth import PrivyAuthRequest, PrivyUser, LinkedAccount
+        from src.schemas.auth import PrivyAuthRequest, PrivyUserData, PrivyLinkedAccount
 
-        privy_user = PrivyUser(
+        privy_user = PrivyUserData(
             id="did:privy:test456",
             created_at=1234567890,
             linked_accounts=[
-                LinkedAccount(
+                PrivyLinkedAccount(
                     type="email",
-                    address="newuser2@example.com",
+                    email="newuser2@example.com",
                     verified_at=1234567890
                 )
             ]
@@ -223,6 +224,7 @@ class TestAuthRegistrationReferralIntegration:
 
         auth_request = PrivyAuthRequest(
             user=privy_user,
+            token="test_token_456",  # Required field
             is_new_user=True,
             email="newuser2@example.com",
             referral_code="INVALID123"  # Invalid code
@@ -265,15 +267,15 @@ class TestAuthRegistrationReferralIntegration:
             "subscription_status": "active",
         }
 
-        from src.schemas.auth import PrivyAuthRequest, PrivyUser, LinkedAccount
+        from src.schemas.auth import PrivyAuthRequest, PrivyUserData, PrivyLinkedAccount
 
-        privy_user = PrivyUser(
+        privy_user = PrivyUserData(
             id="did:privy:existing",
             created_at=1234567890,
             linked_accounts=[
-                LinkedAccount(
+                PrivyLinkedAccount(
                     type="email",
-                    address=bob['email'],
+                    email=bob['email'],
                     verified_at=1234567890
                 )
             ]
@@ -281,6 +283,7 @@ class TestAuthRegistrationReferralIntegration:
 
         auth_request = PrivyAuthRequest(
             user=privy_user,
+            token="test_token_existing",  # Required field
             is_new_user=False,  # Existing user
             email=bob['email'],
             referral_code="SOMECODE"  # Should be ignored
