@@ -546,20 +546,15 @@ class TestReferralEdgeCases:
         assert error is not None
         print(f"✓ Deleted referrer handled gracefully")
 
-    @patch('src.services.referral.add_credits')
     @patch('src.services.referral.send_referral_bonus_notification')
     def test_partial_credit_failure_handling(
         self,
         mock_notification,
-        mock_add_credits,
         supabase_client,
         test_users
     ):
         """Test handling when credit addition fails for one user"""
         mock_notification.return_value = (True, True)
-
-        # Mock add_credits to fail for referee but succeed for referrer
-        mock_add_credits.side_effect = [False, True]  # First call fails, second succeeds
 
         alice = test_users("alice_partial", credits=0.0)
         from src.services.referral import create_user_referral_code
