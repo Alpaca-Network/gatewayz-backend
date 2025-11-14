@@ -44,11 +44,17 @@ def test_auth_users(supabase_client, test_prefix):
             "email": email,
             "credits": float(credits),
             "api_key": api_key,
-            "has_made_first_purchase": False,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        user_result = supabase_client.table("users").insert(user_data).execute()
+        # Try to add has_made_first_purchase, but don't fail if column doesn't exist
+        try:
+            user_data["has_made_first_purchase"] = False
+            user_result = supabase_client.table("users").insert(user_data).execute()
+        except Exception:
+            # Column doesn't exist, remove it and retry
+            del user_data["has_made_first_purchase"]
+            user_result = supabase_client.table("users").insert(user_data).execute()
         if not user_result.data:
             raise Exception("Failed to create test user")
 
@@ -78,10 +84,10 @@ def test_auth_users(supabase_client, test_prefix):
 class TestAuthRegistrationReferralIntegration:
     """Test auth/registration integration with referral system"""
 
-    @patch('src.routes.auth.send_referral_signup_notification')
-    @patch('src.routes.auth.track_referral_signup')
-    @patch('src.routes.auth.create_enhanced_user')
-    @patch('src.routes.auth.get_user_by_privy_id')
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
+    @patch('src.db.users.create_enhanced_user')
+    @patch('src.db.users.get_user_by_privy_id')
     def test_new_user_signup_with_referral_code(
         self,
         mock_get_user,
@@ -170,9 +176,9 @@ class TestAuthRegistrationReferralIntegration:
         # Note: Background tasks are tricky to test directly, but we can verify
         # the notification function was imported and available
 
-    @patch('src.routes.auth.track_referral_signup')
-    @patch('src.routes.auth.create_enhanced_user')
-    @patch('src.routes.auth.get_user_by_privy_id')
+    @patch('src.services.referral.track_referral_signup')
+    @patch('src.db.users.create_enhanced_user')
+    @patch('src.db.users.get_user_by_privy_id')
     def test_new_user_signup_with_invalid_referral_code(
         self,
         mock_get_user,
@@ -236,7 +242,7 @@ class TestAuthRegistrationReferralIntegration:
         assert mock_track_referral.called
         print(f"✓ Invalid referral code was attempted but didn't block signup")
 
-    @patch('src.routes.auth.get_user_by_privy_id')
+    @patch('src.db.users.get_user_by_privy_id')
     def test_existing_user_login_ignores_referral_code(
         self,
         mock_get_user,
