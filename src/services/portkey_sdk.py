@@ -12,8 +12,9 @@ Each provider is accessed individually to:
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional, Dict, List
 
+from typing import Optional
 try:
     from portkey_ai import Portkey
 except ImportError:
@@ -25,11 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Provider configurations
 PROVIDERS = {
-    "google": {
-        "name": "Google",
-        "provider_slug": "google",
-        "description": "Google Generative AI models (direct API access)",
-    },
+
     "cerebras": {
         "name": "Cerebras",
         "provider_slug": "cerebras",
@@ -70,12 +67,12 @@ class PortkeySDKService:
 
         logger.info("Portkey SDK service initialized")
 
-    def get_client(self, provider: str) -> Portkey | None:
+    def get_client(self, provider: str) -> Optional[Portkey]:
         """
         Get a Portkey client configured for a specific provider.
 
         Args:
-            provider: Provider name (e.g., 'google', 'cerebras', 'openrouter', 'deepinfra')
+            provider: Provider name (e.g., 'cerebras', 'openrouter', 'deepinfra')
 
         Returns:
             Configured Portkey client or None if provider config not found
@@ -83,7 +80,6 @@ class PortkeySDKService:
         try:
             # Map provider names to Portkey provider slugs
             provider_config = {
-                "google": "google",
                 "cerebras": "cerebras",
                 "nebius": "nebius",
                 "xai": "xai",
@@ -113,7 +109,7 @@ class PortkeySDKService:
             logger.error(f"Error creating Portkey client for provider {provider}: {e}")
             return None
 
-    def list_models(self, provider: str) -> list[dict[str, Any]]:
+    def list_models(self, provider: str) -> List[Dict[str, Any]]:
         """
         List available models for a provider via Portkey SDK.
 
@@ -192,7 +188,7 @@ class PortkeySDKService:
 
 
 # Singleton instance
-_portkey_service: PortkeySDKService | None = None
+_portkey_service: Optional[PortkeySDKService] = None
 
 
 def get_portkey_service() -> PortkeySDKService:

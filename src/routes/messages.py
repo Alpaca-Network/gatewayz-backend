@@ -3,11 +3,14 @@ Anthropic Messages API endpoint
 Compatible with Claude API: https://docs.claude.com/en/api/messages
 """
 
+from typing import Optional
 import logging
 import asyncio
 import time
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from src.utils.performance_tracker import PerformanceTracker
 
 import src.db.api_keys as api_keys_module
 import src.db.plans as plans_module
@@ -154,7 +157,7 @@ async def _to_thread(func, *args, **kwargs):
 async def anthropic_messages(
     req: MessagesRequest,
     api_key: str = Depends(get_api_key),
-    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
+    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -194,6 +197,9 @@ async def anthropic_messages(
     }
     ```
     """
+    # Initialize performance tracker
+    tracker = PerformanceTracker(endpoint="/v1/messages")
+
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
@@ -277,6 +283,8 @@ async def anthropic_messages(
             top_p=req.top_p,
             top_k=req.top_k,
             stop_sequences=req.stop_sequences,
+            tools=req.tools,
+            tool_choice=req.tool_choice,
         )
 
         # === 2.1) Inject conversation history if session_id provided ===

@@ -19,9 +19,9 @@ from src.services.image_generation_client import (
     make_portkey_image_request,
     process_image_generation_response,
 )
+from src.utils.performance_tracker import PerformanceTracker
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -87,6 +87,9 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
     }
     ```
     """
+    # Initialize performance tracker
+    tracker = PerformanceTracker(endpoint="/v1/images/generations")
+
     try:
         # Get running event loop for async operations
         loop = asyncio.get_running_loop()
@@ -96,7 +99,8 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
 
         try:
             # Get user asynchronously
-            user = await loop.run_in_executor(executor, get_user, api_key)
+            with tracker.stage("auth_validation"):
+                user = await loop.run_in_executor(executor, get_user, api_key)
 
             if not user:
                 if (

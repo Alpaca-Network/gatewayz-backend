@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any
+from typing import Any, Optional, Dict, List
 
 from fastapi import APIRouter, Query, Response
 from datetime import datetime, timezone
@@ -32,7 +32,6 @@ from src.utils.security_validators import sanitize_for_logging
 
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Single router for all model catalog endpoints
@@ -42,13 +41,13 @@ router = APIRouter()
 DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', "
-    "'groq', 'fireworks', 'together', 'google', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'aihubmix', or auto-detect if not specified"
+    "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', "
-    "'groq', 'fireworks', 'together', 'google', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'aihubmix', or 'all'"
+    "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -66,7 +65,7 @@ DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
 DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
 
 
-def normalize_developer_segment(value: str | None) -> str | None:
+def normalize_developer_segment(value: Optional[str]) -> Optional[str]:
     """Align developer/provider identifiers with Hugging Face style slugs."""
     if value is None:
         return None
@@ -80,7 +79,7 @@ def normalize_developer_segment(value: str | None) -> str | None:
     return normalized
 
 
-def normalize_model_segment(value: str | None) -> str | None:
+def normalize_model_segment(value: Optional[str]) -> Optional[str]:
     """Normalize model identifiers without altering intentional casing."""
     if value is None:
         return None
@@ -90,7 +89,7 @@ def normalize_model_segment(value: str | None) -> str | None:
     return normalized or None
 
 
-def annotate_provider_sources(providers: list[dict], source: str) -> list[dict]:
+def annotate_provider_sources(providers: List[dict], source: str) -> List[dict]:
     annotated = []
     for provider in providers or []:
         entry = provider.copy()
@@ -102,8 +101,8 @@ def annotate_provider_sources(providers: list[dict], source: str) -> list[dict]:
     return annotated
 
 
-def derive_portkey_providers(models: list[dict]) -> list[dict]:
-    providers: dict[str, dict] = {}
+def derive_portkey_providers(models: List[dict]) -> List[dict]:
+    providers: Dict[str, dict] = {}
     for model in models or []:
         provider_slug = model.get("provider_slug")
         if not provider_slug:
@@ -125,12 +124,12 @@ def derive_portkey_providers(models: list[dict]) -> list[dict]:
     return list(providers.values())
 
 
-def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[dict]:
+def derive_providers_from_models(models: List[dict], gateway_name: str) -> List[dict]:
     """
     Generic function to derive provider list from model list for any gateway.
     Used for gateways that don't have a dedicated provider endpoint.
     """
-    providers: dict[str, dict] = {}
+    providers: Dict[str, dict] = {}
     for model in models or []:
         # Try different fields to get provider name
         provider_slug = None
@@ -169,8 +168,8 @@ def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[
     return list(providers.values())
 
 
-def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
-    merged: dict[str, dict] = {}
+def merge_provider_lists(*provider_lists: List[List[dict]]) -> List[dict]:
+    merged: Dict[str, dict] = {}
     for providers in provider_lists:
         for provider in providers or []:
             slug = provider.get("slug")
@@ -197,7 +196,7 @@ def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
     return list(merged.values())
 
 
-def merge_models_by_slug(*model_lists: list[dict]) -> list[dict]:
+def merge_models_by_slug(*model_lists: List[dict]) -> List[dict]:
     """Merge multiple model lists by slug, avoiding duplicates"""
     merged = []
     seen = set()
@@ -215,9 +214,9 @@ def merge_models_by_slug(*model_lists: list[dict]) -> list[dict]:
 @router.get("/v1/provider", tags=["providers"])
 async def get_providers(
     moderated_only: bool = Query(False, description="Filter for moderated providers only"),
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
-    gateway: str | None = Query(
+    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    gateway: Optional[str] = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -231,7 +230,7 @@ async def get_providers(
 
         openrouter_models = []
         portkey_models = []
-        provider_groups: list[list[dict]] = []
+        provider_groups: List[List[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             raw_providers = get_cached_providers()
@@ -261,6 +260,8 @@ async def get_providers(
             "together",
             "fal",
             "aihubmix",
+            "anannas",
+            "vercel-ai-gateway",
         ]
         all_models = {}  # Track models for each gateway
 
@@ -282,7 +283,7 @@ async def get_providers(
 
         combined_providers = merge_provider_lists(*provider_groups)
 
-        models_for_counts: list[dict] = []
+        models_for_counts: List[dict] = []
         if gateway_value in ("openrouter", "all"):
             models_for_counts.extend(openrouter_models)
         if gateway_value in ("portkey", "all"):
@@ -333,13 +334,16 @@ async def get_providers(
 
 
 async def get_models(
-    provider: str | None = Query(None, description="Filter models by provider"),
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    provider: Optional[str] = Query(None, description="Filter models by provider"),
+    is_private: Optional[bool] = Query(
+        None, description="Filter by private models: true=private only, false=non-private only, null=all models"
+    ),
+    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
-    gateway: str | None = Query(
+    gateway: Optional[str] = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -348,32 +352,36 @@ async def get_models(
 
     try:
         provider = normalize_developer_segment(provider)
-        logger.error(f"/models endpoint called with gateway parameter: {repr(gateway)}")
+        logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}")
         gateway_value = (gateway or "openrouter").lower()
         # Support both 'huggingface' and 'hug' as aliases
         if gateway_value == "huggingface":
             gateway_value = "hug"
-        logger.info(
+        logger.debug(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
 
-        openrouter_models: list[dict] = []
-        portkey_models: list[dict] = []
-        featherless_models: list[dict] = []
-        deepinfra_models: list[dict] = []
-        chutes_models: list[dict] = []
-        groq_models: list[dict] = []
-        fireworks_models: list[dict] = []
-        together_models: list[dict] = []
-        google_models: list[dict] = []
-        cerebras_models: list[dict] = []
-        nebius_models: list[dict] = []
-        xai_models: list[dict] = []
-        novita_models: list[dict] = []
-        hug_models: list[dict] = []
-        aimo_models: list[dict] = []
-        near_models: list[dict] = []
-        fal_models: list[dict] = []
+        openrouter_models: List[dict] = []
+        portkey_models: List[dict] = []
+        featherless_models: List[dict] = []
+        deepinfra_models: List[dict] = []
+        chutes_models: List[dict] = []
+        groq_models: List[dict] = []
+        fireworks_models: List[dict] = []
+        together_models: List[dict] = []
+        google_models: List[dict] = []
+        cerebras_models: List[dict] = []
+        nebius_models: List[dict] = []
+        xai_models: List[dict] = []
+        novita_models: List[dict] = []
+        hug_models: List[dict] = []
+        aimo_models: List[dict] = []
+        near_models: List[dict] = []
+        fal_models: List[dict] = []
+        helicone_models: List[dict] = []
+        anannas_models: List[dict] = []
+        aihubmix_models: List[dict] = []
+        vercel_ai_gateway_models: List[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -421,12 +429,6 @@ async def get_models(
             together_models = get_cached_models("together") or []
             if gateway_value == "together" and not together_models:
                 logger.error("No Together models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
-
-        if gateway_value in ("google", "all"):
-            google_models = get_cached_models("google") or []
-            if gateway_value == "google" and not google_models:
-                logger.error("No Google models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
         if gateway_value in ("cerebras", "all"):
@@ -477,6 +479,30 @@ async def get_models(
                 logger.error("No Fal models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
+        if gateway_value in ("helicone", "all"):
+            helicone_models = get_cached_models("helicone") or []
+            if gateway_value == "helicone" and not helicone_models:
+                logger.error("No Helicone models data available from cache")
+                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+
+        if gateway_value in ("anannas", "all"):
+            anannas_models = get_cached_models("anannas") or []
+            if gateway_value == "anannas" and not anannas_models:
+                logger.error("No Anannas models data available from cache")
+                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+
+        if gateway_value in ("aihubmix", "all"):
+            aihubmix_models = get_cached_models("aihubmix") or []
+            if gateway_value == "aihubmix" and not aihubmix_models:
+                logger.error("No AiHubMix models data available from cache")
+                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+
+        if gateway_value in ("vercel-ai-gateway", "all"):
+            vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
+            if gateway_value == "vercel-ai-gateway" and not vercel_ai_gateway_models:
+                logger.error("No Vercel AI Gateway models data available from cache")
+                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "portkey":
@@ -493,8 +519,6 @@ async def get_models(
             models = fireworks_models
         elif gateway_value == "together":
             models = together_models
-        elif gateway_value == "google":
-            models = google_models
         elif gateway_value == "cerebras":
             models = cerebras_models
         elif gateway_value == "nebius":
@@ -511,9 +535,17 @@ async def get_models(
             models = near_models
         elif gateway_value == "fal":
             models = fal_models
+        elif gateway_value == "helicone":
+            models = helicone_models
+        elif gateway_value == "anannas":
+            models = anannas_models
+        elif gateway_value == "aihubmix":
+            models = aihubmix_models
+        elif gateway_value == "vercel-ai-gateway":
+            models = vercel_ai_gateway_models
         else:
             # For "all" gateway, merge all models but avoid duplicates from Portkey-based providers
-            # Note: google, cerebras, nebius, xai, novita, hug are filtered FROM Portkey models,
+            # Note: cerebras, nebius, xai, novita, hug are filtered FROM Portkey models,
             # so we DON'T include them separately in the merge to avoid counting them twice
             models = merge_models_by_slug(
                 openrouter_models,
@@ -527,13 +559,17 @@ async def get_models(
                 aimo_models,
                 near_models,
                 fal_models,
+                helicone_models,
+                anannas_models,
+                aihubmix_models,
+                vercel_ai_gateway_models,
             )
 
         if not models:
-            logger.error("No models data available after applying gateway selection")
+            logger.debug("No models data available after applying gateway selection")
             raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
-        provider_groups: list[list[dict]] = []
+        provider_groups: List[List[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             providers = get_cached_providers()
@@ -585,12 +621,6 @@ async def get_models(
             annotated_together = annotate_provider_sources(together_providers, "together")
             provider_groups.append(annotated_together)
 
-        if gateway_value in ("google", "all"):
-            models_for_providers = google_models if gateway_value == "all" else models
-            google_providers = derive_providers_from_models(models_for_providers, "google")
-            annotated_google = annotate_provider_sources(google_providers, "google")
-            provider_groups.append(annotated_google)
-
         if gateway_value in ("cerebras", "all"):
             models_for_providers = cerebras_models if gateway_value == "all" else models
             cerebras_providers = derive_providers_from_models(models_for_providers, "cerebras")
@@ -627,6 +657,36 @@ async def get_models(
             annotated_aimo = annotate_provider_sources(aimo_providers, "aimo")
             provider_groups.append(annotated_aimo)
 
+        if gateway_value in ("near", "all"):
+            models_for_providers = near_models if gateway_value == "all" else models
+            near_providers = derive_providers_from_models(models_for_providers, "near")
+            annotated_near = annotate_provider_sources(near_providers, "near")
+            provider_groups.append(annotated_near)
+
+        if gateway_value in ("fal", "all"):
+            models_for_providers = fal_models if gateway_value == "all" else models
+            fal_providers = derive_providers_from_models(models_for_providers, "fal")
+            annotated_fal = annotate_provider_sources(fal_providers, "fal")
+            provider_groups.append(annotated_fal)
+
+        if gateway_value in ("anannas", "all"):
+            models_for_providers = anannas_models if gateway_value == "all" else models
+            anannas_providers = derive_providers_from_models(models_for_providers, "anannas")
+            annotated_anannas = annotate_provider_sources(anannas_providers, "anannas")
+            provider_groups.append(annotated_anannas)
+
+        if gateway_value in ("aihubmix", "all"):
+            models_for_providers = aihubmix_models if gateway_value == "all" else models
+            aihubmix_providers = derive_providers_from_models(models_for_providers, "aihubmix")
+            annotated_aihubmix = annotate_provider_sources(aihubmix_providers, "aihubmix")
+            provider_groups.append(annotated_aihubmix)
+
+        if gateway_value in ("vercel-ai-gateway", "all"):
+            models_for_providers = vercel_ai_gateway_models if gateway_value == "all" else models
+            vercel_providers = derive_providers_from_models(models_for_providers, "vercel-ai-gateway")
+            annotated_vercel = annotate_provider_sources(vercel_providers, "vercel-ai-gateway")
+            provider_groups.append(annotated_vercel)
+
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")
 
@@ -643,6 +703,22 @@ async def get_models(
             logger.info(
                 f"Filtered models by provider '{provider}': {original_count} -> {len(models)}"
             )
+
+        # Filter by is_private flag
+        if is_private is not None:
+            original_count = len(models)
+            if is_private:
+                # Only show private models (Near AI models)
+                models = [m for m in models if m.get("is_private") is True]
+                logger.info(
+                    f"Filtered for private models only: {original_count} -> {len(models)}"
+                )
+            else:
+                # Only show non-private models
+                models = [m for m in models if not m.get("is_private")]
+                logger.info(
+                    f"Filtered to exclude private models: {original_count} -> {len(models)}"
+                )
 
         total_models = len(models)
 
@@ -700,7 +776,7 @@ async def get_models(
             "groq": "Groq catalog",
             "fireworks": "Fireworks catalog",
             "together": "Together catalog",
-            "google": "Google catalog",
+
             "cerebras": "Cerebras catalog",
             "nebius": "Nebius catalog",
             "xai": "Xai catalog",
@@ -709,7 +785,10 @@ async def get_models(
             "aimo": "AIMO Network catalog",
             "near": "Near AI catalog",
             "fal": "Fal.ai catalog",
-            "all": "Combined OpenRouter, Portkey, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, and Fal.ai catalogs",
+            "anannas": "Anannas catalog",
+            "aihubmix": "AiHubMix catalog",
+            "vercel-ai-gateway": "Vercel AI Gateway catalog",
+            "all": "Combined OpenRouter, Portkey, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, and Vercel AI Gateway catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         result = {
@@ -723,7 +802,7 @@ async def get_models(
             "note": note,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        logger.error(
+        logger.debug(
             f"Returning /models response with keys: {list(result.keys())}, gateway={gateway_value}, first_model={enhanced_models[0]['id'] if enhanced_models else 'none'}"
         )
 
@@ -749,7 +828,7 @@ async def get_specific_model(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: str | None = Query(
+    gateway: Optional[str] = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -764,7 +843,7 @@ async def get_specific_model(
     - Chutes: Model catalog data from Chutes.ai
     - Fal.ai: Image/video/audio generation models (e.g., fal-ai/stable-diffusion-v15)
     - Hugging Face: Open-source models from Hugging Face Hub
-    - And other gateways: groq, fireworks, together, google, cerebras, nebius, xai, novita, aimo, near
+    - And other gateways: groq, fireworks, together, cerebras, nebius, xai, novita, aimo, near
 
     If gateway is not specified, it will automatically detect which gateway the model belongs to.
 
@@ -799,7 +878,7 @@ async def get_specific_model(
         detected_gateway = model_data.get("source_gateway", gateway or "openrouter")
 
         # Get enhanced providers data for all gateways
-        provider_groups: list[list[dict]] = []
+        provider_groups: List[List[dict]] = []
 
         # Always try to get OpenRouter providers for cross-reference
         openrouter_providers = get_cached_providers()
@@ -824,6 +903,26 @@ async def get_specific_model(
             gateway_models = get_cached_models(detected_gateway)
             if gateway_models:
                 derived_providers = derive_portkey_providers(gateway_models)
+                annotated_providers = annotate_provider_sources(derived_providers, detected_gateway)
+                provider_groups.append(annotated_providers)
+        
+        # Handle gateways that use derive_providers_from_models
+        if detected_gateway in [
+            "cerebras",
+            "nebius",
+            "xai",
+            "novita",
+            "hug",
+            "aimo",
+            "near",
+            "fal",
+            "anannas",
+            "aihubmix",
+            "vercel-ai-gateway",
+        ]:
+            gateway_models = get_cached_models(detected_gateway)
+            if gateway_models:
+                derived_providers = derive_providers_from_models(gateway_models, detected_gateway)
                 annotated_providers = annotate_provider_sources(derived_providers, detected_gateway)
                 provider_groups.append(annotated_providers)
 
@@ -861,16 +960,16 @@ async def get_specific_model(
 
 async def get_developer_models(
     developer_name: str,
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
-    gateway: str | None = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
+    gateway: Optional[str] = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
 ):
     """
-    Get all models from a specific developer/provider (e.g., anthropic, openai, google)
+    Get all models from a specific developer/provider (e.g., anthropic, openai, meta)
 
     Args:
-        developer_name: Provider/developer name (e.g., 'anthropic', 'openai', 'google', 'meta')
+        developer_name: Provider/developer name (e.g., 'anthropic', 'openai', 'meta')
         limit: Maximum number of models to return
         offset: Number of models to skip (for pagination)
         include_huggingface: Whether to include HuggingFace metrics
@@ -973,7 +1072,7 @@ async def get_developer_models(
 @router.get("/v1/provider/{provider_name}/stats", tags=["statistics"])
 async def get_provider_statistics(
     provider_name: str,
-    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL),
 ):
     """
@@ -1038,7 +1137,7 @@ async def get_gateway_statistics(
     **This fixes the "Top Provider: N/A" issue in your UI!**
 
     Args:
-        gateway: Gateway name ('openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', 'groq')
+        gateway: Gateway name ('openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', 'groq', 'helicone', etc.)
         time_range: Time range for statistics
 
     Returns:
@@ -1096,7 +1195,7 @@ async def get_gateway_statistics(
 
 
 async def get_trending_models_endpoint(
-    gateway: str | None = Query("all", description="Gateway filter or 'all'"),
+    gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
     limit: int = Query(10, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=100),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
@@ -1185,7 +1284,11 @@ async def get_all_gateways_summary_endpoint(
         if "error" in summary:
             raise HTTPException(status_code=500, detail=summary["error"])
 
-        return {"success": True, "data": summary, "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "success": True,
+            "data": summary,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     except HTTPException:
         raise
@@ -1250,7 +1353,7 @@ async def get_provider_top_models_endpoint(
 async def compare_model_across_gateways(
     provider_name: str,
     model_name: str,
-    gateways: str | None = Query("all", description="Comma-separated gateways or 'all'"),
+    gateways: Optional[str] = Query("all", description="Comma-separated gateways or 'all'"),
 ):
     """
     Compare the same model across different gateways
@@ -1295,6 +1398,7 @@ async def compare_model_across_gateways(
                 "groq",
                 "fireworks",
                 "together",
+                "vercel-ai-gateway",
             ]
 
         model_id = f"{provider_name}/{model_name}"
@@ -1384,7 +1488,7 @@ async def compare_model_across_gateways(
 
 
 async def batch_compare_models(
-    model_ids: list[str] = Query(
+    model_ids: List[str] = Query(
         ..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"
     ),
     criteria: str = Query(
@@ -1438,6 +1542,7 @@ async def batch_compare_models(
                     "groq",
                     "fireworks",
                     "together",
+                    "vercel-ai-gateway",
                 ]
                 models_data = []
 
@@ -1500,24 +1605,29 @@ async def batch_compare_models(
 # ============================================================================
 
 
+@router.get("/models", tags=["models"])
 @router.get("/v1/models", tags=["models"])
 async def get_all_models(
-    provider: str | None = Query(None, description="Filter models by provider"),
-    limit: int | None = Query(
+    provider: Optional[str] = Query(None, description="Filter models by provider"),
+    is_private: Optional[bool] = Query(
+        None, description="Filter by private models: true=private only, false=non-private only, null=all models"
+    ),
+    limit: Optional[int] = Query(
         50, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 50 for fast load)"
     ),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
         False,
         description="Include Hugging Face metrics for models that have hugging_face_id (slower, default: false)",
     ),
-    gateway: str | None = Query(
+    gateway: Optional[str] = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
 ):
     return await get_models(
         provider=provider,
+        is_private=is_private,
         limit=limit,
         offset=offset,
         include_huggingface=include_huggingface,
@@ -1527,7 +1637,7 @@ async def get_all_models(
 
 @router.get("/v1/models/trending", tags=["statistics"])
 async def get_trending_models_api(
-    gateway: str | None = Query("all", description="Gateway filter or 'all'"),
+    gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
     limit: int = Query(10, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=100),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
@@ -1542,7 +1652,7 @@ async def get_trending_models_api(
 
 @router.post("/models/batch-compare", tags=["comparison"])
 async def batch_compare_models_api(
-    model_ids: list[str] = Query(
+    model_ids: List[str] = Query(
         ..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"
     ),
     criteria: str = Query(
@@ -1556,7 +1666,7 @@ async def batch_compare_models_api(
 async def compare_model_gateways_api(
     provider_name: str,
     model_name: str,
-    gateways: str | None = Query("all", description="Comma-separated gateways or 'all'"),
+    gateways: Optional[str] = Query("all", description="Comma-separated gateways or 'all'"),
 ):
     return await compare_model_across_gateways(
         provider_name=provider_name,
@@ -1570,7 +1680,7 @@ async def get_specific_model_api(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: str | None = Query(
+    gateway: Optional[str] = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1588,7 +1698,7 @@ async def get_specific_model_api_legacy(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: str | None = Query(
+    gateway: Optional[str] = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1605,10 +1715,10 @@ async def get_specific_model_api_legacy(
 @router.get("/v1/models/{developer_name}", tags=["models"])
 async def get_developer_models_api(
     developer_name: str,
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
-    gateway: str | None = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
+    gateway: Optional[str] = Query("all", description="Gateway: 'openrouter', 'portkey', or 'all'"),
 ):
     return await get_developer_models(
         developer_name=developer_name,
@@ -1621,19 +1731,22 @@ async def get_developer_models_api(
 
 @router.get("/v1/models/search", tags=["models"])
 async def search_models(
-    q: str | None = Query(
+    q: Optional[str] = Query(
         None, description="Search query (searches in model name, provider, description)"
     ),
-    modality: str | None = Query(
+    modality: Optional[str] = Query(
         None, description="Filter by modality: text, image, audio, video, multimodal"
     ),
-    min_context: int | None = Query(None, description="Minimum context window size (tokens)"),
-    max_context: int | None = Query(None, description="Maximum context window size (tokens)"),
-    min_price: float | None = Query(None, description="Minimum price per token (USD)"),
-    max_price: float | None = Query(None, description="Maximum price per token (USD)"),
-    gateway: str | None = Query(
+    is_private: Optional[bool] = Query(
+        None, description="Filter by private models: true=private only, false=non-private only, null=all models"
+    ),
+    min_context: Optional[int] = Query(None, description="Minimum context window size (tokens)"),
+    max_context: Optional[int] = Query(None, description="Maximum context window size (tokens)"),
+    min_price: Optional[float] = Query(None, description="Minimum price per token (USD)"),
+    max_price: Optional[float] = Query(None, description="Maximum price per token (USD)"),
+    gateway: Optional[str] = Query(
         "all",
-        description="Gateway filter: openrouter, portkey, featherless, deepinfra, chutes, groq, fireworks, together, or all",
+        description="Gateway filter: openrouter, portkey, featherless, deepinfra, chutes, groq, fireworks, together, helicone, aihubmix, vercel-ai-gateway, or all",
     ),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),
@@ -1651,6 +1764,8 @@ async def search_models(
     - Find models with large context: `?min_context=100000&sort_by=context&order=desc`
     - Search by name: `?q=gpt-4&gateway=openrouter`
     - Filter by modality: `?modality=image&sort_by=popularity`
+    - Filter for private models only: `?is_private=true`
+    - Exclude private models: `?is_private=false`
 
     **Returns:**
     - List of models matching the criteria
@@ -1695,6 +1810,14 @@ async def search_models(
             together_models = get_cached_models("together") or []
             all_models.extend(together_models)
 
+        if gateway_value in ("aihubmix", "all"):
+            aihubmix_models = get_cached_models("aihubmix") or []
+            all_models.extend(aihubmix_models)
+
+        if gateway_value in ("vercel-ai-gateway", "all"):
+            vercel_models = get_cached_models("vercel-ai-gateway") or []
+            all_models.extend(vercel_models)
+
         # Apply filters
         filtered_models = all_models
 
@@ -1721,6 +1844,19 @@ async def search_models(
                 if modality_lower in str(m.get("modality", "text")).lower()
                 or modality_lower in str(m.get("architecture", {}).get("modality", "text")).lower()
             ]
+
+        # Private models filter
+        if is_private is not None:
+            if is_private:
+                # Only show private models (Near AI models)
+                filtered_models = [
+                    m for m in filtered_models if m.get("is_private") is True
+                ]
+            else:
+                # Only show non-private models
+                filtered_models = [
+                    m for m in filtered_models if not m.get("is_private")
+                ]
 
         # Context window filters
         if min_context is not None:
@@ -1802,6 +1938,7 @@ async def search_models(
                 "filters_applied": {
                     "query": q,
                     "modality": modality,
+                    "is_private": is_private,
                     "min_context": min_context,
                     "max_context": max_context,
                     "min_price": min_price,
@@ -1822,7 +1959,7 @@ async def search_models(
 # Helper functions for model comparison
 
 
-def _calculate_recommendation(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
+def _calculate_recommendation(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculate which gateway is recommended based on pricing"""
     available = [c for c in comparisons if c.get("available")]
 
@@ -1863,7 +2000,7 @@ def _calculate_recommendation(comparisons: list[dict[str, Any]]) -> dict[str, An
     }
 
 
-def _calculate_savings(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
+def _calculate_savings(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculate potential savings"""
     available = [c for c in comparisons if c.get("available") and c.get("pricing")]
 
@@ -1906,7 +2043,7 @@ def _calculate_savings(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _extract_price_comparison(models_data: list[dict[str, Any]]) -> dict[str, Any]:
+def _extract_price_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Extract price comparison data"""
     prices = {}
     for item in models_data:
@@ -1917,7 +2054,7 @@ def _extract_price_comparison(models_data: list[dict[str, Any]]) -> dict[str, An
     return prices
 
 
-def _extract_context_comparison(models_data: list[dict[str, Any]]) -> dict[str, Any]:
+def _extract_context_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Extract context length comparison data"""
     contexts = {}
     for item in models_data:
@@ -1928,8 +2065,8 @@ def _extract_context_comparison(models_data: list[dict[str, Any]]) -> dict[str, 
 
 
 def _extract_availability_comparison(
-    models_data: list[dict[str, Any]], all_gateways: list[str]
-) -> dict[str, bool]:
+    models_data: List[Dict[str, Any]], all_gateways: List[str]
+) -> Dict[str, bool]:
     """Extract availability comparison data"""
     availability = dict.fromkeys(all_gateways, False)
     for item in models_data:
@@ -1944,7 +2081,7 @@ def _extract_availability_comparison(
 
 @router.get("/modelz/models")
 async def get_modelz_models(
-    is_graduated: bool | None = Query(
+    is_graduated: Optional[bool] = Query(
         None,
         description="Filter for graduated (singularity) models: true=graduated only, false=non-graduated only, null=all models",
     )
@@ -2024,7 +2161,7 @@ async def get_modelz_models(
 
 @router.get("/modelz/ids")
 async def get_modelz_model_ids_endpoint(
-    is_graduated: bool | None = Query(
+    is_graduated: Optional[bool] = Query(
         None,
         description="Filter for graduated models: true=graduated only, false=non-graduated only, null=all models",
     )
@@ -2076,7 +2213,7 @@ async def get_modelz_model_ids_endpoint(
 @router.get("/modelz/check/{model_id}")
 async def check_model_on_modelz(
     model_id: str,
-    is_graduated: bool | None = Query(
+    is_graduated: Optional[bool] = Query(
         None, description="Filter for graduated models when checking"
     ),
 ):

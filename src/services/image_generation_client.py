@@ -1,14 +1,13 @@
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Dict
 
 import httpx
 
 from src.config import Config
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +21,7 @@ def make_portkey_image_request(
     quality: str = "standard",
     style: str = "natural",
     **kwargs,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Make image generation request to Portkey
 
     Args:
@@ -50,15 +49,16 @@ def make_portkey_image_request(
         if virtual_key:
             headers["x-portkey-virtual-key"] = virtual_key
         # Method 2: Use @provider format (Portkey SDK style)
-        elif provider and provider.startswith("@"):
+        # Normalize provider to lowercase for case-insensitive @ prefix checking
+        elif provider and provider.lower().startswith("@"):
             # Use config-based provider format
             import json
 
-            config = {"provider": provider}  # e.g., "@openai", "@stability-ai"
+            config = {"provider": provider.lower()}  # e.g., "@openai", "@stability-ai"
             headers["x-portkey-config"] = json.dumps(config)
         # Method 3: Legacy provider header
         elif provider:
-            headers["x-portkey-provider"] = provider
+            headers["x-portkey-provider"] = provider.lower()
         else:
             raise ValueError(
                 "Either virtual_key or provider must be specified for Portkey image generation"
@@ -101,7 +101,7 @@ def make_portkey_image_request(
 
 def make_deepinfra_image_request(
     prompt: str, model: str = "stabilityai/sd3.5", size: str = "1024x1024", n: int = 1, **kwargs
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Make image generation request directly to DeepInfra
 
     Args:
@@ -156,7 +156,7 @@ def make_google_vertex_image_request(
     location: str = None,
     endpoint_id: str = None,
     **kwargs,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Make image generation request to Google Vertex AI endpoint
 
     Args:
@@ -175,7 +175,7 @@ def make_google_vertex_image_request(
     try:
         # Import Google Cloud AI Platform SDK
         try:
-            from google.auth import default, impersonated_credentials
+            from google.auth import impersonated_credentials
             from google.cloud import aiplatform
         except ImportError:
             raise ImportError(
@@ -204,39 +204,19 @@ def make_google_vertex_image_request(
             "GOOGLE_VERTEX_SERVICE_ACCOUNT", "vertex-client@gatewayz-468519.iam.gserviceaccount.com"
         )
 
-        # Try to get credentials with impersonation support
-        credentials = None
+        # Initialize Vertex AI using ADC (Application Default Credentials)
+        # The initialize_vertex_ai() function handles GOOGLE_VERTEX_CREDENTIALS_JSON
+        # and other credential sources automatically
         try:
-            # First, try to get default credentials
-            source_credentials, source_project = default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
+            from src.services.google_vertex_client import initialize_vertex_ai
 
-            # If GOOGLE_VERTEX_SERVICE_ACCOUNT is set, use impersonation
-            if os.getenv("GOOGLE_VERTEX_SERVICE_ACCOUNT"):
-                logger.info(f"Using service account impersonation: {target_sa}")
-                credentials = impersonated_credentials.Credentials(
-                    source_credentials=source_credentials,
-                    target_principal=target_sa,
-                    target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                    lifetime=3600,  # 1 hour
-                )
-                logger.info("✓ Successfully created impersonated credentials")
-            else:
-                # Use default credentials (works if GOOGLE_APPLICATION_CREDENTIALS is set)
-                credentials = source_credentials
-                logger.info("Using default credentials from environment")
+            # This will use ADC and handle temp file creation for GOOGLE_VERTEX_CREDENTIALS_JSON
+            initialize_vertex_ai()
+            logger.info("✓ Successfully initialized Vertex AI with ADC")
 
         except Exception as auth_error:
             logger.warning(f"Authentication setup: {auth_error}")
-            # Let Vertex AI SDK handle default authentication
-            credentials = None
-
-        # Initialize Vertex AI
-        if credentials:
-            aiplatform.init(project=project_id, location=location, credentials=credentials)
-        else:
-            # Fall back to default authentication
+            # Fall back to default aiplatform initialization
             aiplatform.init(project=project_id, location=location)
 
         # Get the endpoint
@@ -304,8 +284,8 @@ def make_google_vertex_image_request(
 
 
 def process_image_generation_response(
-    response: dict[str, Any], provider: str, model: str
-) -> dict[str, Any]:
+    response: Dict[str, Any], provider: str, model: str
+) -> Dict[str, Any]:
     """Process image generation response to standard format
 
     Args:
