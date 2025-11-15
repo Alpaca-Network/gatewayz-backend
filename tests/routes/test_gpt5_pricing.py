@@ -25,8 +25,8 @@ class TestGPT51ModelAvailability:
                 "id": "openai/gpt-5.1",
                 "name": "GPT-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 },
                 "context_length": 128000,
                 "source_gateway": "openrouter"
@@ -58,8 +58,8 @@ class TestGPT51Pricing:
             "id": "openai/gpt-5.1",
             "name": "GPT-5.1",
             "pricing": {
-                "prompt": "0.15",
-                "completion": "0.60"
+                "prompt": "1.25",
+                "completion": "10.00"
             },
             "context_length": 128000,
             "source_gateway": "openrouter"
@@ -80,8 +80,8 @@ class TestGPT51Pricing:
             {
                 "id": "openai/gpt-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 }
             }
         ]
@@ -89,8 +89,8 @@ class TestGPT51Pricing:
         pricing = get_model_pricing("openai/gpt-5.1")
 
         assert pricing["found"] is True
-        assert float(pricing["prompt"]) == 0.15
-        assert float(pricing["completion"]) == 0.60
+        assert float(pricing["prompt"]) == 1.25
+        assert float(pricing["completion"]) == 10.00
 
     @patch('src.services.pricing.get_cached_models')
     def test_gpt51_cost_calculation(self, mock_get_cached):
@@ -101,8 +101,8 @@ class TestGPT51Pricing:
             {
                 "id": "openai/gpt-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 }
             }
         ]
@@ -110,8 +110,8 @@ class TestGPT51Pricing:
         # 1000 prompt tokens + 500 completion tokens
         cost = calculate_cost("openai/gpt-5.1", 1000, 500)
 
-        # Expected: (1000 * 0.15 / 1M) + (500 * 0.60 / 1M)
-        expected_cost = (1000 * 0.15 / 1_000_000) + (500 * 0.60 / 1_000_000)
+        # Expected: (1000 * 1.25 / 1M) + (500 * 10.00 / 1M)
+        expected_cost = (1000 * 1.25 / 1_000_000) + (500 * 10.00 / 1_000_000)
 
         assert cost == pytest.approx(expected_cost, rel=1e-9)
 
@@ -127,8 +127,8 @@ class TestGPT51ModelCatalogEndpoints:
                 "id": "openai/gpt-5.1",
                 "name": "GPT-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 },
                 "source_gateway": "openrouter"
             }
@@ -167,8 +167,8 @@ class TestGPT51ModelCatalogEndpoints:
                 "canonical_slug": "openai/gpt-5.1",
                 "name": "GPT-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 },
                 "source_gateway": "openrouter"
             }
@@ -195,8 +195,8 @@ class TestGPT51DynamicPricing:
                     "id": "openai/gpt-5.1",
                     "name": "GPT-5.1",
                     "pricing": {
-                        "prompt": "0.15",
-                        "completion": "0.60"
+                        "prompt": "1.25",
+                        "completion": "10.00"
                     },
                     "context_length": 128000
                 },
@@ -231,13 +231,13 @@ class TestGPT51DynamicPricing:
         # Test that negative values are converted to "0"
         pricing = {
             "prompt": "-1",
-            "completion": "0.60"
+            "completion": "10.00"
         }
 
         sanitized = sanitize_pricing(pricing)
 
         assert sanitized["prompt"] == "0"
-        assert sanitized["completion"] == "0.60"
+        assert sanitized["completion"] == "10.00"
 
     def test_gpt51_pricing_sanitization_all_negative(self):
         """Test sanitization when all pricing is dynamic (-1)"""
@@ -270,7 +270,7 @@ class TestGPT51Variants:
             {
                 "id": "openai/gpt-5.1",
                 "name": "GPT-5.1",
-                "pricing": {"prompt": "0.15", "completion": "0.60"},
+                "pricing": {"prompt": "1.25", "completion": "10.00"},
                 "source_gateway": "openrouter"
             },
             {
@@ -303,8 +303,8 @@ class TestGPT51CostEstimation:
             {
                 "id": "openai/gpt-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 }
             }
         ]
@@ -312,8 +312,8 @@ class TestGPT51CostEstimation:
         # Typical request: 2000 prompt tokens, 1000 completion tokens
         cost = calculate_cost("openai/gpt-5.1", 2000, 1000)
 
-        # Expected: (2000 * 0.15 / 1M) + (1000 * 0.60 / 1M) = 0.0003 + 0.0006 = 0.0009
-        expected_cost = (2000 * 0.15 + 1000 * 0.60) / 1_000_000
+        # Expected: (2000 * 1.25 / 1M) + (1000 * 10.00 / 1M) = 0.0025 + 0.01 = 0.0125
+        expected_cost = (2000 * 1.25 + 1000 * 10.00) / 1_000_000
 
         assert cost == pytest.approx(expected_cost, rel=1e-9)
 
@@ -326,8 +326,8 @@ class TestGPT51CostEstimation:
             {
                 "id": "openai/gpt-5.1",
                 "pricing": {
-                    "prompt": "0.15",
-                    "completion": "0.60"
+                    "prompt": "1.25",
+                    "completion": "10.00"
                 }
             }
         ]
@@ -335,11 +335,11 @@ class TestGPT51CostEstimation:
         # Large request: 100k prompt tokens, 50k completion tokens
         cost = calculate_cost("openai/gpt-5.1", 100_000, 50_000)
 
-        expected_cost = (100_000 * 0.15 + 50_000 * 0.60) / 1_000_000
+        expected_cost = (100_000 * 1.25 + 50_000 * 10.00) / 1_000_000
 
         assert cost == pytest.approx(expected_cost, rel=1e-9)
-        # Should be ~$0.045
-        assert cost > 0.04 and cost < 0.05
+        # Should be ~$0.625 (125 + 500) / 1M = 625 / 1M
+        assert cost > 0.6 and cost < 0.7
 
 
 class TestGPT51Integration:
@@ -359,7 +359,7 @@ class TestGPT51Integration:
                     {
                         "id": "openai/gpt-5.1",
                         "name": "GPT-5.1",
-                        "pricing": {"prompt": "0.15", "completion": "0.60"},
+                        "pricing": {"prompt": "1.25", "completion": "10.00"},
                         "source_gateway": "openrouter"
                     }
                 ]

@@ -21,13 +21,14 @@ OpenRouter returns pricing in the following format for each model:
 
 ```json
 {
-  "id": "openai/gpt-5",
-  "name": "GPT-5",
+  "id": "openai/gpt-5.1",
+  "name": "GPT-5.1",
   "pricing": {
-    "prompt": "0.15",      // Cost per 1M input tokens in USD
-    "completion": "0.60"   // Cost per 1M output tokens in USD
+    "prompt": "1.25",       // Cost per 1M input tokens in USD
+    "completion": "10.00"   // Cost per 1M output tokens in USD
   },
-  "context_length": 128000,
+  "context_length": 400000,
+  "max_tokens": 128000,
   "source_gateway": "openrouter"
 }
 ```
@@ -36,10 +37,11 @@ OpenRouter returns pricing in the following format for each model:
 
 OpenRouter provides access to the following OpenAI GPT-5 models:
 
-| Model ID | Name | Context | Status |
-|----------|------|---------|--------|
-| `openai/gpt-5` | GPT-5 | 128,000 tokens | Latest |
-| `openai/gpt-5-turbo` | GPT-5 Turbo | 128,000 tokens | High-speed variant |
+| Model ID | Name | Context | Max Output | Status |
+|----------|------|---------|------------|--------|
+| `openai/gpt-5.1` | GPT-5.1 | 400,000 tokens | 128,000 tokens | Latest |
+| `openai/gpt-5` | GPT-5 | 128,000 tokens | TBD | Available |
+| `openai/gpt-5-turbo` | GPT-5 Turbo | 128,000 tokens | TBD | High-speed variant |
 
 **Note:** Model availability and pricing are subject to OpenRouter's catalog. Check the `/api/v1/models` endpoint for the most current list.
 
@@ -93,13 +95,13 @@ The pricing service automatically looks up costs for any model:
 ```python
 from src.services.pricing import get_model_pricing, calculate_cost
 
-# Get pricing for GPT-5
-pricing = get_model_pricing("openai/gpt-5")
-# Returns: {"prompt": 0.15, "completion": 0.60, "found": True}
+# Get pricing for GPT-5.1
+pricing = get_model_pricing("openai/gpt-5.1")
+# Returns: {"prompt": 1.25, "completion": 10.00, "found": True}
 
 # Calculate cost for a request
 cost = calculate_cost(
-    model_id="openai/gpt-5",
+    model_id="openai/gpt-5.1",
     prompt_tokens=1000,
     completion_tokens=500
 )
@@ -108,7 +110,7 @@ cost = calculate_cost(
 
 ## Cost Calculation
 
-When a request is made to GPT-5, the cost is calculated as:
+When a request is made to GPT-5.1, the cost is calculated as:
 
 ```
 Total Cost = (prompt_tokens × prompt_price) + (completion_tokens × completion_price)
@@ -117,15 +119,15 @@ Total Cost = (prompt_tokens × prompt_price) + (completion_tokens × completion_
 ### Example
 
 For a request with:
-- **Model:** `openai/gpt-5`
+- **Model:** `openai/gpt-5.1`
 - **Prompt tokens:** 1,000
 - **Completion tokens:** 500
-- **Pricing:** prompt=$0.15/1M, completion=$0.60/1M
+- **Pricing:** prompt=$1.25/1M, completion=$10.00/1M
 
 ```
-Prompt cost:     1,000 × ($0.15 / 1,000,000) = $0.00015
-Completion cost: 500 × ($0.60 / 1,000,000) = $0.0003
-Total cost:      $0.00045
+Prompt cost:     1,000 × ($1.25 / 1,000,000) = $0.00125
+Completion cost: 500 × ($10.00 / 1,000,000) = $0.005
+Total cost:      $0.00625
 ```
 
 ## Pricing Cache Management

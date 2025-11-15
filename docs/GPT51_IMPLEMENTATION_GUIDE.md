@@ -59,10 +59,11 @@ From OpenRouter API:
   "id": "openai/gpt-5.1",
   "name": "GPT-5.1",
   "pricing": {
-    "prompt": "0.15",      // $0.15 per 1M input tokens
-    "completion": "0.60"   // $0.60 per 1M output tokens
+    "prompt": "1.25",       // $1.25 per 1M input tokens
+    "completion": "10.00"   // $10.00 per 1M output tokens
   },
-  "context_length": 128000,
+  "context_length": 400000,
+  "max_tokens": 128000,
   "source_gateway": "openrouter"
 }
 ```
@@ -114,8 +115,8 @@ Returns all models including GPT-5.1 with pricing:
     {
       "id": "openai/gpt-5.1",
       "pricing": {
-        "prompt": "0.15",
-        "completion": "0.60"
+        "prompt": "1.25",
+        "completion": "10.00"
       }
     }
   ]
@@ -148,9 +149,9 @@ Input: 100 tokens
 Output: 50 tokens
 
 ```
-Prompt Cost:     100 × $0.15 / 1,000,000 = $0.000015
-Completion Cost: 50 × $0.60 / 1,000,000  = $0.00003
-Total:          $0.000045
+Prompt Cost:     100 × $1.25 / 1,000,000 = $0.000125
+Completion Cost: 50 × $10.00 / 1,000,000  = $0.0005
+Total:          $0.000625
 ```
 
 ### Example 2: Medium Response
@@ -159,9 +160,9 @@ Input: 1,000 tokens
 Output: 500 tokens
 
 ```
-Prompt Cost:     1,000 × $0.15 / 1,000,000 = $0.00015
-Completion Cost: 500 × $0.60 / 1,000,000   = $0.0003
-Total:           $0.00045
+Prompt Cost:     1,000 × $1.25 / 1,000,000 = $0.00125
+Completion Cost: 500 × $10.00 / 1,000,000   = $0.005
+Total:           $0.00625
 ```
 
 ### Example 3: Large Response
@@ -170,9 +171,9 @@ Input: 10,000 tokens
 Output: 5,000 tokens
 
 ```
-Prompt Cost:     10,000 × $0.15 / 1,000,000 = $0.0015
-Completion Cost: 5,000 × $0.60 / 1,000,000  = $0.003
-Total:           $0.0045
+Prompt Cost:     10,000 × $1.25 / 1,000,000 = $0.0125
+Completion Cost: 5,000 × $10.00 / 1,000,000  = $0.05
+Total:           $0.0625
 ```
 
 ## Implementation Details
@@ -215,11 +216,11 @@ Total:           $0.0045
 
 ### Primary Models
 
-| Model ID | Name | Context | Status |
-|----------|------|---------|--------|
-| `openai/gpt-5.1` | GPT-5.1 | 128k tokens | Latest |
-| `openai/gpt-5.1-turbo` | GPT-5.1 Turbo | 128k tokens | High-speed |
-| `openai/gpt-5` | GPT-5 | 128k tokens | Standard |
+| Model ID | Name | Context | Max Output | Status |
+|----------|------|---------|------------|--------|
+| `openai/gpt-5.1` | GPT-5.1 | 400k tokens | 128k tokens | Latest |
+| `openai/gpt-5.1-turbo` | GPT-5.1 Turbo | 400k tokens | 128k tokens | High-speed |
+| `openai/gpt-5` | GPT-5 | 128k tokens | TBD | Standard |
 
 **Note:** Model availability is determined by OpenRouter. Check `/v1/models` endpoint for current availability.
 
@@ -328,11 +329,12 @@ Includes model availability and cache status.
 
 ### Token Efficiency
 
-GPT-5.1 context window: **128,000 tokens**
-
-- Can process long documents efficiently
-- Good for multi-turn conversations
-- Cost-effective for context-heavy tasks
+GPT-5.1 capabilities:
+- **Context Window**: **400,000 tokens** (4x larger than GPT-4)
+- **Max Output**: **128,000 tokens**
+- Can process entire books or long documents efficiently
+- Excellent for multi-turn conversations
+- Higher cost but for extremely long-form reasoning tasks
 
 ## Security Considerations
 
