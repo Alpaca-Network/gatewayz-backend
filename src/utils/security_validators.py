@@ -10,10 +10,10 @@ This module provides validation functions to prevent common security issues:
 import hmac
 import hashlib
 import logging
-from typing import Optional
 from urllib.parse import urlparse
 import ipaddress
 
+from typing import Optional
 logger = logging.getLogger(__name__)
 
 
@@ -69,20 +69,14 @@ def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bo
             return False
 
         # Try to resolve and check if it's a private IP
-        try:
-            ip_obj = ipaddress.ip_address(hostname)
-            if is_private_ip(hostname):
-                logger.warning(f"Webhook URL points to private IP: {url}")
-                return False
-        except ValueError:
-            # Not an IP address, this is fine (it's a domain)
-            pass
+        if is_private_ip(hostname):
+            logger.warning(f"Webhook URL points to private IP: {url}")
+            return False
 
         # If domain whitelist is provided, check against it
         if allowed_domains:
             domain_match = any(
-                hostname == domain or hostname.endswith(f".{domain}")
-                for domain in allowed_domains
+                hostname == domain or hostname.endswith(f".{domain}") for domain in allowed_domains
             )
             if not domain_match:
                 logger.warning(
@@ -141,8 +135,7 @@ def validate_redirect_url(url: str, allowed_origins: Optional[list] = None) -> b
             origin = f"{parsed.scheme}://{parsed.netloc}"
             if origin not in allowed_origins:
                 logger.warning(
-                    f"Redirect URL origin not whitelisted: {origin}. "
-                    f"Allowed: {allowed_origins}"
+                    f"Redirect URL origin not whitelisted: {origin}. " f"Allowed: {allowed_origins}"
                 )
                 return False
 
@@ -163,18 +156,11 @@ def generate_webhook_signature(payload: str, secret: str) -> str:
     Returns:
         Hex-encoded HMAC-SHA256 signature
     """
-    return hmac.new(
-        secret.encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def verify_webhook_signature(
-    payload: str,
-    signature: str,
-    secret: str,
-    header_name: str = "X-Webhook-Signature"
+    payload: str, signature: str, secret: str, header_name: str = "X-Webhook-Signature"
 ) -> bool:
     """Verify webhook signature using constant-time comparison.
 
@@ -192,6 +178,7 @@ def verify_webhook_signature(
 
         # Use constant-time comparison to prevent timing attacks
         import secrets as secrets_module
+
         if secrets_module.compare_digest(signature, expected):
             return True
 
@@ -201,6 +188,26 @@ def verify_webhook_signature(
     except Exception as e:
         logger.error(f"Error verifying webhook signature: {e}")
         return False
+
+
+def sanitize_for_logging(value: str) -> str:
+    """Sanitize user-controlled strings for safe logging.
+
+    Prevents log injection attacks by removing newlines and other control characters
+    that could be used to forge log entries.
+
+    Args:
+        value: String value to sanitize (can be None)
+
+    Returns:
+        Sanitized string with newlines replaced by spaces
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    # Replace newlines and carriage returns with spaces to prevent log injection
+    return value.replace("\n", " ").replace("\r", " ").replace("\x00", "")
 
 
 def sanitize_pii_for_logging(data: dict, pii_fields: Optional[list] = None) -> dict:

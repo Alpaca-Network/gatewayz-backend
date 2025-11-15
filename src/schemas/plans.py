@@ -1,11 +1,11 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from enum import Enum
 
-from src.schemas import PlanType, SubscriptionStatus
+from pydantic import BaseModel, Field
+
+from src.schemas.common import PlanType, SubscriptionStatus
 
 
+from typing import Optional, Dict, List
 class PlanResponse(BaseModel):
     id: int
     name: str
@@ -23,8 +23,10 @@ class PlanResponse(BaseModel):
     features: List[str]
     is_active: bool
 
+
 class SubscriptionPlan(BaseModel):
     """Detailed subscription plan model with all fields"""
+
     id: Optional[int] = None
     plan_name: str
     plan_type: PlanType
@@ -43,8 +45,10 @@ class SubscriptionPlan(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+
 class SubscriptionHistory(BaseModel):
     """Subscription history model"""
+
     id: Optional[int] = None
     api_key_id: int
     plan_name: str
@@ -55,11 +59,14 @@ class SubscriptionHistory(BaseModel):
     payment_method: Optional[str] = None
     created_at: Optional[datetime] = None
 
+
 class SubscriptionPlansResponse(BaseModel):
     """Response for available subscription plans"""
+
     success: bool
     plans: List[SubscriptionPlan]
     message: str
+
 
 class UserPlanResponse(BaseModel):
     user_plan_id: int
@@ -77,10 +84,12 @@ class UserPlanResponse(BaseModel):
     end_date: str
     is_active: bool
 
+
 class AssignPlanRequest(BaseModel):
     user_id: int
     plan_id: int
     duration_months: int = 1
+
 
 class PlanUsageResponse(BaseModel):
     plan_name: str
@@ -88,6 +97,7 @@ class PlanUsageResponse(BaseModel):
     limits: Dict[str, int]
     remaining: Dict[str, int]
     at_limit: Dict[str, bool]
+
 
 class PlanEntitlementsResponse(BaseModel):
     has_plan: bool

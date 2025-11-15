@@ -1,8 +1,10 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from enum import Enum
+from typing import Any, Optional, Dict, List
 
+from pydantic import BaseModel
+
+
+from typing import Optional
 # Chat History Models
 class ChatMessage(BaseModel):
     id: Optional[int] = None

@@ -1,0 +1,239 @@
+name: Claude on CI failure
+
+concurrency:
+  group: claude-failure-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline", "Run Tests"]  # Trigger on both CI workflows
+    types: [completed]
+  # Manual trigger for explicit dispatch from CI or manual testing
+  workflow_dispatch:
+
+jobs:
+  run_claude_on_failure:
+    # Security: Only run for failures from the same repository (not forks)
+    # Supports both workflow_run events and explicit workflow_dispatch calls
+    if: >
+      ${{ (github.event_name == 'workflow_dispatch') ||
+          (github.event.workflow_run.conclusion == 'failure' &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+
+    # Required permissions for Claude Code action
+    permissions:
+      id-token: write      # Required for OIDC token
+      contents: write      # Required to push commits and edit files
+      pull-requests: write # Required to comment on PRs
+      actions: read        # Required to read workflow run data
+      checks: write        # Required to create/update check runs
+      statuses: write      # Required to create commit statuses
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Check for merge conflicts
+        id: check_conflicts
+        run: |
+          # Check if there are any merge conflict markers in the repository
+          # Using generic pattern "<<<<<<< " to catch all conflict markers (HEAD, branch names, etc.)
+          if grep -r "<<<<<<< " --include="*.py" --include="*.js" --include="*.ts" --include="*.tsx" --include="*.json" --include="*.yaml" --include="*.yml" --include="*.md" . 2>/dev/null; then
+            echo "has_conflicts=true" >> $GITHUB_OUTPUT
+            echo "Merge conflicts detected in the codebase"
+          else
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            echo "No merge conflicts detected"
+          fi
+
+      - name: Download workflow run logs
+        if: github.event_name == 'workflow_run'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Get the workflow run that triggered this
+            const runId = context.payload.workflow_run.id;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            console.log(`Fetching logs for workflow run ${runId}...`);
+
+            try {
+              // Get workflow run jobs
+              const jobs = await github.rest.actions.listJobsForWorkflowRun({
+                owner,
+                repo,
+                run_id: runId,
+              });
+
+              let failureSummary = `# CI Pipeline Failure Summary\n\n`;
+              failureSummary += `**Workflow:** ${context.payload.workflow_run.name}\n`;
+              failureSummary += `**Run ID:** ${runId}\n`;
+              failureSummary += `**Branch:** ${context.payload.workflow_run.head_branch}\n`;
+              failureSummary += `**Commit:** ${context.payload.workflow_run.head_sha}\n`;
+              failureSummary += `**Merge Conflicts Detected:** ${{ steps.check_conflicts.outputs.has_conflicts }}\n\n`;
+
+              // Process each failed job
+              for (const job of jobs.data.jobs) {
+                if (job.conclusion === 'failure') {
+                  failureSummary += `## Failed Job: ${job.name}\n\n`;
+                  failureSummary += `**Status:** ${job.status}\n`;
+                  failureSummary += `**Conclusion:** ${job.conclusion}\n`;
+                  failureSummary += `**Started:** ${job.started_at}\n`;
+                  failureSummary += `**Completed:** ${job.completed_at}\n\n`;
+
+                  // Get job logs
+                  try {
+                    const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                      owner,
+                      repo,
+                      job_id: job.id,
+                    });
+
+                    failureSummary += `### Log Output:\n\`\`\`\n`;
+                    failureSummary += logs.data;
+                    failureSummary += `\n\`\`\`\n\n`;
+                  } catch (logError) {
+                    console.error(`Failed to download logs for job ${job.id}:`, logError);
+                    failureSummary += `*Log download failed for this job*\n\n`;
+                  }
+
+                  // Add failed steps details
+                  failureSummary += `### Failed Steps:\n`;
+                  for (const step of job.steps || []) {
+                    if (step.conclusion === 'failure') {
+                      failureSummary += `- **${step.name}**: ${step.conclusion}\n`;
+                    }
+                  }
+                  failureSummary += `\n`;
+                }
+              }
+
+              // Write to file for Claude to read
+              fs.writeFileSync('failure-logs.md', failureSummary);
+              console.log('Failure logs written to failure-logs.md');
+              core.summary.addRaw(failureSummary);
+              await core.summary.write();
+
+            } catch (error) {
+              console.error('Error fetching workflow logs:', error);
+              const errorMsg = `Failed to fetch workflow logs: ${error.message}`;
+              fs.writeFileSync('failure-logs.md', errorMsg);
+            }
+
+      - name: Create placeholder logs for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cat > failure-logs.md << 'EOF'
+          # Manually Triggered Claude On-Failure Workflow
+
+          This workflow was manually dispatched from the CI pipeline.
+
+          Please analyze the repository for:
+          - Test failures
+          - Linting errors (ruff, black, isort, mypy)
+          - Import/dependency issues
+          - Merge conflicts (<<<<<<< markers)
+          - Type checking errors
+          - Coverage issues
+          EOF
+
+      - name: Validate configuration
+        run: |
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "❌ ERROR: ANTHROPIC_API_KEY secret is not configured"
+            echo "Please add ANTHROPIC_API_KEY to repository secrets"
+            exit 1
+          fi
+          echo "✅ ANTHROPIC_API_KEY is configured"
+          echo "✅ GitHub token is available"
+
+      - name: Run Claude Code (fix CI failures and push)
+        timeout-minutes: 45
+        uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_commit_signing: false
+          claude_args: "--max-turns 10"
+          prompt: |
+            The CI pipeline has failed. Your task is to diagnose and fix the failures:
+
+            1. **Check for merge conflicts FIRST** - Look for <<<<<<< <branch> markers in the code:
+               - If found, resolve them by understanding both branches and merging intelligently
+               - Remove all conflict markers
+               - This is often the root cause, so fix this before anything else
+
+            2. **Read failure-logs.md** - This file contains the complete failure details:
+               - Failed test names and error messages
+               - Linting/type check errors
+               - Build or import errors
+               - Any other failure information
+
+            3. **Identify root causes** - Determine what specifically failed and why:
+               - Test assertion failures or timeouts?
+               - Linting errors (ruff, black, isort, mypy)?
+               - Import or dependency issues?
+               - Coverage below 25% threshold?
+               - Build/startup errors?
+
+            4. **Fix the issues** - Make targeted code changes to resolve failures:
+               - Fix failing tests or mock configuration
+               - Resolve linting/formatting issues
+               - Fix import/dependency problems
+               - Ensure coverage stays above 25%
+
+            5. **Commit and push** - Once all fixes are complete:
+               - Create clear commit messages explaining what was fixed
+               - Push to this PR branch
+
+            Common issues in this codebase:
+            - Merge conflicts (<<<<<<< markers)
+            - Test failures (pytest assertions, timeouts, mocks)
+            - Code formatting (ruff, black, isort violations)
+            - Type errors (mypy)
+            - Coverage drops
+            - Integration test failures
+            - FastAPI initialization issues
+
+            **IMPORTANT**: Always check for merge conflicts first, then read failure-logs.md for exact error details!
+
+      - name: Report completion
+        if: always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Create a summary of what happened
+            let summary = '## 🤖 Claude Code Auto-Fix Attempt\n\n';
+
+            // Check if Claude made any commits
+            const { execSync } = require('child_process');
+            try {
+              const newCommits = execSync('git log --oneline ${{ github.event.workflow_run.head_sha }}..HEAD').toString();
+
+              if (newCommits.trim()) {
+                summary += '✅ Claude Code attempted to fix the CI failures.\n\n';
+                summary += '**New commits:**\n```\n' + newCommits + '```\n\n';
+                summary += 'The CI pipeline will run again to verify the fixes.\n';
+              } else {
+                summary += '⚠️ Claude Code ran but did not make any commits.\n\n';
+                summary += 'This might mean:\n';
+                summary += '- The failures require manual intervention\n';
+                summary += '- Claude could not determine a safe fix\n';
+                summary += '- There was an issue accessing the failure logs\n\n';
+                summary += 'Please check the workflow logs for details.\n';
+              }
+            } catch (error) {
+              summary += '❌ Error checking for new commits: ' + error.message + '\n';
+            }
+
+            core.summary.addRaw(summary);
+            await core.summary.write();
+            console.log(summary);

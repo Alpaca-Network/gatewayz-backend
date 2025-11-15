@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from src.services.model_transformations import transform_model_id, detect_provider_from_model_id
 
 
@@ -46,8 +47,9 @@ def test_detect_provider_from_model_id_existing_providers():
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
 
 
+@patch.dict('os.environ', {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
 def test_detect_provider_google_vertex_models():
-    """Test that Google Vertex AI models are correctly detected"""
+    """Test that Google Vertex AI models are correctly detected when credentials are available"""
     test_cases = [
         ("gemini-2.5-flash", "google-vertex"),
         ("gemini-2.0-flash", "google-vertex"),
@@ -73,3 +75,27 @@ def test_detect_provider_portkey_models():
     for model_id, expected in test_cases:
         result = detect_provider_from_model_id(model_id)
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_z_ai_glm_with_exacto_suffix():
+    """Test that z-ai/glm-4.6:exacto is correctly detected as OpenRouter"""
+    # Test provider detection - :exacto suffix indicates OpenRouter
+    result = detect_provider_from_model_id("z-ai/glm-4.6:exacto")
+    assert result == "openrouter", f"Expected 'openrouter' for z-ai/glm-4.6:exacto, got {result}"
+
+    # Test model transformation - OpenRouter passes through as-is (lowercase)
+    transformed = transform_model_id("z-ai/glm-4.6:exacto", "openrouter")
+    assert transformed == "z-ai/glm-4.6:exacto", f"Expected 'z-ai/glm-4.6:exacto', got {transformed}"
+
+
+def test_openrouter_colon_suffix_variants():
+    """Test that OpenRouter models with colon suffixes are correctly detected"""
+    test_cases = [
+        ("z-ai/glm-4.6:exacto", "openrouter"),
+        ("google/gemini-2.0-flash-exp:free", "openrouter"),
+        ("anthropic/claude-3-opus:extended", "openrouter"),
+    ]
+
+    for model_id, expected_provider in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected_provider, f"Expected '{expected_provider}' for {model_id}, got {result}"

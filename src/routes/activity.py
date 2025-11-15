@@ -4,12 +4,14 @@ Endpoints for retrieving user activity statistics and logs
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Optional, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.db.activity import get_user_activity_stats, get_user_activity_log
+from src.db.activity import get_user_activity_log, get_user_activity_stats
 from src.security.deps import get_current_user
 
+from typing import Optional
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user/activity", tags=["Activity"])
@@ -20,7 +22,7 @@ async def get_activity_stats(
     days: Optional[int] = Query(None, description="Number of days to look back", ge=1, le=365),
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Get aggregated activity statistics for the authenticated user
@@ -57,8 +59,10 @@ async def get_activity_stats(
     }
     """
     try:
-        user_id = current_user['id']
-        logger.info(f"Fetching activity stats for user {user_id}, from={from_date}, to={to_date}, days={days}")
+        user_id = current_user["id"]
+        logger.info(
+            f"Fetching activity stats for user {user_id}, from={from_date}, to={to_date}, days={days}"
+        )
 
         stats = get_user_activity_stats(user_id, from_date=from_date, to_date=to_date, days=days)
 
@@ -69,9 +73,8 @@ async def get_activity_stats(
     except Exception as e:
         logger.error(f"Error getting activity stats: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve activity statistics: {str(e)}"
-        )
+            status_code=500, detail=f"Failed to retrieve activity statistics: {str(e)}"
+        ) from e
 
 
 @router.get("/log")
@@ -83,7 +86,7 @@ async def get_activity_log(
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     model: Optional[str] = Query(None, description="Filter by model name"),
     provider: Optional[str] = Query(None, description="Filter by provider name"),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Get paginated activity log for the authenticated user
@@ -132,13 +135,15 @@ async def get_activity_log(
     }
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user["id"]
 
         # Convert page to offset if provided
         if page is not None:
             offset = (page - 1) * limit
 
-        logger.info(f"Fetching activity log for user {user_id}, limit={limit}, offset={offset}, from={from_date}, to={to_date}")
+        logger.info(
+            f"Fetching activity log for user {user_id}, limit={limit}, offset={offset}, from={from_date}, to={to_date}"
+        )
 
         activities = get_user_activity_log(
             user_id=user_id,
@@ -147,7 +152,7 @@ async def get_activity_log(
             from_date=from_date,
             to_date=to_date,
             model_filter=model,
-            provider_filter=provider
+            provider_filter=provider,
         )
 
         logger.info(f"Retrieved {len(activities)} activity records for user {user_id}")
@@ -157,12 +162,11 @@ async def get_activity_log(
             "logs": activities,
             "total": len(activities),
             "page": page if page else (offset // limit) + 1,
-            "limit": limit
+            "limit": limit,
         }
 
     except Exception as e:
         logger.error(f"Error getting activity log: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve activity log: {str(e)}"
-        )
+            status_code=500, detail=f"Failed to retrieve activity log: {str(e)}"
+        ) from e

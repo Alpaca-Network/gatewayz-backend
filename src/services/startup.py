@@ -2,16 +2,21 @@
 Startup service for initializing health monitoring, availability services, and connection pools
 """
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from src.services.model_health_monitor import health_monitor
-from src.services.model_availability import availability_service
 from src.services.connection_pool import clear_connection_pools, get_pool_stats
+from src.services.model_availability import availability_service
+from src.services.model_health_monitor import health_monitor
 from src.services.response_cache import get_cache
+from src.services.prometheus_remote_write import (
+    init_prometheus_remote_write,
+    shutdown_prometheus_remote_write,
+)
+from src.services.tempo_otlp import init_tempo_otlp, init_tempo_otlp_fastapi
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -19,9 +24,34 @@ async def lifespan(app):
     Application lifespan manager for startup and shutdown events
     """
     # Startup
-    logger.info("Starting health monitoring and availability services...")
+    logger.info("Starting health monitoring and observability services...")
+
+    # Validate critical environment variables at runtime startup
+    from src.config import Config
+    is_valid, missing_vars = Config.validate_critical_env_vars()
+    if not is_valid:
+        logger.error(f"❌ CRITICAL: Missing required environment variables: {missing_vars}")
+        logger.error("Application cannot start without these variables")
+        raise RuntimeError(f"Missing required environment variables: {missing_vars}")
+    else:
+        logger.info(f"✅ All critical environment variables validated")
 
     try:
+        # Initialize Tempo/OpenTelemetry OTLP tracing
+        try:
+            init_tempo_otlp()
+            init_tempo_otlp_fastapi()
+            logger.info("Tempo/OTLP tracing initialized")
+        except Exception as e:
+            logger.warning(f"Tempo/OTLP initialization warning: {e}")
+
+        # Initialize Prometheus remote write
+        try:
+            await init_prometheus_remote_write()
+            logger.info("Prometheus remote write initialized")
+        except Exception as e:
+            logger.warning(f"Prometheus remote write initialization warning: {e}")
+
         # Start health monitoring
         await health_monitor.start_monitoring()
         logger.info("Health monitoring service started")
@@ -35,10 +65,10 @@ async def lifespan(app):
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
         # Initialize response cache
-        cache = get_cache()
+        get_cache()
         logger.info("Response cache initialized")
 
-        logger.info("All monitoring services started successfully")
+        logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
         logger.error(f"Failed to start monitoring services: {e}")
@@ -47,7 +77,7 @@ async def lifespan(app):
     yield
 
     # Shutdown
-    logger.info("Shutting down monitoring services...")
+    logger.info("Shutting down monitoring and observability services...")
 
     try:
         # Stop availability monitoring
@@ -58,14 +88,22 @@ async def lifespan(app):
         await health_monitor.stop_monitoring()
         logger.info("Health monitoring service stopped")
 
+        # Shutdown Prometheus remote write
+        try:
+            await shutdown_prometheus_remote_write()
+            logger.info("Prometheus remote write shutdown complete")
+        except Exception as e:
+            logger.warning(f"Prometheus shutdown warning: {e}")
+
         # Clear connection pools
         clear_connection_pools()
         logger.info("Connection pools cleared")
 
-        logger.info("All monitoring services stopped successfully")
+        logger.info("All monitoring and health services stopped successfully")
 
     except Exception as e:
         logger.error(f"Error stopping monitoring services: {e}")
+
 
 async def initialize_services():
     """
@@ -73,18 +111,19 @@ async def initialize_services():
     """
     try:
         logger.info("Initializing monitoring services...")
-        
+
         # Start health monitoring
         await health_monitor.start_monitoring()
-        
+
         # Start availability monitoring
         await availability_service.start_monitoring()
-        
+
         logger.info("All services initialized successfully")
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
+
 
 async def shutdown_services():
     """
@@ -92,14 +131,14 @@ async def shutdown_services():
     """
     try:
         logger.info("Shutting down services...")
-        
+
         # Stop availability monitoring
         await availability_service.stop_monitoring()
-        
+
         # Stop health monitoring
         await health_monitor.stop_monitoring()
-        
+
         logger.info("All services shut down successfully")
-        
+
     except Exception as e:
         logger.error(f"Error shutting down services: {e}")

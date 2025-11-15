@@ -1,8 +1,10 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from enum import Enum
+from typing import Any, Optional, Dict, List
 
+from pydantic import BaseModel
+
+
+from typing import Optional
 class UsageMetrics(BaseModel):
     total_requests: int
     total_tokens: int
@@ -17,12 +19,14 @@ class UsageMetrics(BaseModel):
     most_used_model: str
     last_request_time: Optional[datetime] = None
 
+
 class UserMonitorResponse(BaseModel):
     user_id: int
     api_key: str
     current_credits: int
     usage_metrics: UsageMetrics
     rate_limits: Dict[str, Any]
+
 
 class AdminMonitorResponse(BaseModel):
     total_users: int
@@ -33,6 +37,7 @@ class AdminMonitorResponse(BaseModel):
     system_usage_metrics: UsageMetrics
     top_users_by_usage: List[Dict[str, Any]]
 
+
 class RateLimitConfig(BaseModel):
     requests_per_minute: int = 60
     requests_per_hour: int = 1000
@@ -41,15 +46,18 @@ class RateLimitConfig(BaseModel):
     tokens_per_hour: int = 100000
     tokens_per_day: int = 1000000
 
+
 class SetRateLimitRequest(BaseModel):
     api_key: str
     rate_limits: RateLimitConfig
+
 
 class RateLimitResponse(BaseModel):
     api_key: str
     current_limits: RateLimitConfig
     current_usage: Dict[str, Any]
     reset_times: Dict[str, datetime]
+
 
 class UsageRecord(BaseModel):
     user_id: int

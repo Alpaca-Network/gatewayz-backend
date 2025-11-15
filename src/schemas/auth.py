@@ -1,11 +1,11 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from enum import Enum
 
-from src.schemas import AuthMethod
+from pydantic import BaseModel, EmailStr
+
+from src.schemas.common import AuthMethod
 
 
+from typing import Optional, List
 class PrivyLinkedAccount(BaseModel):
     type: str
     subject: Optional[str] = None
@@ -15,6 +15,7 @@ class PrivyLinkedAccount(BaseModel):
     first_verified_at: Optional[int] = None
     latest_verified_at: Optional[int] = None
 
+
 class PrivyUserData(BaseModel):
     id: str
     created_at: int
@@ -22,6 +23,7 @@ class PrivyUserData(BaseModel):
     mfa_methods: List[str] = []
     has_accepted_terms: bool = False
     is_guest: bool = False
+
 
 class PrivySignupRequest(BaseModel):
     privy_user_id: str
@@ -32,9 +34,11 @@ class PrivySignupRequest(BaseModel):
     gmail_address: Optional[EmailStr] = None
     github_username: Optional[str] = None
 
+
 class PrivySigninRequest(BaseModel):
     privy_user_id: str
     auth_method: AuthMethod
+
 
 class PrivyAuthRequest(BaseModel):
     user: PrivyUserData
@@ -45,6 +49,8 @@ class PrivyAuthRequest(BaseModel):
     session_update_action: Optional[str] = None
     is_new_user: Optional[bool] = None
     referral_code: Optional[str] = None  # Referral code if user signed up with one
+    environment_tag: Optional[str] = "live"  # Environment tag for API keys (live, test, development)
+
 
 class PrivyAuthResponse(BaseModel):
     success: bool

@@ -1,14 +1,13 @@
 import logging
-import httpx
-import time
-import base64
 import os
-from typing import Dict, Any
+import time
+from typing import Any, Dict
+
+import httpx
 
 from src.config import Config
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +20,7 @@ def make_portkey_image_request(
     n: int = 1,
     quality: str = "standard",
     style: str = "natural",
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """Make image generation request to Portkey
 
@@ -44,27 +43,26 @@ def make_portkey_image_request(
         url = "https://api.portkey.ai/v1/images/generations"
 
         # Build headers
-        headers = {
-            "x-portkey-api-key": Config.PORTKEY_API_KEY,
-            "Content-Type": "application/json"
-        }
+        headers = {"x-portkey-api-key": Config.PORTKEY_API_KEY, "Content-Type": "application/json"}
 
         # Method 1: Use virtual key if provided
         if virtual_key:
             headers["x-portkey-virtual-key"] = virtual_key
         # Method 2: Use @provider format (Portkey SDK style)
-        elif provider and provider.startswith("@"):
+        # Normalize provider to lowercase for case-insensitive @ prefix checking
+        elif provider and provider.lower().startswith("@"):
             # Use config-based provider format
             import json
-            config = {
-                "provider": provider  # e.g., "@openai", "@stability-ai"
-            }
+
+            config = {"provider": provider.lower()}  # e.g., "@openai", "@stability-ai"
             headers["x-portkey-config"] = json.dumps(config)
         # Method 3: Legacy provider header
         elif provider:
-            headers["x-portkey-provider"] = provider
+            headers["x-portkey-provider"] = provider.lower()
         else:
-            raise ValueError("Either virtual_key or provider must be specified for Portkey image generation")
+            raise ValueError(
+                "Either virtual_key or provider must be specified for Portkey image generation"
+            )
 
         # Build request payload
         payload = {
@@ -92,7 +90,9 @@ def make_portkey_image_request(
         return response.json()
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"Portkey image generation HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error(
+            f"Portkey image generation HTTP error: {e.response.status_code} - {e.response.text}"
+        )
         raise
     except Exception as e:
         logger.error(f"Portkey image generation request failed: {e}")
@@ -100,11 +100,7 @@ def make_portkey_image_request(
 
 
 def make_deepinfra_image_request(
-    prompt: str,
-    model: str = "stabilityai/sd3.5",
-    size: str = "1024x1024",
-    n: int = 1,
-    **kwargs
+    prompt: str, model: str = "stabilityai/sd3.5", size: str = "1024x1024", n: int = 1, **kwargs
 ) -> Dict[str, Any]:
     """Make image generation request directly to DeepInfra
 
@@ -117,21 +113,18 @@ def make_deepinfra_image_request(
     """
     try:
         if not Config.DEEPINFRA_API_KEY:
-            raise ValueError("DeepInfra API key not configured. Please set DEEPINFRA_API_KEY environment variable")
+            raise ValueError(
+                "DeepInfra API key not configured. Please set DEEPINFRA_API_KEY environment variable"
+            )
 
         url = "https://api.deepinfra.com/v1/openai/images/generations"
 
         headers = {
             "Authorization": f"Bearer {Config.DEEPINFRA_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
-        payload = {
-            "prompt": prompt,
-            "model": model,
-            "size": size,
-            "n": n
-        }
+        payload = {"prompt": prompt, "model": model, "size": size, "n": n}
 
         # Add any additional kwargs
         payload.update(kwargs)
@@ -145,7 +138,9 @@ def make_deepinfra_image_request(
         return response.json()
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"DeepInfra image generation HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error(
+            f"DeepInfra image generation HTTP error: {e.response.status_code} - {e.response.text}"
+        )
         raise
     except Exception as e:
         logger.error(f"DeepInfra image generation request failed: {e}")
@@ -160,7 +155,7 @@ def make_google_vertex_image_request(
     project_id: str = None,
     location: str = None,
     endpoint_id: str = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """Make image generation request to Google Vertex AI endpoint
 
@@ -180,13 +175,13 @@ def make_google_vertex_image_request(
     try:
         # Import Google Cloud AI Platform SDK
         try:
+            from google.auth import impersonated_credentials
             from google.cloud import aiplatform
-            from google.auth import impersonated_credentials, default
         except ImportError:
             raise ImportError(
                 "google-cloud-aiplatform and google-auth packages are required. "
                 "Install with: pip install google-cloud-aiplatform google-auth"
-            )
+            ) from None
 
         # Use config values if not provided
         project_id = project_id or Config.GOOGLE_PROJECT_ID
@@ -194,51 +189,34 @@ def make_google_vertex_image_request(
         endpoint_id = endpoint_id or Config.GOOGLE_VERTEX_ENDPOINT_ID
 
         if not project_id:
-            raise ValueError("Google Cloud project ID not configured. Set GOOGLE_PROJECT_ID environment variable")
+            raise ValueError(
+                "Google Cloud project ID not configured. Set GOOGLE_PROJECT_ID environment variable"
+            )
         if not endpoint_id:
-            raise ValueError("Google Vertex AI endpoint ID not configured. Set GOOGLE_VERTEX_ENDPOINT_ID environment variable")
+            raise ValueError(
+                "Google Vertex AI endpoint ID not configured. Set GOOGLE_VERTEX_ENDPOINT_ID environment variable"
+            )
 
         logger.info(f"Making image generation request to Google Vertex AI endpoint {endpoint_id}")
 
         # Service account to impersonate (if key creation is disabled)
         target_sa = os.getenv(
-            "GOOGLE_VERTEX_SERVICE_ACCOUNT",
-            "vertex-client@gatewayz-468519.iam.gserviceaccount.com"
+            "GOOGLE_VERTEX_SERVICE_ACCOUNT", "vertex-client@gatewayz-468519.iam.gserviceaccount.com"
         )
 
-        # Try to get credentials with impersonation support
-        credentials = None
+        # Initialize Vertex AI using ADC (Application Default Credentials)
+        # The initialize_vertex_ai() function handles GOOGLE_VERTEX_CREDENTIALS_JSON
+        # and other credential sources automatically
         try:
-            # First, try to get default credentials
-            source_credentials, source_project = default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
+            from src.services.google_vertex_client import initialize_vertex_ai
 
-            # If GOOGLE_VERTEX_SERVICE_ACCOUNT is set, use impersonation
-            if os.getenv("GOOGLE_VERTEX_SERVICE_ACCOUNT"):
-                logger.info(f"Using service account impersonation: {target_sa}")
-                credentials = impersonated_credentials.Credentials(
-                    source_credentials=source_credentials,
-                    target_principal=target_sa,
-                    target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                    lifetime=3600  # 1 hour
-                )
-                logger.info("✓ Successfully created impersonated credentials")
-            else:
-                # Use default credentials (works if GOOGLE_APPLICATION_CREDENTIALS is set)
-                credentials = source_credentials
-                logger.info("Using default credentials from environment")
+            # This will use ADC and handle temp file creation for GOOGLE_VERTEX_CREDENTIALS_JSON
+            initialize_vertex_ai()
+            logger.info("✓ Successfully initialized Vertex AI with ADC")
 
         except Exception as auth_error:
             logger.warning(f"Authentication setup: {auth_error}")
-            # Let Vertex AI SDK handle default authentication
-            credentials = None
-
-        # Initialize Vertex AI
-        if credentials:
-            aiplatform.init(project=project_id, location=location, credentials=credentials)
-        else:
-            # Fall back to default authentication
+            # Fall back to default aiplatform initialization
             aiplatform.init(project=project_id, location=location)
 
         # Get the endpoint
@@ -246,7 +224,7 @@ def make_google_vertex_image_request(
 
         # Parse size to width and height
         try:
-            width, height = map(int, size.split('x'))
+            width, height = map(int, size.split("x"))
         except (ValueError, AttributeError):
             width, height = 1024, 1024  # Default size
 
@@ -258,7 +236,7 @@ def make_google_vertex_image_request(
                 "prompt": prompt,
                 "width": width,
                 "height": height,
-                **kwargs  # Allow additional parameters
+                **kwargs,  # Allow additional parameters
             }
             instances.append(instance)
 
@@ -269,15 +247,15 @@ def make_google_vertex_image_request(
         # The response format depends on your model output
         data = []
 
-        if hasattr(response, 'predictions'):
+        if hasattr(response, "predictions"):
             for prediction in response.predictions:
                 # If the prediction contains base64 encoded image
                 if isinstance(prediction, dict):
-                    if 'image' in prediction:
+                    if "image" in prediction:
                         # Image is already base64 encoded
-                        image_b64 = prediction['image']
-                    elif 'b64_json' in prediction:
-                        image_b64 = prediction['b64_json']
+                        image_b64 = prediction["image"]
+                    elif "b64_json" in prediction:
+                        image_b64 = prediction["b64_json"]
                     else:
                         # Assume the prediction itself is the base64 string
                         image_b64 = str(prediction)
@@ -285,17 +263,19 @@ def make_google_vertex_image_request(
                     # Assume prediction is base64 string
                     image_b64 = str(prediction)
 
-                data.append({
-                    "b64_json": image_b64,
-                    "url": None  # Vertex AI typically returns base64, not URLs
-                })
+                data.append(
+                    {
+                        "b64_json": image_b64,
+                        "url": None,  # Vertex AI typically returns base64, not URLs
+                    }
+                )
 
         # Return in OpenAI-compatible format
         return {
             "created": int(time.time()),
             "data": data,
             "provider": "google-vertex",
-            "model": model
+            "model": model,
         }
 
     except Exception as e:
@@ -303,7 +283,9 @@ def make_google_vertex_image_request(
         raise
 
 
-def process_image_generation_response(response: Dict[str, Any], provider: str, model: str) -> Dict[str, Any]:
+def process_image_generation_response(
+    response: Dict[str, Any], provider: str, model: str
+) -> Dict[str, Any]:
     """Process image generation response to standard format
 
     Args:
@@ -329,7 +311,7 @@ def process_image_generation_response(response: Dict[str, Any], provider: str, m
             "created": int(time.time()),
             "data": response.get("data", []),
             "provider": provider,
-            "model": model
+            "model": model,
         }
 
     except Exception as e:

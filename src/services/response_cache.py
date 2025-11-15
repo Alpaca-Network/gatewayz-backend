@@ -5,19 +5,20 @@ This module provides intelligent caching for chat completion responses,
 including semantic caching to match similar queries.
 """
 
-import logging
 import hashlib
 import json
+import logging
 import time
-from typing import Optional, Dict, Any, List, Tuple
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from typing import Any, Optional, Dict, List
 
+from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Try to import Redis for distributed caching
 try:
     import redis
+
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
@@ -27,6 +28,7 @@ except ImportError:
 @dataclass
 class CachedResponse:
     """Container for cached responses"""
+
     response: Dict[str, Any]
     model: str
     created_at: float
@@ -327,11 +329,7 @@ class ResponseCache:
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
         total_requests = self._stats["hits"] + self._stats["misses"]
-        hit_rate = (
-            (self._stats["hits"] / total_requests * 100)
-            if total_requests > 0
-            else 0
-        )
+        hit_rate = (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0
 
         return {
             "hits": self._stats["hits"],
@@ -345,11 +343,7 @@ class ResponseCache:
 
     def cleanup_expired(self):
         """Remove expired entries from memory cache"""
-        expired_keys = [
-            key
-            for key, cached in self._memory_cache.items()
-            if cached.is_expired()
-        ]
+        expired_keys = [key for key, cached in self._memory_cache.items() if cached.is_expired()]
 
         for key in expired_keys:
             del self._memory_cache[key]

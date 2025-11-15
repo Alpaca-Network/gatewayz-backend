@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "gatewayz-backend"
 version = "2.0.3"
 description = "Gatewayz Universal Inference API"
-requires-python = ">=3.12"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     # Core web framework
     "fastapi==0.104.1",
@@ -115,6 +115,7 @@ ignore = [
     "E501",  # Line too long (Black handles this)
     "B008",  # Do not perform function calls in argument defaults
     "W191",  # Indentation contains tabs
+    "I001",  # Import block is unsorted (isort handles this separately)
 ]
 
 # Allow autofix for all enabled rules

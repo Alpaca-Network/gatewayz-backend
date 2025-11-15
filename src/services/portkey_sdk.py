@@ -11,10 +11,10 @@ Each provider is accessed individually to:
 """
 
 import logging
-import json
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
+from typing import Any, Optional, Dict, List
 
+from typing import Optional
 try:
     from portkey_ai import Portkey
 except ImportError:
@@ -26,35 +26,27 @@ logger = logging.getLogger(__name__)
 
 # Provider configurations
 PROVIDERS = {
-    'google': {
-        'name': 'Google',
-        'provider_slug': 'google',
-        'description': 'Google Generative AI models (direct API access)'
+
+    "cerebras": {
+        "name": "Cerebras",
+        "provider_slug": "cerebras",
+        "description": "Cerebras models via Portkey",
     },
-    'cerebras': {
-        'name': 'Cerebras',
-        'provider_slug': 'cerebras',
-        'description': 'Cerebras models via Portkey'
+    "nebius": {
+        "name": "Nebius",
+        "provider_slug": "nebius",
+        "description": "Nebius models via Portkey",
     },
-    'nebius': {
-        'name': 'Nebius',
-        'provider_slug': 'nebius',
-        'description': 'Nebius models via Portkey'
+    "xai": {"name": "Xai", "provider_slug": "xai", "description": "Xai models via Portkey"},
+    "novita": {
+        "name": "Novita",
+        "provider_slug": "novita",
+        "description": "Novita models via Portkey",
     },
-    'xai': {
-        'name': 'Xai',
-        'provider_slug': 'xai',
-        'description': 'Xai models via Portkey'
-    },
-    'novita': {
-        'name': 'Novita',
-        'provider_slug': 'novita',
-        'description': 'Novita models via Portkey'
-    },
-    'hug': {
-        'name': 'Hugging Face',
-        'provider_slug': 'huggingface',
-        'description': 'Hugging Face models via Portkey'
+    "hug": {
+        "name": "Hugging Face",
+        "provider_slug": "huggingface",
+        "description": "Hugging Face models via Portkey",
     },
 }
 
@@ -80,7 +72,7 @@ class PortkeySDKService:
         Get a Portkey client configured for a specific provider.
 
         Args:
-            provider: Provider name (e.g., 'google', 'cerebras', 'openrouter', 'deepinfra')
+            provider: Provider name (e.g., 'cerebras', 'openrouter', 'deepinfra')
 
         Returns:
             Configured Portkey client or None if provider config not found
@@ -88,14 +80,13 @@ class PortkeySDKService:
         try:
             # Map provider names to Portkey provider slugs
             provider_config = {
-                'google': 'google',
-                'cerebras': 'cerebras',
-                'nebius': 'nebius',
-                'xai': 'xai',
-                'novita': 'novita',
-                'hug': 'huggingface',
-                'openrouter': 'openrouter',
-                'deepinfra': 'deepinfra',
+                "cerebras": "cerebras",
+                "nebius": "nebius",
+                "xai": "xai",
+                "novita": "novita",
+                "hug": "huggingface",
+                "openrouter": "openrouter",
+                "deepinfra": "deepinfra",
             }
 
             portkey_provider = provider_config.get(provider.lower())
@@ -144,9 +135,9 @@ class PortkeySDKService:
 
                 # Handle the SyncCursorPage response from Portkey SDK v2.0+
                 model_list = []
-                if hasattr(models_response, 'data'):
+                if hasattr(models_response, "data"):
                     model_list = models_response.data
-                elif hasattr(models_response, '__iter__'):
+                elif hasattr(models_response, "__iter__"):
                     # If it's iterable, collect all items
                     try:
                         model_list = list(models_response)

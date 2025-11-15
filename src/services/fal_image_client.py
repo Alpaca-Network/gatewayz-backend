@@ -1,14 +1,15 @@
-import logging
-import httpx
-import time
 import json
+import logging
+import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional, Dict, List
+
+import httpx
 
 from src.config import Config
 
+from typing import Optional
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Cache for Fal.ai models catalog
@@ -31,13 +32,15 @@ def load_fal_models_catalog() -> List[Dict[str, Any]]:
 
         if catalog_path.exists():
             logger.info(f"Loading Fal.ai models from catalog: {catalog_path}")
-            with open(catalog_path, 'r') as f:
+            with open(catalog_path) as f:
                 raw_data = json.load(f)
-            
+
             # Filter out metadata objects and only keep actual model objects
             # Model objects must have an "id" field
-            _fal_models_cache = [item for item in raw_data if isinstance(item, dict) and "id" in item]
-            
+            _fal_models_cache = [
+                item for item in raw_data if isinstance(item, dict) and "id" in item
+            ]
+
             logger.info(f"Loaded {len(_fal_models_cache)} Fal.ai models from catalog")
             return _fal_models_cache
         else:
@@ -88,7 +91,7 @@ def make_fal_image_request(
     model: str = "fal-ai/stable-diffusion-v15",
     size: str = "1024x1024",
     n: int = 1,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """Make image generation request to Fal.ai
 
@@ -146,19 +149,18 @@ def make_fal_image_request(
     """
     try:
         if not Config.FAL_API_KEY:
-            raise ValueError("Fal.ai API key not configured. Please set FAL_API_KEY environment variable")
+            raise ValueError(
+                "Fal.ai API key not configured. Please set FAL_API_KEY environment variable"
+            )
 
-        # Fal.ai API endpoint - using subscribe endpoint for synchronous requests
-        url = f"https://fal.run/{model}"
+        # Fal.ai Queue API endpoint - recommended for production use
+        queue_url = f"https://queue.fal.run/{model}"
 
-        headers = {
-            "Authorization": f"Key {Config.FAL_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Key {Config.FAL_API_KEY}", "Content-Type": "application/json"}
 
         # Parse size to width and height for Fal.ai
         try:
-            width, height = map(int, size.split('x'))
+            width, height = map(int, size.split("x"))
         except (ValueError, AttributeError):
             width, height = 1024, 1024  # Default size
 
@@ -169,23 +171,17 @@ def make_fal_image_request(
             "768x1024": "portrait_4_3",
             "576x1024": "portrait_16_9",
             "1024x768": "landscape_4_3",
-            "1024x576": "landscape_16_9"
+            "1024x576": "landscape_16_9",
         }
 
         # Build Fal.ai request payload
-        payload = {
-            "prompt": prompt,
-            "num_images": n
-        }
+        payload = {"prompt": prompt, "num_images": n}
 
         # Add image size - use mapping or custom dimensions
         if size in size_mapping:
             payload["image_size"] = size_mapping[size]
         else:
-            payload["image_size"] = {
-                "width": width,
-                "height": height
-            }
+            payload["image_size"] = {"width": width, "height": height}
 
         # Add optional Fal.ai-specific parameters from kwargs
         fal_params = [
@@ -196,39 +192,84 @@ def make_fal_image_request(
             "sync_mode",
             "enable_safety_checker",
             "expand_prompt",
-            "format"
+            "format",
         ]
 
         for param in fal_params:
             if param in kwargs:
                 payload[param] = kwargs[param]
 
-        logger.info(f"Making image generation request to Fal.ai with model {model}")
+        logger.info(f"Submitting image generation request to Fal.ai queue with model {model}")
 
-        # Make synchronous request to Fal.ai
-        response = httpx.post(url, headers=headers, json=payload, timeout=120.0)
+        # Submit request to Fal.ai queue
+        response = httpx.post(queue_url, headers=headers, json=payload, timeout=30.0)
         response.raise_for_status()
 
-        fal_response = response.json()
+        queue_response = response.json()
 
-        # Convert Fal.ai response to OpenAI-compatible format
-        data = []
-        if "images" in fal_response:
-            for img in fal_response["images"]:
-                data.append({
-                    "url": img.get("url"),
-                    "b64_json": None  # Fal.ai returns URLs by default
-                })
+        # Get the request ID, status URL, and response URL for polling
+        request_id = queue_response.get("request_id")
+        status_url = queue_response.get("status_url")
+        response_url = queue_response.get("response_url")
 
-        return {
-            "created": int(time.time()),
-            "data": data,
-            "provider": "fal",
-            "model": model
-        }
+        if not status_url:
+            raise Exception("Fal.ai did not return a status_url")
+
+        logger.info(f"Fal.ai request submitted (ID: {request_id}), polling status at {status_url}")
+
+        # Poll for completion (max 2 minutes)
+        max_attempts = 60  # 60 attempts * 2 seconds = 2 minutes
+        attempt = 0
+
+        while attempt < max_attempts:
+            attempt += 1
+            time.sleep(2)  # Wait 2 seconds between polls
+
+            # Check status
+            status_response = httpx.get(status_url, headers=headers, timeout=30.0)
+            status_response.raise_for_status()
+
+            status_data = status_response.json()
+            status = status_data.get("status")
+
+            logger.info(f"Fal.ai request status (attempt {attempt}): {status}")
+
+            if status == "COMPLETED":
+                # Get the actual result from response_url
+                result_url = status_data.get("response_url") or response_url
+                if not result_url:
+                    raise Exception("Fal.ai did not return a response_url")
+
+                logger.info(f"Fetching completed result from {result_url}")
+                result_response = httpx.get(result_url, headers=headers, timeout=30.0)
+                result_response.raise_for_status()
+
+                fal_response = result_response.json()
+
+                # Convert Fal.ai response to OpenAI-compatible format
+                data = []
+                if "images" in fal_response:
+                    for img in fal_response["images"]:
+                        data.append(
+                            {"url": img.get("url"), "b64_json": None}  # Fal.ai returns URLs by default
+                        )
+
+                return {"created": int(time.time()), "data": data, "provider": "fal", "model": model}
+
+            elif status in ["FAILED", "ERROR"]:
+                error_msg = status_data.get("error", "Unknown error")
+                logger.error(f"Fal.ai request failed: {error_msg}")
+                raise Exception(f"Fal.ai request failed: {error_msg}")
+
+            # Continue polling if status is IN_QUEUE or IN_PROGRESS
+
+        # Timeout after max attempts
+        raise Exception(f"Fal.ai request timed out after {max_attempts * 2} seconds")
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"Fal.ai image generation HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error(
+            f"Fal.ai image generation HTTP error: {e.response.status_code} - {e.response.text}"
+        )
         raise
     except Exception as e:
         logger.error(f"Fal.ai image generation request failed: {e}")

@@ -6,13 +6,14 @@ keepalive, and optimized timeout settings to improve chat streaming performance.
 """
 
 import logging
-from typing import Optional, Dict
-import httpx
-from openai import OpenAI, AsyncOpenAI
 from threading import Lock
+
+import httpx
+from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 
+from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Global connection pool instances
@@ -166,7 +167,7 @@ def clear_connection_pools():
         _client_pool.clear()
 
         # Close all async clients
-        for client in _async_client_pool.values():
+        for _client in _async_client_pool.values():
             try:
                 # AsyncOpenAI clients need to be closed in an async context
                 # For now, just clear the reference

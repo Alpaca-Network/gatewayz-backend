@@ -6,18 +6,17 @@ fast-track high-priority chat completion requests for improved streaming perform
 """
 
 import logging
-import asyncio
-from typing import Optional, Dict, Any
-from enum import IntEnum
 from dataclasses import dataclass
-from datetime import datetime
-import time
+from enum import IntEnum
+from typing import Any, Optional, Dict, List
 
+from typing import Optional
 logger = logging.getLogger(__name__)
 
 
 class RequestPriority(IntEnum):
     """Priority levels for requests (lower number = higher priority)"""
+
     CRITICAL = 0  # System-critical requests
     HIGH = 1  # Premium users, paid plans
     MEDIUM = 2  # Standard users
@@ -28,6 +27,7 @@ class RequestPriority(IntEnum):
 @dataclass
 class PriorityRequest:
     """Container for prioritized requests"""
+
     priority: RequestPriority
     request_id: str
     user_id: Optional[str]
@@ -60,9 +60,7 @@ class RequestPrioritizer:
             RequestPriority.LOW: 0.5,
             RequestPriority.BACKGROUND: 0.3,
         }
-        self._request_counts: Dict[RequestPriority, int] = {
-            priority: 0 for priority in RequestPriority
-        }
+        self._request_counts: Dict[RequestPriority, int] = dict.fromkeys(RequestPriority, 0)
         self._total_requests = 0
 
     def determine_priority(
@@ -233,8 +231,8 @@ def log_request_priority(
 # Provider selection helpers based on priority
 def get_preferred_providers_for_priority(
     priority: RequestPriority,
-    available_providers: list[str],
-) -> list[str]:
+    available_providers: List[str],
+) -> List[str]:
     """
     Get preferred providers ordered by priority.
 

@@ -8,21 +8,35 @@ This module handles transformations between user-friendly model IDs
 """
 
 import logging
-from typing import Dict, Optional
 
+from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
+    "zai-org/glm-4.6-fp8": "near",
 }
 
-# Constants
-GOOGLE_MODELS_PREFIX = "@google/models/"
+# Gemini model name constants to reduce duplication
+GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
+GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
+GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
+GEMINI_2_0_FLASH = "gemini-2.0-flash"
+GEMINI_2_0_PRO = "gemini-2.0-pro"
+GEMINI_1_5_PRO = "gemini-1.5-pro"
+GEMINI_1_5_FLASH = "gemini-1.5-flash"
+GEMINI_1_0_PRO = "gemini-1.0-pro"
+
+# Claude model name constants to reduce duplication
+CLAUDE_SONNET_4_5 = "anthropic/claude-sonnet-4.5"
 
 
-def transform_model_id(model_id: str, provider: str) -> str:
+def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = True) -> str:
     """
     Transform model ID from simplified format to provider-specific format.
+
+    Now supports multi-provider models - will automatically get the correct
+    provider-specific model ID from the registry.
 
     NOTE: All model IDs are normalized to lowercase before being sent to providers
     to ensure compatibility. Fireworks requires lowercase, while other providers
@@ -31,6 +45,7 @@ def transform_model_id(model_id: str, provider: str) -> str:
     Args:
         model_id: The input model ID (e.g., "deepseek-ai/deepseek-v3")
         provider: The target provider (e.g., "fireworks", "openrouter")
+        use_multi_provider: Whether to check multi-provider registry first (default: True)
 
     Returns:
         The transformed model ID suitable for the provider's API (always lowercase)
@@ -45,6 +60,29 @@ def transform_model_id(model_id: str, provider: str) -> str:
         Input: "OpenAI/GPT-4", provider="openrouter"
         Output: "openai/gpt-4"
     """
+
+    # Check multi-provider registry first (if enabled)
+    if use_multi_provider:
+        try:
+            from src.services.multi_provider_registry import get_registry
+
+            registry = get_registry()
+            if registry.has_model(model_id):
+                # Get provider-specific model ID from registry
+                model = registry.get_model(model_id)
+                if model:
+                    provider_config = model.get_provider_by_name(provider)
+                    if provider_config:
+                        provider_model_id = provider_config.model_id
+                        logger.info(
+                            f"Multi-provider transform: {model_id} -> {provider_model_id} "
+                            f"(provider: {provider})"
+                        )
+                        return provider_model_id.lower()
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Error checking multi-provider registry for transform: {e}")
 
     # Normalize input to lowercase for case-insensitive matching
     # Store original for logging
@@ -61,7 +99,7 @@ def transform_model_id(model_id: str, provider: str) -> str:
 
     # If already has Portkey @ prefix, return as-is (already lowercase)
     # EXCEPT for Google Vertex AI models which may use @google/models/ format
-    if model_id.startswith("@") and not model_id.startswith(GOOGLE_MODELS_PREFIX):
+    if model_id.startswith("@") and not model_id.startswith("@google/models/"):
         logger.debug(f"Model ID already in Portkey format: {model_id}")
         return model_id
 
@@ -72,16 +110,26 @@ def transform_model_id(model_id: str, provider: str) -> str:
     if provider_lower == "openrouter" and model_id.startswith("openrouter/"):
         # Don't strip the prefix from openrouter/auto - it needs the full ID
         if model_id != "openrouter/auto":
-            stripped = model_id[len("openrouter/"):]
-            logger.info(f"Stripped 'openrouter/' prefix: '{model_id}' -> '{stripped}' for OpenRouter")
+            stripped = model_id[len("openrouter/") :]
+            logger.info(
+                f"Stripped 'openrouter/' prefix: '{model_id}' -> '{stripped}' for OpenRouter"
+            )
             model_id = stripped
         else:
-            logger.info(f"Preserving 'openrouter/auto' - this model requires the full ID")
+            logger.info("Preserving 'openrouter/auto' - this model requires the full ID")
 
     # Special handling for Near: strip 'near/' prefix if present
     if provider_lower == "near" and model_id.startswith("near/"):
-        stripped = model_id[len("near/"):]
+        stripped = model_id[len("near/") :]
         logger.info(f"Stripped 'near/' prefix: '{model_id}' -> '{stripped}' for Near")
+        model_id = stripped
+
+    # Special handling for AIMO: strip 'aimo/' prefix if present
+    # AIMO models need to be in provider_pubkey:model_name format for actual API calls
+    # The aimo_native_id field contains the correct format
+    if provider_lower == "aimo" and model_id.startswith("aimo/"):
+        stripped = model_id[len("aimo/") :]
+        logger.info(f"Stripped 'aimo/' prefix: '{model_id}' -> '{stripped}' for AIMO")
         model_id = stripped
 
     # Get the mapping for this provider
@@ -99,7 +147,9 @@ def transform_model_id(model_id: str, provider: str) -> str:
         # Try without org prefix
         if model_name in mapping:
             transformed = mapping[model_name]
-            logger.info(f"Transformed '{model_id}' to '{transformed}' for {provider} (matched by model name)")
+            logger.info(
+                f"Transformed '{model_id}' to '{transformed}' for {provider} (matched by model name)"
+            )
             return transformed
 
     # Check fuzzy matching for version variations
@@ -137,7 +187,6 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
-
             # Llama models
             "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "meta-llama/llama-3.3-70b-instruct": "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -147,7 +196,6 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "meta-llama/llama-3.1-8b-instruct": "accounts/fireworks/models/llama-v3p1-8b-instruct",
             "meta-llama/llama-4-scout": "accounts/fireworks/models/llama4-scout-instruct-basic",
             "meta-llama/llama-4-maverick": "accounts/fireworks/models/llama4-maverick-instruct-basic",
-
             # Without org prefix (common shortcuts)
             "deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
@@ -156,7 +204,6 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
             "llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
-
             # Qwen models
             "qwen/qwen-2.5-32b": "accounts/fireworks/models/qwen2p5-vl-32b-instruct",
             "qwen/qwen-3-235b": "accounts/fireworks/models/qwen3-235b-a22b",
@@ -164,7 +211,6 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "qwen/qwen-3-235b-thinking": "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507",
             "qwen/qwen-3-30b-thinking": "accounts/fireworks/models/qwen3-30b-a3b-thinking-2507",
             "qwen/qwen-3-coder-480b": "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
-
             # Other models
             "moonshot-ai/kimi-k2": "accounts/fireworks/models/kimi-k2-instruct",
             "moonshot-ai/kimi-k2-instruct": "accounts/fireworks/models/kimi-k2-instruct",
@@ -183,11 +229,11 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "anthropic/claude-3-sonnet": "anthropic/claude-3-sonnet-20240229",
             "anthropic/claude-3-haiku": "anthropic/claude-3-haiku-20240307",
             # Claude Sonnet 4.5 - support multiple input formats
-            "claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-4.5-sonnet": "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-4.5-sonnet-20250929": "anthropic/claude-sonnet-4.5",
-            "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
+            "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_5,
+            "anthropic/claude-sonnet-4.5": CLAUDE_SONNET_4_5,
+            "anthropic/claude-4.5-sonnet": CLAUDE_SONNET_4_5,
+            "anthropic/claude-4.5-sonnet-20250929": CLAUDE_SONNET_4_5,
+            "claude-sonnet-4.5": CLAUDE_SONNET_4_5,
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
@@ -219,30 +265,23 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "meta-llama/llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
             "meta-llama/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
             "meta-llama/llama-3.1-8b-instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-
             # DeepSeek models
             "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
             "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-
             # Qwen models
             "qwen/qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
             "qwen/qwen-2.5-72b-instruct": "Qwen/Qwen2.5-72B-Instruct",
             "qwen/qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
             "qwen/qwen-2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",
-
             # Mistral models
             "mistralai/mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
             "mistralai/mistral-7b-instruct": "mistralai/Mistral-7B-Instruct-v0.3",
             "mistralai/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1",
             "mistralai/mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-
             # Microsoft models
             "microsoft/phi-3": "microsoft/Phi-3-medium-4k-instruct",
             "microsoft/phi-3-medium": "microsoft/Phi-3-medium-4k-instruct",
-
-            # Google models
-            "google/gemma-2-9b": "google/gemma-2-9b-it",
-            "google/gemma-2-9b-it": "google/gemma-2-9b-it",
+            # Google Gemma models removed - they should use Google Vertex AI provider
         },
         "hug": {
             # Alias for huggingface - use same mappings
@@ -254,30 +293,23 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "meta-llama/llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
             "meta-llama/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
             "meta-llama/llama-3.1-8b-instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-
             # DeepSeek models
             "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
             "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-
             # Qwen models
             "qwen/qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
             "qwen/qwen-2.5-72b-instruct": "Qwen/Qwen2.5-72B-Instruct",
             "qwen/qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
             "qwen/qwen-2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",
-
             # Mistral models
             "mistralai/mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
             "mistralai/mistral-7b-instruct": "mistralai/Mistral-7B-Instruct-v0.3",
             "mistralai/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1",
             "mistralai/mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-
             # Microsoft models
             "microsoft/phi-3": "microsoft/Phi-3-medium-4k-instruct",
             "microsoft/phi-3-medium": "microsoft/Phi-3-medium-4k-instruct",
-
-            # Google models
-            "google/gemma-2-9b": "google/gemma-2-9b-it",
-            "google/gemma-2-9b-it": "google/gemma-2-9b-it",
+            # Google Gemma models removed - they should use Google Vertex AI provider
         },
         "chutes": {
             # Chutes uses org/model format directly
@@ -288,55 +320,158 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             # Google Vertex AI models - simple names
             # Full resource names are constructed by the client
             # Gemini 2.5 models (newest)
-            "gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash-preview-09-2025",
-            "gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025",
-            "gemini-2.5-flash-preview": "gemini-2.5-flash-preview-09-2025",
-            "google/gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash-preview-09-2025",
-            "google/gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025",
-            "@google/models/gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash-preview-09-2025",
-            "@google/models/gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025",
-            "gemini-2.5-pro-preview-09-2025": "gemini-2.5-pro-preview-09-2025",
-            "gemini-2.5-pro": "gemini-2.5-pro-preview-09-2025",
-            "google/gemini-2.5-pro": "gemini-2.5-pro-preview-09-2025",
-            "@google/models/gemini-2.5-pro": "gemini-2.5-pro-preview-09-2025",
-
-            # Gemini 2.0 models
-            "gemini-2.0-flash": "gemini-2.0-flash",
+            # Flash Lite (stable GA version - use stable by default)
+            "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
+            "google/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+            "@google/models/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+            # Preview version (only if explicitly requested)
+            "gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+            "google/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+            "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+            "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
+            "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
+            # Gemini 2.5 flash models
+            "gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
+            "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
+            "google/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
+            "@google/models/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
+            # Image-specific models
+            "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
+            "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
+            "gemini-2.5-flash-image": "gemini-2.5-flash-image",
+            "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
+            # Pro (use stable GA version by default)
+            "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
+            "google/gemini-2.5-pro": "gemini-2.5-pro",
+            "@google/models/gemini-2.5-pro": "gemini-2.5-pro",
+            # Preview version (only if explicitly requested)
+            "gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+            "google/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+            "@google/models/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+            "gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
+            "google/gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
+            "gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
+            "google/gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
+            # Gemini 2.0 models (stable versions)
+            "gemini-2.0-flash": GEMINI_2_0_FLASH,
             "gemini-2.0-flash-thinking": "gemini-2.0-flash-thinking",
             "gemini-2.0-flash-001": "gemini-2.0-flash-001",
-            "google/gemini-2.0-flash": "gemini-2.0-flash",
-            "@google/models/gemini-2.0-flash": "gemini-2.0-flash",
-            "gemini-2.0-pro": "gemini-2.0-pro",
+            "gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite-001",
+            "gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
+            "google/gemini-2.0-flash": GEMINI_2_0_FLASH,
+            "google/gemini-2.0-flash-001": "gemini-2.0-flash-001",
+            "google/gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite-001",
+            "google/gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
+            "@google/models/gemini-2.0-flash": GEMINI_2_0_FLASH,
+            "gemini-2.0-pro": GEMINI_2_0_PRO,
             "gemini-2.0-pro-001": "gemini-2.0-pro-001",
-            "google/gemini-2.0-pro": "gemini-2.0-pro",
-            "@google/models/gemini-2.0-pro": "gemini-2.0-pro",
-
+            "google/gemini-2.0-pro": GEMINI_2_0_PRO,
+            "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
             # Gemini 1.5 models
-            "gemini-1.5-pro": "gemini-1.5-pro",
+            "gemini-1.5-pro": GEMINI_1_5_PRO,
             "gemini-1.5-pro-002": "gemini-1.5-pro-002",
-            "google/gemini-1.5-pro": "gemini-1.5-pro",
-            "@google/models/gemini-1.5-pro": "gemini-1.5-pro",
-            "gemini-1.5-flash": "gemini-1.5-flash",
+            "google/gemini-1.5-pro": GEMINI_1_5_PRO,
+            "@google/models/gemini-1.5-pro": GEMINI_1_5_PRO,
+            "gemini-1.5-flash": GEMINI_1_5_FLASH,
             "gemini-1.5-flash-002": "gemini-1.5-flash-002",
-            "google/gemini-1.5-flash": "gemini-1.5-flash",
-            "@google/models/gemini-1.5-flash": "gemini-1.5-flash",
-
+            "google/gemini-1.5-flash": GEMINI_1_5_FLASH,
+            "@google/models/gemini-1.5-flash": GEMINI_1_5_FLASH,
             # Gemini 1.0 models
-            "gemini-1.0-pro": "gemini-1.0-pro",
+            "gemini-1.0-pro": GEMINI_1_0_PRO,
             "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
-            "google/gemini-1.0-pro": "gemini-1.0-pro",
-            "@google/models/gemini-1.0-pro": "gemini-1.0-pro",
-
+            "google/gemini-1.0-pro": GEMINI_1_0_PRO,
+            "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
             # Aliases for convenience
-            "gemini-2.0": "gemini-2.0-flash",
-            "gemini-1.5": "gemini-1.5-pro",
+            "gemini-2.0": GEMINI_2_0_FLASH,
+            "gemini-1.5": GEMINI_1_5_PRO,
+            # Gemma models (open source models from Google)
+            "google/gemma-2-9b": "gemma-2-9b-it",
+            "google/gemma-2-9b-it": "gemma-2-9b-it",
+            "google/gemma-2-27b-it": "gemma-2-27b-it",
+            "google/gemma-3-4b-it": "gemma-3-4b-it",
+            "google/gemma-3-12b-it": "gemma-3-12b-it",
+            "google/gemma-3-27b-it": "gemma-3-27b-it",
+            "google/gemma-3n-e2b-it": "gemma-3n-e2b-it",
+            "google/gemma-3n-e4b-it": "gemma-3n-e4b-it",
+            "gemma-2-9b-it": "gemma-2-9b-it",
+            "gemma-2-27b-it": "gemma-2-27b-it",
+            "gemma-3-4b-it": "gemma-3-4b-it",
+            "gemma-3-12b-it": "gemma-3-12b-it",
+            "gemma-3-27b-it": "gemma-3-27b-it",
+            "gemma-3n-e2b-it": "gemma-3n-e2b-it",
+            "gemma-3n-e4b-it": "gemma-3n-e4b-it",
         },
         "vercel-ai-gateway": {
             # Vercel AI Gateway uses standard model identifiers
             # The gateway automatically routes requests to the appropriate provider
             # Using pass-through format - any model ID is supported
             # Minimal mappings to avoid conflicts with other providers during auto-detection
-        }
+        },
+        "helicone": {
+            # Helicone AI Gateway uses standard model identifiers
+            # The gateway provides observability on top of standard provider APIs
+            # Using pass-through format - any model ID is supported
+            # Minimal mappings to avoid conflicts with other providers during auto-detection
+        },
+        "aihubmix": {
+            # AiHubMix uses OpenAI-compatible model identifiers
+            # Pass-through format - any model ID is supported
+            # Minimal mappings to avoid conflicts with other providers during auto-detection
+        },
+        "anannas": {
+            # Anannas uses OpenAI-compatible model identifiers
+            # Pass-through format - any model ID is supported
+            # Minimal mappings to avoid conflicts with other providers during auto-detection
+        },
+        "near": {
+            # Near AI uses HuggingFace-style model naming with proper case
+            # Maps lowercase input variants to actual NEAR model IDs
+            # Reference: https://cloud.near.ai/models for current available models
+
+            # DeepSeek models - only DeepSeek-V3.1 is currently available on Near AI
+            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3.1",  # Map v3 to v3.1 (only available)
+            "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+            "deepseek-v3": "deepseek-ai/DeepSeek-V3.1",
+            "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+
+            # GPT-OSS models - requires openai/ prefix
+            "gpt-oss/gpt-oss-120b": "openai/gpt-oss-120b",
+            "gpt-oss-120b": "openai/gpt-oss-120b",
+
+            # Qwen models
+            "qwen/qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",  # Map old qwen-2-72b to qwen-3-30b
+            "qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            # Qwen3 models - proper case required
+            "qwen/qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen/qwen-3-30b-instruct": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen/qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "qwen/qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+            "qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+
+            # GLM models from Zhipu AI
+            "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6",
+            "zai-org/glm-4.6": "zai-org/GLM-4.6",
+            "glm-4.6-fp8": "zai-org/GLM-4.6",
+            "glm-4.6": "zai-org/GLM-4.6",
+        },
+        "alpaca-network": {
+            # Alpaca Network uses Anyscale infrastructure with DeepSeek models
+            # Service: deepseek-v3-1 via https://deepseek-v3-1-b18ty.cld-kvytpjjrw13e2gvq.s.anyscaleuserdata.com
+
+            # DeepSeek V3.1 models
+            "deepseek-ai/deepseek-v3.1": "deepseek-v3-1",
+            "deepseek-ai/deepseek-v3": "deepseek-v3-1",  # Map v3 to v3.1
+            "deepseek/deepseek-v3.1": "deepseek-v3-1",
+            "deepseek/deepseek-v3": "deepseek-v3-1",
+            "deepseek-v3.1": "deepseek-v3-1",
+            "deepseek-v3": "deepseek-v3-1",
+            "deepseek-v3-1": "deepseek-v3-1",  # Direct service name
+        },
     }
 
     return mappings.get(provider, {})
@@ -366,7 +501,7 @@ def normalize_model_name(model_id: str) -> str:
     # Remove common suffixes for matching
     for suffix in ["-instruct", "-chat", "-turbo", "-basic"]:
         if normalized.endswith(suffix):
-            normalized = normalized[:-len(suffix)]
+            normalized = normalized[: -len(suffix)]
 
     return normalized
 
@@ -418,16 +553,47 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str) -> Optional[str]:
+def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[str] = None) -> Optional[str]:
     """
     Try to detect which provider a model belongs to based on its ID.
 
+    Now supports multi-provider models with automatic provider selection.
+
     Args:
         model_id: The model ID to analyze
+        preferred_provider: Optional preferred provider (for multi-provider models)
 
     Returns:
         The detected provider name, or None if unable to detect
     """
+
+    # Check multi-provider registry first
+    try:
+        from src.services.multi_provider_registry import get_registry
+
+        registry = get_registry()
+        if registry.has_model(model_id):
+            # Model is in multi-provider registry
+            from src.services.provider_selector import get_selector
+
+            selector = get_selector()
+            selected_provider = selector.registry.select_provider(
+                model_id=model_id,
+                preferred_provider=preferred_provider,
+            )
+
+            if selected_provider:
+                logger.info(
+                    f"Multi-provider model {model_id}: selected {selected_provider.name} "
+                    f"(priority {selected_provider.priority})"
+                )
+                return selected_provider.name
+    except ImportError:
+        # Multi-provider modules not available, fall through to legacy detection
+        pass
+    except Exception as e:
+        logger.warning(f"Error checking multi-provider registry: {e}")
+        # Fall through to legacy detection
 
     # Apply explicit overrides first
     normalized_id = (model_id or "").lower()
@@ -437,31 +603,90 @@ def detect_provider_from_model_id(model_id: str) -> Optional[str]:
         logger.info(f"Provider override for model '{model_id}': {override}")
         return override
 
+    # OpenRouter models with colon-based suffixes (e.g., :exacto, :free, :extended)
+    # These are OpenRouter-specific model variants
+    if ":" in model_id and "/" in model_id:
+        # Models like "z-ai/glm-4.6:exacto", "google/gemini-2.0-flash-exp:free"
+        suffix = model_id.split(":", 1)[1]
+        if suffix in ["exacto", "free", "extended"]:
+            logger.info(f"Detected OpenRouter model with :{suffix} suffix: {model_id}")
+            return "openrouter"
+
     # Check if it's already in a provider-specific format
     if model_id.startswith("accounts/fireworks/models/"):
         return "fireworks"
 
+    # Normalize to lowercase for consistency in all @ prefix checks
+    normalized_model = model_id.lower()
+
     # Check for Google Vertex AI models first (before Portkey check)
     if model_id.startswith("projects/") and "/models/" in model_id:
         return "google-vertex"
-    if model_id.startswith(GOOGLE_MODELS_PREFIX) and any(pattern in model_id.lower() for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]):
+    if normalized_model.startswith("@google/models/") and any(
+        pattern in normalized_model
+        for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+    ):
         # Patterns like "@google/models/gemini-2.5-flash"
         return "google-vertex"
-    if any(pattern in model_id.lower() for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]) and "/" not in model_id:
+    if (
+        any(
+            pattern in normalized_model
+            for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+        )
+        and "/" not in model_id
+    ):
         # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
         return "google-vertex"
-    if model_id.startswith("google/") and "gemini" in model_id.lower():
-        # Patterns like "google/gemini-2.5-flash"
-        return "google-vertex"
+    if model_id.startswith("google/") and "gemini" in normalized_model:
+        # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
+        # These can go to either Vertex AI or OpenRouter
+        # Check if Vertex AI credentials are available
+        import os
+
+        # Debug logging
+        gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        gvc = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
+        logger.info(
+            f"[CREDENTIAL CHECK] model={model_id}, "
+            f"GOOGLE_APPLICATION_CREDENTIALS={'SET' if gac else 'NOT SET'}, "
+            f"GOOGLE_VERTEX_CREDENTIALS_JSON={'SET (len=' + str(len(gvc)) + ')' if gvc else 'NOT SET'}"
+        )
+
+        has_credentials = gac or gvc
+        if has_credentials:
+            logger.info(f"✅ Routing {model_id} to google-vertex (credentials available)")
+            return "google-vertex"
+        else:
+            # No Vertex credentials, route to OpenRouter which supports google/ prefix
+            logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
+            return "openrouter"
 
     # Portkey format is @org/model (must have / to be valid)
-    if model_id.startswith("@") and "/" in model_id:
+    # Normalize to lowercase for case-insensitive @ prefix detection
+    if normalized_model.startswith("@") and "/" in model_id:
         # Only Portkey if not a Google format
-        if not model_id.startswith(GOOGLE_MODELS_PREFIX):
+        if not normalized_model.startswith("@google/models/"):
             return "portkey"
 
     # Check all mappings to see if this model exists
-    for provider in ["fireworks", "openrouter", "featherless", "together", "portkey", "huggingface", "hug", "chutes", "google-vertex", "vercel-ai-gateway", "fal"]:
+    for provider in [
+        "fireworks",
+        "openrouter",
+        "featherless",
+        "together",
+        "portkey",
+        "huggingface",
+        "hug",
+        "chutes",
+        "google-vertex",
+        "vercel-ai-gateway",
+        "helicone",
+        "aihubmix",
+        "anannas",
+        "near",
+        "alpaca-network",
+        "fal",
+    ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
             logger.info(f"Detected provider '{provider}' for model '{model_id}'")
@@ -476,17 +701,31 @@ def detect_provider_from_model_id(model_id: str) -> Optional[str]:
     if "/" in model_id:
         org, model_name = model_id.split("/", 1)
 
-        # Google Vertex models (e.g., "google/gemini-2.0-flash")
-        if org == "google":
-            return "google-vertex"
+        # Google Vertex models should only be routed if explicitly in the mapping above
+        # OpenRouter also has google/ models (with :free suffix) that should stay with OpenRouter
+        # So we comment this out to avoid routing OpenRouter's google/ models to Vertex AI
+        # if org == "google":
+        #     return "google-vertex"
 
-        # Near AI models (e.g., "near/deepseek-chat-v3-0324")
+        # Near AI models (e.g., "near/deepseek-ai/DeepSeek-V3", "near/deepseek-ai/DeepSeek-R1")
         if org == "near":
             return "near"
+
+        # Anannas models (e.g., "anannas/openai/gpt-4o")
+        if org == "anannas":
+            return "anannas"
 
         # OpenRouter models (e.g., "openrouter/auto")
         if org == "openrouter":
             return "openrouter"
+
+        # Helicone models (e.g., "helicone/gpt-4o-mini")
+        if org == "helicone":
+            return "helicone"
+
+        # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
+        if org == "alpaca-network" or org == "alpaca":
+            return "alpaca-network"
 
         # DeepSeek models are primarily on Fireworks in this system
         if org == "deepseek-ai" and "deepseek" in model_name.lower():
@@ -501,7 +740,14 @@ def detect_provider_from_model_id(model_id: str) -> Optional[str]:
             return "openrouter"
 
         # Fal.ai models (e.g., "fal-ai/stable-diffusion-v15", "minimax/video-01")
-        if org == "fal-ai" or org in ["fal", "minimax", "stabilityai", "hunyuan3d", "meshy", "tripo3d"]:
+        if org == "fal-ai" or org in [
+            "fal",
+            "minimax",
+            "stabilityai",
+            "hunyuan3d",
+            "meshy",
+            "tripo3d",
+        ]:
             return "fal"
 
     logger.debug(f"Could not detect provider for model '{model_id}'")

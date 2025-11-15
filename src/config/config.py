@@ -1,9 +1,11 @@
+from typing import Optional
 import os
 
 from dotenv import load_dotenv
 
 # Load environment variables from ..env file
 load_dotenv()
+
 
 class Config:
     """Configuration class for the application"""
@@ -13,7 +15,11 @@ class Config:
     IS_PRODUCTION = APP_ENV == "production"
     IS_STAGING = APP_ENV == "staging"
     IS_DEVELOPMENT = APP_ENV == "development"
-    IS_TESTING = APP_ENV in {"testing", "test"} or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+    IS_TESTING = APP_ENV in {"testing", "test"} or os.environ.get("TESTING", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     # Supabase Configuration
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -64,11 +70,24 @@ class Config:
     # Vercel AI Gateway Configuration
     VERCEL_AI_GATEWAY_API_KEY = os.environ.get("VERCEL_AI_GATEWAY_API_KEY")
 
+    # Helicone AI Gateway Configuration
+    HELICONE_API_KEY = os.environ.get("HELICONE_API_KEY")
+
+    # Vercel AI SDK Configuration
+    AI_SDK_API_KEY = os.environ.get("AI_SDK_API_KEY")
+
+    # AiHubMix Configuration
+    AIHUBMIX_API_KEY = os.environ.get("AIHUBMIX_API_KEY")
+    AIHUBMIX_APP_CODE = os.environ.get("AIHUBMIX_APP_CODE")
+
     # Fal.ai Configuration
     FAL_API_KEY = os.environ.get("FAL_API_KEY")
 
-    # Google Generative AI Configuration (for language models)
-    GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+    # Anannas Configuration
+    ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
+
+    # Alpaca Network Configuration
+    ALPACA_NETWORK_API_KEY = os.environ.get("ALPACA_NETWORK_API_KEY")
 
     # Google Vertex AI Configuration (for image generation)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
@@ -82,8 +101,53 @@ class Config:
     # Admin Configuration
     ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
 
+    # ==================== Monitoring & Observability Configuration ====================
+
+    # Prometheus Configuration
+    PROMETHEUS_ENABLED = os.environ.get("PROMETHEUS_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    PROMETHEUS_REMOTE_WRITE_URL = os.environ.get(
+        "PROMETHEUS_REMOTE_WRITE_URL",
+        "http://prometheus:9090/api/v1/write",
+    )
+    PROMETHEUS_SCRAPE_ENABLED = os.environ.get("PROMETHEUS_SCRAPE_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    # Tempo/OpenTelemetry OTLP Configuration
+    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "gatewayz-api")
+    TEMPO_OTLP_HTTP_ENDPOINT = os.environ.get(
+        "TEMPO_OTLP_HTTP_ENDPOINT",
+        "http://tempo:4318",
+    )
+    TEMPO_OTLP_GRPC_ENDPOINT = os.environ.get(
+        "TEMPO_OTLP_GRPC_ENDPOINT",
+        "localhost:4317",
+    )
+
+    # Grafana Loki Configuration
+    LOKI_ENABLED = os.environ.get("LOKI_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    LOKI_PUSH_URL = os.environ.get(
+        "LOKI_PUSH_URL",
+        "http://loki:3100/loki/api/v1/push",
+    )
+
     @classmethod
-    def get_portkey_virtual_key(cls, provider: str | None = None) -> str | None:
+    def get_portkey_virtual_key(cls, provider: Optional[str] = None) -> Optional[str]:
         """
         Resolve Portkey virtual key for a provider.
 
@@ -95,10 +159,7 @@ class Config:
         if not provider:
             return cls.PORTKEY_DEFAULT_VIRTUAL_KEY
 
-        normalized = "".join(
-            ch if ch.isalnum() else "_"
-            for ch in provider.upper()
-        )
+        normalized = "".join(ch if ch.isalnum() else "_" for ch in provider.upper())
         env_name = f"PORTKEY_VIRTUAL_KEY_{normalized}"
         provider_specific = os.environ.get(env_name)
         return provider_specific or cls.PORTKEY_DEFAULT_VIRTUAL_KEY
@@ -132,10 +193,36 @@ class Config:
                 "OPENROUTER_SITE_NAME=your_site_name (optional)\n"
                 "PORTKEY_API_KEY=your_portkey_api_key"
             )
-        
+
         return True
-    
+
     @classmethod
     def get_supabase_config(cls):
         """Get Supabase configuration as a tuple"""
-        return cls.SUPABASE_URL, cls.SUPABASE_KEY 
+        return cls.SUPABASE_URL, cls.SUPABASE_KEY
+
+    @classmethod
+    def validate_critical_env_vars(cls) -> tuple[bool, list[str]]:
+        """
+        Validate that all critical environment variables are set.
+
+        Returns:
+            tuple: (is_valid, missing_vars)
+                - is_valid: bool indicating if all critical vars are present
+                - missing_vars: list of missing variable names
+        """
+        # Skip validation in Vercel environment to prevent startup failures
+        if os.environ.get("VERCEL"):
+            return True, []
+
+        critical_vars = {
+            "SUPABASE_URL": cls.SUPABASE_URL,
+            "SUPABASE_KEY": cls.SUPABASE_KEY,
+            "OPENROUTER_API_KEY": cls.OPENROUTER_API_KEY,
+            "PORTKEY_API_KEY": cls.PORTKEY_API_KEY,
+        }
+
+        missing = [name for name, value in critical_vars.items() if not value]
+        is_valid = len(missing) == 0
+
+        return is_valid, missing

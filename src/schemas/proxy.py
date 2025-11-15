@@ -1,8 +1,7 @@
-from pydantic import BaseModel, EmailStr, field_validator
-from typing import List, Dict, Any, Optional, Union
-from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional, Union
 
+from pydantic import BaseModel, field_validator
 
 ALLOWED_CHAT_ROLES = {"system", "user", "assistant"}
 
@@ -38,6 +37,7 @@ class ProxyRequest(BaseModel):
     frequency_penalty: Optional[float] = 0.0
     presence_penalty: Optional[float] = 0.0
     stream: Optional[bool] = False
+    tools: Optional[List[dict]] = None  # Function calling tools
     provider: Optional[str] = None  # Provider selection: "openrouter" or "portkey"
     portkey_provider: Optional[str] = "openai"  # Sub-provider for Portkey
     portkey_virtual_key: Optional[str] = None  # Virtual key for Portkey
@@ -69,6 +69,7 @@ class InputMessage(BaseModel):
     Unified input message for v1/responses endpoint.
     Supports multimodal input (text, images, etc.)
     """
+
     role: str
     content: Union[str, List[Dict[str, Any]]]  # String or multimodal content array
 
@@ -78,6 +79,7 @@ class ResponseRequest(BaseModel):
     Unified API request schema for v1/responses endpoint.
     This is the newer, more flexible alternative to v1/chat/completions.
     """
+
     model: str
     input: List[InputMessage]  # Replaces 'messages' in chat/completions
     max_tokens: Optional[int] = 950
@@ -86,6 +88,7 @@ class ResponseRequest(BaseModel):
     frequency_penalty: Optional[float] = 0.0
     presence_penalty: Optional[float] = 0.0
     stream: Optional[bool] = False
+    tools: Optional[List[dict]] = None  # Function calling tools
     response_format: Optional[ResponseFormat] = None
     provider: Optional[str] = None
     portkey_provider: Optional[str] = "openai"
@@ -106,8 +109,10 @@ class ResponseRequest(BaseModel):
 # Anthropic Messages API Schemas
 # ============================================================================
 
+
 class ContentBlock(BaseModel):
     """Content block for Anthropic Messages API"""
+
     type: str  # "text", "image", etc.
     text: Optional[str] = None
     source: Optional[Dict[str, Any]] = None  # For image blocks
@@ -118,6 +123,7 @@ class ContentBlock(BaseModel):
 
 class AnthropicMessage(BaseModel):
     """Message format for Anthropic Messages API"""
+
     role: str  # "user" or "assistant"
     content: Union[str, List[ContentBlock]]  # String or content blocks
 
@@ -156,7 +162,9 @@ class MessagesRequest(BaseModel):
     - 'max_tokens' is REQUIRED (not optional)
     - Content can be string or array of content blocks
     - No frequency_penalty or presence_penalty
+    - Supports tool use (function calling)
     """
+
     model: str  # e.g., "claude-sonnet-4-5-20250929"
     messages: List[AnthropicMessage]
     max_tokens: int  # REQUIRED for Anthropic API
@@ -167,6 +175,8 @@ class MessagesRequest(BaseModel):
     stop_sequences: Optional[List[str]] = None
     stream: Optional[bool] = False
     metadata: Optional[Dict[str, Any]] = None
+    tools: Optional[List[dict]] = None  # Tool definitions for function calling
+    tool_choice: Optional[Any] = None  # Tool selection: "auto", "required", or specific tool
 
     # Gateway-specific fields (not part of Anthropic API)
     provider: Optional[str] = None

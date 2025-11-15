@@ -1,17 +1,19 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from enum import Enum
 
+from pydantic import BaseModel
+
+
+from typing import Optional, Dict, List
 class CreateApiKeyRequest(BaseModel):
     key_name: str
-    environment_tag: str = 'live'
+    environment_tag: str = "live"
     scope_permissions: Optional[Dict[str, List[str]]] = None
     expiration_days: Optional[int] = None
     max_requests: Optional[int] = None
     ip_allowlist: Optional[List[str]] = None
     domain_referrers: Optional[List[str]] = None
-    action: str = 'create'
+    action: str = "create"
+
 
 class ApiKeyResponse(BaseModel):
     id: int
@@ -33,19 +35,23 @@ class ApiKeyResponse(BaseModel):
     updated_at: Optional[str] = None
     last_used_at: Optional[str] = None
 
+
 class ListApiKeysResponse(BaseModel):
     status: str
     total_keys: int
     keys: List[ApiKeyResponse]
 
+
 class DeleteApiKeyRequest(BaseModel):
     confirmation: str = "DELETE"
+
 
 class DeleteApiKeyResponse(BaseModel):
     status: str
     message: str
     deleted_key_id: int
     timestamp: str
+
 
 class UpdateApiKeyRequest(BaseModel):
     key_name: Optional[str] = None
@@ -58,11 +64,13 @@ class UpdateApiKeyRequest(BaseModel):
     action: Optional[str] = None
     environment_tag: Optional[str] = None
 
+
 class UpdateApiKeyResponse(BaseModel):
     status: str
     message: str
     updated_key: ApiKeyResponse
     timestamp: datetime
+
 
 class ApiKeyUsageResponse(BaseModel):
     api_key: str
