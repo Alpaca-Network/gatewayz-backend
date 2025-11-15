@@ -26,17 +26,17 @@ except ImportError as e:
 def verify_pricing_structure() -> Tuple[bool, str]:
     """Verify the pricing data structure is correct"""
     test_pricing = {
-        "prompt": "0.15",
-        "completion": "0.60",
+        "prompt": "1.25",
+        "completion": "10.00",
         "request": "0",
         "image": "0"
     }
 
     try:
         sanitized = sanitize_pricing(test_pricing)
-        if sanitized["prompt"] != "0.15":
+        if sanitized["prompt"] != "1.25":
             return False, "Pricing sanitization failed"
-        if sanitized["completion"] != "0.60":
+        if sanitized["completion"] != "10.00":
             return False, "Pricing sanitization failed"
         return True, "Pricing structure is correct"
     except Exception as e:
@@ -47,14 +47,14 @@ def verify_negative_pricing_handling() -> Tuple[bool, str]:
     """Verify that negative pricing (dynamic pricing) is handled correctly"""
     dynamic_pricing = {
         "prompt": "-1",
-        "completion": "0.60"
+        "completion": "10.00"
     }
 
     try:
         sanitized = sanitize_pricing(dynamic_pricing)
         if sanitized["prompt"] != "0":
             return False, f"Dynamic pricing not converted to 0: {sanitized['prompt']}"
-        if sanitized["completion"] != "0.60":
+        if sanitized["completion"] != "10.00":
             return False, "Sanitization affected valid pricing"
         return True, "Dynamic pricing (-1) is correctly handled"
     except Exception as e:
@@ -64,8 +64,8 @@ def verify_negative_pricing_handling() -> Tuple[bool, str]:
 def verify_gpt51_pricing_data() -> Tuple[bool, str]:
     """Verify GPT-5.1 pricing data structure"""
     gpt51_pricing = {
-        "prompt": "0.15",
-        "completion": "0.60"
+        "prompt": "1.25",
+        "completion": "10.00"
     }
 
     try:
