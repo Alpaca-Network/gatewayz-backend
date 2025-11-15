@@ -14,7 +14,6 @@ PROVIDERS USING OPENAI SDK WITH CUSTOM BASE URL:
   - Novita: OpenAI SDK with base_url="https://api.novita.ai/v3/openai"
 
 PROVIDERS USING PORTKEY FILTERING:
-  - Google: Filters Portkey catalog by patterns "@google/", "google/", "gemini", "gemma"
   - Hugging Face: Filters Portkey catalog by patterns "llava-hf", "hugging", "hf/"
 
 IMPLEMENTATION STRATEGY:
@@ -31,11 +30,10 @@ HISTORICAL NOTE:
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional, Union
 
 from src.cache import (
     _cerebras_models_cache,
-    _google_models_cache,
     _google_vertex_models_cache,
     _huggingface_models_cache,
     _nebius_models_cache,
@@ -69,7 +67,7 @@ XAI_FALLBACK_MODELS = [
 ]
 
 
-def _check_api_key(api_key: str | None, provider_name: str) -> bool:
+def _check_api_key(api_key: Optional[str], provider_name: str) -> bool:
     """Check if API key is configured - returns False and logs warning if not
 
     Args:
@@ -149,7 +147,7 @@ def _unwrap_sdk_response(models_response: Any) -> list:
     return raw_models if isinstance(raw_models, list) else []
 
 
-def _extract_models_from_response(payload: dict | list, key: str = "data") -> list:
+def _extract_models_from_response(payload: Union[dict, list], key: str = "data") -> list:
     """Extract models list from API response - handles dict or list formats
 
     Args:
@@ -167,7 +165,7 @@ def _extract_models_from_response(payload: dict | list, key: str = "data") -> li
         return []
 
 
-def _convert_model_to_dict(model: Any) -> dict | None:
+def _convert_model_to_dict(model: Any) -> Optional[dict]:
     """Convert SDK model object to dict - shared helper to reduce duplication
 
     Handles Pydantic v1/v2 models, regular objects, and dicts.
@@ -241,7 +239,7 @@ def _cache_normalized_models(models_list: list, provider: str, cache_dict: dict)
 
 def _fetch_openai_compatible_models(
     provider_name: str, base_url: str, api_key: str, cache_dict: dict
-) -> list | None:
+) -> Optional[list]:
     """Fetch models from OpenAI-compatible API - shared helper for Nebius and Novita
 
     Args:
@@ -343,55 +341,6 @@ def _filter_portkey_models_by_patterns(patterns: list, provider_name: str):
         logger.error(f"Failed to filter {provider_name} models from Portkey: {e}", exc_info=True)
         return None
 
-
-def fetch_models_from_google():
-    """
-    Fetch models from Google using their Generative AI API.
-
-    Uses the Google Generative AI API to list available models (Gemini, etc.)
-    """
-    try:
-        import httpx
-
-        from src.config import Config
-
-        if not _check_api_key(Config.GOOGLE_API_KEY, "Google"):
-            return None
-
-        # Google Generative AI API endpoint
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={Config.GOOGLE_API_KEY}"
-
-        headers = {
-            "Content-Type": "application/json",
-        }
-
-        try:
-            response = httpx.get(url, headers=headers, timeout=20.0)
-            response.raise_for_status()
-
-            payload = response.json()
-            models_list = _extract_models_from_response(payload, key="models")
-
-            if not models_list:
-                logger.warning("No models returned from Google API")
-                return None
-
-            logger.info(f"Fetched {len(models_list)} models from Google Generative AI API")
-
-        except Exception as http_error:
-            _handle_http_error(http_error, "Google")
-            return None
-
-        # Normalize the models
-        if not models_list:
-            logger.warning("No models available from Google")
-            return None
-
-        return _cache_normalized_models(models_list, "google", _google_models_cache)
-
-    except Exception as e:
-        logger.error(f"Failed to fetch models from Google: {e}", exc_info=True)
-        return None
 
 
 def fetch_models_from_cerebras():
@@ -495,7 +444,19 @@ def fetch_models_from_cerebras():
             logger.warning("No models available from Cerebras")
             return None
 
-        normalized_models = _normalize_models_list(models_list, "cerebras")
+        # Use direct normalization for Cerebras (no @cerebras/ prefix)
+        # Since we're using direct SDK instead of Portkey routing
+        normalized_models = []
+        for model in models_list:
+            if not model:
+                continue
+            try:
+                normalized = normalize_cerebras_model_direct(model)
+                if normalized:
+                    normalized_models.append(normalized)
+            except Exception as normalization_error:
+                logger.warning(f"Failed to normalize Cerebras model: {normalization_error}")
+                continue
 
         if not normalized_models:
             logger.warning("No models were successfully normalized from Cerebras")
@@ -649,6 +610,79 @@ def fetch_models_from_hug_via_portkey():
         return None
 
 
+def normalize_cerebras_model_direct(model: dict) -> dict:
+    """
+    Normalize Cerebras model for direct SDK integration (no Portkey).
+
+    Uses plain model IDs without @cerebras/ prefix since we're calling
+    Cerebras API directly via their SDK instead of routing through Portkey.
+    """
+    try:
+        model_id = model.get("id") or model.get("name", "")
+        if not model_id:
+            return {"source_gateway": "cerebras", "raw_cerebras": model}
+
+        # Use plain model ID (no @cerebras/ prefix for direct integration)
+        slug = model_id
+        display_name = (
+            model.get("display_name") or model_id.replace("-", " ").replace("_", " ").title()
+        )
+        description = model.get("description") or f"Cerebras hosted model: {model_id}"
+        context_length = model.get("context_length") or 0
+
+        pricing = {
+            "prompt": None,
+            "completion": None,
+            "request": None,
+            "image": None,
+            "web_search": None,
+            "internal_reasoning": None,
+        }
+
+        # Try to extract pricing if available
+        if "pricing" in model:
+            pricing_info = model.get("pricing", {})
+            if isinstance(pricing_info, dict):
+                pricing["prompt"] = pricing_info.get("prompt") or pricing_info.get("input")
+                pricing["completion"] = pricing_info.get("completion") or pricing_info.get("output")
+
+        architecture = {
+            "modality": model.get("modality", "text->text"),
+            "input_modalities": model.get("input_modalities") or ["text"],
+            "output_modalities": model.get("output_modalities") or ["text"],
+            "tokenizer": None,
+            "instruct_type": None,
+        }
+
+        normalized = {
+            "id": slug,
+            "slug": slug,
+            "canonical_slug": slug,
+            "hugging_face_id": None,
+            "name": display_name,
+            "created": model.get("created"),
+            "description": description,
+            "context_length": context_length,
+            "architecture": architecture,
+            "pricing": pricing,
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": model.get("supported_parameters") or [],
+            "default_parameters": model.get("default_parameters") or {},
+            "provider_slug": "cerebras",
+            "provider_site_url": None,
+            "model_logo_url": None,
+            "source_gateway": "cerebras",
+            "raw_cerebras": model,
+        }
+
+        return enrich_model_with_pricing(normalized, "cerebras")
+
+    except Exception as e:
+        logger.error(f"Error normalizing Cerebras model: {e}")
+        return {"source_gateway": "cerebras", "raw_cerebras": model}
+
+
 def normalize_portkey_provider_model(model: dict, provider: str) -> dict:
     """
     Normalize model from provider API to catalog schema.
@@ -751,67 +785,31 @@ def fetch_models_from_google_vertex():
 
         logger.info("Fetching models from Google Vertex AI Model Registry")
 
-        # Get credentials
-        if Config.GOOGLE_APPLICATION_CREDENTIALS:
-            credentials = Credentials.from_service_account_file(
-                Config.GOOGLE_APPLICATION_CREDENTIALS
-            )
-            credentials.refresh(Request())
-        else:
-            credentials, _ = google.auth.default()
-            if not credentials.valid:
-                credentials.refresh(Request())
+        # Initialize Vertex AI using ADC (Application Default Credentials)
+        # This ensures consistent credential handling across all Google Vertex AI calls
+        from src.services.google_vertex_client import initialize_vertex_ai
 
-        # Initialize Model Registry client
-        aiplatform.init(
-            project=Config.GOOGLE_PROJECT_ID,
-            location=Config.GOOGLE_VERTEX_LOCATION,
-            credentials=credentials,
-        )
+        # This will use ADC and handle temp file creation for GOOGLE_VERTEX_CREDENTIALS_JSON
+        initialize_vertex_ai()
+        logger.info("✓ Successfully initialized Vertex AI Model Registry with ADC")
 
         # Common Google Vertex AI models
-        # These are the officially supported models available in Vertex AI
+        # These are the officially supported and generally available models in Vertex AI
+        # Note: Preview models (with -preview- in the name) may not be available in all projects
         vertex_models = [
-            {
-                "id": "gemini-2.5-flash-lite",
-                "display_name": "Gemini 2.5 Flash Lite (GA)",
-                "description": "Lightweight, cost-effective model for high-throughput applications (stable version)",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 8192,
-                "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
-            {
-                "id": "gemini-2.5-flash-lite-preview-09-2025",
-                "display_name": "Gemini 2.5 Flash Lite Preview (Sep 2025)",
-                "description": "Preview version with improved performance (887 tokens/sec) and enhanced reasoning capabilities",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 8192,
-                "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
             {
                 "id": "gemini-2.0-flash",
                 "display_name": "Gemini 2.0 Flash",
-                "description": "Fast, efficient model optimized for real-time applications",
+                "description": "Latest stable fast model, optimized for real-time applications",
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 100000,
                 "modalities": ["text", "image", "audio", "video"],
-                "supported_generation_methods": _GEMINI_GENERATION_METHODS,
-            },
-            {
-                "id": "gemini-2.0-flash-thinking",
-                "display_name": "Gemini 2.0 Flash Thinking",
-                "description": "Extended thinking variant for complex reasoning tasks",
-                "max_input_tokens": 1000000,
-                "max_output_tokens": 100000,
-                "modalities": ["text"],
                 "supported_generation_methods": _GEMINI_GENERATION_METHODS,
             },
             {
                 "id": "gemini-2.0-pro",
                 "display_name": "Gemini 2.0 Pro",
-                "description": "Advanced reasoning model for complex tasks",
+                "description": "Latest stable advanced reasoning model for complex tasks",
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 4096,
                 "modalities": ["text", "image", "audio", "video"],
@@ -829,7 +827,7 @@ def fetch_models_from_google_vertex():
             {
                 "id": "gemini-1.5-flash",
                 "display_name": "Gemini 1.5 Flash",
-                "description": "Fast model for speed-focused applications",
+                "description": "Fast model optimized for speed and efficiency",
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 8192,
                 "modalities": ["text", "image", "audio", "video"],
@@ -838,7 +836,7 @@ def fetch_models_from_google_vertex():
             {
                 "id": "gemini-1.0-pro",
                 "display_name": "Gemini 1.0 Pro",
-                "description": "Previous generation pro model",
+                "description": "Stable legacy model with good reasoning capabilities",
                 "max_input_tokens": 32000,
                 "max_output_tokens": 8192,
                 "modalities": ["text"],

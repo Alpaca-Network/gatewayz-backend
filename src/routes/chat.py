@@ -2,10 +2,18 @@ import logging
 import asyncio
 import time
 import json
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 import httpx
 
+from typing import Optional
+from contextvars import ContextVar
+
+from src.utils.performance_tracker import PerformanceTracker
+
+# Request correlation ID for distributed tracing
+request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Make braintrust optional for test environments
 try:
     from braintrust import current_span, start_span, traced
@@ -45,71 +53,188 @@ from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
 from src.config import Config
 import importlib
-from src.services.openrouter_client import (
-    make_openrouter_request_openai,
-    process_openrouter_response,
-    make_openrouter_request_openai_stream,
-)
-from src.services.portkey_client import (
-    make_portkey_request_openai,
-    process_portkey_response,
-    make_portkey_request_openai_stream,
-)
-from src.services.featherless_client import (
-    make_featherless_request_openai,
-    process_featherless_response,
-    make_featherless_request_openai_stream,
-)
-from src.services.fireworks_client import (
-    make_fireworks_request_openai,
-    process_fireworks_response,
-    make_fireworks_request_openai_stream,
-)
-from src.services.together_client import (
-    make_together_request_openai,
-    process_together_response,
-    make_together_request_openai_stream,
-)
-from src.services.huggingface_client import (
-    make_huggingface_request_openai,
-    process_huggingface_response,
-    make_huggingface_request_openai_stream,
-)
-from src.services.aimo_client import (
-    make_aimo_request_openai,
-    process_aimo_response,
-    make_aimo_request_openai_stream,
-)
-from src.services.xai_client import (
-    make_xai_request_openai,
-    process_xai_response,
-    make_xai_request_openai_stream,
-)
-from src.services.chutes_client import (
-    make_chutes_request_openai,
-    process_chutes_response,
-    make_chutes_request_openai_stream,
-)
-from src.services.google_vertex_client import (
-    make_google_vertex_request_openai,
-    process_google_vertex_response,
-    make_google_vertex_request_openai_stream,
-)
-from src.services.near_client import (
-    make_near_request_openai,
-    process_near_response,
-    make_near_request_openai_stream,
-)
-from src.services.vercel_ai_gateway_client import (
-    make_vercel_ai_gateway_request_openai,
-    process_vercel_ai_gateway_response,
-    make_vercel_ai_gateway_request_openai_stream,
-)
-from src.services.aihubmix_client import (
-    make_aihubmix_request_openai,
-    process_aihubmix_response,
-    make_aihubmix_request_openai_stream,
-)
+# Import provider clients with graceful error handling
+# This prevents a single provider's import failure from breaking the entire chat endpoint
+_provider_import_errors = {}
+
+# Helper function to safely import provider clients
+def _safe_import_provider(provider_name, imports_list):
+    """Safely import provider functions with error logging"""
+    try:
+        module_path = f"src.services.{provider_name}_client"
+        module = __import__(module_path, fromlist=imports_list)
+        result = {}
+        for import_name in imports_list:
+            result[import_name] = getattr(module, import_name)
+        logging.getLogger(__name__).debug(f"✓ Loaded {provider_name} provider client")
+        return result
+    except Exception as e:
+        error_msg = f"⚠  Failed to load {provider_name} provider client: {type(e).__name__}: {str(e)}"
+        logging.getLogger(__name__).error(error_msg)
+        _provider_import_errors[provider_name] = str(e)
+        # Return error-raising stubs instead of silent None returns
+        def create_error_stub(prov_name, error_details):
+            async def error_stub(*args, **kwargs):
+                raise ImportError(
+                    f"Provider '{prov_name}' failed to import during startup: {error_details}. "
+                    "This provider is currently unavailable. Check logs for details."
+                )
+            return error_stub
+        return {import_name: create_error_stub(provider_name, str(e)) for import_name in imports_list}
+
+# Load all provider clients
+_openrouter = _safe_import_provider("openrouter", [
+    "make_openrouter_request_openai",
+    "process_openrouter_response",
+    "make_openrouter_request_openai_stream",
+])
+make_openrouter_request_openai = _openrouter.get("make_openrouter_request_openai")
+process_openrouter_response = _openrouter.get("process_openrouter_response")
+make_openrouter_request_openai_stream = _openrouter.get("make_openrouter_request_openai_stream")
+
+_portkey = _safe_import_provider("portkey", [
+    "make_portkey_request_openai",
+    "process_portkey_response",
+    "make_portkey_request_openai_stream",
+])
+make_portkey_request_openai = _portkey.get("make_portkey_request_openai")
+process_portkey_response = _portkey.get("process_portkey_response")
+make_portkey_request_openai_stream = _portkey.get("make_portkey_request_openai_stream")
+
+_featherless = _safe_import_provider("featherless", [
+    "make_featherless_request_openai",
+    "process_featherless_response",
+    "make_featherless_request_openai_stream",
+])
+make_featherless_request_openai = _featherless.get("make_featherless_request_openai")
+process_featherless_response = _featherless.get("process_featherless_response")
+make_featherless_request_openai_stream = _featherless.get("make_featherless_request_openai_stream")
+
+_fireworks = _safe_import_provider("fireworks", [
+    "make_fireworks_request_openai",
+    "process_fireworks_response",
+    "make_fireworks_request_openai_stream",
+])
+make_fireworks_request_openai = _fireworks.get("make_fireworks_request_openai")
+process_fireworks_response = _fireworks.get("process_fireworks_response")
+make_fireworks_request_openai_stream = _fireworks.get("make_fireworks_request_openai_stream")
+
+_together = _safe_import_provider("together", [
+    "make_together_request_openai",
+    "process_together_response",
+    "make_together_request_openai_stream",
+])
+make_together_request_openai = _together.get("make_together_request_openai")
+process_together_response = _together.get("process_together_response")
+make_together_request_openai_stream = _together.get("make_together_request_openai_stream")
+
+_huggingface = _safe_import_provider("huggingface", [
+    "make_huggingface_request_openai",
+    "process_huggingface_response",
+    "make_huggingface_request_openai_stream",
+])
+make_huggingface_request_openai = _huggingface.get("make_huggingface_request_openai")
+process_huggingface_response = _huggingface.get("process_huggingface_response")
+make_huggingface_request_openai_stream = _huggingface.get("make_huggingface_request_openai_stream")
+
+_aimo = _safe_import_provider("aimo", [
+    "make_aimo_request_openai",
+    "process_aimo_response",
+    "make_aimo_request_openai_stream",
+])
+make_aimo_request_openai = _aimo.get("make_aimo_request_openai")
+process_aimo_response = _aimo.get("process_aimo_response")
+make_aimo_request_openai_stream = _aimo.get("make_aimo_request_openai_stream")
+
+_xai = _safe_import_provider("xai", [
+    "make_xai_request_openai",
+    "process_xai_response",
+    "make_xai_request_openai_stream",
+])
+make_xai_request_openai = _xai.get("make_xai_request_openai")
+process_xai_response = _xai.get("process_xai_response")
+make_xai_request_openai_stream = _xai.get("make_xai_request_openai_stream")
+
+_cerebras = _safe_import_provider("cerebras", [
+    "make_cerebras_request_openai",
+    "process_cerebras_response",
+    "make_cerebras_request_openai_stream",
+])
+make_cerebras_request_openai = _cerebras.get("make_cerebras_request_openai")
+process_cerebras_response = _cerebras.get("process_cerebras_response")
+make_cerebras_request_openai_stream = _cerebras.get("make_cerebras_request_openai_stream")
+
+_chutes = _safe_import_provider("chutes", [
+    "make_chutes_request_openai",
+    "process_chutes_response",
+    "make_chutes_request_openai_stream",
+])
+make_chutes_request_openai = _chutes.get("make_chutes_request_openai")
+process_chutes_response = _chutes.get("process_chutes_response")
+make_chutes_request_openai_stream = _chutes.get("make_chutes_request_openai_stream")
+
+_google_vertex = _safe_import_provider("google_vertex", [
+    "make_google_vertex_request_openai",
+    "process_google_vertex_response",
+    "make_google_vertex_request_openai_stream",
+])
+make_google_vertex_request_openai = _google_vertex.get("make_google_vertex_request_openai")
+process_google_vertex_response = _google_vertex.get("process_google_vertex_response")
+make_google_vertex_request_openai_stream = _google_vertex.get("make_google_vertex_request_openai_stream")
+
+_near = _safe_import_provider("near", [
+    "make_near_request_openai",
+    "process_near_response",
+    "make_near_request_openai_stream",
+])
+make_near_request_openai = _near.get("make_near_request_openai")
+process_near_response = _near.get("process_near_response")
+make_near_request_openai_stream = _near.get("make_near_request_openai_stream")
+
+_vercel_ai_gateway = _safe_import_provider("vercel_ai_gateway", [
+    "make_vercel_ai_gateway_request_openai",
+    "process_vercel_ai_gateway_response",
+    "make_vercel_ai_gateway_request_openai_stream",
+])
+make_vercel_ai_gateway_request_openai = _vercel_ai_gateway.get("make_vercel_ai_gateway_request_openai")
+process_vercel_ai_gateway_response = _vercel_ai_gateway.get("process_vercel_ai_gateway_response")
+make_vercel_ai_gateway_request_openai_stream = _vercel_ai_gateway.get("make_vercel_ai_gateway_request_openai_stream")
+
+_helicone = _safe_import_provider("helicone", [
+    "make_helicone_request_openai",
+    "process_helicone_response",
+    "make_helicone_request_openai_stream",
+])
+make_helicone_request_openai = _helicone.get("make_helicone_request_openai")
+process_helicone_response = _helicone.get("process_helicone_response")
+make_helicone_request_openai_stream = _helicone.get("make_helicone_request_openai_stream")
+
+_aihubmix = _safe_import_provider("aihubmix", [
+    "make_aihubmix_request_openai",
+    "process_aihubmix_response",
+    "make_aihubmix_request_openai_stream",
+])
+make_aihubmix_request_openai = _aihubmix.get("make_aihubmix_request_openai")
+process_aihubmix_response = _aihubmix.get("process_aihubmix_response")
+make_aihubmix_request_openai_stream = _aihubmix.get("make_aihubmix_request_openai_stream")
+
+_anannas = _safe_import_provider("anannas", [
+    "make_anannas_request_openai",
+    "process_anannas_response",
+    "make_anannas_request_openai_stream",
+])
+make_anannas_request_openai = _anannas.get("make_anannas_request_openai")
+process_anannas_response = _anannas.get("process_anannas_response")
+make_anannas_request_openai_stream = _anannas.get("make_anannas_request_openai_stream")
+
+_alpaca_network = _safe_import_provider("alpaca_network", [
+    "make_alpaca_network_request_openai",
+    "process_alpaca_network_response",
+    "make_alpaca_network_request_openai_stream",
+])
+make_alpaca_network_request_openai = _alpaca_network.get("make_alpaca_network_request_openai")
+process_alpaca_network_response = _alpaca_network.get("process_alpaca_network_response")
+make_alpaca_network_request_openai_stream = _alpaca_network.get("make_alpaca_network_request_openai_stream")
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.provider_failover import (
     build_provider_failover_chain,
@@ -190,9 +315,14 @@ def track_trial_usage(*args, **kwargs):
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Log module initialization to help debug route loading
+logger.info("🔄 Chat module initialized - router created")
+logger.info(f"   Router type: {type(router)}")
+
 DEFAULT_PROVIDER_TIMEOUT = 30
 PROVIDER_TIMEOUTS = {
     "huggingface": 120,
+    "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
 
 
@@ -235,6 +365,7 @@ async def stream_generator(
     messages,
     rate_limit_mgr=None,
     provider="openrouter",
+    tracker=None,
 ):
     """Generate SSE stream from OpenAI stream response with thinking tag support"""
     accumulated_content = ""
@@ -245,8 +376,14 @@ async def stream_generator(
     start_time = time.monotonic()
     rate_limit_mgr is not None and not trial.get("is_trial", False)
     has_thinking = False
+    streaming_ctx = None
 
     try:
+        # Track streaming duration if tracker is provided
+        if tracker:
+            streaming_ctx = tracker.streaming()
+            streaming_ctx.__enter__()
+
         chunk_count = 0
         for chunk in stream:
             chunk_count += 1
@@ -318,7 +455,19 @@ async def stream_generator(
         if total_tokens == 0:
             # Rough estimate: 1 token ≈ 4 characters
             completion_tokens = max(1, len(accumulated_content) // 4)
-            prompt_tokens = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
+
+            # Calculate prompt tokens, handling both string and multimodal content
+            prompt_chars = 0
+            for m in messages:
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    prompt_chars += len(content)
+                elif isinstance(content, list):
+                    # For multimodal content, extract text parts
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            prompt_chars += len(item.get("text", ""))
+            prompt_tokens = max(1, prompt_chars // 4)
             total_tokens = prompt_tokens + completion_tokens
 
         elapsed = max(0.001, time.monotonic() - start_time)
@@ -491,31 +640,55 @@ async def stream_generator(
         error_chunk = {"error": {"message": "Streaming error occurred", "type": "stream_error"}}
         yield f"data: {json.dumps(error_chunk)}\n\n"
         yield "data: [DONE]\n\n"
+    finally:
+        # Record streaming duration
+        if streaming_ctx:
+            streaming_ctx.__exit__(None, None, None)
+        # Record performance percentages if tracker is provided
+        if tracker:
+            tracker.record_percentages()
 
+
+# Log route registration for debugging
+logger.info("📍 Registering /v1/chat/completions endpoint")
 
 @router.post("/v1/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
     req: ProxyRequest,
     api_key: str = Depends(get_api_key),
-    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
+    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     # === 0) Setup / sanity ===
+    # Generate request correlation ID for distributed tracing
+    request_id = str(uuid.uuid4())
+    request_id_var.set(request_id)
+
     # Never print keys; log masked
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             api_key = auth_header.split(" ", 1)[1].strip()
 
-    logger.info("chat_completions start (api_key=%s, model=%s)", mask_key(api_key), req.model)
+    logger.info(
+        "chat_completions start (request_id=%s, api_key=%s, model=%s)",
+        request_id,
+        mask_key(api_key),
+        req.model,
+        extra={"request_id": request_id}
+    )
 
     # Start Braintrust span for this request
     span = start_span(name=f"chat_{req.model}", type="llm")
 
+    # Initialize performance tracker
+    tracker = PerformanceTracker(endpoint="/v1/chat/completions")
+
     try:
         # === 1) User + plan/trial prechecks (DB calls on thread) ===
-        user = await _to_thread(get_user, api_key)
+        with tracker.stage("auth_validation"):
+            user = await _to_thread(get_user, api_key)
         if not user and Config.IS_TESTING:
             logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
             user = await _to_thread(_fallback_get_user, api_key)
@@ -569,7 +742,12 @@ async def chat_completions(
 
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
-        if should_release_concurrency:
+
+        # Allow disabling rate limiting for testing (DEV ONLY)
+        import os
+        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
+
+        if should_release_concurrency and not disable_rate_limiting:
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
                 await _to_thread(
@@ -595,7 +773,8 @@ async def chat_completions(
             raise HTTPException(status_code=402, detail="Insufficient credits")
 
         # === 2) Build upstream request ===
-        messages = [m.model_dump() for m in req.messages]
+        with tracker.stage("request_parsing"):
+            messages = [m.model_dump() for m in req.messages]
 
         # === 2.1) Inject conversation history if session_id provided ===
         if session_id:
@@ -635,78 +814,92 @@ async def chat_completions(
         # Store original model for response
         original_model = req.model
 
-        optional = {}
-        for name in (
-            "max_tokens",
-            "temperature",
-            "top_p",
-            "frequency_penalty",
-            "presence_penalty",
-            "tools",
-        ):
-            val = getattr(req, name, None)
-            if val is not None:
-                optional[name] = val
+        with tracker.stage("request_preparation"):
+            optional = {}
+            for name in (
+                "max_tokens",
+                "temperature",
+                "top_p",
+                "frequency_penalty",
+                "presence_penalty",
+                "tools",
+            ):
+                val = getattr(req, name, None)
+                if val is not None:
+                    optional[name] = val
 
-        # Auto-detect provider if not specified
-        req_provider_missing = req.provider is None or (
-            isinstance(req.provider, str) and not req.provider
-        )
-        provider = (req.provider or "openrouter").lower()
+            # Auto-detect provider if not specified
+            req_provider_missing = req.provider is None or (
+                isinstance(req.provider, str) and not req.provider
+            )
+            provider = (req.provider or "openrouter").lower()
 
-        # Normalize provider aliases
-        if provider == "hug":
-            provider = "huggingface"
+            # Normalize provider aliases
+            if provider == "hug":
+                provider = "huggingface"
 
-        override_provider = detect_provider_from_model_id(original_model)
-        if override_provider:
-            override_provider = override_provider.lower()
-            if override_provider == "hug":
-                override_provider = "huggingface"
-            if override_provider != provider:
-                logger.info(
-                    f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
-                )
-                provider = override_provider
+            override_provider = detect_provider_from_model_id(original_model)
+            if override_provider:
+                override_provider = override_provider.lower()
+                if override_provider == "hug":
+                    override_provider = "huggingface"
+                if override_provider != provider:
+                    logger.info(
+                        f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                    )
+                    provider = override_provider
+                # Mark provider as determined even if it matches the default
+                # This prevents the fallback logic from incorrectly routing to wrong providers
                 req_provider_missing = False
 
-        if req_provider_missing:
-            # Try to detect provider from model ID using the transformation module
-            detected_provider = detect_provider_from_model_id(original_model)
-            if detected_provider:
-                provider = detected_provider
-                # Normalize provider aliases
-                if provider == "hug":
-                    provider = "huggingface"
-                logger.info(
-                    "Auto-detected provider '%s' for model %s",
-                    sanitize_for_logging(provider),
-                    sanitize_for_logging(original_model),
-                )
-            else:
-                # Fallback to checking cached models
-                from src.services.models import get_cached_models
+            if req_provider_missing:
+                # Try to detect provider from model ID using the transformation module
+                detected_provider = detect_provider_from_model_id(original_model)
+                if detected_provider:
+                    provider = detected_provider
+                    # Normalize provider aliases
+                    if provider == "hug":
+                        provider = "huggingface"
+                    logger.info(
+                        "Auto-detected provider '%s' for model %s",
+                        sanitize_for_logging(provider),
+                        sanitize_for_logging(original_model),
+                    )
+                else:
+                    # Fallback to checking cached models
+                    from src.services.models import get_cached_models
 
-                # Try each provider with transformation
-                for test_provider in [
-                    "huggingface",
-                    "featherless",
-                    "fireworks",
-                    "together",
-                    "portkey",
-                ]:
-                    transformed = transform_model_id(original_model, test_provider)
-                    provider_models = get_cached_models(test_provider) or []
-                    if any(m.get("id") == transformed for m in provider_models):
-                        provider = test_provider
-                        logger.info(
-                            f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
-                        )
-                        break
-                # Otherwise default to openrouter (already set)
+                    # Try each provider with transformation
+                    for test_provider in [
+                        "huggingface",
+                        "featherless",
+                        "fireworks",
+                        "together",
+                        "portkey",
+                        "google-vertex",
+                    ]:
+                        transformed = transform_model_id(original_model, test_provider)
+                        provider_models = get_cached_models(test_provider) or []
+                        if any(m.get("id") == transformed for m in provider_models):
+                            provider = test_provider
+                            logger.info(
+                                f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
+                            )
+                            break
+                    # Otherwise default to openrouter (already set)
 
-        provider_chain = build_provider_failover_chain(provider)
-        model = original_model
+            provider_chain = build_provider_failover_chain(provider)
+            model = original_model
+        
+        # Diagnostic logging for tools parameter
+        if "tools" in optional:
+            logger.info(
+                "Tools parameter detected: tools_count=%d, provider=%s, model=%s",
+                len(optional["tools"]) if isinstance(optional["tools"], list) else 0,
+                sanitize_for_logging(provider),
+                sanitize_for_logging(original_model),
+            )
+            logger.debug("Tools content: %s", sanitize_for_logging(str(optional["tools"])[:500]))
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
@@ -764,6 +957,10 @@ async def chat_completions(
                         stream = await _to_thread(
                             make_xai_request_openai_stream, messages, request_model, **optional
                         )
+                    elif attempt_provider == "cerebras":
+                        stream = await _to_thread(
+                            make_cerebras_request_openai_stream, messages, request_model, **optional
+                        )
                     elif attempt_provider == "chutes":
                         stream = await _to_thread(
                             make_chutes_request_openai_stream, messages, request_model, **optional
@@ -786,9 +983,30 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "helicone":
+                        stream = await _to_thread(
+                            make_helicone_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
                     elif attempt_provider == "aihubmix":
                         stream = await _to_thread(
                             make_aihubmix_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
+                    elif attempt_provider == "anannas":
+                        stream = await _to_thread(
+                            make_anannas_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
+                    elif attempt_provider == "alpaca-network":
+                        stream = await _to_thread(
+                            make_alpaca_network_request_openai_stream,
                             messages,
                             request_model,
                             **optional,
@@ -815,6 +1033,7 @@ async def chat_completions(
                             messages,
                             rate_limit_mgr,
                             provider,
+                            tracker,
                         ),
                         media_type="text/event-stream",
                     )
@@ -928,6 +1147,12 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_xai_response, resp_raw)
+                elif attempt_provider == "cerebras":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(make_cerebras_request_openai, messages, request_model, **optional),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_cerebras_response, resp_raw)
                 elif attempt_provider == "chutes":
                     resp_raw = await asyncio.wait_for(
                         _to_thread(make_chutes_request_openai, messages, request_model, **optional),
@@ -959,6 +1184,17 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_vercel_ai_gateway_response, resp_raw)
+                elif attempt_provider == "helicone":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_helicone_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_helicone_response, resp_raw)
                 elif attempt_provider == "aihubmix":
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -970,6 +1206,28 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_aihubmix_response, resp_raw)
+                elif attempt_provider == "anannas":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_anannas_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_anannas_response, resp_raw)
+                elif attempt_provider == "alpaca-network":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_alpaca_network_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_alpaca_network_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -1032,7 +1290,7 @@ async def chat_completions(
             except Exception as e:
                 logger.warning("Failed to track trial usage: %s", e)
 
-        if should_release_concurrency and rate_limit_mgr:
+        if should_release_concurrency and rate_limit_mgr and not disable_rate_limiting:
             try:
                 await rate_limit_mgr.release_concurrency(api_key)
             except Exception as exc:
@@ -1235,10 +1493,16 @@ async def chat_completions(
 
     except HTTPException:
         raise
-    except Exception:
-        logger.exception("Unhandled server error")
-        # Don't leak internal details
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except Exception as e:
+        logger.exception(
+            f"[{request_id}] Unhandled server error: {type(e).__name__}",
+            extra={"request_id": request_id, "error_type": type(e).__name__}
+        )
+        # Don't leak internal details, but include request ID for support
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error (request ID: {request_id})"
+        )
 
 
 @router.post("/v1/responses", tags=["chat"])
@@ -1246,7 +1510,7 @@ async def chat_completions(
 async def unified_responses(
     req: ResponseRequest,
     api_key: str = Depends(get_api_key),
-    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
+    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -1461,7 +1725,9 @@ async def unified_responses(
                     f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
                 )
                 provider = override_provider
-                req_provider_missing = False
+            # Mark provider as determined even if it matches the default
+            # This prevents the fallback logic from incorrectly routing to wrong providers
+            req_provider_missing = False
 
         if req_provider_missing:
             # Try to detect provider from model ID using the transformation module
@@ -1484,6 +1750,7 @@ async def unified_responses(
                     "fireworks",
                     "together",
                     "portkey",
+                    "google-vertex",
                 ]:
                     transformed = transform_model_id(original_model, test_provider)
                     provider_models = get_cached_models(test_provider) or []
@@ -1499,6 +1766,16 @@ async def unified_responses(
 
         provider_chain = build_provider_failover_chain(provider)
         model = original_model
+        
+        # Diagnostic logging for tools parameter
+        if "tools" in optional:
+            logger.info(
+                "Tools parameter detected (unified_responses): tools_count=%d, provider=%s, model=%s",
+                len(optional["tools"]) if isinstance(optional["tools"], list) else 0,
+                sanitize_for_logging(provider),
+                sanitize_for_logging(original_model),
+            )
+            logger.debug("Tools content: %s", sanitize_for_logging(str(optional["tools"])[:500]))
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
@@ -1514,12 +1791,14 @@ async def unified_responses(
                 http_exc = None
                 try:
                     if attempt_provider == "portkey":
-                        base_provider = req.portkey_provider or "openai"
-                        request_model = f"@{base_provider}/{attempt_model}"
+                        portkey_provider = req.portkey_provider or "openai"
+                        portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
                         stream = await _to_thread(
                             make_portkey_request_openai_stream,
                             messages,
                             request_model,
+                            portkey_provider,
+                            portkey_virtual_key,
                             **optional,
                         )
                     elif attempt_provider == "featherless":
@@ -1555,6 +1834,10 @@ async def unified_responses(
                         stream = await _to_thread(
                             make_xai_request_openai_stream, messages, request_model, **optional
                         )
+                    elif attempt_provider == "cerebras":
+                        stream = await _to_thread(
+                            make_cerebras_request_openai_stream, messages, request_model, **optional
+                        )
                     elif attempt_provider == "chutes":
                         stream = await _to_thread(
                             make_chutes_request_openai_stream, messages, request_model, **optional
@@ -1579,6 +1862,8 @@ async def unified_responses(
                             session_id,
                             messages,
                             rate_limit_mgr,
+                            provider="openrouter",
+                            tracker=None,
                         ):
                             if chunk_data.startswith("data: "):
                                 data_str = chunk_data[6:].strip()
@@ -1671,11 +1956,16 @@ async def unified_responses(
             http_exc = None
             try:
                 if attempt_provider == "portkey":
-                    base_provider = req.portkey_provider or "openai"
-                    request_model = f"@{base_provider}/{attempt_model}"
+                    portkey_provider = req.portkey_provider or "openai"
+                    portkey_virtual_key = getattr(req, "portkey_virtual_key", None)
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
-                            make_portkey_request_openai, messages, request_model, **optional
+                            make_portkey_request_openai,
+                            messages,
+                            request_model,
+                            portkey_provider,
+                            portkey_virtual_key,
+                            **optional,
                         ),
                         timeout=request_timeout,
                     )
@@ -1724,6 +2014,12 @@ async def unified_responses(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_xai_response, resp_raw)
+                elif attempt_provider == "cerebras":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(make_cerebras_request_openai, messages, request_model, **optional),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_cerebras_response, resp_raw)
                 elif attempt_provider == "chutes":
                     resp_raw = await asyncio.wait_for(
                         _to_thread(make_chutes_request_openai, messages, request_model, **optional),
@@ -2034,3 +2330,16 @@ async def unified_responses(
                 await rate_limit_mgr.release_concurrency(api_key)
             except Exception as exc:
                 logger.debug("Failed to release concurrency for %s: %s", mask_key(api_key), exc)
+
+
+# Log successful module load - this should appear in startup logs if chat.py loads correctly
+logger.info("✅ Chat module fully loaded - all routes registered successfully")
+logger.info(f"   Total routes in router: {len(router.routes)}")
+
+# Log any provider import errors that occurred during safe imports
+if _provider_import_errors:
+    logger.warning(f"⚠  Provider import warnings ({len(_provider_import_errors)} failed):")
+    for provider_name, error_msg in _provider_import_errors.items():
+        logger.warning(f"     - {provider_name}: {error_msg}")
+else:
+    logger.info("✓ All provider clients loaded successfully")

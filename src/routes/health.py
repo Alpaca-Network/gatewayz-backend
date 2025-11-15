@@ -7,7 +7,7 @@ and health status across all providers and gateways.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
@@ -64,9 +64,9 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
         raise HTTPException(status_code=500, detail="Failed to retrieve system health") from e
 
 
-@router.get("/health/providers", response_model=list[ProviderHealthResponse], tags=["health"])
+@router.get("/health/providers", response_model=List[ProviderHealthResponse], tags=["health"])
 async def get_providers_health(
-    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -86,11 +86,11 @@ async def get_providers_health(
         raise HTTPException(status_code=500, detail="Failed to retrieve providers health") from e
 
 
-@router.get("/health/models", response_model=list[ModelHealthResponse], tags=["health"])
+@router.get("/health/models", response_model=List[ModelHealthResponse], tags=["health"])
 async def get_models_health(
-    gateway: str | None = Query(None, description="Filter by specific gateway"),
-    provider: str | None = Query(None, description="Filter by specific provider"),
-    status: str | None = Query(None, description="Filter by health status"),
+    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
+    provider: Optional[str] = Query(None, description="Filter by specific provider"),
+    status: Optional[str] = Query(None, description="Filter by health status"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -121,7 +121,7 @@ async def get_models_health(
 @router.get("/health/model/{model_id}", response_model=ModelHealthResponse, tags=["health"])
 async def get_model_health(
     model_id: str,
-    gateway: str | None = Query(None, description="Specific gateway to check"),
+    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -151,7 +151,7 @@ async def get_model_health(
 @router.get("/health/provider/{provider}", response_model=ProviderHealthResponse, tags=["health"])
 async def get_provider_health(
     provider: str,
-    gateway: str | None = Query(None, description="Specific gateway to check"),
+    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -197,7 +197,7 @@ async def get_health_summary(api_key: str = Depends(get_api_key)):
         raise HTTPException(status_code=500, detail="Failed to retrieve health summary") from e
 
 
-@router.post("/health/check", response_model=dict[str, Any], tags=["health"])
+@router.post("/health/check", response_model=Dict[str, Any], tags=["health"])
 async def perform_health_check(
     request: HealthCheckRequest,
     background_tasks: BackgroundTasks,
@@ -223,7 +223,7 @@ async def perform_health_check(
         raise HTTPException(status_code=500, detail="Failed to initiate health check") from e
 
 
-@router.post("/health/check/now", response_model=dict[str, Any], tags=["health", "admin"])
+@router.post("/health/check/now", response_model=Dict[str, Any], tags=["health", "admin"])
 async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
     """
     Perform immediate health check and return results
@@ -515,7 +515,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
         ) from e
 
 
-@router.get("/health/status", response_model=dict[str, Any], tags=["health", "status"])
+@router.get("/health/status", response_model=Dict[str, Any], tags=["health", "status"])
 async def get_health_status(api_key: str = Depends(get_api_key)):
     """
     Get simple health status for quick checks
@@ -553,7 +553,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
         }
 
 
-@router.get("/health/monitoring/status", response_model=dict[str, Any], tags=["health", "admin"])
+@router.get("/health/monitoring/status", response_model=Dict[str, Any], tags=["health", "admin"])
 async def get_monitoring_status(api_key: str = Depends(get_api_key)):
     """
     Get monitoring service status
@@ -578,7 +578,7 @@ async def get_monitoring_status(api_key: str = Depends(get_api_key)):
         }
 
 
-@router.post("/health/monitoring/start", response_model=dict[str, Any], tags=["health", "admin"])
+@router.post("/health/monitoring/start", response_model=Dict[str, Any], tags=["health", "admin"])
 async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     Start health monitoring service
@@ -593,7 +593,7 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
         raise HTTPException(status_code=500, detail="Failed to start health monitoring") from e
 
 
-@router.post("/health/monitoring/stop", response_model=dict[str, Any], tags=["health", "admin"])
+@router.post("/health/monitoring/stop", response_model=Dict[str, Any], tags=["health", "admin"])
 async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     Stop health monitoring service
@@ -606,3 +606,129 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     except Exception as e:
         logger.error(f"Failed to stop health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop health monitoring") from e
+
+
+@router.get("/health/google-vertex", tags=["health"])
+async def check_google_vertex_health():
+    """
+    Check Google Vertex AI provider health
+
+    Returns detailed diagnostics about Google Vertex AI configuration and credentials:
+    - Configuration (project ID, region)
+    - Credential loading status
+    - Access token generation status
+    - Overall health status
+
+    This endpoint does not require authentication and provides diagnostic information
+    that can help troubleshoot Google Vertex AI integration issues.
+
+    Example response:
+    ```json
+    {
+        "provider": "google-vertex",
+        "health_status": "healthy",
+        "status": "healthy",
+        "diagnosis": {
+            "credentials_available": true,
+            "credential_source": "env_json",
+            "project_id": "my-project",
+            "location": "us-central1",
+            "token_available": true,
+            "token_valid": true,
+            "error": null,
+            "steps": [...]
+        },
+        "timestamp": "2025-01-01T12:00:00Z"
+    }
+    ```
+    """
+    try:
+        from src.services.google_vertex_client import diagnose_google_vertex_credentials
+
+        diagnosis = diagnose_google_vertex_credentials()
+
+        return {
+            "provider": "google-vertex",
+            "health_status": diagnosis.get("health_status", "unhealthy"),
+            "status": diagnosis.get("health_status", "unhealthy"),
+            "diagnosis": diagnosis,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to check Google Vertex AI health: {e}", exc_info=True)
+        return {
+            "provider": "google-vertex",
+            "health_status": "unhealthy",
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.get("/health/database", tags=["health"])
+async def database_health():
+    """
+    Check database connectivity and health
+
+    Returns database connection status and any errors.
+    This is critical for startup diagnostics in Railway.
+    """
+    try:
+        from src.config.supabase_config import supabase
+
+        logger.info("Checking database connectivity...")
+        # Try a simple query to verify connection
+        result = supabase.table("users").limit(1).execute()
+
+        logger.info("✅ Database connection verified")
+        return {
+            "status": "healthy",
+            "database": "supabase",
+            "connection": "verified",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "database": "supabase",
+            "connection": "failed",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.get("/health/providers", tags=["health"])
+async def provider_health():
+    """
+    Check provider import status
+
+    Returns which providers successfully imported and which failed.
+    This is essential for debugging chat endpoint issues in Railway.
+    """
+    try:
+        from src.routes.chat import _provider_import_errors
+
+        # Count total providers and failed
+        total_providers = 16  # Based on the code, there are 16 providers
+        failed_count = len(_provider_import_errors)
+        loaded_count = total_providers - failed_count
+
+        logger.info(f"Provider status: {loaded_count}/{total_providers} loaded, {failed_count} failed")
+
+        return {
+            "status": "healthy" if failed_count == 0 else "degraded",
+            "total_providers": total_providers,
+            "loaded_providers": loaded_count,
+            "failed_providers": failed_count,
+            "failures": _provider_import_errors if _provider_import_errors else None,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error checking provider health: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }

@@ -40,7 +40,6 @@ from src.cache import (
     _fireworks_models_cache,
     _together_models_cache,
     _deepinfra_models_cache,
-    _google_models_cache,
     _cerebras_models_cache,
     _nebius_models_cache,
     _xai_models_cache,
@@ -92,7 +91,7 @@ GATEWAY_CONFIG = {
     },
     'chutes': {
         'name': 'Chutes',
-        'url': 'https://api.chutes.ai/v1/models',
+        'url': 'https://llm.chutes.ai/v1/models',
         'api_key_env': 'CHUTES_API_KEY',
         'api_key': getattr(Config, 'CHUTES_API_KEY', None),
         'cache': _chutes_models_cache,
@@ -135,15 +134,6 @@ GATEWAY_CONFIG = {
         'min_expected_models': 50,
         'header_type': 'bearer'
     },
-    'google': {
-        'name': 'Google Generative AI',
-        'url': 'https://generativelanguage.googleapis.com/v1beta/models',
-        'api_key_env': 'GOOGLE_API_KEY',
-        'api_key': Config.GOOGLE_API_KEY,
-        'cache': _google_models_cache,
-        'min_expected_models': 5,
-        'header_type': 'google'
-    },
     'cerebras': {
         'name': 'Cerebras',
         'url': 'https://api.cerebras.ai/v1/models',
@@ -173,7 +163,7 @@ GATEWAY_CONFIG = {
     },
     'novita': {
         'name': 'Novita',
-        'url': 'https://api.novita.ai/v3/models',
+        'url': 'https://api.novita.ai/v3/openai/models',
         'api_key_env': 'NOVITA_API_KEY',
         'api_key': Config.NOVITA_API_KEY,
         'cache': _novita_models_cache,
@@ -204,7 +194,7 @@ GATEWAY_CONFIG = {
         'api_key_env': 'NEAR_API_KEY',
         'api_key': Config.NEAR_API_KEY,
         'cache': _near_models_cache,
-        'min_expected_models': 5,
+        'min_expected_models': 4,
         'header_type': 'bearer'
     },
 }

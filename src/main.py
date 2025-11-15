@@ -7,14 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from prometheus_client import generate_latest, REGISTRY, CollectorRegistry
 
 from src.config import Config
 from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
-# Initialize logging
-logging.basicConfig(level=logging.INFO)
+# Initialize logging with Loki integration
+from src.config.logging_config import configure_logging
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -112,8 +114,48 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     logger.info("  🗜  GZip compression middleware enabled (threshold: 1KB)")
 
+    # Add observability middleware for automatic metrics collection
+    # This should be added after CORS/compression but before route handlers
+    from src.middleware.observability_middleware import ObservabilityMiddleware
+    app.add_middleware(ObservabilityMiddleware)
+    logger.info("  📊 Observability middleware enabled (automatic metrics tracking)")
+
+    # Add trace context middleware for log-to-trace correlation
+    # This should be added after observability middleware
+    from src.middleware.trace_context_middleware import TraceContextMiddleware
+    app.add_middleware(TraceContextMiddleware)
+    logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
+
     # Security
     HTTPBearer()
+
+    # ==================== Prometheus Metrics ====================
+    logger.info("Setting up Prometheus metrics...")
+
+    # Import metrics module to initialize all metrics
+    from src.services import prometheus_metrics  # noqa: F401
+
+    # Add Prometheus metrics endpoint
+    from prometheus_client import generate_latest
+    from fastapi.responses import Response
+
+    @app.get("/metrics", tags=["monitoring"], include_in_schema=False)
+    async def metrics():
+        """
+        Prometheus metrics endpoint for monitoring.
+
+        Exposes metrics in Prometheus text format including:
+        - HTTP request counts and durations
+        - Model inference metrics (requests, latency, tokens)
+        - Database query metrics
+        - Cache hit/miss rates
+        - Rate limiting metrics
+        - Provider health metrics
+        - Business metrics (credits, tokens, subscriptions)
+        """
+        return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
+
+    logger.info("  [OK] Prometheus metrics endpoint at /metrics")
 
     # ==================== Load All Routes ====================
     logger.info("Loading application routes...")
@@ -134,6 +176,7 @@ def create_app() -> FastAPI:
         ("ping", "Ping Service"),
         ("chat", "Chat Completions"),  # Moved before catalog
         ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
+        ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
         ("system", "System & Health"),  # Cache management and health monitoring
@@ -167,11 +210,18 @@ def create_app() -> FastAPI:
     for module_name, display_name in routes_to_load:
         try:
             # Import the route module
+            logger.debug(f"  [LOADING] Importing src.routes.{module_name}...")
             module = __import__(f"src.routes.{module_name}", fromlist=["router"])
+
+            if not hasattr(module, "router"):
+                raise AttributeError(f"Module 'src.routes.{module_name}' has no 'router' attribute")
+
             router = module.router
+            logger.debug(f"  [LOADING] Router found for {module_name}")
 
             # Include the router (all routes now follow clean REST patterns)
             app.include_router(router)
+            logger.debug(f"  [LOADING] Router included for {module_name}")
 
             # Log success
             success_msg = f"  [OK] {display_name} ({module_name})"
@@ -179,23 +229,33 @@ def create_app() -> FastAPI:
             loaded_count += 1
 
         except ImportError as e:
-            error_msg = f"  [WARN] {display_name} ({module_name}) - Module not found: {e}"
+            error_msg = f"  [FAIL] {display_name} ({module_name}) - Import failed"
             logger.error(error_msg)
-            logger.error(f"       Full error details: {repr(e)}")
+            logger.error(f"       Error: {str(e)}")
+            logger.error(f"       Type: {type(e).__name__}")
             import traceback
 
             tb = traceback.format_exc()
             logger.error(f"       Traceback:\n{tb}")
             failed_count += 1
 
+            # For critical routes, log more details
+            if module_name in ["chat", "messages", "catalog", "health"]:
+                logger.error(f"       [CRITICAL] Failed to load critical route: {module_name}")
+
         except AttributeError as e:
-            error_msg = f"  [ERROR] {display_name} ({module_name}) - No router found: {e}"
+            error_msg = f"  [FAIL] {display_name} ({module_name}) - No router found"
             logger.error(error_msg)
+            logger.error(f"       Error: {str(e)}")
+            import traceback
+            logger.error(f"       Traceback:\n{traceback.format_exc()}")
             failed_count += 1
 
         except Exception as e:
-            error_msg = f"  [ERROR] {display_name} ({module_name}) - Error: {e}"
+            error_msg = f"  [FAIL] {display_name} ({module_name}) - Unexpected error"
             logger.error(error_msg)
+            logger.error(f"       Error: {str(e)}")
+            logger.error(f"       Type: {type(e).__name__}")
             import traceback
 
             logger.error(f"       Traceback:\n{traceback.format_exc()}")
@@ -224,15 +284,23 @@ def create_app() -> FastAPI:
         logger.info("\n🔧 Initializing application...")
 
         try:
+            # Initialize OpenTelemetry tracing
+            try:
+                from src.config.opentelemetry_config import OpenTelemetryConfig
+                OpenTelemetryConfig.initialize()
+                OpenTelemetryConfig.instrument_fastapi(app)
+            except Exception as otel_e:
+                logger.warning(f"    OpenTelemetry initialization warning: {otel_e}")
+
             # Validate configuration
             logger.info("    Validating configuration...")
             Config.validate()
             logger.info("  [OK] Configuration validated")
 
-            # Enforce admin key presence in production
+            # Warn if admin key is missing in production (don't fail startup)
             if Config.IS_PRODUCTION and not os.environ.get("ADMIN_API_KEY"):
-                logger.error("  [ERROR] ADMIN_API_KEY is not set in production. Aborting startup.")
-                raise RuntimeError("ADMIN_API_KEY is required in production")
+                logger.warning("  [WARN] ADMIN_API_KEY is not set in production. Admin endpoints will be inaccessible.")
+                logger.warning("        Set ADMIN_API_KEY environment variable to enable admin functionality.")
 
             # Initialize database
             try:
@@ -329,6 +397,13 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def on_shutdown():
         logger.info("🛑 Shutting down application...")
+
+        # Shutdown OpenTelemetry
+        try:
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+            OpenTelemetryConfig.shutdown()
+        except Exception as e:
+            logger.warning(f"    OpenTelemetry shutdown warning: {e}")
 
         # Shutdown analytics services gracefully
         try:

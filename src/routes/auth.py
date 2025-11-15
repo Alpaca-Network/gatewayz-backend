@@ -17,7 +17,6 @@ from src.schemas import (
 )
 
 # Initialize logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -178,6 +177,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             logger.info(
                 f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}"
             )
+            logger.info(
+                f"User credits at login: {existing_user.get('credits', 'NOT_FOUND')} (type: {type(existing_user.get('credits')).__name__})"
+            )
 
             # OPTIMIZATION: Get API key with a single query instead of two separate queries
             client = supabase_config.get_supabase_client()
@@ -205,6 +207,15 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     f"No API keys found in api_keys_new for user {existing_user['id']}, using legacy key from users table"
                 )
 
+            # Ensure credits is a float value, handle None/null cases
+            # Normalize credits BEFORE passing to background tasks to ensure consistency
+            user_credits = existing_user.get("credits")
+            if user_credits is None:
+                logger.warning(f"User {existing_user['id']} has None/null credits, defaulting to 0")
+                user_credits = 0.0
+            else:
+                user_credits = float(user_credits)
+
             # OPTIMIZATION: Send welcome email in background to avoid blocking the response
             user_email = existing_user.get("email") or email
             logger.info(
@@ -212,13 +223,13 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             )
 
             if user_email:
-                # Send email in background
+                # Send email in background with normalized credits
                 background_tasks.add_task(
                     _send_welcome_email_background,
                     user_id=existing_user["id"],
                     username=existing_user.get("username") or display_name,
                     email=user_email,
-                    credits=existing_user.get("credits", 0),
+                    credits=user_credits,
                 )
             else:
                 logger.warning(
@@ -234,6 +245,8 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 is_new_user=False,
             )
 
+            logger.info(f"Returning login response with credits: {user_credits}")
+
             return PrivyAuthResponse(
                 success=True,
                 message="Login successful",
@@ -244,7 +257,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 is_new_user=False,
                 display_name=existing_user.get("username") or display_name,
                 email=existing_user.get("email") or email,
-                credits=existing_user.get("credits", 0),
+                credits=user_credits,
                 timestamp=datetime.now(timezone.utc),
             )
         else:
@@ -395,6 +408,10 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 metadata=activity_metadata,
             )
 
+            # Ensure credits is a float value for new users
+            new_user_credits = float(user_data["credits"])
+            logger.info(f"Returning registration response with credits: {new_user_credits}")
+
             return PrivyAuthResponse(
                 success=True,
                 message="Account created successfully",
@@ -405,7 +422,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 is_new_user=True,
                 display_name=display_name or user_data["username"],
                 email=email,
-                credits=user_data["credits"],
+                credits=new_user_credits,
                 timestamp=datetime.now(timezone.utc),
             )
 
