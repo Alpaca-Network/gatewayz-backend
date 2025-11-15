@@ -103,8 +103,9 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
     try:
         pricing = get_model_pricing(model_id)
 
-        prompt_cost = prompt_tokens * pricing["prompt"]
-        completion_cost = completion_tokens * pricing["completion"]
+        # Pricing is per 1M tokens, so divide by 1,000,000
+        prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000_000
+        completion_cost = (completion_tokens * pricing["completion"]) / 1_000_000
         total_cost = prompt_cost + completion_cost
 
         logger.info(
