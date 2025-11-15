@@ -19,15 +19,6 @@ from src.config.logging_config import configure_logging
 configure_logging()
 logger = logging.getLogger(__name__)
 
-# Validate critical environment variables at startup
-is_valid, missing_vars = Config.validate_critical_env_vars()
-if not is_valid:
-    logger.error(f"❌ CRITICAL: Missing required environment variables: {missing_vars}")
-    logger.error("Application cannot start without these variables")
-    raise RuntimeError(f"Missing required environment variables: {missing_vars}")
-else:
-    logger.info(f"✅ All critical environment variables validated ({len(missing_vars) == 0})")
-
 # Constants
 ERROR_INVALID_ADMIN_API_KEY = "Invalid admin API key"
 
