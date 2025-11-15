@@ -3,8 +3,8 @@ Pricing Service
 Handles model pricing calculations and credit cost computation
 """
 
-from typing import Dict
 import logging
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
