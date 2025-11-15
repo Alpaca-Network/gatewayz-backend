@@ -71,7 +71,7 @@ class TestGPT51Pricing:
         response = client.get("/v1/models")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.services.pricing.get_cached_models')
+    @patch('src.services.models.get_cached_models')
     def test_gpt51_pricing_lookup(self, mock_get_cached):
         """Test that pricing can be looked up for GPT-5.1"""
         from src.services.pricing import get_model_pricing
@@ -92,7 +92,7 @@ class TestGPT51Pricing:
         assert float(pricing["prompt"]) == 1.25
         assert float(pricing["completion"]) == 10.00
 
-    @patch('src.services.pricing.get_cached_models')
+    @patch('src.services.models.get_cached_models')
     def test_gpt51_cost_calculation(self, mock_get_cached):
         """Test that costs are calculated correctly for GPT-5.1"""
         from src.services.pricing import calculate_cost
@@ -221,8 +221,8 @@ class TestGPT51DynamicPricing:
         # Find GPT-5.1
         gpt51 = next((m for m in models if m["id"] == "openai/gpt-5.1"), None)
         assert gpt51 is not None
-        assert gpt51["pricing"]["prompt"] == "0.15"
-        assert gpt51["pricing"]["completion"] == "0.60"
+        assert gpt51["pricing"]["prompt"] == "1.25"
+        assert gpt51["pricing"]["completion"] == "10.00"
 
     def test_gpt51_pricing_sanitization(self):
         """Test that negative pricing values are sanitized"""
@@ -294,7 +294,7 @@ class TestGPT51Variants:
 class TestGPT51CostEstimation:
     """Test accurate cost estimation for GPT-5.1 requests"""
 
-    @patch('src.services.pricing.get_cached_models')
+    @patch('src.services.models.get_cached_models')
     def test_estimate_gpt51_request_cost(self, mock_get_cached):
         """Test cost estimation for typical GPT-5.1 requests"""
         from src.services.pricing import calculate_cost
@@ -317,7 +317,7 @@ class TestGPT51CostEstimation:
 
         assert cost == pytest.approx(expected_cost, rel=1e-9)
 
-    @patch('src.services.pricing.get_cached_models')
+    @patch('src.services.models.get_cached_models')
     def test_large_gpt51_request_cost(self, mock_get_cached):
         """Test cost estimation for large GPT-5.1 requests"""
         from src.services.pricing import calculate_cost
