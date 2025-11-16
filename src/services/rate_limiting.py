@@ -44,8 +44,13 @@ def _populate_rate_limit_headers(
     """
     result.ratelimit_limit_requests = request_limit
     result.ratelimit_limit_tokens = token_limit
-    result.ratelimit_reset_requests = int(result.reset_time.timestamp())
-    result.ratelimit_reset_tokens = int(result.reset_time.timestamp())
+    # Safely convert reset_time to Unix timestamp
+    if result.reset_time:
+        reset_timestamp = int(result.reset_time.timestamp()) if hasattr(result.reset_time, 'timestamp') else int(result.reset_time)
+    else:
+        reset_timestamp = int(time.time()) + 60
+    result.ratelimit_reset_requests = reset_timestamp
+    result.ratelimit_reset_tokens = reset_timestamp
     result.burst_window_description = _calculate_burst_window_description(config)
 
 
