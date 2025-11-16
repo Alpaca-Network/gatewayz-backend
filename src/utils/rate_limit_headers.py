@@ -2,11 +2,10 @@
 Utilities for converting rate limit results to HTTP headers
 """
 
-from typing import Dict, Optional
-from src.services.rate_limiting import RateLimitResult as PrimaryRateLimitResult
+from typing import Dict, Optional, Any
 
 
-def get_rate_limit_headers(rate_limit_result: "PrimaryRateLimitResult") -> Dict[str, str]:
+def get_rate_limit_headers(rate_limit_result: Any) -> Dict[str, str]:
     """Convert a RateLimitResult into HTTP headers for the response.
 
     Returns a dictionary of HTTP headers like:

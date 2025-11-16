@@ -748,6 +748,10 @@ async def chat_completions(
         import os
         disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
 
+        # Initialize rate limit variables
+        rl_pre = None
+        rl_final = None
+
         if should_release_concurrency and not disable_rate_limiting:
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
@@ -1024,7 +1028,7 @@ async def chat_completions(
                     model = request_model
                     # Get rate limit headers if available (pre-stream check)
                     stream_headers = {}
-                    if should_release_concurrency and not disable_rate_limiting and rate_limit_mgr and rl_pre:
+                    if rl_pre is not None:
                         stream_headers.update(get_rate_limit_headers(rl_pre))
 
                     return StreamingResponse(
@@ -1498,7 +1502,7 @@ async def chat_completions(
 
         # Prepare headers including rate limit information
         headers = {}
-        if should_release_concurrency and not disable_rate_limiting and rate_limit_mgr and 'rl_final' in locals():
+        if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
 
         return JSONResponse(content=processed, headers=headers)

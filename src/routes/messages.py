@@ -250,6 +250,10 @@ async def anthropic_messages(
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
 
+        # Initialize rate limit variables
+        rl_pre = None
+        rl_final = None
+
         if should_release_concurrency:
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
@@ -728,7 +732,7 @@ async def anthropic_messages(
 
         # Prepare headers including rate limit information
         headers = {}
-        if should_release_concurrency and not disable_rate_limiting and rate_limit_mgr and 'rl_final' in locals():
+        if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
 
         return JSONResponse(content=anthropic_response, headers=headers)
