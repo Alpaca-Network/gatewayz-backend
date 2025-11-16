@@ -9,6 +9,7 @@ on:
     types: [labeled, opened, synchronize]
     paths:
       - "src/**"
+      - "tests/**"
 
 permissions:
   id-token: write
@@ -300,12 +301,17 @@ jobs:
 
             comment += 'Please review and merge these test additions to improve coverage. ✅';
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+              console.log('PR comment posted successfully');
+            } catch (error) {
+              console.error('Failed to post PR comment:', error);
+            }
 
       - name: Upload coverage report
         if: always()
