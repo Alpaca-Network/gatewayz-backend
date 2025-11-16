@@ -264,7 +264,7 @@ jobs:
                 repo: context.repo.repo,
                 title: '⚡ Codex Performance Review Results',
                 body: `## Performance Analysis Report\n\nCodex has completed a comprehensive performance analysis of the codebase.\n\nReview the workflow run for detailed findings and recommendations.\n\n**Run:** ${context.runId}\n\nKey areas reviewed:\n- Database query optimization\n- Caching effectiveness\n- Provider integration performance\n- Rate limiting efficiency\n- Async/await patterns\n- Memory usage\n- API response optimization`,
-                labels: ['performance', 'codex-analysis'],
+                labels: ['performance', 'codex-analyze'],
               });
 
               console.log(`Created issue #${issue.data.number}`);
@@ -277,17 +277,22 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
         with:
           script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## ⚡ Codex Performance Analysis\n\nCodex has analyzed this PR for performance implications.\n\nCheck the workflow run logs for detailed performance insights and optimization recommendations.\n\n**Workflow Run:** ${context.runId}`,
-            });
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## ⚡ Codex Performance Analysis\n\nCodex has analyzed this PR for performance implications.\n\nCheck the workflow run logs for detailed performance insights and optimization recommendations.\n\n**Workflow Run:** ${context.runId}`,
+              });
+              console.log('PR comment posted successfully');
+            } catch (error) {
+              console.error('Failed to post PR comment:', error);
+            }
 
       - name: Generate performance metrics report
         if: always()
         run: |
-          cat > perf-metrics.md << 'EOF'
+          cat > perf-metrics.md << EOF
           # Performance Metrics Summary
 
           ## Analyzed Components
