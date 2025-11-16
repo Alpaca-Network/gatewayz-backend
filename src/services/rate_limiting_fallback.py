@@ -25,7 +25,7 @@ def _calculate_burst_window_description(config: "RateLimitConfig") -> str:
 
 
 def _populate_rate_limit_headers(
-    result: "RateLimitResult", config: RateLimitConfig, request_limit: int, token_limit: int, reset_time: Optional[int] = None
+    result: "RateLimitResult", config: "RateLimitConfig", request_limit: int, token_limit: int, reset_time: Optional[int] = None
 ) -> None:
     """Populate rate limit header fields in the result object.
 
