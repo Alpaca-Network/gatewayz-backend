@@ -26,7 +26,7 @@ class RateLimitConfig:
     tokens_per_minute: int = 10000
     tokens_per_hour: int = 100000
     tokens_per_day: int = 500000
-    burst_limit: int = 500
+    burst_limit: int = 100
     concurrency_limit: int = 50  # Updated from 5 to 50
     window_size_seconds: int = 60
 
