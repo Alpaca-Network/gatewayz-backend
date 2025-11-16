@@ -2812,28 +2812,52 @@ def get_cached_huggingface_model(hugging_face_id: str):
 
 
 def fetch_huggingface_model(hugging_face_id: str):
-    """Fetch model data from Hugging Face API"""
+    """Fetch model data from Hugging Face API with rate limiting and retry logic"""
+    import time
+    
     try:
         # Hugging Face API endpoint for model info
         url = f"https://huggingface.co/api/models/{hugging_face_id}"
 
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
+        max_retries = 3
+        base_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                response = httpx.get(url, timeout=10.0)
+                response.raise_for_status()
 
-        model_data = response.json()
+                model_data = response.json()
 
-        # Cache the result
-        _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+                # Cache the result
+                _huggingface_cache["data"][hugging_face_id] = model_data
+                _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
 
-        return model_data
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"Hugging Face model {hugging_face_id} not found")
-            return None
-        else:
-            logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
-            return None
+                return model_data
+                
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    logger.warning(f"Hugging Face model {hugging_face_id} not found")
+                    return None
+                elif e.response.status_code == 429:
+                    # Rate limited - exponential backoff
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"Rate limited fetching {hugging_face_id}, retrying in {delay}s (attempt {attempt+1}/{max_retries})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Rate limit exceeded for {hugging_face_id} after {max_retries} attempts")
+                        return None
+                elif e.response.status_code == 307:
+                    # Handle redirects
+                    redirect_location = e.response.headers.get('location', '')
+                    logger.warning(f"Model {hugging_face_id} redirected to {redirect_location}")
+                    return None
+                else:
+                    logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
+                    return None
+                    
     except Exception as e:
         logger.error(f"Failed to fetch Hugging Face model {hugging_face_id}: {e}")
         return None
