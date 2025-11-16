@@ -4,7 +4,7 @@ import time
 import json
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
 
 from typing import Optional
@@ -52,6 +52,7 @@ import src.db.activity as activity_module
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
 from src.config import Config
+from src.utils.rate_limit_headers import get_rate_limit_headers
 import importlib
 # Import provider clients with graceful error handling
 # This prevents a single provider's import failure from breaking the entire chat endpoint
@@ -1021,6 +1022,11 @@ async def chat_completions(
 
                     provider = attempt_provider
                     model = request_model
+                    # Get rate limit headers if available (pre-stream check)
+                    stream_headers = {}
+                    if should_release_concurrency and not disable_rate_limiting and rate_limit_mgr and rl_pre:
+                        stream_headers.update(get_rate_limit_headers(rl_pre))
+
                     return StreamingResponse(
                         stream_generator(
                             stream,
@@ -1036,6 +1042,7 @@ async def chat_completions(
                             tracker,
                         ),
                         media_type="text/event-stream",
+                        headers=stream_headers,
                     )
                 except Exception as exc:
                     if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
@@ -1489,7 +1496,12 @@ async def chat_completions(
         except Exception as e:
             logger.warning(f"Failed to log to Braintrust: {e}")
 
-        return processed
+        # Prepare headers including rate limit information
+        headers = {}
+        if should_release_concurrency and not disable_rate_limiting and rate_limit_mgr and 'rl_final' in locals():
+            headers.update(get_rate_limit_headers(rl_final))
+
+        return JSONResponse(content=processed, headers=headers)
 
     except HTTPException:
         raise
