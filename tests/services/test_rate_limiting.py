@@ -33,6 +33,12 @@ class _FallbackResult:
         self.reset_time = int(time.time()) + 60 if reset_time is None else reset_time
         self.retry_after = retry_after
         self.reason = reason
+        # Rate limit header fields (new in latest version)
+        self.ratelimit_limit_requests = 0
+        self.ratelimit_limit_tokens = 0
+        self.ratelimit_reset_requests = int(time.time()) + 60
+        self.ratelimit_reset_tokens = int(time.time()) + 60
+        self.burst_window_description = ""
 
 
 class _FakeFallback:
