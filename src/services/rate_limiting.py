@@ -32,7 +32,7 @@ class RateLimitConfig:
     tokens_per_minute: int = 10000
     tokens_per_hour: int = 100000
     tokens_per_day: int = 1000000
-    burst_limit: int = 500  # Maximum burst requests
+    burst_limit: int = 100  # Maximum burst requests
     concurrency_limit: int = 50  # Maximum concurrent requests
     window_size_seconds: int = 60  # Sliding window size
 
@@ -59,7 +59,7 @@ DEFAULT_CONFIG = RateLimitConfig(
     tokens_per_minute=10000,
     tokens_per_hour=100000,
     tokens_per_day=1000000,
-    burst_limit=500,
+    burst_limit=100,
     concurrency_limit=50,
 )
 
