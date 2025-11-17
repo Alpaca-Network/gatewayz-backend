@@ -269,25 +269,25 @@ def clear_modelz_cache():
 
 def is_cache_fresh(cache: dict) -> bool:
     """Check if cache is within fresh TTL
-    
+
     Note: Only checks timestamp, not data value. This allows empty lists []
     to be treated as valid cached values (representing "no models found").
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(datetime.UTC) - cache["timestamp"]).total_seconds()
     return cache_age < cache.get("ttl", 3600)
 
 
 def is_cache_stale_but_usable(cache: dict) -> bool:
     """Check if cache is stale but within stale-while-revalidate window
-    
+
     Note: Only checks timestamp, not data value. This allows empty lists []
     to be treated as valid cached values (representing "no models found").
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(datetime.UTC) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", ttl * 2)
     return ttl <= cache_age < stale_ttl
@@ -317,7 +317,7 @@ def initialize_fal_cache_from_catalog():
         # Store raw models temporarily - will be normalized on first access
         # This avoids circular import with models.py
         _fal_models_cache["data"] = raw_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fal_models_cache["timestamp"] = datetime.now(datetime.UTC)
         logger.debug(f"Preloaded {len(raw_models)} FAL models from catalog")
 
     except (ImportError, OSError) as error:
@@ -341,7 +341,7 @@ def initialize_featherless_cache_from_catalog():
         if raw_models and len(raw_models) > 0:
             # Successfully loaded from export
             _featherless_models_cache["data"] = raw_models
-            _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+            _featherless_models_cache["timestamp"] = datetime.now(datetime.UTC)
             logger.debug(f"Preloaded {len(raw_models)} Featherless models from catalog export")
         else:
             # No export available - initialize empty to enable lazy loading via API
