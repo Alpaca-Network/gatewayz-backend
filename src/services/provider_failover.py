@@ -7,7 +7,6 @@ import httpx
 from fastapi import HTTPException
 
 from typing import Optional, Dict, List
-from src.config import Config
 
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
