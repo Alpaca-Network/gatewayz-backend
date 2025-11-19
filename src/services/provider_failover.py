@@ -92,6 +92,8 @@ def map_provider_error(
             "access token",
             "credential",
             "authentication",
+            "api key",
+            "not configured",
             "id_token",
             "service account",
             "GOOGLE_APPLICATION_CREDENTIALS",
