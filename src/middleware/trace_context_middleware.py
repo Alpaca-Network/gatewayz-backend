@@ -12,7 +12,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from src.config.opentelemetry_config import get_current_trace_id, get_current_span_id
+from src.config.opentelemetry_config import get_current_span_id, get_current_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,12 @@ class TraceContextMiddleware(BaseHTTPMiddleware):
         Returns:
             HTTP response with trace headers
         """
+        # Skip tracing for high-frequency non-critical endpoints (performance optimization)
+        # This saves ~3-5ms per request for these endpoints
+        path = request.url.path
+        if path in ("/health", "/metrics", "/"):
+            return await call_next(request)
+
         # Get trace context
         trace_id = get_current_trace_id()
         span_id = get_current_span_id()
@@ -60,10 +66,7 @@ class TraceContextMiddleware(BaseHTTPMiddleware):
             log_extra["span_id"] = span_id
 
         # Log request with trace context
-        logger.info(
-            f"{request.method} {request.url.path}",
-            extra=log_extra
-        )
+        logger.info(f"{request.method} {request.url.path}", extra=log_extra)
 
         # Process request
         try:
@@ -81,7 +84,7 @@ class TraceContextMiddleware(BaseHTTPMiddleware):
                 extra={
                     **log_extra,
                     "status_code": response.status_code,
-                }
+                },
             )
 
             return response
@@ -91,6 +94,6 @@ class TraceContextMiddleware(BaseHTTPMiddleware):
             logger.error(
                 f"{request.method} {request.url.path} - Error: {str(e)}",
                 extra=log_extra,
-                exc_info=True
+                exc_info=True,
             )
             raise

@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # Llama models are better served through OpenRouter, Featherless, or HuggingFace
+    # rather than directly through Cerebras which doesn't have native Llama models
+    "cerebras/llama-3.3-70b": "openrouter",
+    "cerebras/llama-3.3-70b-instruct": "openrouter",
+    "cerebras/llama-3.1-70b": "openrouter",
+    "cerebras/llama-3.1-70b-instruct": "openrouter",
 }
 
 # Gemini model name constants to reduce duplication
@@ -472,6 +478,104 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "deepseek-v3": "deepseek-v3-1",
             "deepseek-v3-1": "deepseek-v3-1",  # Direct service name
         },
+        "alibaba-cloud": {
+            # Alibaba Cloud / DashScope models
+            # Uses OpenAI-compatible API with direct model IDs
+            # Reference: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+            # Qwen commercial models
+            "qwen/qwen-plus": "qwen-plus",
+            "qwen/qwen-max": "qwen-max",
+            "qwen/qwen-flash": "qwen-flash",
+            "qwen-plus": "qwen-plus",
+            "qwen-max": "qwen-max",
+            "qwen-flash": "qwen-flash",
+
+            # Qwen specialized models
+            "qwen/qwq-plus": "qwq-plus",
+            "qwen/qwen-long": "qwen-long",
+            "qwen/qwen-omni": "qwen-omni",
+            "qwen/qwen-vl": "qwen-vl",
+            "qwen/qwen-math": "qwen-math",
+            "qwen/qwen-mt": "qwen-mt",
+            "qwen/qvq": "qvq",
+            "qwq-plus": "qwq-plus",
+            "qwen-long": "qwen-long",
+            "qwen-omni": "qwen-omni",
+            "qwen-vl": "qwen-vl",
+            "qwen-math": "qwen-math",
+            "qwen-mt": "qwen-mt",
+            "qvq": "qvq",
+
+            # Qwen Coder models
+            "qwen/qwen-coder": "qwen-coder",
+            "qwen-coder": "qwen-coder",
+
+            # Qwen reasoning models
+            "qwen/qwq-32b-preview": "qwq-32b-preview",
+            "qwq-32b-preview": "qwq-32b-preview",
+
+            # Qwen thinking models
+            "qwen/qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
+            "qwen/qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
+            "qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
+            "qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
+
+            # Qwen 3 series
+            "qwen/qwen-3-30b": "qwen-3-30b-a3b-instruct",
+            "qwen/qwen-3-80b": "qwen-3-80b-a3b-instruct",
+            "qwen/qwen3-32b": "qwen-3-32b-a3b-instruct",
+            "qwen3-30b": "qwen-3-30b-a3b-instruct",
+            "qwen3-80b": "qwen-3-80b-a3b-instruct",
+            "qwen3-32b": "qwen-3-32b-a3b-instruct",
+
+            # Qwen 2.5 series
+            "qwen/qwen-2.5-72b": "qwen-2.5-72b-instruct",
+            "qwen/qwen-2.5-7b": "qwen-2.5-7b-instruct",
+            "qwen-2.5-72b": "qwen-2.5-72b-instruct",
+            "qwen-2.5-7b": "qwen-2.5-7b-instruct",
+
+            # Qwen 2 series
+            "qwen/qwen-2-72b": "qwen-2-72b-instruct",
+            "qwen/qwen-2-7b": "qwen-2-7b-instruct",
+            "qwen-2-72b": "qwen-2-72b-instruct",
+            "qwen-2-7b": "qwen-2-7b-instruct",
+
+            # Qwen 1.5 models
+            "qwen/qwen-1.5-72b": "qwen-1.5-72b-chat",
+            "qwen/qwen-1.5-14b": "qwen-1.5-14b-chat",
+            "qwen-1.5-72b": "qwen-1.5-72b-chat",
+            "qwen-1.5-14b": "qwen-1.5-14b-chat",
+
+            # Alternative naming formats (shorthand)
+            "qwen": "qwen-plus",  # Default to Plus for unspecified qwen
+            "qwen-max-latest": "qwen-max",
+            "qwen-plus-latest": "qwen-plus",
+        },
+        "clarifai": {
+            # Clarifai supports many models through its unified API
+            # Most models pass through directly using their standard naming
+            # Anthropic models
+            "anthropic/claude-3-opus": "claude-3-opus",
+            "anthropic/claude-3.5-sonnet": "claude-3.5-sonnet",
+            "claude-3-opus": "claude-3-opus",
+            "claude-3.5-sonnet": "claude-3.5-sonnet",
+            # OpenAI models
+            "openai/gpt-4": "gpt-4",
+            "openai/gpt-4-turbo": "gpt-4-turbo",
+            "gpt-4": "gpt-4",
+            "gpt-4-turbo": "gpt-4-turbo",
+            # Meta Llama models
+            "meta-llama/llama-3.1-70b": "llama-3.1-70b-instruct",
+            "meta-llama/llama-3-70b": "llama-3-70b-instruct",
+            "llama-3.1-70b": "llama-3.1-70b-instruct",
+            "llama-3-70b": "llama-3-70b-instruct",
+            # Mistral models
+            "mistralai/mistral-7b": "mistral-7b-instruct",
+            "mistralai/mixtral-8x7b": "mixtral-8x7b-instruct",
+            "mistral-7b": "mistral-7b-instruct",
+            "mixtral-8x7b": "mixtral-8x7b-instruct",
+        },
     }
 
     return mappings.get(provider, {})
@@ -685,6 +789,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "anannas",
         "near",
         "alpaca-network",
+        "alibaba-cloud",
         "fal",
     ]:
         mapping = get_model_id_mapping(provider)
@@ -726,6 +831,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
             return "alpaca-network"
+
+        # Alibaba Cloud / Qwen models (e.g., "qwen/qwen-plus", "alibaba-cloud/qwen-max")
+        if org == "qwen" or org == "alibaba-cloud" or org == "alibaba":
+            return "alibaba-cloud"
 
         # DeepSeek models are primarily on Fireworks in this system
         if org == "deepseek-ai" and "deepseek" in model_name.lower():

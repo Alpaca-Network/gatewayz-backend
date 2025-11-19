@@ -1,4 +1,4 @@
-#!/usr/bin/.env python3
+#!/usr/bin/env python3
 """
 Enhanced Database Functions with Advanced Security
 Implements secure key storage, audit logging, and advanced security features.
@@ -6,7 +6,7 @@ Implements secure key storage, audit logging, and advanced security features.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.config.supabase_config import get_supabase_client
 from src.security.security import (

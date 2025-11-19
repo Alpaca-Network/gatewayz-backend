@@ -1,4 +1,4 @@
-#!/usr/bin/.env python3
+#!/usr/bin/env python3
 """
 Notification Service
 Handles low balance notifications, trial expiry alerts, and user communication
@@ -7,7 +7,7 @@ Handles low balance notifications, trial expiry alerts, and user communication
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
 
 import requests
 import resend
@@ -315,6 +315,9 @@ class NotificationService:
             if not self.resend_api_key:
                 logger.warning("Resend API key not configured, skipping email notification")
                 return False
+
+            # Ensure API key is set before each send (in case it changed)
+            resend.api_key = self.resend_api_key
 
             # Prepare email data for Resend
             email_params = {

@@ -1,5 +1,5 @@
-from typing import Optional
 import os
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -89,6 +89,14 @@ class Config:
     # Alpaca Network Configuration
     ALPACA_NETWORK_API_KEY = os.environ.get("ALPACA_NETWORK_API_KEY")
 
+    # Alibaba Cloud Configuration
+    ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
+
+    # Clarifai Configuration
+    CLARIFAI_API_KEY = os.environ.get("CLARIFAI_API_KEY")
+    CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
+    CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
+
     # Google Vertex AI Configuration (for image generation)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
     GOOGLE_VERTEX_LOCATION = os.environ.get("GOOGLE_VERTEX_LOCATION", "us-central1")
@@ -147,7 +155,7 @@ class Config:
     )
 
     @classmethod
-    def get_portkey_virtual_key(cls, provider: Optional[str] = None) -> Optional[str]:
+    def get_portkey_virtual_key(cls, provider: str | None = None) -> str | None:
         """
         Resolve Portkey virtual key for a provider.
 
@@ -200,3 +208,29 @@ class Config:
     def get_supabase_config(cls):
         """Get Supabase configuration as a tuple"""
         return cls.SUPABASE_URL, cls.SUPABASE_KEY
+
+    @classmethod
+    def validate_critical_env_vars(cls) -> tuple[bool, list[str]]:
+        """
+        Validate that all critical environment variables are set.
+
+        Returns:
+            tuple: (is_valid, missing_vars)
+                - is_valid: bool indicating if all critical vars are present
+                - missing_vars: list of missing variable names
+        """
+        # Skip validation in Vercel environment to prevent startup failures
+        if os.environ.get("VERCEL"):
+            return True, []
+
+        critical_vars = {
+            "SUPABASE_URL": cls.SUPABASE_URL,
+            "SUPABASE_KEY": cls.SUPABASE_KEY,
+            "OPENROUTER_API_KEY": cls.OPENROUTER_API_KEY,
+            "PORTKEY_API_KEY": cls.PORTKEY_API_KEY,
+        }
+
+        missing = [name for name, value in critical_vars.items() if not value]
+        is_valid = len(missing) == 0
+
+        return is_valid, missing
