@@ -10,7 +10,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import generate_latest, REGISTRY, CollectorRegistry
 
 from src.config import Config
-
 from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
