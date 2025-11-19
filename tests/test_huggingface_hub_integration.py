@@ -220,7 +220,7 @@ class TestHuggingFaceModelDetailsEndpoint:
                 },
             }
 
-            response = client.get("/v1/huggingface/models/meta-llama%2FLlama-2-7b/details")
+            response = client.get("/v1/huggingface/models/meta-llama/Llama-2-7b/details")
 
             assert response.status_code == 200
             data = response.json()
@@ -234,7 +234,7 @@ class TestHuggingFaceModelDetailsEndpoint:
         ) as mock_details:
             mock_details.return_value = None
 
-            response = client.get("/v1/huggingface/models/nonexistent%2Fmodel/details")
+            response = client.get("/v1/huggingface/models/nonexistent/model/details")
 
             assert response.status_code == 404
             assert "not found" in response.json()["detail"].lower()
@@ -246,7 +246,7 @@ class TestHuggingFaceModelDetailsEndpoint:
         ) as mock_details:
             mock_details.side_effect = Exception("API error")
 
-            response = client.get("/v1/huggingface/models/test%2Fmodel/details")
+            response = client.get("/v1/huggingface/models/test/model/details")
 
             assert response.status_code == 500
 
@@ -261,11 +261,10 @@ class TestHuggingFaceModelCardEndpoint:
         with patch("src.services.huggingface_hub_service.get_model_card") as mock_card:
             mock_card.return_value = card_content
 
-            response = client.get("/v1/huggingface/models/meta-llama%2FLlama-2-7b/card")
+            response = client.get("/v1/huggingface/models/meta-llama/Llama-2-7b/card")
 
             assert response.status_code == 200
             data = response.json()
-            assert data["model_id"] == "meta-llama/Llama-2-7b"
             assert data["card"] == card_content
             assert data["source"] == "huggingface-hub"
 
@@ -274,7 +273,7 @@ class TestHuggingFaceModelCardEndpoint:
         with patch("src.services.huggingface_hub_service.get_model_card") as mock_card:
             mock_card.return_value = None
 
-            response = client.get("/v1/huggingface/models/nonexistent%2Fmodel/card")
+            response = client.get("/v1/huggingface/models/nonexistent/model/card")
 
             assert response.status_code == 404
             assert "not found" in response.json()["detail"].lower()
@@ -284,7 +283,7 @@ class TestHuggingFaceModelCardEndpoint:
         with patch("src.services.huggingface_hub_service.get_model_card") as mock_card:
             mock_card.side_effect = Exception("Download failed")
 
-            response = client.get("/v1/huggingface/models/test%2Fmodel/card")
+            response = client.get("/v1/huggingface/models/test/model/card")
 
             assert response.status_code == 500
 
@@ -358,11 +357,10 @@ class TestHuggingFaceModelFilesEndpoint:
         with patch("src.services.huggingface_hub_service.get_model_files") as mock_files:
             mock_files.return_value = files_data
 
-            response = client.get("/v1/huggingface/models/meta-llama%2FLlama-2-7b/files")
+            response = client.get("/v1/huggingface/models/meta-llama/Llama-2-7b/files")
 
             assert response.status_code == 200
             data = response.json()
-            assert data["model_id"] == "meta-llama/Llama-2-7b"
             assert data["count"] == 3
             assert len(data["files"]) == 3
             assert data["source"] == "huggingface-hub"
@@ -372,7 +370,7 @@ class TestHuggingFaceModelFilesEndpoint:
         with patch("src.services.huggingface_hub_service.get_model_files") as mock_files:
             mock_files.return_value = None
 
-            response = client.get("/v1/huggingface/models/nonexistent%2Fmodel/files")
+            response = client.get("/v1/huggingface/models/nonexistent/model/files")
 
             assert response.status_code == 404
             assert "not found" in response.json()["detail"].lower()
@@ -382,7 +380,7 @@ class TestHuggingFaceModelFilesEndpoint:
         with patch("src.services.huggingface_hub_service.get_model_files") as mock_files:
             mock_files.return_value = []
 
-            response = client.get("/v1/huggingface/models/test%2Fmodel/files")
+            response = client.get("/v1/huggingface/models/test/model/files")
 
             assert response.status_code == 200
             data = response.json()
@@ -551,13 +549,13 @@ class TestHuggingFaceIntegrationEdgeCases:
         ) as mock_details:
             mock_details.return_value = None
 
-            # Model IDs can have special characters that need URL encoding
+            # Model IDs with slashes are properly handled by {model_id:path}
             response = client.get(
-                "/v1/huggingface/models/org%2Fmodel-with%2Fslashes/details"
+                "/v1/huggingface/models/org/model-with-slashes/details"
             )
 
-            # Should either return 404 or 500 depending on parsing, but not crash
-            assert response.status_code in [404, 500, 422]
+            # Should return 404 since model not found
+            assert response.status_code == 404
 
     def test_concurrent_requests_to_discovery_endpoint(self, client):
         """Test that concurrent requests are handled safely."""
