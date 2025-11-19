@@ -63,6 +63,10 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         method = request.method
         path = request.url.path
 
+        # Skip metrics collection for metrics endpoint to avoid recursion
+        if path == "/metrics":
+            return await call_next(request)
+
         # Normalize path for metrics (group dynamic segments)
         endpoint = self._normalize_path(path)
 
