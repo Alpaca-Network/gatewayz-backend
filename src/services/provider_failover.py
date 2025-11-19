@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover - handled gracefully below
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
+    "cerebras",
     "huggingface",
     "featherless",
     "vercel-ai-gateway",
