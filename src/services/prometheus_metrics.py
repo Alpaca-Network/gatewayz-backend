@@ -17,7 +17,7 @@ import time
 from contextlib import contextmanager
 from typing import Optional
 
-from prometheus_client import Counter, Gauge, Histogram, Summary, Info
+from prometheus_client import Counter, Gauge, Histogram, Info, Summary
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,7 @@ APP_NAME = os.environ.get("APP_NAME", "gatewayz")
 
 # ==================== Application Info ====================
 # This metric helps Grafana dashboard populate the app_name variable dropdown
-fastapi_app_info = Info(
-    "fastapi_app_info",
-    "FastAPI application information"
-)
+fastapi_app_info = Info("fastapi_app_info", "FastAPI application information")
 # Set the app_name label value after creation
 fastapi_app_info.info({"app_name": APP_NAME})
 
@@ -277,7 +274,9 @@ def track_http_request(method: str, endpoint: str):
         http_request_duration.labels(method=method, endpoint=endpoint).observe(duration)
 
 
-def record_http_response(method: str, endpoint: str, status_code: int, app_name: Optional[str] = None):
+def record_http_response(
+    method: str, endpoint: str, status_code: int, app_name: Optional[str] = None
+):
     """Record HTTP response metrics."""
     # Use provided app_name or fall back to environment variable
     app = app_name or APP_NAME
@@ -288,9 +287,7 @@ def record_http_response(method: str, endpoint: str, status_code: int, app_name:
     ).inc()
 
     # Also record in legacy metrics for backward compatibility
-    http_request_count.labels(
-        method=method, endpoint=endpoint, status_code=status_code
-    ).inc()
+    http_request_count.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
 
 
 @contextmanager
@@ -305,29 +302,17 @@ def track_model_inference(provider: str, model: str):
         logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
         duration = time.time() - start_time
-        model_inference_duration.labels(provider=provider, model=model).observe(
-            duration
-        )
-        model_inference_requests.labels(
-            provider=provider, model=model, status=status
-        ).inc()
+        model_inference_duration.labels(provider=provider, model=model).observe(duration)
+        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
 
 
-def record_tokens_used(
-    provider: str, model: str, input_tokens: int, output_tokens: int
-):
+def record_tokens_used(provider: str, model: str, input_tokens: int, output_tokens: int):
     """Record token consumption metrics."""
-    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
-        input_tokens
-    )
-    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
-        output_tokens
-    )
+    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
+    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
 
 
-def record_credits_used(
-    provider: str, model: str, user_id: str, credits: float
-):
+def record_credits_used(provider: str, model: str, user_id: str, credits: float):
     """Record credit consumption metrics."""
     # Note: user_id parameter kept for backwards compatibility but not used in labels
     # (avoid exposing PII in metric labels)
@@ -409,9 +394,7 @@ def set_trial_count(status: str, count: int):
 
 def set_subscription_count(plan_type: str, billing_cycle: str, count: int):
     """Set subscription count."""
-    subscription_count.labels(
-        plan_type=plan_type, billing_cycle=billing_cycle
-    ).set(count)
+    subscription_count.labels(plan_type=plan_type, billing_cycle=billing_cycle).set(count)
 
 
 def set_active_connections(connection_type: str, count: int):
@@ -426,11 +409,10 @@ def set_queue_size(queue_name: str, size: int):
 
 # ==================== Performance Stage Tracking Functions ====================
 
+
 def track_backend_ttfb(provider: str, model: str, endpoint: str, duration: float):
     """Track backend API time to first byte (TTFB)."""
-    backend_ttfb_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(
-        duration
-    )
+    backend_ttfb_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(duration)
 
 
 def track_streaming_duration(provider: str, model: str, endpoint: str, duration: float):
@@ -447,7 +429,7 @@ def track_frontend_processing(endpoint: str, duration: float):
 
 def track_request_stage(stage: str, endpoint: str, duration: float):
     """Track duration of a specific request processing stage.
-    
+
     Stages:
     - request_parsing: Time to parse and validate request
     - auth_validation: Time to validate authentication
@@ -474,7 +456,7 @@ def get_metrics_summary() -> dict:
         summary = {
             "enabled": True,
             "metrics_endpoint": "/metrics",
-            "message": "Use /metrics endpoint for Prometheus format metrics"
+            "message": "Use /metrics endpoint for Prometheus format metrics",
         }
         return summary
     except Exception as e:

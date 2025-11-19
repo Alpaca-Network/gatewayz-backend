@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException
-
-from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
@@ -208,7 +207,9 @@ def map_provider_error(
             )
         if 400 <= status < 500:
             # Extract error details from response
-            error_detail = f"Provider '{provider}' rejected request for model '{model}' (HTTP {status})"
+            error_detail = (
+                f"Provider '{provider}' rejected request for model '{model}' (HTTP {status})"
+            )
             try:
                 response_body = exc.response.text[:500] if exc.response.text else "No response body"
                 error_detail += f" | Response: {response_body}"
