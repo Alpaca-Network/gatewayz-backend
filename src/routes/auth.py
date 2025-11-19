@@ -381,10 +381,14 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
             # Create user with Privy ID (username already generated above)
             try:
+                # Convert auth_method enum to string for create_enhanced_user
+                auth_method_str = (
+                    auth_method.value if hasattr(auth_method, "value") else str(auth_method)
+                )
                 user_data = users_module.create_enhanced_user(
                     username=username,
                     email=email or f"{request.user.id}@privy.user",
-                    auth_method=auth_method,
+                    auth_method=auth_method_str,
                     privy_user_id=request.user.id,
                     credits=10,  # Users start with $10 trial credits for 3 days
                 )
@@ -611,10 +615,14 @@ async def register_user(request: UserRegistrationRequest):
 
         # Create user first
         try:
+            # Convert auth_method enum to string for create_enhanced_user
+            auth_method_str = (
+                request.auth_method.value if hasattr(request.auth_method, "value") else str(request.auth_method)
+            )
             user_data = users_module.create_enhanced_user(
                 username=request.username,
                 email=request.email,
-                auth_method=request.auth_method,
+                auth_method=auth_method_str,
                 privy_user_id=None,  # No Privy for direct registration
                 credits=10,
             )
