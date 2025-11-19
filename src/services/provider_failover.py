@@ -48,53 +48,20 @@ FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
     """Return the provider attempt order starting with the initial provider.
 
-    In production/staging, filters out providers that don't have required API keys configured.
-    In testing/development, includes all providers (they are mocked).
+    Always includes all eligible providers in the failover chain.
+    Provider availability checks happen at request time, not at chain building time.
     """
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
-    # Map providers to their required config keys
-    required_keys = {
-        "alibaba-cloud": "ALIBABA_CLOUD_API_KEY",
-        "aihubmix": "AIHUBMIX_API_KEY",
-        "anannas": "ANANNAS_API_KEY",
-        "featherless": "FEATHERLESS_API_KEY",
-        "fireworks": "FIREWORKS_API_KEY",
-        "google-vertex": "GOOGLE_PROJECT_ID",
-        "vercel-ai-gateway": "VERCEL_AI_GATEWAY_API_KEY",
-    }
-
-    def is_provider_available(prov: str) -> bool:
-        """Check if a provider has the required configuration.
-
-        In testing/development, always return True (use mocks).
-        In production/staging, check for actual configuration.
-        """
-        import os
-        # In testing/development, always consider providers available (mocks handle them)
-        app_env = os.environ.get("APP_ENV", "development")
-        testing_flag = os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
-        is_test_mode = app_env in {"testing", "test"} or testing_flag
-
-        if is_test_mode or app_env == "development":
-            return True
-
-        if prov not in required_keys:
-            return True  # Providers not in this map don't require special keys
-
-        key_name = required_keys[prov]
-        config_value = getattr(Config, key_name, None)
-        return bool(config_value)
-
     chain: List[str] = []
-    if provider and is_provider_available(provider):
+    if provider:
         chain.append(provider)
 
     for candidate in FALLBACK_PROVIDER_PRIORITY:
-        if candidate not in chain and is_provider_available(candidate):
+        if candidate not in chain:
             chain.append(candidate)
 
     # Always include openrouter as ultimate fallback if nothing else is available
