@@ -52,7 +52,12 @@ _provider_import_errors = {}
 
 # Helper function to safely import provider clients
 def _safe_import_provider(provider_name, imports_list):
-    """Safely import provider functions with error logging"""
+    """Safely import provider functions with error logging
+
+    Returns a dict with either:
+    - Real functions if import succeeds
+    - Sentinel functions that raise HTTPException if used
+    """
     try:
         module_path = f"src.services.{provider_name}_client"
         module = __import__(module_path, fromlist=imports_list)
@@ -65,8 +70,25 @@ def _safe_import_provider(provider_name, imports_list):
         error_msg = f"⚠  Failed to load {provider_name} provider client: {type(e).__name__}: {str(e)}"
         logging.getLogger(__name__).warning(error_msg)
         _provider_import_errors[provider_name] = str(e)
-        # Return a stub that will raise an error if actually used
-        return {import_name: lambda *args, **kwargs: None for import_name in imports_list}
+
+        # Return sentinel functions that raise informative errors when called
+        def make_error_raiser(prov_name, func_name, error):
+            async def async_error(*args, **kwargs):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}"
+                )
+
+            def sync_error(*args, **kwargs):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}"
+                )
+
+            # Return the sync version by default (async handling is done elsewhere)
+            return sync_error
+
+        return {import_name: make_error_raiser(provider_name, import_name, e) for import_name in imports_list}
 
 # Load all provider clients
 _openrouter = _safe_import_provider("openrouter", [
@@ -221,6 +243,7 @@ _alpaca_network = _safe_import_provider("alpaca_network", [
 make_alpaca_network_request_openai = _alpaca_network.get("make_alpaca_network_request_openai")
 process_alpaca_network_response = _alpaca_network.get("process_alpaca_network_response")
 make_alpaca_network_request_openai_stream = _alpaca_network.get("make_alpaca_network_request_openai_stream")
+
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.provider_failover import (
     build_provider_failover_chain,
