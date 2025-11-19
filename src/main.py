@@ -116,13 +116,13 @@ def create_app() -> FastAPI:
 
     # Add observability middleware for automatic metrics collection
     # This should be added after CORS/compression but before route handlers
-    from middleware.observability_middleware import ObservabilityMiddleware
+    from src.middleware.observability_middleware import ObservabilityMiddleware
     app.add_middleware(ObservabilityMiddleware)
     logger.info("  📊 Observability middleware enabled (automatic metrics tracking)")
 
     # Add trace context middleware for log-to-trace correlation
     # This should be added after observability middleware
-    from middleware.trace_context_middleware import TraceContextMiddleware
+    from src.middleware.trace_context_middleware import TraceContextMiddleware
     app.add_middleware(TraceContextMiddleware)
     logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
 
