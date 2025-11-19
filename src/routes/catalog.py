@@ -2362,7 +2362,7 @@ async def search_huggingface_models_endpoint(
 
 @router.get("/v1/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
 async def get_huggingface_model_details_endpoint(
-    model_id: str = Query(..., description="HuggingFace model ID (e.g., 'meta-llama/Llama-2-7b')"),
+    model_id: str,
 ):
     """
     Get detailed information about a specific HuggingFace model.
@@ -2400,7 +2400,7 @@ async def get_huggingface_model_details_endpoint(
 
 @router.get("/v1/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
 async def get_huggingface_model_card_endpoint(
-    model_id: str = Query(..., description="HuggingFace model ID (e.g., 'meta-llama/Llama-2-7b')"),
+    model_id: str,
 ):
     """
     Retrieve the model card (README) for a HuggingFace model.
@@ -2439,7 +2439,7 @@ async def get_huggingface_model_card_endpoint(
 
 @router.get("/v1/huggingface/author/{author}/models", tags=["huggingface-discovery"])
 async def list_author_models_endpoint(
-    author: str = Query(..., description="Author/organization name"),
+    author: str,
     limit: int = Query(50, description="Number of models to return", ge=1, le=500),
 ):
     """
@@ -2471,7 +2471,7 @@ async def list_author_models_endpoint(
 
 @router.get("/v1/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
 async def get_model_files_endpoint(
-    model_id: str = Query(..., description="HuggingFace model ID"),
+    model_id: str,
 ):
     """
     Get information about all files in a HuggingFace model repository.
