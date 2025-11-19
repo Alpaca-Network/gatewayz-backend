@@ -19,7 +19,7 @@ class PrivyLinkedAccount(BaseModel):
     @classmethod
     def validate_type(cls, v):
         """Validate account type is a known provider"""
-        valid_types = {'email', 'google_oauth', 'github', 'apple_oauth', 'discord', 'farcaster'}
+        valid_types = {'email', 'google_oauth', 'github', 'apple_oauth', 'discord', 'farcaster', 'wallet'}
         if v not in valid_types:
             raise ValueError(f'Account type must be one of {valid_types}, got {v}')
         return v
