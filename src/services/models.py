@@ -2812,31 +2812,81 @@ def get_cached_huggingface_model(hugging_face_id: str):
 
 
 def fetch_huggingface_model(hugging_face_id: str):
-    """Fetch model data from Hugging Face API"""
-    try:
-        # Hugging Face API endpoint for model info
-        url = f"https://huggingface.co/api/models/{hugging_face_id}"
+    """Fetch model data from Hugging Face API with retry logic for rate limiting"""
+    import time
 
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
+    # Retry configuration for rate limiting
+    max_retries = 3
+    retry_delay = 1.0  # Start with 1 second delay
 
-        model_data = response.json()
+    for attempt in range(max_retries):
+        try:
+            # Hugging Face API endpoint for model info
+            url = f"https://huggingface.co/api/models/{hugging_face_id}"
 
-        # Cache the result
-        _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+            # Add authentication header if available
+            headers = {}
+            if Config.HUG_API_KEY:
+                headers["Authorization"] = f"Bearer {Config.HUG_API_KEY}"
 
-        return model_data
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"Hugging Face model {hugging_face_id} not found")
-            return None
-        else:
-            logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
-            return None
-    except Exception as e:
-        logger.error(f"Failed to fetch Hugging Face model {hugging_face_id}: {e}")
-        return None
+            response = httpx.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+
+            model_data = response.json()
+
+            # Cache the result
+            _huggingface_cache["data"][hugging_face_id] = model_data
+            _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+
+            return model_data
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # Model not found - don't retry
+                logger.warning(f"Hugging Face model {hugging_face_id} not found")
+                return None
+            elif e.response.status_code == 429:
+                # Rate limited - retry with exponential backoff
+                if attempt < max_retries - 1:
+                    logger.warning(f"Rate limited (429) fetching {hugging_face_id}, attempt {attempt + 1}/{max_retries}. Waiting {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    # Final attempt failed
+                    logger.error(f"Rate limited (429) fetching {hugging_face_id} after {max_retries} attempts")
+                    return None
+            elif e.response.status_code in (307, 308):
+                # Handle redirects - extract the redirect location
+                redirect_location = e.response.headers.get("location", "")
+                if redirect_location:
+                    logger.info(f"Model {hugging_face_id} redirected to {redirect_location}")
+                    # Extract new model ID from redirect path
+                    if redirect_location.startswith("/api/models/"):
+                        new_model_id = redirect_location.replace("/api/models/", "")
+                        if new_model_id != hugging_face_id:
+                            # Recursively fetch with the correct model ID
+                            return fetch_huggingface_model(new_model_id)
+                logger.error(f"Redirect response '{e.response.status_code} {e.response.reason_phrase}' for url '{url}'")
+                logger.error(f"Redirect location: '{redirect_location}'")
+                return None
+            else:
+                # Other HTTP errors
+                logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
+                return None
+
+        except Exception as e:
+            # Other errors - retry with backoff
+            if attempt < max_retries - 1:
+                logger.warning(f"Error fetching {hugging_face_id}, attempt {attempt + 1}/{max_retries}: {e}. Retrying...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                logger.error(f"Failed to fetch Hugging Face model {hugging_face_id} after {max_retries} attempts: {e}")
+                return None
+
+    return None
 
 
 def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
