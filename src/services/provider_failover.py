@@ -7,6 +7,7 @@ import httpx
 from fastapi import HTTPException
 
 from typing import Optional, Dict, List
+from src.config import Config
 
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
@@ -45,19 +46,47 @@ FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 
 
 def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
-    """Return the provider attempt order starting with the initial provider."""
+    """Return the provider attempt order starting with the initial provider.
+
+    Filters out providers that don't have required API keys configured.
+    """
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
+    # Map providers to their required config keys
+    required_keys = {
+        "alibaba-cloud": "ALIBABA_CLOUD_API_KEY",
+        "aihubmix": "AIHUBMIX_API_KEY",
+        "anannas": "ANANNAS_API_KEY",
+        "featherless": "FEATHERLESS_API_KEY",
+        "fireworks": "FIREWORKS_API_KEY",
+        "google-vertex": "GOOGLE_PROJECT_ID",
+        "vercel-ai-gateway": "VERCEL_AI_GATEWAY_API_KEY",
+    }
+
+    def is_provider_available(prov: str) -> bool:
+        """Check if a provider has the required configuration"""
+        if prov not in required_keys:
+            return True  # Providers not in this map don't require special keys
+
+        key_name = required_keys[prov]
+        config_value = getattr(Config, key_name, None)
+        return bool(config_value)
+
     chain: List[str] = []
-    if provider:
+    if provider and is_provider_available(provider):
         chain.append(provider)
 
     for candidate in FALLBACK_PROVIDER_PRIORITY:
-        if candidate not in chain:
+        if candidate not in chain and is_provider_available(candidate):
             chain.append(candidate)
+
+    # Always include openrouter as ultimate fallback if nothing else is available
+    if not chain or (len(chain) == 1 and chain[0] == provider and provider != "openrouter"):
+        if "openrouter" not in chain:
+            chain.append("openrouter")
 
     return chain
 
