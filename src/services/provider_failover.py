@@ -73,8 +73,13 @@ def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
         In testing/development, always return True (use mocks).
         In production/staging, check for actual configuration.
         """
+        import os
         # In testing/development, always consider providers available (mocks handle them)
-        if Config.IS_TESTING or Config.IS_DEVELOPMENT:
+        app_env = os.environ.get("APP_ENV", "development")
+        testing_flag = os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+        is_test_mode = app_env in {"testing", "test"} or testing_flag
+
+        if is_test_mode or app_env == "development":
             return True
 
         if prov not in required_keys:
