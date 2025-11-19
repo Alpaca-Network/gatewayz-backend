@@ -48,7 +48,8 @@ FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
     """Return the provider attempt order starting with the initial provider.
 
-    Filters out providers that don't have required API keys configured.
+    In production/staging, filters out providers that don't have required API keys configured.
+    In testing/development, includes all providers (they are mocked).
     """
     provider = (initial_provider or "").lower()
 
@@ -67,7 +68,15 @@ def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
     }
 
     def is_provider_available(prov: str) -> bool:
-        """Check if a provider has the required configuration"""
+        """Check if a provider has the required configuration.
+
+        In testing/development, always return True (use mocks).
+        In production/staging, check for actual configuration.
+        """
+        # In testing/development, always consider providers available (mocks handle them)
+        if Config.IS_TESTING or Config.IS_DEVELOPMENT:
+            return True
+
         if prov not in required_keys:
             return True  # Providers not in this map don't require special keys
 
