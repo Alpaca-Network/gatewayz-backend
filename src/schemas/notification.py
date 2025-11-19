@@ -1,4 +1,4 @@
-#!/usr/bin/.env python3
+#!/usr/bin/env python3
 """
 Notification Models
 Pydantic models for notification system
@@ -6,12 +6,11 @@ Pydantic models for notification system
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
 
-from typing import Optional
 class NotificationType(str, Enum):
     """Notification type enumeration"""
 

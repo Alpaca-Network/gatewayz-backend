@@ -7,7 +7,7 @@ and health status across all providers and gateways.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
@@ -587,7 +587,10 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.start_monitoring()
-        return {"message": "Health monitoring started", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "message": "Health monitoring started",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to start health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to start health monitoring") from e
@@ -602,7 +605,10 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.stop_monitoring()
-        return {"message": "Health monitoring stopped", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "message": "Health monitoring stopped",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to stop health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop health monitoring") from e
@@ -652,7 +658,7 @@ async def check_google_vertex_health():
             "health_status": diagnosis.get("health_status", "unhealthy"),
             "status": diagnosis.get("health_status", "unhealthy"),
             "diagnosis": diagnosis,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -662,5 +668,75 @@ async def check_google_vertex_health():
             "health_status": "unhealthy",
             "status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.get("/health/database", tags=["health"])
+async def database_health():
+    """
+    Check database connectivity and health
+
+    Returns database connection status and any errors.
+    This is critical for startup diagnostics in Railway.
+    """
+    try:
+        from src.config.supabase_config import supabase
+
+        logger.info("Checking database connectivity...")
+        # Try a simple query to verify connection
+        result = supabase.table("users").limit(1).execute()
+
+        logger.info("✅ Database connection verified")
+        return {
+            "status": "healthy",
+            "database": "supabase",
+            "connection": "verified",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "database": "supabase",
+            "connection": "failed",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.get("/health/providers", tags=["health"])
+async def provider_health():
+    """
+    Check provider import status
+
+    Returns which providers successfully imported and which failed.
+    This is essential for debugging chat endpoint issues in Railway.
+    """
+    try:
+        from src.routes.chat import _provider_import_errors
+
+        # Count total providers and failed
+        total_providers = 16  # Based on the code, there are 16 providers
+        failed_count = len(_provider_import_errors)
+        loaded_count = total_providers - failed_count
+
+        logger.info(
+            f"Provider status: {loaded_count}/{total_providers} loaded, {failed_count} failed"
+        )
+
+        return {
+            "status": "healthy" if failed_count == 0 else "degraded",
+            "total_providers": total_providers,
+            "loaded_providers": loaded_count,
+            "failed_providers": failed_count,
+            "failures": _provider_import_errors if _provider_import_errors else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error checking provider health: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
