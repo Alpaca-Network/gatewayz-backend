@@ -106,9 +106,9 @@ GATEWAY_INFO = {
     },
     'nebius': {
         'fetch_func': fetch_models_from_nebius,
-        'make_request': make_portkey_request_openai,
-        'make_stream': make_portkey_request_openai_stream,
-        'needs_transform': True,
+        'make_request': None,  # Not directly supported after Portkey removal
+        'make_stream': None,
+        'needs_transform': False,
     },
     'xai': {
         'fetch_func': fetch_models_from_xai,
@@ -118,15 +118,15 @@ GATEWAY_INFO = {
     },
     'novita': {
         'fetch_func': fetch_models_from_novita,
-        'make_request': make_portkey_request_openai,
-        'make_stream': make_portkey_request_openai_stream,
-        'needs_transform': True,
+        'make_request': None,  # Not directly supported after Portkey removal
+        'make_stream': None,
+        'needs_transform': False,
     },
     'hug': {
         'fetch_func': fetch_models_from_hug,
-        'make_request': make_portkey_request_openai,
-        'make_stream': make_portkey_request_openai_stream,
-        'needs_transform': True,
+        'make_request': None,  # Not directly supported after Portkey removal
+        'make_stream': None,
+        'needs_transform': False,
     },
 }
 
