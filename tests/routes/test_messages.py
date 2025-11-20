@@ -789,6 +789,8 @@ class TestMessagesEndpointFailover:
     @patch('src.routes.messages.get_rate_limit_manager')
     @patch('src.routes.messages.make_openrouter_request_openai')
     @patch('src.routes.messages.process_openrouter_response')
+    @patch('src.routes.messages.make_featherless_request_openai')
+    @patch('src.routes.messages.process_featherless_response')
     @patch('src.routes.messages.build_provider_failover_chain')
     @patch('src.routes.messages.calculate_cost')
     @patch('src.routes.messages.deduct_credits')
@@ -805,8 +807,10 @@ class TestMessagesEndpointFailover:
         mock_deduct_credits,
         mock_calculate_cost,
         mock_build_chain,
-        mock_process_response,
-        mock_make_request,
+        mock_process_featherless_response,
+        mock_make_featherless_request,
+        mock_process_openrouter_response,
+        mock_make_openrouter_request,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
@@ -838,11 +842,10 @@ class TestMessagesEndpointFailover:
 
         # First provider fails, second succeeds
         mock_build_chain.return_value = ['openrouter', 'featherless']
-        mock_make_request.side_effect = [
-            Exception("Provider error"),  # First attempt fails
-            mock_openai_response  # Second attempt succeeds
-        ]
-        mock_process_response.return_value = mock_openai_response
+        mock_make_openrouter_request.side_effect = Exception("Provider error")
+        mock_make_featherless_request.return_value = mock_openai_response
+        mock_process_openrouter_response.return_value = mock_openai_response
+        mock_process_featherless_response.return_value = mock_openai_response
         mock_calculate_cost.return_value = 0.01
 
         # Execute
