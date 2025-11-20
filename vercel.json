@@ -1,15 +1,10 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxDuration": 60,
-        "pythonVersion": "3.12"
-      }
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60
     }
-  ],
+  },
   "rewrites": [
     {
       "source": "/(.*)",
