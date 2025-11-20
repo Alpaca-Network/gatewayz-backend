@@ -38,6 +38,9 @@ dependencies = [
     # Analytics (lightweight)
     "statsig-python-core==0.10.2",
     "posthog==6.7.8",
+
+    # Observability and metrics
+    "prometheus-client==0.19.0",
 ]
 
 [project.optional-dependencies]
