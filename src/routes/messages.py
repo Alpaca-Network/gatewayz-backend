@@ -29,6 +29,10 @@ from src.services.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
+from src.services.cerebras_client import (
+    make_cerebras_request_openai,
+    process_cerebras_response,
+)
 from src.services.featherless_client import (
     make_featherless_request_openai,
     process_featherless_response,
@@ -453,6 +457,17 @@ async def anthropic_messages(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_huggingface_response, resp_raw)
+                elif attempt_provider == "cerebras":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_cerebras_request_openai,
+                            openai_messages,
+                            request_model,
+                            **openai_params,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_cerebras_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
