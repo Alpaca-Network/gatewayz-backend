@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 try:
     from src.main import app
+    # Vercel looks for 'app' directly for FastAPI
+    # No need to rename to 'handler' - modern @vercel/python runtime handles FastAPI apps
 
 except Exception as e:
     # If import fails, create a simple error app
