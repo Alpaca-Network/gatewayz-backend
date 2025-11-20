@@ -4,7 +4,6 @@ Comprehensive tests for Xai Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.xai_client import *
 
 
 class TestXaiClient:

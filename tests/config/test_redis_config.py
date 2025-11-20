@@ -4,7 +4,6 @@ Comprehensive tests for Redis Config
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.config.redis_config import *
 
 
 class TestRedisConfig:

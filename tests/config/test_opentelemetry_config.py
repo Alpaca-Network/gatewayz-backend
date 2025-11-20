@@ -4,7 +4,6 @@ Comprehensive tests for Opentelemetry Config
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.config.opentelemetry_config import *
 
 
 class TestOpentelemetryConfig:

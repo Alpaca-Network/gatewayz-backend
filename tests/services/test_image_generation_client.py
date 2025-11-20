@@ -4,7 +4,6 @@ Comprehensive tests for Image Generation Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.image_generation_client import *
 
 
 class TestImageGenerationClient:

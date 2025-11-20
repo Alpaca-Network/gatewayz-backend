@@ -4,7 +4,6 @@ Comprehensive tests for Clarifai Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.clarifai_client import *
 
 
 class TestClarifaiClient:

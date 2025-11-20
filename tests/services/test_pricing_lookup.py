@@ -4,7 +4,6 @@ Comprehensive tests for Pricing Lookup service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.pricing_lookup import *
 
 
 class TestPricingLookup:

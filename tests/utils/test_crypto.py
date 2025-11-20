@@ -4,7 +4,6 @@ Comprehensive tests for Crypto
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.crypto import *
 
 
 class TestCrypto:

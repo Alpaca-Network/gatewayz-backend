@@ -4,7 +4,6 @@ Comprehensive tests for Image Models models
 import pytest
 from pydantic import ValidationError
 
-from src.models.image_models import *
 
 
 class TestImageModelsModels:

@@ -4,7 +4,6 @@ Comprehensive tests for Google Models Config service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.google_models_config import *
 
 
 class TestGoogleModelsConfig:

@@ -4,7 +4,6 @@ Comprehensive tests for Huggingface Models service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.huggingface_models import *
 
 
 class TestHuggingfaceModels:

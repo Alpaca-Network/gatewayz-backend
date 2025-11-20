@@ -4,7 +4,6 @@ Comprehensive tests for Portkey Providers service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.portkey_providers import *
 
 
 class TestPortkeyProviders:

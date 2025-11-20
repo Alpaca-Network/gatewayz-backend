@@ -4,7 +4,6 @@ Comprehensive tests for Gateway Health Service service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.gateway_health_service import *
 
 
 class TestGatewayHealthService:

@@ -4,7 +4,6 @@ Comprehensive tests for Ai Sdk Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.ai_sdk_client import *
 
 
 class TestAiSdkClient:

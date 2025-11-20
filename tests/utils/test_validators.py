@@ -4,7 +4,6 @@ Comprehensive tests for Validators
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.validators import *
 
 
 class TestValidators:

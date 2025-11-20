@@ -4,7 +4,6 @@ Comprehensive tests for Professional Email Templates service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.professional_email_templates import *
 
 
 class TestProfessionalEmailTemplates:

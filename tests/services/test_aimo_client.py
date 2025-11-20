@@ -4,7 +4,6 @@ Comprehensive tests for Aimo Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.aimo_client import *
 
 
 class TestAimoClient:

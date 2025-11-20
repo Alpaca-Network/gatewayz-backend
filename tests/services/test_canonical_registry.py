@@ -4,7 +4,6 @@ Comprehensive tests for Canonical Registry service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.canonical_registry import *
 
 
 class TestCanonicalRegistry:

@@ -4,7 +4,6 @@ Comprehensive tests for Near Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.near_client import *
 
 
 class TestNearClient:

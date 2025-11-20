@@ -4,7 +4,6 @@ Comprehensive tests for Model Availability service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.model_availability import *
 
 
 class TestModelAvailability:

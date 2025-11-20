@@ -4,7 +4,6 @@ Comprehensive tests for Dependency Utils
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.dependency_utils import *
 
 
 class TestDependencyUtils:

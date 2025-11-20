@@ -4,7 +4,6 @@ Comprehensive tests for Rate Limit Headers
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.rate_limit_headers import *
 
 
 class TestRateLimitHeaders:

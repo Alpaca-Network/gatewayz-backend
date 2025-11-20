@@ -4,7 +4,6 @@ Comprehensive tests for Statsig Service service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.statsig_service import *
 
 
 class TestStatsigService:

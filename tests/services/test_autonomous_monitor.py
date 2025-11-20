@@ -4,7 +4,6 @@ Comprehensive tests for Autonomous Monitor service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.autonomous_monitor import *
 
 
 class TestAutonomousMonitor:

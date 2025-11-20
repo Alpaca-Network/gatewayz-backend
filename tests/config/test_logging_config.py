@@ -4,7 +4,6 @@ Comprehensive tests for Logging Config
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.config.logging_config import *
 
 
 class TestLoggingConfig:

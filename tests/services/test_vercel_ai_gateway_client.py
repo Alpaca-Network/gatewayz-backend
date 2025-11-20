@@ -4,7 +4,6 @@ Comprehensive tests for Vercel Ai Gateway Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.vercel_ai_gateway_client import *
 
 
 class TestVercelAiGatewayClient:

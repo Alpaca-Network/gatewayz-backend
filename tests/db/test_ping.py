@@ -4,7 +4,6 @@ Comprehensive tests for Ping database operations
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.db.ping import *
 
 
 class TestPing:

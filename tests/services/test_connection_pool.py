@@ -4,7 +4,6 @@ Comprehensive tests for Connection Pool service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.connection_pool import *
 
 
 class TestConnectionPool:
