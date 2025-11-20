@@ -4,7 +4,6 @@ Comprehensive tests for Ranking database operations
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.db.ranking import *
 
 
 class TestRanking:

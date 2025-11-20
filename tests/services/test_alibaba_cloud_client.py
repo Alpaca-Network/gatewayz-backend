@@ -4,7 +4,6 @@ Comprehensive tests for Alibaba Cloud Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.alibaba_cloud_client import *
 
 
 class TestAlibabaCloudClient:

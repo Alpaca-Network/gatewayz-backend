@@ -5,7 +5,6 @@ import pytest
 from pydantic import ValidationError
 from datetime import datetime
 
-from src.schemas.api_keys import *
 
 
 class TestApiKeysSchemas:

@@ -4,7 +4,6 @@ Comprehensive tests for Chutes Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.chutes_client import *
 
 
 class TestChutesClient:

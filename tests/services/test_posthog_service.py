@@ -4,7 +4,6 @@ Comprehensive tests for Posthog Service service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.posthog_service import *
 
 
 class TestPosthogService:

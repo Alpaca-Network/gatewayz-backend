@@ -4,7 +4,6 @@ Comprehensive tests for Anannas Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.anannas_client import *
 
 
 class TestAnannasClient:

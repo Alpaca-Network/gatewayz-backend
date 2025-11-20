@@ -4,7 +4,6 @@ Comprehensive tests for Trial Utils
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.trial_utils import *
 
 
 class TestTrialUtils:

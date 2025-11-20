@@ -4,7 +4,6 @@ Comprehensive tests for Trace Context Middleware middleware
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.middleware.trace_context_middleware import *
 
 
 class TestTraceContextMiddleware:

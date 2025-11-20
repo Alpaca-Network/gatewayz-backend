@@ -4,7 +4,6 @@ Comprehensive tests for Modelz Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.modelz_client import *
 
 
 class TestModelzClient:

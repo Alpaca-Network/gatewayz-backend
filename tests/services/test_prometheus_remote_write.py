@@ -4,7 +4,6 @@ Comprehensive tests for Prometheus Remote Write service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.prometheus_remote_write import *
 
 
 class TestPrometheusRemoteWrite:

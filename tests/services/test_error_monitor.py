@@ -4,7 +4,6 @@ Comprehensive tests for Error Monitor service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.error_monitor import *
 
 
 class TestErrorMonitor:

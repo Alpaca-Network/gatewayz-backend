@@ -4,7 +4,6 @@ Comprehensive tests for Tempo Otlp service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.tempo_otlp import *
 
 
 class TestTempoOtlp:

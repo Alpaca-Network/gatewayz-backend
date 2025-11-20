@@ -4,7 +4,6 @@ Comprehensive tests for Multi Provider Registry service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.multi_provider_registry import *
 
 
 class TestMultiProviderRegistry:

@@ -4,7 +4,6 @@ Comprehensive tests for Cerebras Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.cerebras_client import *
 
 
 class TestCerebrasClient:

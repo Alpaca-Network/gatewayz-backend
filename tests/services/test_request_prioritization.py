@@ -4,7 +4,6 @@ Comprehensive tests for Request Prioritization service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.request_prioritization import *
 
 
 class TestRequestPrioritization:

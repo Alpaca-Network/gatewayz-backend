@@ -4,7 +4,6 @@ Comprehensive tests for Braintrust Tracing
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.braintrust_tracing import *
 
 
 class TestBraintrustTracing:

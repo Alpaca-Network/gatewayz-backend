@@ -4,7 +4,6 @@ Comprehensive tests for Anthropic Transformer service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.anthropic_transformer import *
 
 
 class TestAnthropicTransformer:

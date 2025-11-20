@@ -4,7 +4,6 @@ Comprehensive tests for Reset Welcome Emails
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.reset_welcome_emails import *
 
 
 class TestResetWelcomeEmails:

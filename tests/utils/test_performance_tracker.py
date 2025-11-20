@@ -4,7 +4,6 @@ Comprehensive tests for Performance Tracker
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.performance_tracker import *
 
 
 class TestPerformanceTracker:

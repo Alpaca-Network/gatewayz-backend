@@ -4,7 +4,6 @@ Comprehensive tests for Startup service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.startup import *
 
 
 class TestStartup:

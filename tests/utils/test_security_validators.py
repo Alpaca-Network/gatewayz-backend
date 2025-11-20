@@ -4,7 +4,6 @@ Comprehensive tests for Security Validators
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.utils.security_validators import *
 
 
 class TestSecurityValidators:

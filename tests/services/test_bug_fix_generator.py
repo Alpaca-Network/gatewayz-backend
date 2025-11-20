@@ -4,7 +4,6 @@ Comprehensive tests for Bug Fix Generator service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.bug_fix_generator import *
 
 
 class TestBugFixGenerator:

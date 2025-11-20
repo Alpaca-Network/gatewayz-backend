@@ -4,7 +4,6 @@ Comprehensive tests for Alpaca Network Client service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.alpaca_network_client import *
 
 
 class TestAlpacaNetworkClient:
