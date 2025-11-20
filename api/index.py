@@ -10,10 +10,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 try:
     from src.main import app
 
-    # Export the app for Vercel
-    # Vercel will look for an 'app' or 'handler' variable
-    handler = app
-
 except Exception as e:
     # If import fails, create a simple error app
     from fastapi import FastAPI
@@ -31,5 +27,3 @@ except Exception as e:
                 "path": path
             }
         )
-
-    handler = app
