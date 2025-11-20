@@ -761,10 +761,13 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
             return "openrouter"
 
     # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
-    # Keep this check commented for reference but don't route to portkey anymore
-    # if normalized_model.startswith("@") and "/" in model_id:
-    #     if not normalized_model.startswith("@google/models/"):
-    #         return "portkey"
+    # After Portkey removal, @ prefix models are now routed through OpenRouter
+    # which supports multi-provider model format
+    if model_id.startswith("@") and "/" in model_id:
+        if not normalized_model.startswith("@google/models/"):
+            # Route @ prefix models (e.g., "@anthropic/claude-3-sonnet") to OpenRouter
+            logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
+            return "openrouter"
 
     # Check all mappings to see if this model exists
     for provider in [
