@@ -16,7 +16,7 @@ operations and model discovery.
 import logging
 from typing import Any, Dict, List, Optional
 
-from huggingface_hub import HfApi, ModelFilter, ModelSearchArguments, hf_hub_download, list_models
+from huggingface_hub import HfApi, hf_hub_download, list_models
 from huggingface_hub.utils import RepositoryNotFoundError
 
 from src.config import Config
