@@ -4,7 +4,6 @@ Comprehensive tests for image generation endpoint
 
 Tests cover:
 - Image generation with DeepInfra
-- Image generation with Portkey
 - Image generation with Fal.ai
 - Authentication and authorization
 - Credit validation and deduction
@@ -61,21 +60,6 @@ def mock_deepinfra_response():
         'data': [
             {
                 'url': 'https://cdn.deepinfra.com/image123.png',
-                'b64_json': None
-            }
-        ]
-    }
-
-
-@pytest.fixture
-def mock_portkey_response():
-    """Sample Portkey image generation response"""
-    return {
-        'created': 1677652288,
-        'data': [
-            {
-                'url': 'https://cdn.portkey.ai/image456.png',
-                'revised_prompt': 'A serene mountain landscape at sunset, photorealistic',
                 'b64_json': None
             }
         ]

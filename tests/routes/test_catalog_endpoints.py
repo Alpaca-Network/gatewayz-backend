@@ -211,7 +211,6 @@ class TestModelsEndpoint:
             gateway = (gateway or "").lower()
             catalog_by_gateway = {
                 "openrouter": [sample_model],
-                "portkey": [],
                 "featherless": [],
                 "deepinfra": [],
                 "chutes": [],
