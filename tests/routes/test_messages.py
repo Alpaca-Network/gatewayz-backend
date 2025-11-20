@@ -787,10 +787,10 @@ class TestMessagesEndpointFailover:
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
     @patch('src.routes.messages.get_rate_limit_manager')
-    @patch('src.routes.messages.make_openrouter_request_openai')
-    @patch('src.routes.messages.process_openrouter_response')
-    @patch('src.routes.messages.make_featherless_request_openai')
     @patch('src.routes.messages.process_featherless_response')
+    @patch('src.routes.messages.make_featherless_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
+    @patch('src.routes.messages.make_openrouter_request_openai')
     @patch('src.routes.messages.build_provider_failover_chain')
     @patch('src.routes.messages.calculate_cost')
     @patch('src.routes.messages.deduct_credits')
@@ -807,10 +807,10 @@ class TestMessagesEndpointFailover:
         mock_deduct_credits,
         mock_calculate_cost,
         mock_build_chain,
-        mock_process_featherless_response,
-        mock_make_featherless_request,
-        mock_process_openrouter_response,
         mock_make_openrouter_request,
+        mock_process_openrouter_response,
+        mock_make_featherless_request,
+        mock_process_featherless_response,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
