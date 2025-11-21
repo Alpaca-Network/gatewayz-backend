@@ -1629,6 +1629,7 @@ async def chat_completions(
 @traced(name="unified_responses", type="llm")
 async def unified_responses(
     req: ResponseRequest,
+    background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
     session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
