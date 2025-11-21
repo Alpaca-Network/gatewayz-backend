@@ -12,6 +12,8 @@ from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
+STRIPE_CHECKOUT_SESSION_COLUMN = "stripe_checkout_session_id"
+
 
 # ==================== Create ====================
 
@@ -37,7 +39,7 @@ def create_payment(
         payment_method: Payment method used (default: stripe)
         status: Payment status (pending, completed, failed, refunded, canceled)
         stripe_payment_intent_id: Stripe payment intent ID
-        stripe_session_id: Stripe checkout session ID
+        stripe_session_id: Stripe checkout session ID (stored as stripe_checkout_session_id)
         stripe_customer_id: Stripe customer ID
         metadata: Additional metadata as JSON
 
@@ -69,7 +71,7 @@ def create_payment(
             payment_data["stripe_payment_intent_id"] = stripe_payment_intent_id
 
         if stripe_session_id:
-            payment_data["stripe_checkout_session_id"] = stripe_session_id
+            payment_data[STRIPE_CHECKOUT_SESSION_COLUMN] = stripe_session_id
 
         if stripe_customer_id:
             payment_data["stripe_customer_id"] = stripe_customer_id
@@ -144,11 +146,11 @@ def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> Optional[Dict
         if result.data:
             return result.data[0]
 
-        # Try session ID
+        # Try checkout session ID (legacy column stripe_session_id no longer exists)
         result = (
             client.table("payments")
             .select("*")
-            .eq("stripe_session_id", stripe_payment_intent_id)
+            .eq(STRIPE_CHECKOUT_SESSION_COLUMN, stripe_payment_intent_id)
             .execute()
         )
 
@@ -255,7 +257,7 @@ def update_payment_status(
             update_data["stripe_payment_intent_id"] = stripe_payment_intent_id
 
         if stripe_session_id:
-            update_data["stripe_session_id"] = stripe_session_id
+            update_data[STRIPE_CHECKOUT_SESSION_COLUMN] = stripe_session_id
 
         # Add completion timestamp for completed payments
         if status == "completed":
