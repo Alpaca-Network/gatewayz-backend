@@ -1,0 +1,3035 @@
+[
+  {
+    "index": 1,
+    "model": "google/gemini-3-pro-preview",
+    "status": "error",
+    "response_time_ms": 15179.41,
+    "error": "HTTP 400: {\"detail\":\"Failed to initialize Vertex AI: Google Vertex AI SDK is not available: libstdc++.so.6: ca",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:04:58.449849"
+  },
+  {
+    "index": 2,
+    "model": "openrouter/sherlock-dash-alpha",
+    "status": "error",
+    "response_time_ms": 15176.64,
+    "error": "HTTP 400: {\"detail\":\"Provider 'openrouter' rejected request for model 'sherlock-dash-alpha': Error code: 400 -",
+    "provider": "openrouter",
+    "timestamp": "2025-11-18T22:04:58.447323"
+  },
+  {
+    "index": 3,
+    "model": "openrouter/sherlock-think-alpha",
+    "status": "error",
+    "response_time_ms": 15174.56,
+    "error": "HTTP 400: {\"detail\":\"Provider 'openrouter' rejected request for model 'sherlock-think-alpha': Error code: 400 ",
+    "provider": "openrouter",
+    "timestamp": "2025-11-18T22:04:58.445417"
+  },
+  {
+    "index": 4,
+    "model": "openai/gpt-5.1",
+    "status": "error",
+    "response_time_ms": 15904.39,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:04:59.175374"
+  },
+  {
+    "index": 5,
+    "model": "openai/gpt-5.1-chat",
+    "status": "error",
+    "response_time_ms": 15806.91,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:04:59.077996"
+  },
+  {
+    "index": 6,
+    "model": "openai/gpt-5.1-codex",
+    "status": "error",
+    "response_time_ms": 15908.18,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:04:59.179375"
+  },
+  {
+    "index": 7,
+    "model": "openai/gpt-5.1-codex-mini",
+    "status": "error",
+    "response_time_ms": 17341.73,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:00.613023"
+  },
+  {
+    "index": 8,
+    "model": "kwaipilot/kat-coder-pro:free",
+    "status": "error",
+    "response_time_ms": 15886.28,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "kwaipilot",
+    "timestamp": "2025-11-18T22:04:59.157655"
+  },
+  {
+    "index": 9,
+    "model": "moonshotai/kimi-linear-48b-a3b-instruct",
+    "status": "error",
+    "response_time_ms": 18312.32,
+    "error": "HTTP 429: {\"detail\":\"Upstream rate limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:05:01.583780"
+  },
+  {
+    "index": 10,
+    "model": "moonshotai/kimi-k2-thinking",
+    "status": "error",
+    "response_time_ms": 15907.03,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:04:59.179167"
+  },
+  {
+    "index": 11,
+    "model": "amazon/nova-premier-v1",
+    "status": "error",
+    "response_time_ms": 17243.39,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "amazon",
+    "timestamp": "2025-11-18T22:05:00.515651"
+  },
+  {
+    "index": 12,
+    "model": "perplexity/sonar-pro-search",
+    "status": "error",
+    "response_time_ms": 17640.55,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "perplexity",
+    "timestamp": "2025-11-18T22:05:00.912916"
+  },
+  {
+    "index": 13,
+    "model": "mistralai/voxtral-small-24b-2507",
+    "status": "error",
+    "response_time_ms": 17242.22,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:05:00.514658"
+  },
+  {
+    "index": 14,
+    "model": "openai/gpt-oss-safeguard-20b",
+    "status": "error",
+    "response_time_ms": 17358.03,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:00.630545"
+  },
+  {
+    "index": 15,
+    "model": "nvidia/nemotron-nano-12b-v2-vl:free",
+    "status": "error",
+    "response_time_ms": 18075.17,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:05:01.347768"
+  },
+  {
+    "index": 16,
+    "model": "nvidia/nemotron-nano-12b-v2-vl",
+    "status": "error",
+    "response_time_ms": 17339.87,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:05:00.612529"
+  },
+  {
+    "index": 17,
+    "model": "minimax/minimax-m2",
+    "status": "error",
+    "response_time_ms": 17341.35,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "minimax",
+    "timestamp": "2025-11-18T22:05:00.614065"
+  },
+  {
+    "index": 18,
+    "model": "liquid/lfm2-8b-a1b",
+    "status": "error",
+    "response_time_ms": 15887.96,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "liquid",
+    "timestamp": "2025-11-18T22:04:59.160741"
+  },
+  {
+    "index": 19,
+    "model": "liquid/lfm-2.2-6b",
+    "status": "error",
+    "response_time_ms": 15888.03,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "liquid",
+    "timestamp": "2025-11-18T22:04:59.160876"
+  },
+  {
+    "index": 20,
+    "model": "ibm-granite/granite-4.0-h-micro",
+    "status": "error",
+    "response_time_ms": 15867.2,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "ibm-granite",
+    "timestamp": "2025-11-18T22:04:59.140156"
+  },
+  {
+    "index": 21,
+    "model": "deepcogito/cogito-v2-preview-llama-405b",
+    "status": "error",
+    "response_time_ms": 12277.2,
+    "error": "HTTP 401: {\"detail\":\"Invalid API key\"}",
+    "provider": "deepcogito",
+    "timestamp": "2025-11-18T22:04:55.550241"
+  },
+  {
+    "index": 22,
+    "model": "openai/gpt-5-image-mini",
+    "status": "error",
+    "response_time_ms": 15171.25,
+    "error": "HTTP 400: {\"detail\":\"Provider 'openrouter' rejected request for model 'openai/gpt-5-image-mini': Error code: 4",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:04:58.444362"
+  },
+  {
+    "index": 23,
+    "model": "anthropic/claude-haiku-4.5",
+    "status": "error",
+    "response_time_ms": 17242.0,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:05:00.515156"
+  },
+  {
+    "index": 24,
+    "model": "qwen/qwen3-vl-8b-thinking",
+    "status": "error",
+    "response_time_ms": 15180.91,
+    "error": "HTTP 400: {\"detail\":\"Alibaba Cloud API key not configured\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:04:58.454137"
+  },
+  {
+    "index": 25,
+    "model": "qwen/qwen3-vl-8b-instruct",
+    "status": "error",
+    "response_time_ms": 15180.22,
+    "error": "HTTP 400: {\"detail\":\"Alibaba Cloud API key not configured\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:04:58.453514"
+  },
+  {
+    "index": 26,
+    "model": "openai/gpt-5-image",
+    "status": "error",
+    "response_time_ms": 12713.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:16.299003"
+  },
+  {
+    "index": 27,
+    "model": "openai/o3-deep-research",
+    "status": "error",
+    "response_time_ms": 12532.74,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:16.119278"
+  },
+  {
+    "index": 28,
+    "model": "openai/o4-mini-deep-research",
+    "status": "error",
+    "response_time_ms": 12532.8,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:16.119698"
+  },
+  {
+    "index": 29,
+    "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    "status": "error",
+    "response_time_ms": 12711.17,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:05:16.298358"
+  },
+  {
+    "index": 30,
+    "model": "baidu/ernie-4.5-21b-a3b-thinking",
+    "status": "error",
+    "response_time_ms": 12532.23,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "baidu",
+    "timestamp": "2025-11-18T22:05:16.119715"
+  },
+  {
+    "index": 31,
+    "model": "google/gemini-2.5-flash-image",
+    "status": "error",
+    "response_time_ms": 12536.0,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:05:16.123831"
+  },
+  {
+    "index": 32,
+    "model": "qwen/qwen3-vl-30b-a3b-thinking",
+    "status": "error",
+    "response_time_ms": 12531.18,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:16.119305"
+  },
+  {
+    "index": 33,
+    "model": "qwen/qwen3-vl-30b-a3b-instruct",
+    "status": "error",
+    "response_time_ms": 12709.64,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:16.298069"
+  },
+  {
+    "index": 34,
+    "model": "openai/gpt-5-pro",
+    "status": "error",
+    "response_time_ms": 12531.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:16.120070"
+  },
+  {
+    "index": 35,
+    "model": "z-ai/glm-4.6",
+    "status": "error",
+    "response_time_ms": 12720.51,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:16.309535"
+  },
+  {
+    "index": 36,
+    "model": "z-ai/glm-4.6:exacto",
+    "status": "error",
+    "response_time_ms": 12530.67,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:16.120035"
+  },
+  {
+    "index": 37,
+    "model": "anthropic/claude-sonnet-4.5",
+    "status": "error",
+    "response_time_ms": 12534.03,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:05:16.123735"
+  },
+  {
+    "index": 38,
+    "model": "deepseek/deepseek-v3.2-exp",
+    "status": "error",
+    "response_time_ms": 12530.24,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:05:16.120271"
+  },
+  {
+    "index": 39,
+    "model": "thedrummer/cydonia-24b-v4.1",
+    "status": "error",
+    "response_time_ms": 12719.54,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "thedrummer",
+    "timestamp": "2025-11-18T22:05:16.309860"
+  },
+  {
+    "index": 40,
+    "model": "relace/relace-apply-3",
+    "status": "error",
+    "response_time_ms": 13102.78,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "relace",
+    "timestamp": "2025-11-18T22:05:16.693438"
+  },
+  {
+    "index": 41,
+    "model": "google/gemini-2.5-flash-preview-09-2025",
+    "status": "error",
+    "response_time_ms": 12720.28,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:05:16.311168"
+  },
+  {
+    "index": 42,
+    "model": "google/gemini-2.5-flash-lite-preview-09-2025",
+    "status": "error",
+    "response_time_ms": 12719.47,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:05:16.310615"
+  },
+  {
+    "index": 43,
+    "model": "qwen/qwen3-vl-235b-a22b-thinking",
+    "status": "error",
+    "response_time_ms": 12599.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:16.191159"
+  },
+  {
+    "index": 44,
+    "model": "qwen/qwen3-vl-235b-a22b-instruct",
+    "status": "error",
+    "response_time_ms": 12706.01,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:16.297734"
+  },
+  {
+    "index": 45,
+    "model": "qwen/qwen3-max",
+    "status": "error",
+    "response_time_ms": 12628.53,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:16.220563"
+  },
+  {
+    "index": 46,
+    "model": "qwen/qwen3-coder-plus",
+    "status": "error",
+    "response_time_ms": 13287.09,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:16.879478"
+  },
+  {
+    "index": 47,
+    "model": "openai/gpt-5-codex",
+    "status": "error",
+    "response_time_ms": 12706.1,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:16.298819"
+  },
+  {
+    "index": 48,
+    "model": "deepseek/deepseek-v3.1-terminus",
+    "status": "error",
+    "response_time_ms": 12536.02,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:05:16.129050"
+  },
+  {
+    "index": 49,
+    "model": "deepseek/deepseek-v3.1-terminus:exacto",
+    "status": "error",
+    "response_time_ms": 12715.99,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:05:16.309362"
+  },
+  {
+    "index": 50,
+    "model": "x-ai/grok-4-fast",
+    "status": "error",
+    "response_time_ms": 12716.69,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:05:16.310378"
+  },
+  {
+    "index": 51,
+    "model": "alibaba/tongyi-deepresearch-30b-a3b:free",
+    "status": "error",
+    "response_time_ms": 12432.88,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "alibaba",
+    "timestamp": "2025-11-18T22:05:31.314329"
+  },
+  {
+    "index": 52,
+    "model": "alibaba/tongyi-deepresearch-30b-a3b",
+    "status": "error",
+    "response_time_ms": 13004.48,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "alibaba",
+    "timestamp": "2025-11-18T22:05:31.886465"
+  },
+  {
+    "index": 53,
+    "model": "qwen/qwen3-coder-flash",
+    "status": "error",
+    "response_time_ms": 12997.56,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:31.880047"
+  },
+  {
+    "index": 54,
+    "model": "arcee-ai/afm-4.5b",
+    "status": "error",
+    "response_time_ms": 13114.95,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arcee-ai",
+    "timestamp": "2025-11-18T22:05:31.997753"
+  },
+  {
+    "index": 55,
+    "model": "opengvlab/internvl3-78b",
+    "status": "error",
+    "response_time_ms": 12998.0,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "opengvlab",
+    "timestamp": "2025-11-18T22:05:31.881138"
+  },
+  {
+    "index": 56,
+    "model": "qwen/qwen3-next-80b-a3b-thinking",
+    "status": "error",
+    "response_time_ms": 12405.8,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:31.289357"
+  },
+  {
+    "index": 57,
+    "model": "qwen/qwen3-next-80b-a3b-instruct",
+    "status": "error",
+    "response_time_ms": 13090.65,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:31.974540"
+  },
+  {
+    "index": 58,
+    "model": "meituan/longcat-flash-chat:free",
+    "status": "error",
+    "response_time_ms": 12412.27,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meituan",
+    "timestamp": "2025-11-18T22:05:31.296522"
+  },
+  {
+    "index": 59,
+    "model": "meituan/longcat-flash-chat",
+    "status": "error",
+    "response_time_ms": 12450.01,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meituan",
+    "timestamp": "2025-11-18T22:05:31.334619"
+  },
+  {
+    "index": 60,
+    "model": "qwen/qwen-plus-2025-07-28",
+    "status": "error",
+    "response_time_ms": 12586.84,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:31.472621"
+  },
+  {
+    "index": 61,
+    "model": "qwen/qwen-plus-2025-07-28:thinking",
+    "status": "error",
+    "response_time_ms": 12994.11,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:31.880220"
+  },
+  {
+    "index": 62,
+    "model": "nvidia/nemotron-nano-9b-v2:free",
+    "status": "error",
+    "response_time_ms": 12994.88,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:05:31.881290"
+  },
+  {
+    "index": 63,
+    "model": "nvidia/nemotron-nano-9b-v2",
+    "status": "error",
+    "response_time_ms": 13086.26,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:05:31.973161"
+  },
+  {
+    "index": 64,
+    "model": "moonshotai/kimi-k2-0905",
+    "status": "error",
+    "response_time_ms": 12422.1,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:05:31.309364"
+  },
+  {
+    "index": 65,
+    "model": "moonshotai/kimi-k2-0905:exacto",
+    "status": "error",
+    "response_time_ms": 12553.66,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:05:31.441313"
+  },
+  {
+    "index": 66,
+    "model": "deepcogito/cogito-v2-preview-llama-70b",
+    "status": "error",
+    "response_time_ms": 12992.75,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepcogito",
+    "timestamp": "2025-11-18T22:05:31.880755"
+  },
+  {
+    "index": 67,
+    "model": "deepcogito/cogito-v2-preview-llama-109b-moe",
+    "status": "error",
+    "response_time_ms": 12995.83,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepcogito",
+    "timestamp": "2025-11-18T22:05:31.884156"
+  },
+  {
+    "index": 68,
+    "model": "deepcogito/cogito-v2-preview-deepseek-671b",
+    "status": "error",
+    "response_time_ms": 12572.15,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepcogito",
+    "timestamp": "2025-11-18T22:05:31.460840"
+  },
+  {
+    "index": 69,
+    "model": "stepfun-ai/step3",
+    "status": "error",
+    "response_time_ms": 13002.76,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "stepfun-ai",
+    "timestamp": "2025-11-18T22:05:31.891948"
+  },
+  {
+    "index": 70,
+    "model": "qwen/qwen3-30b-a3b-thinking-2507",
+    "status": "error",
+    "response_time_ms": 13114.5,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:32.004045"
+  },
+  {
+    "index": 71,
+    "model": "x-ai/grok-code-fast-1",
+    "status": "error",
+    "response_time_ms": 13114.84,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:05:32.004808"
+  },
+  {
+    "index": 72,
+    "model": "nousresearch/hermes-4-70b",
+    "status": "error",
+    "response_time_ms": 12990.34,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:05:31.880617"
+  },
+  {
+    "index": 73,
+    "model": "nousresearch/hermes-4-405b",
+    "status": "error",
+    "response_time_ms": 12991.0,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:05:31.881688"
+  },
+  {
+    "index": 74,
+    "model": "google/gemini-2.5-flash-image-preview",
+    "status": "error",
+    "response_time_ms": 13101.07,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:05:31.992148"
+  },
+  {
+    "index": 75,
+    "model": "deepseek/deepseek-chat-v3.1",
+    "status": "error",
+    "response_time_ms": 13106.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:05:31.998228"
+  },
+  {
+    "index": 76,
+    "model": "openai/gpt-4o-audio-preview",
+    "status": "error",
+    "response_time_ms": 13177.71,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.183885"
+  },
+  {
+    "index": 77,
+    "model": "mistralai/mistral-medium-3.1",
+    "status": "error",
+    "response_time_ms": 13153.11,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:05:47.160042"
+  },
+  {
+    "index": 78,
+    "model": "baidu/ernie-4.5-21b-a3b",
+    "status": "error",
+    "response_time_ms": 13505.86,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "baidu",
+    "timestamp": "2025-11-18T22:05:47.513297"
+  },
+  {
+    "index": 79,
+    "model": "baidu/ernie-4.5-vl-28b-a3b",
+    "status": "error",
+    "response_time_ms": 13505.93,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "baidu",
+    "timestamp": "2025-11-18T22:05:47.513770"
+  },
+  {
+    "index": 80,
+    "model": "z-ai/glm-4.5v",
+    "status": "error",
+    "response_time_ms": 13007.66,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:47.015922"
+  },
+  {
+    "index": 81,
+    "model": "ai21/jamba-mini-1.7",
+    "status": "error",
+    "response_time_ms": 13147.78,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "ai21",
+    "timestamp": "2025-11-18T22:05:47.156419"
+  },
+  {
+    "index": 82,
+    "model": "ai21/jamba-large-1.7",
+    "status": "error",
+    "response_time_ms": 13698.89,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "ai21",
+    "timestamp": "2025-11-18T22:05:47.707875"
+  },
+  {
+    "index": 83,
+    "model": "openai/gpt-5-chat",
+    "status": "error",
+    "response_time_ms": 13586.19,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.595636"
+  },
+  {
+    "index": 84,
+    "model": "openai/gpt-5",
+    "status": "error",
+    "response_time_ms": 13005.79,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.015643"
+  },
+  {
+    "index": 85,
+    "model": "openai/gpt-5-mini",
+    "status": "error",
+    "response_time_ms": 13006.02,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.016324"
+  },
+  {
+    "index": 86,
+    "model": "openai/gpt-5-nano",
+    "status": "error",
+    "response_time_ms": 13005.6,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.016272"
+  },
+  {
+    "index": 87,
+    "model": "openai/gpt-oss-120b",
+    "status": "error",
+    "response_time_ms": 12996.41,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.007996"
+  },
+  {
+    "index": 88,
+    "model": "openai/gpt-oss-120b:exacto",
+    "status": "error",
+    "response_time_ms": 13502.02,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.514026"
+  },
+  {
+    "index": 89,
+    "model": "openai/gpt-oss-20b:free",
+    "status": "error",
+    "response_time_ms": 13500.61,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.513005"
+  },
+  {
+    "index": 90,
+    "model": "openai/gpt-oss-20b",
+    "status": "error",
+    "response_time_ms": 13171.42,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:05:47.184157"
+  },
+  {
+    "index": 91,
+    "model": "anthropic/claude-opus-4.1",
+    "status": "error",
+    "response_time_ms": 13160.87,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:05:47.174017"
+  },
+  {
+    "index": 92,
+    "model": "mistralai/codestral-2508",
+    "status": "error",
+    "response_time_ms": 13498.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:05:47.512234"
+  },
+  {
+    "index": 93,
+    "model": "qwen/qwen3-coder-30b-a3b-instruct",
+    "status": "error",
+    "response_time_ms": 13497.88,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:47.511799"
+  },
+  {
+    "index": 94,
+    "model": "qwen/qwen3-30b-a3b-instruct-2507",
+    "status": "error",
+    "response_time_ms": 13001.23,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:47.015540"
+  },
+  {
+    "index": 95,
+    "model": "z-ai/glm-4.5",
+    "status": "error",
+    "response_time_ms": 13486.35,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:47.501062"
+  },
+  {
+    "index": 96,
+    "model": "z-ai/glm-4.5-air:free",
+    "status": "error",
+    "response_time_ms": 13499.38,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:47.514477"
+  },
+  {
+    "index": 97,
+    "model": "z-ai/glm-4.5-air",
+    "status": "error",
+    "response_time_ms": 13484.56,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:47.500029"
+  },
+  {
+    "index": 98,
+    "model": "qwen/qwen3-235b-a22b-thinking-2507",
+    "status": "error",
+    "response_time_ms": 13484.64,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:47.500425"
+  },
+  {
+    "index": 99,
+    "model": "z-ai/glm-4-32b",
+    "status": "error",
+    "response_time_ms": 13495.18,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "z-ai",
+    "timestamp": "2025-11-18T22:05:47.511321"
+  },
+  {
+    "index": 100,
+    "model": "qwen/qwen3-coder:free",
+    "status": "error",
+    "response_time_ms": 13000.92,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:05:47.017458"
+  },
+  {
+    "index": 101,
+    "model": "qwen/qwen3-coder",
+    "status": "error",
+    "response_time_ms": 13016.91,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:02.727593"
+  },
+  {
+    "index": 102,
+    "model": "qwen/qwen3-coder:exacto",
+    "status": "error",
+    "response_time_ms": 13287.92,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:02.999095"
+  },
+  {
+    "index": 103,
+    "model": "bytedance/ui-tars-1.5-7b",
+    "status": "error",
+    "response_time_ms": 13682.34,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "bytedance",
+    "timestamp": "2025-11-18T22:06:03.393863"
+  },
+  {
+    "index": 104,
+    "model": "google/gemini-2.5-flash-lite",
+    "status": "error",
+    "response_time_ms": 13532.55,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:03.244373"
+  },
+  {
+    "index": 105,
+    "model": "qwen/qwen3-235b-a22b-2507",
+    "status": "error",
+    "response_time_ms": 13020.0,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:02.732154"
+  },
+  {
+    "index": 106,
+    "model": "switchpoint/router",
+    "status": "error",
+    "response_time_ms": 13731.84,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "switchpoint",
+    "timestamp": "2025-11-18T22:06:03.444334"
+  },
+  {
+    "index": 107,
+    "model": "moonshotai/kimi-k2:free",
+    "status": "error",
+    "response_time_ms": 13839.45,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:06:03.552309"
+  },
+  {
+    "index": 108,
+    "model": "moonshotai/kimi-k2",
+    "status": "error",
+    "response_time_ms": 13255.43,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:06:02.968630"
+  },
+  {
+    "index": 109,
+    "model": "thudm/glm-4.1v-9b-thinking",
+    "status": "error",
+    "response_time_ms": 13711.48,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "thudm",
+    "timestamp": "2025-11-18T22:06:03.425060"
+  },
+  {
+    "index": 110,
+    "model": "mistralai/devstral-medium",
+    "status": "error",
+    "response_time_ms": 13846.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:03.560195"
+  },
+  {
+    "index": 111,
+    "model": "mistralai/devstral-small",
+    "status": "error",
+    "response_time_ms": 13843.57,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:03.557810"
+  },
+  {
+    "index": 112,
+    "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    "status": "error",
+    "response_time_ms": 13728.85,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "cognitivecomputations",
+    "timestamp": "2025-11-18T22:06:03.443821"
+  },
+  {
+    "index": 113,
+    "model": "x-ai/grok-4",
+    "status": "error",
+    "response_time_ms": 13843.07,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:06:03.558452"
+  },
+  {
+    "index": 114,
+    "model": "google/gemma-3n-e2b-it:free",
+    "status": "error",
+    "response_time_ms": 13529.2,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:03.244900"
+  },
+  {
+    "index": 115,
+    "model": "tencent/hunyuan-a13b-instruct",
+    "status": "error",
+    "response_time_ms": 13722.32,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "tencent",
+    "timestamp": "2025-11-18T22:06:03.438415"
+  },
+  {
+    "index": 116,
+    "model": "tngtech/deepseek-r1t2-chimera:free",
+    "status": "error",
+    "response_time_ms": 13789.06,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "tngtech",
+    "timestamp": "2025-11-18T22:06:03.505490"
+  },
+  {
+    "index": 117,
+    "model": "tngtech/deepseek-r1t2-chimera",
+    "status": "error",
+    "response_time_ms": 13283.55,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "tngtech",
+    "timestamp": "2025-11-18T22:06:03.000345"
+  },
+  {
+    "index": 118,
+    "model": "morph/morph-v3-large",
+    "status": "error",
+    "response_time_ms": 13261.0,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "morph",
+    "timestamp": "2025-11-18T22:06:02.978134"
+  },
+  {
+    "index": 119,
+    "model": "morph/morph-v3-fast",
+    "status": "error",
+    "response_time_ms": 13726.11,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "morph",
+    "timestamp": "2025-11-18T22:06:03.443555"
+  },
+  {
+    "index": 120,
+    "model": "baidu/ernie-4.5-vl-424b-a47b",
+    "status": "error",
+    "response_time_ms": 13721.05,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "baidu",
+    "timestamp": "2025-11-18T22:06:03.438887"
+  },
+  {
+    "index": 121,
+    "model": "baidu/ernie-4.5-300b-a47b",
+    "status": "error",
+    "response_time_ms": 13828.55,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "baidu",
+    "timestamp": "2025-11-18T22:06:03.546789"
+  },
+  {
+    "index": 122,
+    "model": "thedrummer/anubis-70b-v1.1",
+    "status": "error",
+    "response_time_ms": 13724.24,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "thedrummer",
+    "timestamp": "2025-11-18T22:06:03.442807"
+  },
+  {
+    "index": 123,
+    "model": "inception/mercury",
+    "status": "error",
+    "response_time_ms": 13721.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "inception",
+    "timestamp": "2025-11-18T22:06:03.440018"
+  },
+  {
+    "index": 124,
+    "model": "mistralai/mistral-small-3.2-24b-instruct:free",
+    "status": "error",
+    "response_time_ms": 14039.41,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:03.758603"
+  },
+  {
+    "index": 125,
+    "model": "mistralai/mistral-small-3.2-24b-instruct",
+    "status": "error",
+    "response_time_ms": 13722.62,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:03.442210"
+  },
+  {
+    "index": 126,
+    "model": "minimax/minimax-m1",
+    "status": "error",
+    "response_time_ms": 13566.35,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "minimax",
+    "timestamp": "2025-11-18T22:06:19.327285"
+  },
+  {
+    "index": 127,
+    "model": "google/gemini-2.5-flash",
+    "status": "error",
+    "response_time_ms": 13566.07,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:19.327570"
+  },
+  {
+    "index": 128,
+    "model": "google/gemini-2.5-pro",
+    "status": "error",
+    "response_time_ms": 13566.25,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:19.328192"
+  },
+  {
+    "index": 129,
+    "model": "moonshotai/kimi-dev-72b",
+    "status": "error",
+    "response_time_ms": 14090.53,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "moonshotai",
+    "timestamp": "2025-11-18T22:06:19.852900"
+  },
+  {
+    "index": 130,
+    "model": "openai/o3-pro",
+    "status": "error",
+    "response_time_ms": 14088.25,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:19.851029"
+  },
+  {
+    "index": 131,
+    "model": "x-ai/grok-3-mini",
+    "status": "error",
+    "response_time_ms": 13564.26,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:06:19.327415"
+  },
+  {
+    "index": 132,
+    "model": "x-ai/grok-3",
+    "status": "error",
+    "response_time_ms": 14088.12,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:06:19.851585"
+  },
+  {
+    "index": 133,
+    "model": "mistralai/magistral-small-2506",
+    "status": "error",
+    "response_time_ms": 13564.31,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:19.328133"
+  },
+  {
+    "index": 134,
+    "model": "mistralai/magistral-medium-2506:thinking",
+    "status": "error",
+    "response_time_ms": 13708.07,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:19.472223"
+  },
+  {
+    "index": 135,
+    "model": "mistralai/magistral-medium-2506",
+    "status": "error",
+    "response_time_ms": 14088.76,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:19.853209"
+  },
+  {
+    "index": 136,
+    "model": "google/gemini-2.5-pro-preview",
+    "status": "error",
+    "response_time_ms": 13563.32,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:19.328091"
+  },
+  {
+    "index": 137,
+    "model": "deepseek/deepseek-r1-0528-qwen3-8b:free",
+    "status": "error",
+    "response_time_ms": 14087.71,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:19.853489"
+  },
+  {
+    "index": 138,
+    "model": "deepseek/deepseek-r1-0528-qwen3-8b",
+    "status": "error",
+    "response_time_ms": 14086.58,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:19.852688"
+  },
+  {
+    "index": 139,
+    "model": "deepseek/deepseek-r1-0528:free",
+    "status": "error",
+    "response_time_ms": 14087.46,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:19.854032"
+  },
+  {
+    "index": 140,
+    "model": "deepseek/deepseek-r1-0528",
+    "status": "error",
+    "response_time_ms": 13561.23,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:19.328179"
+  },
+  {
+    "index": 141,
+    "model": "anthropic/claude-opus-4",
+    "status": "error",
+    "response_time_ms": 13560.85,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:06:19.328150"
+  },
+  {
+    "index": 142,
+    "model": "anthropic/claude-sonnet-4",
+    "status": "error",
+    "response_time_ms": 13560.22,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:06:19.327885"
+  },
+  {
+    "index": 143,
+    "model": "mistralai/devstral-small-2505",
+    "status": "error",
+    "response_time_ms": 14078.01,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:19.846027"
+  },
+  {
+    "index": 144,
+    "model": "google/gemma-3n-e4b-it:free",
+    "status": "error",
+    "response_time_ms": 14082.89,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:19.851198"
+  },
+  {
+    "index": 145,
+    "model": "google/gemma-3n-e4b-it",
+    "status": "error",
+    "response_time_ms": 14085.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:19.854350"
+  },
+  {
+    "index": 146,
+    "model": "openai/codex-mini",
+    "status": "error",
+    "response_time_ms": 13558.62,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:19.327702"
+  },
+  {
+    "index": 147,
+    "model": "nousresearch/deephermes-3-mistral-24b-preview",
+    "status": "error",
+    "response_time_ms": 13677.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:06:19.446782"
+  },
+  {
+    "index": 148,
+    "model": "mistralai/mistral-medium-3",
+    "status": "error",
+    "response_time_ms": 13558.3,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:19.328165"
+  },
+  {
+    "index": 149,
+    "model": "google/gemini-2.5-pro-preview-05-06",
+    "status": "error",
+    "response_time_ms": 14084.43,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:19.854668"
+  },
+  {
+    "index": 150,
+    "model": "arcee-ai/spotlight",
+    "status": "error",
+    "response_time_ms": 14083.09,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arcee-ai",
+    "timestamp": "2025-11-18T22:06:19.853756"
+  },
+  {
+    "index": 151,
+    "model": "arcee-ai/maestro-reasoning",
+    "status": "error",
+    "response_time_ms": 13004.91,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arcee-ai",
+    "timestamp": "2025-11-18T22:06:34.862466"
+  },
+  {
+    "index": 152,
+    "model": "arcee-ai/virtuoso-large",
+    "status": "error",
+    "response_time_ms": 12519.37,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arcee-ai",
+    "timestamp": "2025-11-18T22:06:34.378295"
+  },
+  {
+    "index": 153,
+    "model": "arcee-ai/coder-large",
+    "status": "error",
+    "response_time_ms": 12485.57,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arcee-ai",
+    "timestamp": "2025-11-18T22:06:34.345454"
+  },
+  {
+    "index": 154,
+    "model": "microsoft/phi-4-reasoning-plus",
+    "status": "error",
+    "response_time_ms": 12144.64,
+    "error": "HTTP 401: {\"detail\":\"Invalid API key\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:06:34.005035"
+  },
+  {
+    "index": 155,
+    "model": "inception/mercury-coder",
+    "status": "error",
+    "response_time_ms": 13003.41,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "inception",
+    "timestamp": "2025-11-18T22:06:34.864186"
+  },
+  {
+    "index": 156,
+    "model": "qwen/qwen3-4b:free",
+    "status": "error",
+    "response_time_ms": 12525.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.386282"
+  },
+  {
+    "index": 157,
+    "model": "deepseek/deepseek-prover-v2",
+    "status": "error",
+    "response_time_ms": 13075.65,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:34.937073"
+  },
+  {
+    "index": 158,
+    "model": "meta-llama/llama-guard-4-12b",
+    "status": "error",
+    "response_time_ms": 12506.73,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:06:34.368536"
+  },
+  {
+    "index": 159,
+    "model": "qwen/qwen3-30b-a3b:free",
+    "status": "error",
+    "response_time_ms": 13007.71,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.869846"
+  },
+  {
+    "index": 160,
+    "model": "qwen/qwen3-30b-a3b",
+    "status": "error",
+    "response_time_ms": 13001.39,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.863918"
+  },
+  {
+    "index": 161,
+    "model": "qwen/qwen3-8b",
+    "status": "error",
+    "response_time_ms": 13004.58,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.867424"
+  },
+  {
+    "index": 162,
+    "model": "qwen/qwen3-14b:free",
+    "status": "error",
+    "response_time_ms": 13000.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.864540"
+  },
+  {
+    "index": 163,
+    "model": "qwen/qwen3-14b",
+    "status": "error",
+    "response_time_ms": 13005.33,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.869476"
+  },
+  {
+    "index": 164,
+    "model": "qwen/qwen3-32b",
+    "status": "error",
+    "response_time_ms": 12491.58,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.356016"
+  },
+  {
+    "index": 165,
+    "model": "qwen/qwen3-235b-a22b:free",
+    "status": "error",
+    "response_time_ms": 13003.04,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.867779"
+  },
+  {
+    "index": 166,
+    "model": "qwen/qwen3-235b-a22b",
+    "status": "error",
+    "response_time_ms": 13005.31,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.870350"
+  },
+  {
+    "index": 167,
+    "model": "tngtech/deepseek-r1t-chimera:free",
+    "status": "error",
+    "response_time_ms": 12510.15,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "tngtech",
+    "timestamp": "2025-11-18T22:06:34.375492"
+  },
+  {
+    "index": 168,
+    "model": "tngtech/deepseek-r1t-chimera",
+    "status": "error",
+    "response_time_ms": 13003.55,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "tngtech",
+    "timestamp": "2025-11-18T22:06:34.869222"
+  },
+  {
+    "index": 169,
+    "model": "microsoft/mai-ds-r1:free",
+    "status": "error",
+    "response_time_ms": 13002.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:06:34.868676"
+  },
+  {
+    "index": 170,
+    "model": "microsoft/mai-ds-r1",
+    "status": "error",
+    "response_time_ms": 13065.91,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:06:34.932185"
+  },
+  {
+    "index": 171,
+    "model": "openai/o4-mini-high",
+    "status": "error",
+    "response_time_ms": 13003.44,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:34.870088"
+  },
+  {
+    "index": 172,
+    "model": "openai/o3",
+    "status": "error",
+    "response_time_ms": 12467.22,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:34.334261"
+  },
+  {
+    "index": 173,
+    "model": "openai/o4-mini",
+    "status": "error",
+    "response_time_ms": 13067.28,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:34.934761"
+  },
+  {
+    "index": 174,
+    "model": "qwen/qwen2.5-coder-7b-instruct",
+    "status": "error",
+    "response_time_ms": 13000.37,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:34.868232"
+  },
+  {
+    "index": 175,
+    "model": "openai/gpt-4.1",
+    "status": "error",
+    "response_time_ms": 13002.67,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:34.870934"
+  },
+  {
+    "index": 176,
+    "model": "openai/gpt-4.1-mini",
+    "status": "error",
+    "response_time_ms": 13442.83,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:50.382506"
+  },
+  {
+    "index": 177,
+    "model": "openai/gpt-4.1-nano",
+    "status": "error",
+    "response_time_ms": 12714.72,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:49.654962"
+  },
+  {
+    "index": 178,
+    "model": "eleutherai/llemma_7b",
+    "status": "error",
+    "response_time_ms": 13323.21,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "eleutherai",
+    "timestamp": "2025-11-18T22:06:50.263780"
+  },
+  {
+    "index": 179,
+    "model": "alfredpros/codellama-7b-instruct-solidity",
+    "status": "error",
+    "response_time_ms": 12714.54,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "alfredpros",
+    "timestamp": "2025-11-18T22:06:49.655451"
+  },
+  {
+    "index": 180,
+    "model": "arliai/qwq-32b-arliai-rpr-v1:free",
+    "status": "error",
+    "response_time_ms": 13424.02,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arliai",
+    "timestamp": "2025-11-18T22:06:50.365270"
+  },
+  {
+    "index": 181,
+    "model": "arliai/qwq-32b-arliai-rpr-v1",
+    "status": "error",
+    "response_time_ms": 13317.72,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "arliai",
+    "timestamp": "2025-11-18T22:06:50.259307"
+  },
+  {
+    "index": 182,
+    "model": "x-ai/grok-3-mini-beta",
+    "status": "error",
+    "response_time_ms": 13537.15,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:06:50.479065"
+  },
+  {
+    "index": 183,
+    "model": "x-ai/grok-3-beta",
+    "status": "error",
+    "response_time_ms": 13439.72,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "x-ai",
+    "timestamp": "2025-11-18T22:06:50.381932"
+  },
+  {
+    "index": 184,
+    "model": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+    "status": "error",
+    "response_time_ms": 13306.25,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:06:50.248825"
+  },
+  {
+    "index": 185,
+    "model": "meta-llama/llama-4-maverick",
+    "status": "error",
+    "response_time_ms": 13439.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:06:50.382222"
+  },
+  {
+    "index": 186,
+    "model": "meta-llama/llama-4-scout",
+    "status": "error",
+    "response_time_ms": 13538.74,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:06:50.482160"
+  },
+  {
+    "index": 187,
+    "model": "qwen/qwen2.5-vl-32b-instruct:free",
+    "status": "error",
+    "response_time_ms": 13436.17,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:50.380434"
+  },
+  {
+    "index": 188,
+    "model": "qwen/qwen2.5-vl-32b-instruct",
+    "status": "error",
+    "response_time_ms": 13317.69,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:06:50.262366"
+  },
+  {
+    "index": 189,
+    "model": "deepseek/deepseek-chat-v3-0324:free",
+    "status": "error",
+    "response_time_ms": 13438.03,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:50.383022"
+  },
+  {
+    "index": 190,
+    "model": "deepseek/deepseek-chat-v3-0324",
+    "status": "error",
+    "response_time_ms": 12703.49,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:06:49.648811"
+  },
+  {
+    "index": 191,
+    "model": "openai/o1-pro",
+    "status": "error",
+    "response_time_ms": 13421.49,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:50.367136"
+  },
+  {
+    "index": 192,
+    "model": "mistralai/mistral-small-3.1-24b-instruct:free",
+    "status": "error",
+    "response_time_ms": 13434.92,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:50.380890"
+  },
+  {
+    "index": 193,
+    "model": "mistralai/mistral-small-3.1-24b-instruct",
+    "status": "error",
+    "response_time_ms": 12711.46,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:06:49.657763"
+  },
+  {
+    "index": 194,
+    "model": "allenai/olmo-2-0325-32b-instruct",
+    "status": "error",
+    "response_time_ms": 12814.72,
+    "error": "HTTP 429: {\"detail\":\"Plan limit exceeded: Unable to check plan limits\"}",
+    "provider": "allenai",
+    "timestamp": "2025-11-18T22:06:49.761467"
+  },
+  {
+    "index": 195,
+    "model": "google/gemma-3-4b-it:free",
+    "status": "error",
+    "response_time_ms": 13435.64,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:50.382749"
+  },
+  {
+    "index": 196,
+    "model": "google/gemma-3-4b-it",
+    "status": "error",
+    "response_time_ms": 13319.38,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:50.266849"
+  },
+  {
+    "index": 197,
+    "model": "google/gemma-3-12b-it:free",
+    "status": "error",
+    "response_time_ms": 12792.38,
+    "error": "HTTP 429: {\"detail\":\"Plan limit exceeded: Unable to check plan limits\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:49.740208"
+  },
+  {
+    "index": 198,
+    "model": "google/gemma-3-12b-it",
+    "status": "error",
+    "response_time_ms": 12799.05,
+    "error": "HTTP 429: {\"detail\":\"Plan limit exceeded: Unable to check plan limits\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:06:49.747183"
+  },
+  {
+    "index": 199,
+    "model": "cohere/command-a",
+    "status": "error",
+    "response_time_ms": 12822.95,
+    "error": "HTTP 429: {\"detail\":\"Plan limit exceeded: Unable to check plan limits\"}",
+    "provider": "cohere",
+    "timestamp": "2025-11-18T22:06:49.771385"
+  },
+  {
+    "index": 200,
+    "model": "openai/gpt-4o-mini-search-preview",
+    "status": "error",
+    "response_time_ms": 12812.39,
+    "error": "HTTP 429: {\"detail\":\"Plan limit exceeded: Unable to check plan limits\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:06:49.761229"
+  },
+  {
+    "index": 201,
+    "model": "openai/gpt-4o-search-preview",
+    "status": "error",
+    "response_time_ms": 13581.48,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:06.066268"
+  },
+  {
+    "index": 202,
+    "model": "google/gemma-3-27b-it:free",
+    "status": "error",
+    "response_time_ms": 13715.91,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:06.201270"
+  },
+  {
+    "index": 203,
+    "model": "google/gemma-3-27b-it",
+    "status": "error",
+    "response_time_ms": 13706.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:06.192494"
+  },
+  {
+    "index": 204,
+    "model": "thedrummer/skyfall-36b-v2",
+    "status": "error",
+    "response_time_ms": 13707.66,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "thedrummer",
+    "timestamp": "2025-11-18T22:07:06.193800"
+  },
+  {
+    "index": 205,
+    "model": "microsoft/phi-4-multimodal-instruct",
+    "status": "error",
+    "response_time_ms": 13915.71,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:07:06.402168"
+  },
+  {
+    "index": 206,
+    "model": "perplexity/sonar-reasoning-pro",
+    "status": "error",
+    "response_time_ms": 13714.07,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "perplexity",
+    "timestamp": "2025-11-18T22:07:06.200851"
+  },
+  {
+    "index": 207,
+    "model": "perplexity/sonar-pro",
+    "status": "error",
+    "response_time_ms": 12590.39,
+    "error": "HTTP 401: {\"detail\":\"Invalid API key\"}",
+    "provider": "perplexity",
+    "timestamp": "2025-11-18T22:07:05.077497"
+  },
+  {
+    "index": 208,
+    "model": "perplexity/sonar-deep-research",
+    "status": "error",
+    "response_time_ms": 13833.48,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "perplexity",
+    "timestamp": "2025-11-18T22:07:06.320889"
+  },
+  {
+    "index": 209,
+    "model": "qwen/qwq-32b",
+    "status": "error",
+    "response_time_ms": 13706.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.194581"
+  },
+  {
+    "index": 210,
+    "model": "google/gemini-2.0-flash-lite-001",
+    "status": "error",
+    "response_time_ms": 13694.04,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:06.182114"
+  },
+  {
+    "index": 211,
+    "model": "anthropic/claude-3.7-sonnet:thinking",
+    "status": "error",
+    "response_time_ms": 13684.17,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:07:06.172566"
+  },
+  {
+    "index": 212,
+    "model": "anthropic/claude-3.7-sonnet",
+    "status": "error",
+    "response_time_ms": 13657.44,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:07:06.146464"
+  },
+  {
+    "index": 213,
+    "model": "mistralai/mistral-saba",
+    "status": "error",
+    "response_time_ms": 13575.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:06.065165"
+  },
+  {
+    "index": 214,
+    "model": "meta-llama/llama-guard-3-8b",
+    "status": "error",
+    "response_time_ms": 13710.13,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:06.199775"
+  },
+  {
+    "index": 215,
+    "model": "openai/o3-mini-high",
+    "status": "error",
+    "response_time_ms": 13655.21,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:06.145166"
+  },
+  {
+    "index": 216,
+    "model": "google/gemini-2.0-flash-001",
+    "status": "error",
+    "response_time_ms": 13829.8,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:06.320058"
+  },
+  {
+    "index": 217,
+    "model": "qwen/qwen-vl-plus",
+    "status": "error",
+    "response_time_ms": 13575.77,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.066377"
+  },
+  {
+    "index": 218,
+    "model": "aion-labs/aion-1.0",
+    "status": "error",
+    "response_time_ms": 13574.28,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "aion-labs",
+    "timestamp": "2025-11-18T22:07:06.065199"
+  },
+  {
+    "index": 219,
+    "model": "aion-labs/aion-1.0-mini",
+    "status": "error",
+    "response_time_ms": 13716.25,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "aion-labs",
+    "timestamp": "2025-11-18T22:07:06.207525"
+  },
+  {
+    "index": 220,
+    "model": "aion-labs/aion-rp-llama-3.1-8b",
+    "status": "error",
+    "response_time_ms": 14022.37,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "aion-labs",
+    "timestamp": "2025-11-18T22:07:06.513955"
+  },
+  {
+    "index": 221,
+    "model": "qwen/qwen-vl-max",
+    "status": "error",
+    "response_time_ms": 13827.83,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.319732"
+  },
+  {
+    "index": 222,
+    "model": "qwen/qwen-turbo",
+    "status": "error",
+    "response_time_ms": 13828.21,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.320399"
+  },
+  {
+    "index": 223,
+    "model": "qwen/qwen2.5-vl-72b-instruct",
+    "status": "error",
+    "response_time_ms": 13826.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.319407"
+  },
+  {
+    "index": 224,
+    "model": "qwen/qwen-plus",
+    "status": "error",
+    "response_time_ms": 13710.1,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.202966"
+  },
+  {
+    "index": 225,
+    "model": "qwen/qwen-max",
+    "status": "error",
+    "response_time_ms": 13571.45,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:06.064664"
+  },
+  {
+    "index": 226,
+    "model": "openai/o3-mini",
+    "status": "error",
+    "response_time_ms": 14825.75,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:23.342814"
+  },
+  {
+    "index": 227,
+    "model": "mistralai/mistral-small-24b-instruct-2501:free",
+    "status": "error",
+    "response_time_ms": 14174.41,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:22.695590"
+  },
+  {
+    "index": 228,
+    "model": "mistralai/mistral-small-24b-instruct-2501",
+    "status": "error",
+    "response_time_ms": 14068.23,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:22.590708"
+  },
+  {
+    "index": 229,
+    "model": "deepseek/deepseek-r1-distill-qwen-32b",
+    "status": "error",
+    "response_time_ms": 14820.51,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:23.344307"
+  },
+  {
+    "index": 230,
+    "model": "deepseek/deepseek-r1-distill-qwen-14b",
+    "status": "error",
+    "response_time_ms": 14819.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:23.344732"
+  },
+  {
+    "index": 231,
+    "model": "perplexity/sonar-reasoning",
+    "status": "error",
+    "response_time_ms": 14218.42,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "perplexity",
+    "timestamp": "2025-11-18T22:07:22.745134"
+  },
+  {
+    "index": 232,
+    "model": "perplexity/sonar",
+    "status": "error",
+    "response_time_ms": 14815.33,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "perplexity",
+    "timestamp": "2025-11-18T22:07:23.345277"
+  },
+  {
+    "index": 233,
+    "model": "deepseek/deepseek-r1-distill-llama-70b:free",
+    "status": "error",
+    "response_time_ms": 14196.3,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:22.727349"
+  },
+  {
+    "index": 234,
+    "model": "deepseek/deepseek-r1-distill-llama-70b",
+    "status": "error",
+    "response_time_ms": 14821.51,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:23.354415"
+  },
+  {
+    "index": 235,
+    "model": "deepseek/deepseek-r1:free",
+    "status": "error",
+    "response_time_ms": 14822.88,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:23.359735"
+  },
+  {
+    "index": 236,
+    "model": "deepseek/deepseek-r1",
+    "status": "error",
+    "response_time_ms": 14196.23,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:22.737197"
+  },
+  {
+    "index": 237,
+    "model": "minimax/minimax-01",
+    "status": "error",
+    "response_time_ms": 14051.33,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "minimax",
+    "timestamp": "2025-11-18T22:07:22.596280"
+  },
+  {
+    "index": 238,
+    "model": "mistralai/codestral-2501",
+    "status": "error",
+    "response_time_ms": 14023.51,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:22.569819"
+  },
+  {
+    "index": 239,
+    "model": "microsoft/phi-4",
+    "status": "error",
+    "response_time_ms": 14811.87,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:07:23.359300"
+  },
+  {
+    "index": 240,
+    "model": "sao10k/l3.1-70b-hanami-x1",
+    "status": "error",
+    "response_time_ms": 14796.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "sao10k",
+    "timestamp": "2025-11-18T22:07:23.344967"
+  },
+  {
+    "index": 241,
+    "model": "deepseek/deepseek-chat",
+    "status": "error",
+    "response_time_ms": 14199.65,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "deepseek",
+    "timestamp": "2025-11-18T22:07:22.750364"
+  },
+  {
+    "index": 242,
+    "model": "sao10k/l3.3-euryale-70b",
+    "status": "error",
+    "response_time_ms": 14165.06,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "sao10k",
+    "timestamp": "2025-11-18T22:07:22.717418"
+  },
+  {
+    "index": 243,
+    "model": "openai/o1",
+    "status": "error",
+    "response_time_ms": 14025.06,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:22.578762"
+  },
+  {
+    "index": 244,
+    "model": "cohere/command-r7b-12-2024",
+    "status": "error",
+    "response_time_ms": 14788.89,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "cohere",
+    "timestamp": "2025-11-18T22:07:23.343819"
+  },
+  {
+    "index": 245,
+    "model": "google/gemini-2.0-flash-exp:free",
+    "status": "error",
+    "response_time_ms": 14782.66,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:23.339697"
+  },
+  {
+    "index": 246,
+    "model": "meta-llama/llama-3.3-70b-instruct:free",
+    "status": "error",
+    "response_time_ms": 14785.78,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:23.344079"
+  },
+  {
+    "index": 247,
+    "model": "meta-llama/llama-3.3-70b-instruct",
+    "status": "error",
+    "response_time_ms": 14038.96,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:22.599781"
+  },
+  {
+    "index": 248,
+    "model": "amazon/nova-lite-v1",
+    "status": "error",
+    "response_time_ms": 14942.68,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "amazon",
+    "timestamp": "2025-11-18T22:07:23.508812"
+  },
+  {
+    "index": 249,
+    "model": "amazon/nova-micro-v1",
+    "status": "error",
+    "response_time_ms": 14773.37,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "amazon",
+    "timestamp": "2025-11-18T22:07:23.343209"
+  },
+  {
+    "index": 250,
+    "model": "amazon/nova-pro-v1",
+    "status": "error",
+    "response_time_ms": 14773.77,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "amazon",
+    "timestamp": "2025-11-18T22:07:23.344504"
+  },
+  {
+    "index": 251,
+    "model": "openai/gpt-4o-2024-11-20",
+    "status": "error",
+    "response_time_ms": 14419.22,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:39.933498"
+  },
+  {
+    "index": 252,
+    "model": "mistralai/mistral-large-2411",
+    "status": "error",
+    "response_time_ms": 14418.1,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:39.932971"
+  },
+  {
+    "index": 253,
+    "model": "mistralai/mistral-large-2407",
+    "status": "error",
+    "response_time_ms": 14418.38,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:39.933596"
+  },
+  {
+    "index": 254,
+    "model": "mistralai/pixtral-large-2411",
+    "status": "error",
+    "response_time_ms": 14418.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:39.933687"
+  },
+  {
+    "index": 255,
+    "model": "qwen/qwen-2.5-coder-32b-instruct:free",
+    "status": "error",
+    "response_time_ms": 14473.69,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:39.989550"
+  },
+  {
+    "index": 256,
+    "model": "qwen/qwen-2.5-coder-32b-instruct",
+    "status": "error",
+    "response_time_ms": 14417.02,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:39.933214"
+  },
+  {
+    "index": 257,
+    "model": "raifle/sorcererlm-8x22b",
+    "status": "error",
+    "response_time_ms": 14446.04,
+    "error": "HTTP 403: {\"detail\":\"Validation error: StreamIDTooLowError: 1259 is lower than 1317\"}",
+    "provider": "raifle",
+    "timestamp": "2025-11-18T22:07:39.962521"
+  },
+  {
+    "index": 258,
+    "model": "thedrummer/unslopnemo-12b",
+    "status": "error",
+    "response_time_ms": 14416.93,
+    "error": "HTTP 429: {\"detail\":\"Plan limit exceeded: Unable to check plan limits\"}",
+    "provider": "thedrummer",
+    "timestamp": "2025-11-18T22:07:39.933725"
+  },
+  {
+    "index": 259,
+    "model": "anthropic/claude-3.5-haiku-20241022",
+    "status": "error",
+    "response_time_ms": 14638.46,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:07:40.155570"
+  },
+  {
+    "index": 260,
+    "model": "anthropic/claude-3.5-haiku",
+    "status": "error",
+    "response_time_ms": 14717.8,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:07:40.235210"
+  },
+  {
+    "index": 261,
+    "model": "anthracite-org/magnum-v4-72b",
+    "status": "error",
+    "response_time_ms": 14635.47,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthracite-org",
+    "timestamp": "2025-11-18T22:07:40.153216"
+  },
+  {
+    "index": 262,
+    "model": "anthropic/claude-3.5-sonnet",
+    "status": "error",
+    "response_time_ms": 14640.72,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:07:40.159649"
+  },
+  {
+    "index": 263,
+    "model": "mistralai/ministral-8b",
+    "status": "error",
+    "response_time_ms": 14638.34,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:40.157706"
+  },
+  {
+    "index": 264,
+    "model": "mistralai/ministral-3b",
+    "status": "error",
+    "response_time_ms": 14711.26,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:40.230991"
+  },
+  {
+    "index": 265,
+    "model": "qwen/qwen-2.5-7b-instruct",
+    "status": "error",
+    "response_time_ms": 14412.09,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:39.932098"
+  },
+  {
+    "index": 266,
+    "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+    "status": "error",
+    "response_time_ms": 14638.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nvidia",
+    "timestamp": "2025-11-18T22:07:40.159154"
+  },
+  {
+    "index": 267,
+    "model": "inflection/inflection-3-pi",
+    "status": "error",
+    "response_time_ms": 14614.44,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "inflection",
+    "timestamp": "2025-11-18T22:07:40.135180"
+  },
+  {
+    "index": 268,
+    "model": "inflection/inflection-3-productivity",
+    "status": "error",
+    "response_time_ms": 14412.61,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "inflection",
+    "timestamp": "2025-11-18T22:07:39.933648"
+  },
+  {
+    "index": 269,
+    "model": "thedrummer/rocinante-12b",
+    "status": "error",
+    "response_time_ms": 14466.53,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "thedrummer",
+    "timestamp": "2025-11-18T22:07:39.987914"
+  },
+  {
+    "index": 270,
+    "model": "meta-llama/llama-3.2-1b-instruct",
+    "status": "error",
+    "response_time_ms": 14637.01,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:40.158674"
+  },
+  {
+    "index": 271,
+    "model": "meta-llama/llama-3.2-3b-instruct:free",
+    "status": "error",
+    "response_time_ms": 14611.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:40.133310"
+  },
+  {
+    "index": 272,
+    "model": "meta-llama/llama-3.2-3b-instruct",
+    "status": "error",
+    "response_time_ms": 14873.88,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:40.396227"
+  },
+  {
+    "index": 273,
+    "model": "meta-llama/llama-3.2-11b-vision-instruct",
+    "status": "error",
+    "response_time_ms": 15021.73,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:40.544430"
+  },
+  {
+    "index": 274,
+    "model": "meta-llama/llama-3.2-90b-vision-instruct",
+    "status": "error",
+    "response_time_ms": 15301.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:40.824220"
+  },
+  {
+    "index": 275,
+    "model": "qwen/qwen-2.5-72b-instruct:free",
+    "status": "error",
+    "response_time_ms": 14634.8,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:40.158164"
+  },
+  {
+    "index": 276,
+    "model": "qwen/qwen-2.5-72b-instruct",
+    "status": "error",
+    "response_time_ms": 12769.58,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:55.600340"
+  },
+  {
+    "index": 277,
+    "model": "neversleep/llama-3.1-lumimaid-8b",
+    "status": "error",
+    "response_time_ms": 13383.06,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "neversleep",
+    "timestamp": "2025-11-18T22:07:56.215410"
+  },
+  {
+    "index": 278,
+    "model": "mistralai/pixtral-12b",
+    "status": "error",
+    "response_time_ms": 12830.66,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:55.663961"
+  },
+  {
+    "index": 279,
+    "model": "cohere/command-r-08-2024",
+    "status": "error",
+    "response_time_ms": 13407.09,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "cohere",
+    "timestamp": "2025-11-18T22:07:56.241255"
+  },
+  {
+    "index": 280,
+    "model": "cohere/command-r-plus-08-2024",
+    "status": "error",
+    "response_time_ms": 13398.16,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "cohere",
+    "timestamp": "2025-11-18T22:07:56.233156"
+  },
+  {
+    "index": 281,
+    "model": "qwen/qwen-2.5-vl-7b-instruct",
+    "status": "error",
+    "response_time_ms": 13607.83,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "qwen",
+    "timestamp": "2025-11-18T22:07:56.443741"
+  },
+  {
+    "index": 282,
+    "model": "sao10k/l3.1-euryale-70b",
+    "status": "error",
+    "response_time_ms": 13660.84,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "sao10k",
+    "timestamp": "2025-11-18T22:07:56.497561"
+  },
+  {
+    "index": 283,
+    "model": "microsoft/phi-3.5-mini-128k-instruct",
+    "status": "error",
+    "response_time_ms": 13405.1,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:07:56.242637"
+  },
+  {
+    "index": 284,
+    "model": "nousresearch/hermes-3-llama-3.1-70b",
+    "status": "error",
+    "response_time_ms": 12969.86,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:07:55.808318"
+  },
+  {
+    "index": 285,
+    "model": "nousresearch/hermes-3-llama-3.1-405b:free",
+    "status": "error",
+    "response_time_ms": 13539.97,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:07:56.378896"
+  },
+  {
+    "index": 286,
+    "model": "nousresearch/hermes-3-llama-3.1-405b",
+    "status": "error",
+    "response_time_ms": 13405.1,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:07:56.244383"
+  },
+  {
+    "index": 287,
+    "model": "openai/chatgpt-4o-latest",
+    "status": "error",
+    "response_time_ms": 13362.63,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:56.202892"
+  },
+  {
+    "index": 288,
+    "model": "sao10k/l3-lunaris-8b",
+    "status": "error",
+    "response_time_ms": 13355.19,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "sao10k",
+    "timestamp": "2025-11-18T22:07:56.195872"
+  },
+  {
+    "index": 289,
+    "model": "openai/gpt-4o-2024-08-06",
+    "status": "error",
+    "response_time_ms": 13538.43,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:56.379487"
+  },
+  {
+    "index": 290,
+    "model": "meta-llama/llama-3.1-405b",
+    "status": "error",
+    "response_time_ms": 12821.67,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:55.663038"
+  },
+  {
+    "index": 291,
+    "model": "meta-llama/llama-3.1-70b-instruct",
+    "status": "error",
+    "response_time_ms": 13502.25,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:56.343957"
+  },
+  {
+    "index": 292,
+    "model": "meta-llama/llama-3.1-405b-instruct",
+    "status": "error",
+    "response_time_ms": 13536.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:56.378319"
+  },
+  {
+    "index": 293,
+    "model": "meta-llama/llama-3.1-8b-instruct",
+    "status": "error",
+    "response_time_ms": 13639.59,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:07:56.481924"
+  },
+  {
+    "index": 294,
+    "model": "mistralai/mistral-nemo:free",
+    "status": "error",
+    "response_time_ms": 13526.09,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:56.368778"
+  },
+  {
+    "index": 295,
+    "model": "mistralai/mistral-nemo",
+    "status": "error",
+    "response_time_ms": 13653.95,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:07:56.496909"
+  },
+  {
+    "index": 296,
+    "model": "openai/gpt-4o-mini-2024-07-18",
+    "status": "error",
+    "response_time_ms": 13643.99,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:56.487278"
+  },
+  {
+    "index": 297,
+    "model": "openai/gpt-4o-mini",
+    "status": "error",
+    "response_time_ms": 13403.17,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:07:56.246819"
+  },
+  {
+    "index": 298,
+    "model": "google/gemma-2-27b-it",
+    "status": "error",
+    "response_time_ms": 13638.41,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:56.482419"
+  },
+  {
+    "index": 299,
+    "model": "google/gemma-2-9b-it",
+    "status": "error",
+    "response_time_ms": 13636.05,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "google",
+    "timestamp": "2025-11-18T22:07:56.480409"
+  },
+  {
+    "index": 300,
+    "model": "sao10k/l3-euryale-70b",
+    "status": "error",
+    "response_time_ms": 13491.44,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "sao10k",
+    "timestamp": "2025-11-18T22:07:56.336186"
+  },
+  {
+    "index": 301,
+    "model": "mistralai/mistral-7b-instruct-v0.3",
+    "status": "error",
+    "response_time_ms": 13936.54,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.437637"
+  },
+  {
+    "index": 302,
+    "model": "mistralai/mistral-7b-instruct:free",
+    "status": "error",
+    "response_time_ms": 13938.58,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.440835"
+  },
+  {
+    "index": 303,
+    "model": "mistralai/mistral-7b-instruct",
+    "status": "error",
+    "response_time_ms": 13952.54,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.455554"
+  },
+  {
+    "index": 304,
+    "model": "nousresearch/hermes-2-pro-llama-3-8b",
+    "status": "error",
+    "response_time_ms": 13893.24,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "nousresearch",
+    "timestamp": "2025-11-18T22:08:12.397016"
+  },
+  {
+    "index": 305,
+    "model": "microsoft/phi-3-mini-128k-instruct",
+    "status": "error",
+    "response_time_ms": 13950.63,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:08:12.455122"
+  },
+  {
+    "index": 306,
+    "model": "microsoft/phi-3-medium-128k-instruct",
+    "status": "error",
+    "response_time_ms": 13918.81,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:08:12.424033"
+  },
+  {
+    "index": 307,
+    "model": "meta-llama/llama-guard-2-8b",
+    "status": "error",
+    "response_time_ms": 14080.82,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:08:12.586664"
+  },
+  {
+    "index": 308,
+    "model": "openai/gpt-4o",
+    "status": "error",
+    "response_time_ms": 13950.01,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:12.456348"
+  },
+  {
+    "index": 309,
+    "model": "openai/gpt-4o:extended",
+    "status": "error",
+    "response_time_ms": 13949.91,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:12.456657"
+  },
+  {
+    "index": 310,
+    "model": "openai/gpt-4o-2024-05-13",
+    "status": "error",
+    "response_time_ms": 14084.65,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:12.591753"
+  },
+  {
+    "index": 311,
+    "model": "meta-llama/llama-3-70b-instruct",
+    "status": "error",
+    "response_time_ms": 14080.09,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:08:12.587547"
+  },
+  {
+    "index": 312,
+    "model": "meta-llama/llama-3-8b-instruct",
+    "status": "error",
+    "response_time_ms": 13930.96,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "meta-llama",
+    "timestamp": "2025-11-18T22:08:12.439320"
+  },
+  {
+    "index": 313,
+    "model": "mistralai/mixtral-8x22b-instruct",
+    "status": "error",
+    "response_time_ms": 13948.32,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.457018"
+  },
+  {
+    "index": 314,
+    "model": "microsoft/wizardlm-2-8x22b",
+    "status": "error",
+    "response_time_ms": 14073.25,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "microsoft",
+    "timestamp": "2025-11-18T22:08:12.582317"
+  },
+  {
+    "index": 315,
+    "model": "openai/gpt-4-turbo",
+    "status": "error",
+    "response_time_ms": 13559.95,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:12.069410"
+  },
+  {
+    "index": 316,
+    "model": "anthropic/claude-3-haiku",
+    "status": "error",
+    "response_time_ms": 13919.97,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:08:12.429856"
+  },
+  {
+    "index": 317,
+    "model": "anthropic/claude-3-opus",
+    "status": "error",
+    "response_time_ms": 13929.29,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "anthropic",
+    "timestamp": "2025-11-18T22:08:12.439554"
+  },
+  {
+    "index": 318,
+    "model": "mistralai/mistral-large",
+    "status": "error",
+    "response_time_ms": 13945.04,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.455688"
+  },
+  {
+    "index": 319,
+    "model": "openai/gpt-4-turbo-preview",
+    "status": "error",
+    "response_time_ms": 13929.58,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:12.440556"
+  },
+  {
+    "index": 320,
+    "model": "openai/gpt-3.5-turbo-0613",
+    "status": "error",
+    "response_time_ms": 14074.95,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:12.586273"
+  },
+  {
+    "index": 321,
+    "model": "mistralai/mistral-small",
+    "status": "error",
+    "response_time_ms": 14189.42,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.701100"
+  },
+  {
+    "index": 322,
+    "model": "mistralai/mistral-tiny",
+    "status": "error",
+    "response_time_ms": 13564.73,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.076747"
+  },
+  {
+    "index": 323,
+    "model": "mistralai/mistral-7b-instruct-v0.2",
+    "status": "error",
+    "response_time_ms": 14054.55,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.566901"
+  },
+  {
+    "index": 324,
+    "model": "mistralai/mixtral-8x7b-instruct",
+    "status": "error",
+    "response_time_ms": 14075.26,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:12.587919"
+  },
+  {
+    "index": 325,
+    "model": "neversleep/noromaid-20b",
+    "status": "error",
+    "response_time_ms": 13873.96,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "neversleep",
+    "timestamp": "2025-11-18T22:08:12.387009"
+  },
+  {
+    "index": 326,
+    "model": "alpindale/goliath-120b",
+    "status": "error",
+    "response_time_ms": 5782.14,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "alpindale",
+    "timestamp": "2025-11-18T22:08:20.487308"
+  },
+  {
+    "index": 327,
+    "model": "openrouter/auto",
+    "status": "error",
+    "response_time_ms": 5778.65,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openrouter",
+    "timestamp": "2025-11-18T22:08:20.485324"
+  },
+  {
+    "index": 328,
+    "model": "openai/gpt-4-1106-preview",
+    "status": "error",
+    "response_time_ms": 5779.23,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:20.487073"
+  },
+  {
+    "index": 329,
+    "model": "mistralai/mistral-7b-instruct-v0.1",
+    "status": "error",
+    "response_time_ms": 5759.62,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "mistralai",
+    "timestamp": "2025-11-18T22:08:20.468426"
+  },
+  {
+    "index": 330,
+    "model": "openai/gpt-3.5-turbo-instruct",
+    "status": "error",
+    "response_time_ms": 5767.39,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:20.477123"
+  },
+  {
+    "index": 331,
+    "model": "openai/gpt-3.5-turbo-16k",
+    "status": "error",
+    "response_time_ms": 5774.99,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:20.485597"
+  },
+  {
+    "index": 332,
+    "model": "mancer/weaver",
+    "status": "error",
+    "response_time_ms": 5667.44,
+    "error": "HTTP 401: {\"detail\":\"Invalid API key\"}",
+    "provider": "mancer",
+    "timestamp": "2025-11-18T22:08:20.378997"
+  },
+  {
+    "index": 333,
+    "model": "undi95/remm-slerp-l2-13b",
+    "status": "error",
+    "response_time_ms": 6482.67,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "undi95",
+    "timestamp": "2025-11-18T22:08:21.195040"
+  },
+  {
+    "index": 334,
+    "model": "gryphe/mythomax-l2-13b",
+    "status": "error",
+    "response_time_ms": 5772.01,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "gryphe",
+    "timestamp": "2025-11-18T22:08:20.485202"
+  },
+  {
+    "index": 335,
+    "model": "openai/gpt-4-0314",
+    "status": "error",
+    "response_time_ms": 6482.37,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:21.196414"
+  },
+  {
+    "index": 336,
+    "model": "openai/gpt-3.5-turbo",
+    "status": "error",
+    "response_time_ms": 6636.3,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:21.351065"
+  },
+  {
+    "index": 337,
+    "model": "openai/gpt-4",
+    "status": "error",
+    "response_time_ms": 6481.39,
+    "error": "HTTP 429: {\"detail\":\"Rate limit exceeded: Burst limit exceeded\"}",
+    "provider": "openai",
+    "timestamp": "2025-11-18T22:08:21.196618"
+  }
+]
