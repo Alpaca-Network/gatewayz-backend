@@ -10,10 +10,9 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
 
 import httpx
 
@@ -89,7 +88,7 @@ class ErrorMonitor:
         self.session: Optional[httpx.AsyncClient] = None
         self.error_patterns: Dict[str, ErrorPattern] = {}
         self.loki_enabled = Config.LOKI_ENABLED
-        self.loki_url = Config.LOKI_PUSH_URL
+        self.loki_query_url = Config.LOKI_QUERY_URL
 
     async def __aenter__(self):
         self.session = httpx.AsyncClient(timeout=10.0)
@@ -119,7 +118,7 @@ class ErrorMonitor:
         Returns:
             List of error log entries
         """
-        if not self.loki_enabled or not self.loki_url or not self.session:
+        if not self.loki_enabled or not self.loki_query_url or not self.session:
             logger.warning("Loki not enabled or not initialized")
             return []
 
@@ -132,10 +131,7 @@ class ErrorMonitor:
                 "direction": "backward",
             }
 
-            # Loki query API endpoint (typically /loki/api/v1/query_range)
-            url = f"{self.loki_url.rstrip('/')}/loki/api/v1/query_range"
-
-            response = await self.session.get(url, params=params)
+            response = await self.session.get(self.loki_query_url, params=params)
             response.raise_for_status()
 
             data = response.json()
