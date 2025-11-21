@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 from src.config import Config
+from src.config.opentelemetry_config import instrument_fastapi_application
 
 logger = logging.getLogger(__name__)
 
@@ -88,17 +89,18 @@ def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
         return
 
     try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
-        # Instrument FastAPI
-        if app is not None:
-            FastAPIInstrumentor.instrument_app(app)
-            logger.info("FastAPI instrumentation enabled for app instance")
+        try:
+            fastapi_instrumented = instrument_fastapi_application(app)
+        except Exception as fastapi_error:
+            logger.error(f"Failed to initialize FastAPI instrumentation: {fastapi_error}")
         else:
-            FastAPIInstrumentor().instrument()
-            logger.info("FastAPI instrumentation enabled globally")
+            if fastapi_instrumented:
+                logger.info("FastAPI instrumentation enabled for app instance")
+            else:
+                logger.debug("FastAPI instrumentation skipped (app missing or already instrumented)")
 
         # Instrument HTTP clients
         HTTPXClientInstrumentor().instrument()
@@ -114,7 +116,7 @@ def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
             "opentelemetry-instrumentation-httpx opentelemetry-instrumentation-requests"
         )
     except Exception as e:
-        logger.error(f"Failed to initialize FastAPI instrumentation: {e}")
+        logger.error(f"Failed to initialize OTLP instrumentation helpers: {e}")
 
 
 def get_tracer(name: str = __name__):
