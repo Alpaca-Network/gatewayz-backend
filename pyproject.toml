@@ -32,22 +32,30 @@ dependencies = [
     "resend==0.8.0",
     "stripe==13.0.1",
 
-    # Provider SDKs
+    # Provider SDKs (lightweight)
     "cerebras-cloud-sdk>=1.0.0",
     "xai-sdk>=0.1.0",
-    "google-cloud-aiplatform>=1.38.0",
-    "google-auth>=2.0.0",
-    "clarifai>=10.0.0",
-    "huggingface-hub>=0.23.0",
 
     # Analytics and monitoring
     "statsig-python-core==0.10.2",
     "posthog==6.7.8",
-    "braintrust",
     "prometheus-client==0.21.0",
     "sentry-sdk[fastapi]>=2.0.0",
+]
 
-    # OpenTelemetry - Required for tracing
+[project.optional-dependencies]
+# Heavy provider SDKs - install only when needed (Railway, local dev)
+providers = [
+    "google-cloud-aiplatform>=1.38.0",
+    "google-auth>=2.0.0",
+    "clarifai>=10.0.0",
+    "huggingface-hub>=0.23.0",
+    "braintrust",
+]
+
+# OpenTelemetry - Optional tracing (Railway, local dev)
+# Not installed on Vercel to stay under 250MB limit
+observability = [
     "opentelemetry-api>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "opentelemetry-instrumentation>=0.49b0",
@@ -57,7 +65,6 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.28.0",
 ]
 
-[project.optional-dependencies]
 # Test dependencies
 test = [
     "pytest==7.4.3",
@@ -68,6 +75,12 @@ test = [
     "pytest-timeout>=2.2.0",
     "pytest-mock>=3.12.0",
     "flask-sqlalchemy",
+]
+
+# Full production dependencies (Railway, self-hosted)
+# Includes all optional features
+full = [
+    "gatewayz-backend[providers,observability]",
 ]
 
 # Ruff Configuration (Fast Python Linter)
