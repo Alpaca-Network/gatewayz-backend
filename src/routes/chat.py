@@ -937,19 +937,28 @@ async def chat_completions(
             if provider == "hug":
                 provider = "huggingface"
 
+            provider_locked = not req_provider_missing
+
             override_provider = detect_provider_from_model_id(original_model)
             if override_provider:
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
                     override_provider = "huggingface"
-                if override_provider != provider:
+                if provider_locked and override_provider != provider:
                     logger.info(
-                        f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                        "Skipping provider override for model %s: request locked provider to '%s'",
+                        sanitize_for_logging(original_model),
+                        sanitize_for_logging(provider),
                     )
-                    provider = override_provider
-                # Mark provider as determined even if it matches the default
-                # This prevents the fallback logic from incorrectly routing to wrong providers
-                req_provider_missing = False
+                else:
+                    if override_provider != provider:
+                        logger.info(
+                            f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                        )
+                        provider = override_provider
+                    # Mark provider as determined even if it matches the default
+                    # This prevents the fallback logic from incorrectly routing to wrong providers
+                    req_provider_missing = False
 
             if req_provider_missing:
                 # Try to detect provider from model ID using the transformation module
@@ -1815,19 +1824,28 @@ async def unified_responses(
         if provider == "hug":
             provider = "huggingface"
 
+        provider_locked = not req_provider_missing
+
         override_provider = detect_provider_from_model_id(original_model)
         if override_provider:
             override_provider = override_provider.lower()
             if override_provider == "hug":
                 override_provider = "huggingface"
-            if override_provider != provider:
+            if provider_locked and override_provider != provider:
                 logger.info(
-                    f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                    "Skipping provider override for model %s: request locked provider to '%s'",
+                    sanitize_for_logging(original_model),
+                    sanitize_for_logging(provider),
                 )
-                provider = override_provider
-            # Mark provider as determined even if it matches the default
-            # This prevents the fallback logic from incorrectly routing to wrong providers
-            req_provider_missing = False
+            else:
+                if override_provider != provider:
+                    logger.info(
+                        f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                    )
+                    provider = override_provider
+                # Mark provider as determined even if it matches the default
+                # This prevents the fallback logic from incorrectly routing to wrong providers
+                req_provider_missing = False
 
         if req_provider_missing:
             # Try to detect provider from model ID using the transformation module
