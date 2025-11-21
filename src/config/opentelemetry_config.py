@@ -151,8 +151,11 @@ class OpenTelemetryConfig:
             return
 
         try:
-            FastAPIInstrumentor.instrument_app(app)
-            logger.info("✅ FastAPI application instrumented with OpenTelemetry")
+            instrumented = instrument_fastapi_application(app)
+            if instrumented:
+                logger.info("✅ FastAPI application instrumented with OpenTelemetry")
+            else:
+                logger.debug("FastAPI instrumentation skipped (already instrumented or unavailable)")
         except Exception as e:
             logger.error(f"❌ Failed to instrument FastAPI: {e}", exc_info=True)
 
@@ -192,6 +195,43 @@ class OpenTelemetryConfig:
         if not OPENTELEMETRY_AVAILABLE:
             return None
         return trace.get_tracer(name)
+
+
+def instrument_fastapi_application(app) -> bool:
+    """
+    Instrument a FastAPI application while remaining compatible with different
+    opentelemetry-instrumentation-fastapi versions.
+
+    Returns:
+        bool: True if instrumentation was applied, False if it was skipped.
+    """
+    if not OPENTELEMETRY_AVAILABLE:
+        logger.debug("OpenTelemetry not available; skipping FastAPI instrumentation")
+        return False
+
+    if app is None:
+        logger.debug("FastAPI app instance not provided; skipping instrumentation")
+        return False
+
+    instrumentor = FastAPIInstrumentor()
+
+    try:
+        instrumentor.instrument_app(app=app)
+        return True
+    except TypeError as exc:
+        message = str(exc)
+        if "instrument()" in message and "app" in message:
+            logger.debug(
+                "FastAPIInstrumentor.instrument_app requires explicit app argument; retrying with instrument(app=app)"
+            )
+            instrumentor.instrument(app=app)
+            return True
+        raise
+    except RuntimeError as exc:
+        if "already instrumented" in str(exc).lower():
+            logger.debug("FastAPI already instrumented; skipping re-instrumentation")
+            return False
+        raise
 
 
 # Helper function to get current trace context
