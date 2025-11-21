@@ -10,6 +10,7 @@ class PrivyLinkedAccount(BaseModel):
     type: str
     subject: Optional[str] = None
     email: Optional[str] = None
+    address: Optional[str] = None
     name: Optional[str] = None
     verified_at: Optional[int] = None
     first_verified_at: Optional[int] = None
@@ -32,7 +33,7 @@ class PrivyLinkedAccount(BaseModel):
             raise ValueError(f"Account type must be one of {valid_types}, got {v}")
         return v
 
-    @field_validator("email")
+    @field_validator("email", "address")
     @classmethod
     def validate_email_format(cls, v):
         """Validate email format if provided"""

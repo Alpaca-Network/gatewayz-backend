@@ -109,6 +109,20 @@ class TestPrivyLinkedAccount:
         assert account.email == "user@gmail.com"
         assert account.name == "Test User"
 
+    def test_create_with_address_field(self):
+        """Test creating email account that uses address instead of email"""
+        from src.schemas.auth import PrivyLinkedAccount
+
+        account = PrivyLinkedAccount(
+            type="email",
+            address="address_only@example.com",
+            first_verified_at=1234567890,
+        )
+
+        assert account.type == "email"
+        assert account.address == "address_only@example.com"
+        assert account.email is None
+
     def test_all_optional_fields(self):
         """Test creating account with only required field"""
         from src.schemas.auth import PrivyLinkedAccount
