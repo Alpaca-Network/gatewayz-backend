@@ -1,5 +1,6 @@
 """Tests for Google Vertex AI client"""
 
+import json
 import pytest
 import sys
 from unittest.mock import patch, MagicMock, Mock
@@ -33,6 +34,22 @@ try:
     GOOGLE_VERTEX_AVAILABLE = True
 except ImportError:
     GOOGLE_VERTEX_AVAILABLE = False
+
+from src.config import Config
+
+
+@pytest.fixture
+def force_sdk_transport(monkeypatch):
+    """Force Vertex client to use SDK transport."""
+    monkeypatch.setattr(Config, "GOOGLE_VERTEX_TRANSPORT", "sdk")
+    yield
+
+
+@pytest.fixture
+def force_rest_transport(monkeypatch):
+    """Force Vertex client to use REST transport."""
+    monkeypatch.setattr(Config, "GOOGLE_VERTEX_TRANSPORT", "rest")
+    yield
 
 
 @pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
@@ -201,6 +218,7 @@ class TestProcessGoogleVertexResponse:
 
 
 @pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
+@pytest.mark.usefixtures("force_sdk_transport")
 class TestMakeGoogleVertexRequest:
     """Tests for making requests to Google Vertex"""
 
@@ -320,6 +338,93 @@ class TestMakeGoogleVertexRequest:
 
         # Verify the lazy import was called
         mock_ensure_imports.assert_called_once()
+
+
+class DummyHttpxResponse:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = json.dumps(self._payload)
+
+    def json(self):
+        return self._payload
+
+
+class DummyHttpxClientFactory:
+    """Factory that mimics httpx.Client context manager with predefined responses."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = 0
+        self.payloads = []
+
+    def __call__(self, *args, **kwargs):
+        factory = self
+
+        class _ClientCtx:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, exc_type, exc, tb):
+                return False
+
+            def post(self_inner, url, headers=None, json=None):
+                response = factory.responses[min(factory.calls, len(factory.responses) - 1)]
+                factory.calls += 1
+                factory.payloads.append({"url": url, "headers": headers, "json": json})
+                return response
+
+        return _ClientCtx()
+
+
+class TestGoogleVertexRestTransport:
+    """Tests for the REST fallback transport."""
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_rest_request_success(self, monkeypatch):
+        """Ensure REST transport returns normalized response."""
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Hello!"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "hi"}], model="gemini-2.0-flash"
+        )
+
+        assert result["choices"][0]["message"]["content"] == "Hello!"
+        assert result["usage"]["total_tokens"] == 5
+        assert client_factory.calls == 1
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_rest_request_http_error(self, monkeypatch):
+        """REST transport should raise ValueError on HTTP error."""
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        error_payload = {"error": {"message": "Something broke"}}
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(500, error_payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        with pytest.raises(ValueError):
+            make_google_vertex_request_openai(
+                messages=[{"role": "user", "content": "hi"}], model="gemini-2.0-flash"
+            )
 
 
 @pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
