@@ -24,6 +24,7 @@ dependencies = [
     "python-dotenv==1.0.0",
     "cryptography==41.0.7",
     "email-validator==2.1.0",
+    "PyJWT[crypto]==2.8.0",
 
     # External services
     "requests==2.31.0",
@@ -31,23 +32,22 @@ dependencies = [
     "resend==0.8.0",
     "stripe==13.0.1",
 
-    # Provider SDKs (lightweight)
+    # Provider SDKs
     "cerebras-cloud-sdk>=1.0.0",
     "xai-sdk>=0.1.0",
+    "google-cloud-aiplatform>=1.38.0",
+    "google-auth>=2.0.0",
+    "clarifai>=10.0.0",
+    "huggingface-hub>=0.23.0",
 
-    # Analytics (lightweight)
+    # Analytics and monitoring
     "statsig-python-core==0.10.2",
     "posthog==6.7.8",
-
-    # Monitoring and metrics
+    "braintrust",
     "prometheus-client==0.21.0",
     "sentry-sdk[fastapi]>=2.0.0",
-]
 
-[project.optional-dependencies]
-# Heavy observability dependencies - install only when needed
-observability = [
-    "braintrust",
+    # OpenTelemetry - Required for tracing
     "opentelemetry-api>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "opentelemetry-instrumentation>=0.49b0",
@@ -57,12 +57,7 @@ observability = [
     "opentelemetry-exporter-otlp>=1.28.0",
 ]
 
-# Heavy Google Cloud dependencies - install only when needed
-google = [
-    "google-cloud-aiplatform>=1.38.0",
-    "google-auth>=2.0.0",
-]
-
+[project.optional-dependencies]
 # Test dependencies
 test = [
     "pytest==7.4.3",
@@ -73,11 +68,6 @@ test = [
     "pytest-timeout>=2.2.0",
     "pytest-mock>=3.12.0",
     "flask-sqlalchemy",
-]
-
-# Full production dependencies (for Railway, etc.)
-full = [
-    "gatewayz-backend[observability,google]",
 ]
 
 # Ruff Configuration (Fast Python Linter)
