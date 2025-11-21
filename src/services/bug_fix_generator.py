@@ -61,7 +61,12 @@ class BugFixGenerator:
     """Generates bug fixes using Claude API."""
 
     def __init__(self, github_token: Optional[str] = None):
-        self.anthropic_key = Config.ANTHROPIC_API_KEY
+        self.anthropic_key = getattr(Config, "ANTHROPIC_API_KEY", None)
+        if not self.anthropic_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is not configured. "
+                "Set this environment variable to enable automated bug fixes."
+            )
         self.github_token = github_token or Config.GITHUB_TOKEN
         self.anthropic_url = "https://api.anthropic.com/v1"
         self.session: Optional[httpx.AsyncClient] = None
