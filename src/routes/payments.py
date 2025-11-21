@@ -496,7 +496,8 @@ async def get_payment_details(
             "status": payment["status"],
             "payment_method": payment["payment_method"],
             "stripe_payment_intent_id": payment.get("stripe_payment_intent_id"),
-            "stripe_session_id": payment.get("stripe_session_id"),
+            "stripe_session_id": payment.get("stripe_checkout_session_id")
+            or payment.get("stripe_session_id"),
             "stripe_customer_id": payment.get("stripe_customer_id"),
             "created_at": payment["created_at"],
             "updated_at": payment.get("updated_at"),
