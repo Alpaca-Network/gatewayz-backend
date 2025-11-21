@@ -7,6 +7,33 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _derive_loki_query_url(push_url: Optional[str]) -> str:
+    """
+    Build a Loki query endpoint from the configured push endpoint.
+
+    The Railway-provided URL typically ends with /loki/api/v1/push. When querying we need
+    /loki/api/v1/query_range instead, but we want to preserve the scheme/host/custom base.
+    """
+    default_query = "http://loki:3100/loki/api/v1/query_range"
+    if not push_url:
+        return default_query
+
+    normalized = push_url.rstrip("/")
+    push_suffix = "/loki/api/v1/push"
+    if normalized.endswith(push_suffix):
+        normalized = normalized[: -len(push_suffix)]
+    return f"{normalized}/loki/api/v1/query_range"
+
+
+_default_loki_push_url = os.environ.get(
+    "LOKI_PUSH_URL",
+    "http://loki:3100/loki/api/v1/push",
+)
+_default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query_url(
+    _default_loki_push_url
+)
+
+
 class Config:
     """Configuration class for the application"""
 
@@ -156,10 +183,8 @@ class Config:
         "true",
         "yes",
     }
-    LOKI_PUSH_URL = os.environ.get(
-        "LOKI_PUSH_URL",
-        "http://loki:3100/loki/api/v1/push",
-    )
+    LOKI_PUSH_URL = _default_loki_push_url
+    LOKI_QUERY_URL = _default_loki_query_url
 
     @classmethod
     def validate(cls):
