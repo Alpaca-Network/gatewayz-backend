@@ -41,21 +41,8 @@ dependencies = [
     "posthog==6.7.8",
     "prometheus-client==0.21.0",
     "sentry-sdk[fastapi]>=2.0.0",
-]
 
-[project.optional-dependencies]
-# Heavy provider SDKs - install only when needed (Railway, local dev)
-providers = [
-    "google-cloud-aiplatform>=1.38.0",
-    "google-auth>=2.0.0",
-    "clarifai>=10.0.0",
-    "huggingface-hub>=0.23.0",
-    "braintrust",
-]
-
-# OpenTelemetry - Optional tracing (Railway, local dev)
-# Not installed on Vercel to stay under 250MB limit
-observability = [
+    # OpenTelemetry - Core tracing functionality
     "opentelemetry-api>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "opentelemetry-instrumentation>=0.49b0",
@@ -63,6 +50,17 @@ observability = [
     "opentelemetry-instrumentation-httpx>=0.49b0",
     "opentelemetry-instrumentation-requests>=0.49b0",
     "opentelemetry-exporter-otlp>=1.28.0",
+]
+
+[project.optional-dependencies]
+# Heavy provider SDKs - install only when needed (Railway, local dev)
+# These are the main culprits for bundle size (especially google-cloud-aiplatform)
+providers = [
+    "google-cloud-aiplatform>=1.38.0",
+    "google-auth>=2.0.0",
+    "clarifai>=10.0.0",
+    "huggingface-hub>=0.23.0",
+    "braintrust",
 ]
 
 # Test dependencies
@@ -78,9 +76,9 @@ test = [
 ]
 
 # Full production dependencies (Railway, self-hosted)
-# Includes all optional features
+# Includes all optional provider SDKs
 full = [
-    "gatewayz-backend[providers,observability]",
+    "gatewayz-backend[providers]",
 ]
 
 # Ruff Configuration (Fast Python Linter)
