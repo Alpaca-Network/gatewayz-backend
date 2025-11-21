@@ -20,6 +20,29 @@ from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 configure_logging()
 logger = logging.getLogger(__name__)
 
+# Initialize Sentry for error monitoring
+if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=Config.SENTRY_DSN,
+        # Add data like request headers and IP for users
+        send_default_pii=True,
+        # Enable sending logs to Sentry
+        enable_logs=True,
+        # Set environment (development, staging, production)
+        environment=Config.SENTRY_ENVIRONMENT,
+        # Set traces_sample_rate to capture transactions for tracing
+        traces_sample_rate=Config.SENTRY_TRACES_SAMPLE_RATE,
+        # Set profiles_sample_rate to capture profiling data
+        profiles_sample_rate=Config.SENTRY_PROFILES_SAMPLE_RATE,
+        # Set profile_lifecycle to "trace" to run profiler during transactions
+        profile_lifecycle="trace",
+    )
+    logger.info(f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT})")
+else:
+    logger.info("⏭️  Sentry disabled (SENTRY_ENABLED=false or SENTRY_DSN not set)")
+
 # Constants
 ERROR_INVALID_ADMIN_API_KEY = "Invalid admin API key"
 
@@ -101,6 +124,14 @@ def create_app() -> FastAPI:
     logger.info(f"   Environment: {Config.APP_ENV}")
     logger.info(f"   Allowed Origins: {allowed_origins}")
 
+    # OPTIMIZED: Add trace context middleware first (for distributed tracing)
+    # Middleware order matters! Last added = first executed
+    from src.middleware.trace_context_middleware import TraceContextMiddleware
+
+    app.add_middleware(TraceContextMiddleware)
+    logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
+
+    # Add CORS middleware second (must be early for OPTIONS requests)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -109,25 +140,17 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "Accept", "Origin"],
     )
 
-    # Add GZip compression middleware for model catalog responses
-    # Compress responses larger than 1KB (1000 bytes)
-    # This significantly reduces payload size for large model lists
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
-    logger.info("  🗜  GZip compression middleware enabled (threshold: 1KB)")
-
     # Add observability middleware for automatic metrics collection
-    # This should be added after CORS/compression but before route handlers
     from src.middleware.observability_middleware import ObservabilityMiddleware
 
     app.add_middleware(ObservabilityMiddleware)
     logger.info("  📊 Observability middleware enabled (automatic metrics tracking)")
 
-    # Add trace context middleware for log-to-trace correlation
-    # This should be added after observability middleware
-    from src.middleware.trace_context_middleware import TraceContextMiddleware
-
-    app.add_middleware(TraceContextMiddleware)
-    logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
+    # OPTIMIZED: Add GZip compression last (larger threshold = 10KB for better CPU efficiency)
+    # Only compress large responses (model catalogs, large JSON payloads)
+    # This significantly reduces payload size while avoiding compression overhead for small responses
+    app.add_middleware(GZipMiddleware, minimum_size=10000)
+    logger.info("  🗜  GZip compression middleware enabled (threshold: 10KB, optimized)")
 
     # Security
     HTTPBearer()
@@ -160,6 +183,27 @@ def create_app() -> FastAPI:
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
+
+    # ==================== Sentry Debug Endpoint ====================
+    if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+        @app.get("/sentry-debug", tags=["monitoring"], include_in_schema=False)
+        async def trigger_sentry_error():
+            """
+            Test endpoint to verify Sentry error tracking is working.
+            This will intentionally trigger a division by zero error.
+            """
+            import sentry_sdk
+
+            # Send test logs to Sentry
+            sentry_sdk.logger.info("Testing Sentry logging integration")
+            sentry_sdk.logger.warning("This is a test warning message")
+            sentry_sdk.logger.error("This is a test error message")
+
+            # Trigger an error to test error tracking
+            division_by_zero = 1 / 0  # This will raise ZeroDivisionError
+            return {"status": "This line will never execute"}
+
+        logger.info("  [OK] Sentry debug endpoint at /sentry-debug")
 
     # ==================== Load All Routes ====================
     logger.info("Loading application routes...")
@@ -419,17 +463,23 @@ def create_app() -> FastAPI:
             except Exception as analytics_e:
                 logger.warning(f"    Analytics initialization warning: {analytics_e}")
 
-            # Warm model caches on startup
-            try:
-                logger.info("  🔥 Warming model caches...")
-                from src.services.models import get_cached_models
+            # OPTIMIZED: Warm model caches asynchronously (non-blocking startup)
+            async def warm_caches_async():
+                """Background task to warm model caches without blocking startup."""
+                try:
+                    logger.info("  🔥 Warming model caches asynchronously...")
+                    from src.services.models import get_cached_models
 
-                # Warm critical provider caches
-                get_cached_models("hug")
-                logger.info("   HuggingFace models cache warmed")
+                    # Warm critical provider caches
+                    await asyncio.to_thread(get_cached_models, "hug")
+                    logger.info("   ✅ HuggingFace models cache warmed")
 
-            except Exception as cache_e:
-                logger.warning(f"    Cache warming warning: {cache_e}")
+                except Exception as cache_e:
+                    logger.warning(f"    Cache warming warning: {cache_e}")
+
+            # Start cache warming in background (don't block startup)
+            asyncio.create_task(warm_caches_async())
+            logger.info("  🔥 Cache warming started in background (non-blocking)")
 
         except Exception as e:
             logger.error(f"   Startup initialization failed: {e}")
