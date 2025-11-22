@@ -341,6 +341,7 @@ from src.services.provider_failover import (
     should_failover,
 )
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.token_estimator import estimate_message_tokens
 
 
 # Backwards compatibility wrappers for test patches
@@ -955,6 +956,14 @@ async def chat_completions(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # === 2.2) Plan limit pre-check with estimated tokens ===
+        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         # Store original model for response
         original_model = req.model
@@ -1848,6 +1857,14 @@ async def unified_responses(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # Plan limit pre-check for unified responses
+        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         # Store original model for response
         original_model = req.model
