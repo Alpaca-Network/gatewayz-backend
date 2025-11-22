@@ -27,7 +27,10 @@ from src.config import Config
 from src.services.huggingface_models import fetch_models_from_hug
 from src.services.models import (
     fetch_models_from_aihubmix,
+<<<<<<< HEAD
+=======
     fetch_models_from_aimo,
+>>>>>>> main
     fetch_models_from_anannas,
     fetch_models_from_chutes,
     fetch_models_from_fal,
@@ -1159,8 +1162,23 @@ async def get_cache_status():
     """
     try:
         cache_status = {}
+<<<<<<< HEAD
+        gateways = [
+            "openrouter",
+            "portkey",
+            "featherless",
+            "deepinfra",
+            "chutes",
+            "groq",
+            "fireworks",
+            "together",
+            "aihubmix",
+            "anannas",
+        ]
+=======
         # Get all gateways dynamically from GATEWAY_CONFIG
         gateways = get_all_gateway_names()
+>>>>>>> main
 
         for gateway in gateways:
             try:
@@ -1273,8 +1291,24 @@ async def refresh_gateway_cache(
     """
     try:
         gateway = gateway.lower()
+<<<<<<< HEAD
+        valid_gateways = [
+            "openrouter",
+            "portkey",
+            "featherless",
+            "deepinfra",
+            "chutes",
+            "groq",
+            "fireworks",
+            "together",
+            "huggingface",
+            "aihubmix",
+            "anannas",
+        ]
+=======
         # Get all gateway names for validation (includes deepinfra for special handling)
         all_gateways = get_all_gateway_names()
+>>>>>>> main
 
         if gateway not in all_gateways:
             # Get cacheable gateways for error message
@@ -1315,8 +1349,25 @@ async def refresh_gateway_cache(
         # Fetch new data based on gateway
         logger.info(f"Refreshing cache for {gateway}...")
 
+<<<<<<< HEAD
+        fetch_functions = {
+            "openrouter": fetch_models_from_openrouter,
+            "portkey": fetch_models_from_portkey,
+            "featherless": fetch_models_from_featherless,
+            "chutes": fetch_models_from_chutes,
+            "groq": fetch_models_from_groq,
+            "fireworks": fetch_models_from_fireworks,
+            "together": fetch_models_from_together,
+            "huggingface": fetch_models_from_hug,
+            "aihubmix": fetch_models_from_aihubmix,
+            "anannas": fetch_models_from_anannas,
+        }
+
+        fetch_func = fetch_functions.get(gateway)
+=======
         # Get the fetch function dynamically
         fetch_func = get_fetch_function(gateway)
+>>>>>>> main
         if fetch_func:
             # Most fetch functions are sync, so we need to handle both
             try:
@@ -1386,8 +1437,24 @@ async def clear_all_caches(
                 "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
+<<<<<<< HEAD
+            # Clear all gateways
+            gateways = [
+                "openrouter",
+                "portkey",
+                "featherless",
+                "deepinfra",
+                "chutes",
+                "groq",
+                "fireworks",
+                "together",
+                "aihubmix",
+                "anannas",
+            ]
+=======
             # Clear all gateways dynamically
             gateways = get_all_gateway_names()
+>>>>>>> main
             for gw in gateways:
                 clear_models_cache(gw)
             clear_providers_cache()

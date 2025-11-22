@@ -108,6 +108,12 @@ class Config:
 
     # Anannas Configuration
     ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
+<<<<<<< HEAD
+
+    # Google Generative AI Configuration (for language models)
+    GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+=======
+>>>>>>> main
 
     # Alpaca Network Configuration
     ALPACA_NETWORK_API_KEY = os.environ.get("ALPACA_NETWORK_API_KEY")

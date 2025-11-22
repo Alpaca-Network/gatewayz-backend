@@ -3,10 +3,55 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+<<<<<<< HEAD
+
+from src.config import Config
+from src.cache import (
+    _huggingface_cache,
+    _models_cache,
+    _portkey_models_cache,
+    _featherless_models_cache,
+    _chutes_models_cache,
+    _groq_models_cache,
+    _fireworks_models_cache,
+    _together_models_cache,
+    _deepinfra_models_cache,
+    _google_models_cache,
+    _google_vertex_models_cache,
+    _cerebras_models_cache,
+    _nebius_models_cache,
+    _xai_models_cache,
+    _novita_models_cache,
+    _huggingface_models_cache,
+    _aimo_models_cache,
+    _near_models_cache,
+    _fal_models_cache,
+    _vercel_ai_gateway_models_cache,
+    _anannas_models_cache,
+    is_cache_fresh,
+    should_revalidate_in_background,
+    _FAL_CACHE_INIT_DEFERRED,
+)
+from fastapi import APIRouter
+from datetime import datetime, timezone
+from src.services.pricing_lookup import enrich_model_with_pricing
+from src.services.portkey_providers import (
+    fetch_models_from_google,
+    fetch_models_from_google_vertex,
+    fetch_models_from_cerebras,
+    fetch_models_from_nebius,
+    fetch_models_from_xai,
+    fetch_models_from_novita,
+)
+from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
+from src.services.model_transformations import detect_provider_from_model_id
+from src.utils.security_validators import sanitize_for_logging
+=======
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+>>>>>>> main
 
 import httpx
 from fastapi import APIRouter
@@ -409,10 +454,14 @@ def get_all_models_parallel():
             "aimo",
             "near",
             "fal",
+<<<<<<< HEAD
+            "anannas",
+=======
             "helicone",
             "anannas",
             "aihubmix",
             "alibaba",
+>>>>>>> main
         ]
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
@@ -466,10 +515,14 @@ def get_all_models_sequential():
     aimo_models = get_cached_models("aimo") or []
     near_models = get_cached_models("near") or []
     fal_models = get_cached_models("fal") or []
+<<<<<<< HEAD
+    anannas_models = get_cached_models("anannas") or []
+=======
     helicone_models = get_cached_models("helicone") or []
     anannas_models = get_cached_models("anannas") or []
     aihubmix_models = get_cached_models("aihubmix") or []
     alibaba_models = get_cached_models("alibaba") or []
+>>>>>>> main
     return (
         openrouter_models
         + featherless_models
@@ -486,10 +539,14 @@ def get_all_models_sequential():
         + aimo_models
         + near_models
         + fal_models
+<<<<<<< HEAD
+        + anannas_models
+=======
         + helicone_models
         + anannas_models
         + aihubmix_models
         + alibaba_models
+>>>>>>> main
     )
 
 
@@ -723,6 +780,14 @@ def get_cached_models(gateway: str = "openrouter"):
             result = fetch_models_from_alibaba()
             _register_canonical_records("alibaba", result)
             return result
+
+        if gateway == "anannas":
+            cache = _anannas_models_cache
+            if cache["data"] and cache["timestamp"]:
+                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                if cache_age < cache["ttl"]:
+                    return cache["data"]
+            return fetch_models_from_anannas()
 
         if gateway == "all":
             cache = _multi_provider_catalog_cache
@@ -2963,6 +3028,8 @@ def normalize_aihubmix_model(model) -> dict | None:
         return None
 
 
+<<<<<<< HEAD
+=======
 def fetch_models_from_helicone():
     """Fetch models from Helicone AI Gateway via OpenAI-compatible API
 
@@ -3122,17 +3189,21 @@ def get_helicone_model_pricing(model_id: str) -> dict:
     }
 
 
+>>>>>>> main
 def fetch_models_from_anannas():
     """Fetch models from Anannas via OpenAI-compatible API
 
     Anannas provides access to various models through a unified OpenAI-compatible endpoint.
     """
     try:
+<<<<<<< HEAD
+=======
         # Check if API key is configured
         if not Config.ANANNAS_API_KEY:
             logger.warning("Anannas API key not configured - skipping model fetch")
             return []
 
+>>>>>>> main
         from src.services.anannas_client import get_anannas_client
 
         client = get_anannas_client()
@@ -3146,12 +3217,22 @@ def fetch_models_from_anannas():
         normalized_models = [normalize_anannas_model(model) for model in response.data if model]
 
         _anannas_models_cache["data"] = normalized_models
+<<<<<<< HEAD
+        _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
+=======
         _anannas_models_cache["timestamp"] = datetime.now(UTC)
+>>>>>>> main
 
         logger.info(f"Fetched {len(normalized_models)} models from Anannas")
         return _anannas_models_cache["data"]
     except Exception as e:
+<<<<<<< HEAD
+        logger.error(
+            "Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e))
+        )
+=======
         logger.error("Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e)))
+>>>>>>> main
         return []
 
 
@@ -3173,7 +3254,11 @@ def normalize_anannas_model(model) -> dict | None:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
+<<<<<<< HEAD
+            "description": getattr(model, "description", f"Model from Anannas"),
+=======
             "description": getattr(model, "description", "Model from Anannas"),
+>>>>>>> main
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -3199,6 +3284,8 @@ def normalize_anannas_model(model) -> dict | None:
     except Exception as e:
         logger.error("Failed to normalize Anannas model: %s", sanitize_for_logging(str(e)))
         return None
+<<<<<<< HEAD
+=======
 
 
 def fetch_models_from_alibaba():
@@ -3278,3 +3365,4 @@ def normalize_alibaba_model(model) -> dict | None:
     except Exception as e:
         logger.error("Failed to normalize Alibaba Cloud model: %s", sanitize_for_logging(str(e)))
         return None
+>>>>>>> main
