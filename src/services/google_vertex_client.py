@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -43,7 +43,7 @@ _MessageToDict = None
 _VERTEX_API_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 _TOKEN_CACHE = {"token": None, "expiry": 0.0}
 _TOKEN_LOCK = threading.Lock()
-_TEMP_CREDENTIALS_FILE: Optional[str] = None
+_TEMP_CREDENTIALS_FILE: str | None = None
 _TEMP_CREDENTIALS_LOCK = threading.Lock()
 _DEFAULT_TRANSPORT = "rest"
 
@@ -186,6 +186,36 @@ def _get_google_vertex_access_token(force_refresh: bool = False) -> str:
     return token
 
 
+def _sanitize_system_content(content: Any) -> str:
+    """Normalize system message content into plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(item.get("text", ""))
+        return "\n".join(part for part in text_parts if part)
+    return str(content)
+
+
+def _prepare_vertex_contents(messages: list) -> tuple[list, str | None]:
+    """Split OpenAI messages into conversational content and system instruction."""
+    system_messages = []
+    conversational_messages = []
+
+    for message in messages:
+        role = message.get("role", "user")
+        if role == "system":
+            system_messages.append(_sanitize_system_content(message.get("content", "")))
+            continue
+        conversational_messages.append(message)
+
+    contents = _build_vertex_content(conversational_messages)
+    system_instruction = "\n\n".join(filter(None, system_messages)) if system_messages else None
+    return contents, system_instruction
+
+
 def initialize_vertex_ai():
     """Initialize Vertex AI using Application Default Credentials (ADC)
 
@@ -247,9 +277,9 @@ def transform_google_vertex_model_id(model_id: str) -> str:
 def _make_google_vertex_request_sdk(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> dict:
     """Make request to Google Vertex AI using the Vertex AI SDK with ADC
@@ -373,9 +403,9 @@ def _make_google_vertex_request_sdk(
 def _make_google_vertex_request_rest(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> dict:
     """Make request to Google Vertex AI using the public REST API."""
@@ -399,8 +429,11 @@ def _make_google_vertex_request_rest(
                 "Requests will proceed without tool definitions."
             )
 
-        contents = _build_vertex_content(messages)
+        contents, system_instruction = _prepare_vertex_contents(messages)
         request_body: dict[str, Any] = {"contents": contents}
+
+        if system_instruction:
+            request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
@@ -469,16 +502,25 @@ def _make_google_vertex_request_rest(
 def make_google_vertex_request_openai(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> dict:
     """Public entry point that routes to SDK or REST transport."""
     transport = (Config.GOOGLE_VERTEX_TRANSPORT or _DEFAULT_TRANSPORT).lower()
+    allowed_transports = {"rest", "sdk", "auto"}
+    if transport not in allowed_transports:
+        logger.warning(
+            "Unknown GOOGLE_VERTEX_TRANSPORT value '%s'. Falling back to '%s'.",
+            transport,
+            _DEFAULT_TRANSPORT,
+        )
+        transport = _DEFAULT_TRANSPORT
+
     logger.info(f"Google Vertex transport preference: {transport}")
 
-    if transport == "sdk":
+    def _attempt_sdk_request() -> dict | None:
         try:
             return _make_google_vertex_request_sdk(
                 messages=messages,
@@ -493,7 +535,6 @@ def make_google_vertex_request_openai(
                 "Vertex SDK unavailable (%s). Falling back to REST transport.", sdk_error
             )
         except ValueError as sdk_value_error:
-            # Preserve non-dependency errors
             if "libstdc++.so.6" not in str(sdk_value_error):
                 raise
             logger.warning(
@@ -507,6 +548,13 @@ def make_google_vertex_request_openai(
                 )
             else:
                 raise
+        return None
+
+    if transport in {"sdk", "auto"}:
+        sdk_response = _attempt_sdk_request()
+        if sdk_response is not None:
+            return sdk_response
+        logger.info("Vertex SDK request unavailable; falling back to REST transport.")
 
     # REST is default or fallback
     return _make_google_vertex_request_rest(
@@ -587,9 +635,9 @@ def _process_google_vertex_sdk_response(response: Any, model: str) -> dict:
 def make_google_vertex_request_openai_stream(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> Iterator[str]:
     """Make streaming request to Google Vertex AI
@@ -998,7 +1046,7 @@ def diagnose_google_vertex_credentials() -> dict:
         step3["passed"] = True
         step3["details"] = "Successfully obtained Vertex access token via REST transport"
 
-        if transport == "sdk":
+        if transport in {"sdk", "auto"}:
             try:
                 initialize_vertex_ai()
                 step3["details"] += " | SDK initialization successful"

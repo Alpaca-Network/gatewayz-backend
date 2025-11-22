@@ -5,8 +5,8 @@ CRUD operations for payment records in Supabase
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, UTC
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -24,11 +24,11 @@ def create_payment(
     currency: str = "usd",
     payment_method: str = "stripe",
     status: str = "pending",
-    stripe_payment_intent_id: Optional[str] = None,
-    stripe_session_id: Optional[str] = None,
-    stripe_customer_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    stripe_payment_intent_id: str | None = None,
+    stripe_session_id: str | None = None,
+    stripe_customer_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """
     Create a new payment record
 
@@ -63,7 +63,7 @@ def create_payment(
             "payment_method": payment_method,
             "status": status,
             "metadata": metadata or {},
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         # Add Stripe fields if provided
@@ -96,7 +96,7 @@ def create_payment(
 # ==================== Read ====================
 
 
-def get_payment(payment_id: int) -> Optional[Dict[str, Any]]:
+def get_payment(payment_id: int) -> dict[str, Any] | None:
     """
     Get a payment record by ID
 
@@ -122,7 +122,7 @@ def get_payment(payment_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> Optional[Dict[str, Any]]:
+def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> dict[str, Any] | None:
     """
     Get a payment record by Stripe payment intent ID
 
@@ -166,8 +166,8 @@ def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> Optional[Dict
 
 
 def get_user_payments(
-    user_id: int, limit: int = 50, offset: int = 0, status: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    user_id: int, limit: int = 50, offset: int = 0, status: str | None = None
+) -> list[dict[str, Any]]:
     """
     Get all payment records for a user
 
@@ -197,7 +197,7 @@ def get_user_payments(
         return []
 
 
-def get_recent_payments(limit: int = 20) -> List[Dict[str, Any]]:
+def get_recent_payments(limit: int = 20) -> list[dict[str, Any]]:
     """
     Get recent payments across all users (admin function)
 
@@ -231,10 +231,10 @@ def get_recent_payments(limit: int = 20) -> List[Dict[str, Any]]:
 def update_payment_status(
     payment_id: int,
     status: str,
-    stripe_payment_intent_id: Optional[str] = None,
-    stripe_session_id: Optional[str] = None,
-    error_message: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
+    stripe_payment_intent_id: str | None = None,
+    stripe_session_id: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any] | None:
     """
     Update payment status and related fields
 
@@ -251,7 +251,7 @@ def update_payment_status(
     try:
         client = get_supabase_client()
 
-        update_data = {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data = {"status": status, "updated_at": datetime.now(UTC).isoformat()}
 
         if stripe_payment_intent_id:
             update_data["stripe_payment_intent_id"] = stripe_payment_intent_id
@@ -261,11 +261,11 @@ def update_payment_status(
 
         # Add completion timestamp for completed payments
         if status == "completed":
-            update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+            update_data["completed_at"] = datetime.now(UTC).isoformat()
 
         # Add failed timestamp and error for failed payments
         if status == "failed":
-            update_data["failed_at"] = datetime.now(timezone.utc).isoformat()
+            update_data["failed_at"] = datetime.now(UTC).isoformat()
             if error_message:
                 # Store error in metadata
                 payment = get_payment(payment_id)
@@ -288,7 +288,7 @@ def update_payment_status(
         return None
 
 
-def update_payment_metadata(payment_id: int, metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_payment_metadata(payment_id: int, metadata: dict[str, Any]) -> dict[str, Any] | None:
     """
     Update payment metadata
 
@@ -313,7 +313,7 @@ def update_payment_metadata(payment_id: int, metadata: Dict[str, Any]) -> Option
 
         update_data = {
             "metadata": updated_metadata,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         result = client.table("payments").update(update_data).eq("id", payment_id).execute()
@@ -363,7 +363,7 @@ def delete_payment(payment_id: int) -> bool:
 # ==================== Statistics & Analytics ====================
 
 
-def get_payment_statistics(user_id: Optional[int] = None) -> Dict[str, Any]:
+def get_payment_statistics(user_id: int | None = None) -> dict[str, Any]:
     """
     Get payment statistics for a user or overall system
 
@@ -425,8 +425,8 @@ def get_payment_statistics(user_id: Optional[int] = None) -> Dict[str, Any]:
 
 
 def get_total_revenue(
-    start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
-) -> Dict[str, Any]:
+    start_date: datetime | None = None, end_date: datetime | None = None
+) -> dict[str, Any]:
     """
     Get total revenue statistics
 
@@ -477,7 +477,7 @@ def get_total_revenue(
         return {"total_transactions": 0, "revenue_by_currency": {}, "error": str(e)}
 
 
-def get_payment_trends(days: int = 30) -> Dict[str, Any]:
+def get_payment_trends(days: int = 30) -> dict[str, Any]:
     """
     Get payment trends over specified days
 
@@ -490,7 +490,7 @@ def get_payment_trends(days: int = 30) -> Dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        start_date = datetime.now(timezone.utc) - timedelta(days=days)
+        start_date = datetime.now(UTC) - timedelta(days=days)
 
         result = (
             client.table("payments").select("*").gte("created_at", start_date.isoformat()).execute()
