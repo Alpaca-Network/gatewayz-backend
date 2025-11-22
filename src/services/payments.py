@@ -7,7 +7,7 @@ Handles all Stripe payment operations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import stripe
 
@@ -379,13 +379,137 @@ class StripeService:
             logger.error(f"Webhook processing error: {e}")
             raise
 
-    def _handle_checkout_completed(self, session):
-        """Handle completed checkout session"""
+    @staticmethod
+    def _get_session_value(session: Any, key: str, default: Any | None = None) -> Any | None:
+        """Safely extract a value from a Stripe session regardless of dict/object representation."""
+        if session is None:
+            return default
+        if isinstance(session, dict):
+            return session.get(key, default)
+        return getattr(session, key, default)
+
+    @staticmethod
+    def _extract_metadata(session: Any) -> dict[str, Any]:
+        """Return checkout session metadata as a plain dict."""
+        raw_metadata: Any | None = None
+        if isinstance(session, dict):
+            raw_metadata = session.get("metadata")
+        else:
+            raw_metadata = getattr(session, "metadata", None)
+
+        if raw_metadata is None:
+            return {}
+
+        if isinstance(raw_metadata, dict):
+            return raw_metadata
+
+        if hasattr(raw_metadata, "to_dict_recursive"):
+            try:
+                return raw_metadata.to_dict_recursive()
+            except Exception:
+                logger.warning("Failed to convert Stripe metadata via to_dict_recursive", exc_info=True)
+                return {}
+
         try:
-            user_id = int(session.metadata.get("user_id"))
-            credits = float(session.metadata.get("credits"))
-            payment_id = int(session.metadata.get("payment_id"))
-            amount_dollars = credits / 100  # Convert cents to dollars
+            return dict(raw_metadata)
+        except Exception:
+            logger.warning("Unable to coerce checkout session metadata to dict", exc_info=True)
+            return {}
+
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
+        """Best-effort conversion to int without raising."""
+        try:
+            if value is None or value == "":
+                return None
+            return int(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        """Best-effort conversion to float without raising."""
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _dollars_to_cents(amount: Any) -> float | None:
+        """Convert a dollar amount (possibly string) into cents."""
+        value = StripeService._safe_float(amount)
+        return None if value is None else value * 100
+
+    def _lookup_payment_context(self, session: Any) -> Dict[str, Any] | None:
+        """Try to recover the payment record using identifiers present on the session."""
+        lookup_candidates = [
+            self._get_session_value(session, "payment_intent"),
+            self._get_session_value(session, "id"),
+        ]
+
+        for candidate in lookup_candidates:
+            if not candidate:
+                continue
+            record = get_payment_by_stripe_intent(candidate)
+            if record:
+                return record
+        return None
+
+    def _handle_checkout_completed(self, session):
+        """Handle completed checkout session even when metadata is partially missing."""
+        try:
+            session_id = self._get_session_value(session, "id")
+            metadata = self._extract_metadata(session)
+
+            user_id = self._safe_int(metadata.get("user_id")) or self._safe_int(
+                self._get_session_value(session, "client_reference_id")
+            )
+            payment_id = self._safe_int(metadata.get("payment_id"))
+            credits_cents = self._safe_float(metadata.get("credits"))
+
+            used_fallback = False
+            payment_record: Optional[Dict[str, Any]] = None
+
+            if user_id is None or payment_id is None or credits_cents is None:
+                payment_record = self._lookup_payment_context(session)
+                if payment_record:
+                    used_fallback = True
+                    if user_id is None:
+                        user_id = payment_record.get("user_id")
+                    if payment_id is None:
+                        payment_id = payment_record.get("id")
+                    if credits_cents is None and payment_record.get("credits_purchased") is not None:
+                        credits_cents = float(payment_record["credits_purchased"])
+                    if credits_cents is None and payment_record.get("amount_cents") is not None:
+                        credits_cents = float(payment_record["amount_cents"])
+                    if credits_cents is None:
+                        cents = self._dollars_to_cents(
+                            payment_record.get("amount_usd") or payment_record.get("amount")
+                        )
+                        if cents is not None:
+                            credits_cents = cents
+
+            if credits_cents is None:
+                amount_total = self._safe_float(self._get_session_value(session, "amount_total"))
+                if amount_total is not None:
+                    credits_cents = amount_total
+
+            if used_fallback:
+                logger.warning(
+                    "Checkout session %s missing metadata. Fallback payment context recovered (payment_id=%s).",
+                    session_id,
+                    payment_id,
+                )
+
+            if user_id is None or payment_id is None or credits_cents is None:
+                raise ValueError(
+                    f"Unable to resolve checkout context for session {session_id}: "
+                    f"user_id={user_id}, payment_id={payment_id}, credits={credits_cents}"
+                )
+
+            amount_dollars = credits_cents / 100  # Convert cents to dollars
 
             # Add credits and log transaction
             add_credits_to_user(
@@ -395,8 +519,8 @@ class StripeService:
                 description=f"Stripe checkout - ${amount_dollars}",
                 payment_id=payment_id,
                 metadata={
-                    "stripe_session_id": session.id,
-                    "stripe_payment_intent_id": session.payment_intent,
+                    "stripe_session_id": session_id,
+                    "stripe_payment_intent_id": self._get_session_value(session, "payment_intent"),
                 },
             )
 
@@ -404,7 +528,7 @@ class StripeService:
             update_payment_status(
                 payment_id=payment_id,
                 status="completed",
-                stripe_payment_intent_id=session.payment_intent,
+                stripe_payment_intent_id=self._get_session_value(session, "payment_intent"),
             )
 
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
