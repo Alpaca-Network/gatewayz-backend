@@ -12,6 +12,30 @@ from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
+_missing_table_warning_logged = False
+
+
+def _maybe_log_missing_table_hint(error: Exception) -> None:
+    """
+    Emit a single actionable warning when the stripe_webhook_events table
+    is missing from the Supabase schema cache so operators know to run migrations.
+    """
+    global _missing_table_warning_logged
+
+    if _missing_table_warning_logged:
+        return
+
+    message = str(error)
+    if "stripe_webhook_events" in message or "PGRST205" in message:
+        logger.warning(
+            "stripe_webhook_events table is unavailable in Supabase (likely migrations not applied "
+            "or schema cache stale). Apply migrations "
+            "20251109000000_add_webhook_event_tracking.sql and "
+            "20251121000100_refresh_postgrest_schema_cache.sql, then run "
+            "NOTIFY pgrst, 'reload schema'; to refresh PostgREST."
+        )
+        _missing_table_warning_logged = True
+
 
 def is_event_processed(event_id: str) -> bool:
     """
@@ -40,6 +64,7 @@ def is_event_processed(event_id: str) -> bool:
         return exists
 
     except Exception as e:
+        _maybe_log_missing_table_hint(e)
         logger.error(f"Error checking if event is processed: {e}", exc_info=True)
         # On error, default to False to allow processing
         # (Better to process twice than not at all)
@@ -89,6 +114,7 @@ def record_processed_event(
             return False
 
     except Exception as e:
+        _maybe_log_missing_table_hint(e)
         logger.error(f"Error recording processed event: {e}", exc_info=True)
         return False
 
@@ -115,6 +141,7 @@ def get_processed_event(event_id: str) -> dict[str, Any] | None:
         return None
 
     except Exception as e:
+        _maybe_log_missing_table_hint(e)
         logger.error(f"Error getting processed event: {e}", exc_info=True)
         return None
 
@@ -147,5 +174,6 @@ def cleanup_old_events(days: int = 90) -> int:
         return count
 
     except Exception as e:
+        _maybe_log_missing_table_hint(e)
         logger.error(f"Error cleaning up old events: {e}", exc_info=True)
         return 0
