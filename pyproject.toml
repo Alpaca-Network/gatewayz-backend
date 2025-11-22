@@ -44,7 +44,6 @@ dependencies = [
     # Observability and metrics
     "prometheus-client==0.21.0",
     "sentry-sdk[fastapi]>=2.0.0",
-]
 
     # OpenTelemetry - Core tracing functionality
     "opentelemetry-api>=1.28.0",
