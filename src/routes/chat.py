@@ -918,6 +918,14 @@ async def chat_completions(
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
 
+        # Pre-check plan limits before streaming (fail fast)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
             messages = [m.model_dump() for m in req.messages]
