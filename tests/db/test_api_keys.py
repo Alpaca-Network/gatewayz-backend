@@ -235,6 +235,30 @@ def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fak
     assert len(fake_supabase.store["api_keys_new"]) == 1
 
 
+def test_create_api_key_schema_cache_error_fallback(monkeypatch, mod, fake_supabase):
+    """Ensure we recover from PostgREST schema cache misses for new columns."""
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
+
+    fake_supabase.fail_next_insert(
+        "api_keys_new",
+        RuntimeError(
+            "{'code': 'PGRST204', 'message': \"Could not find the 'key_version' column "
+            "of 'api_keys_new' in the schema cache\"}"
+        ),
+    )
+
+    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", lambda: True)
+
+    api_key, key_id = mod.create_api_key(user_id=1, key_name="Primary", is_primary=True)
+
+    assert api_key.startswith("gw_live_")
+    assert key_id == 1
+
+    stored_row = fake_supabase.store["api_keys_new"][0]
+    assert "key_version" not in stored_row
+    assert stored_row["api_key"] == api_key
+
+
 def test_get_user_api_keys_builds_fields(mod, fake_supabase):
     # load 2 keys
     now = datetime.now(timezone.utc)
