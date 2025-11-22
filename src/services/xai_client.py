@@ -109,7 +109,95 @@ def fetch_models_from_xai():
     """Fetch models from xAI API
 
     xAI does not provide a public API to list available models.
-    Returns None to indicate no dynamic model listing is available.
+    Returns a hardcoded list of known xAI Grok models instead.
     """
-    logger.info("xAI does not provide a public model listing API")
-    return None
+    logger.info("xAI does not provide a public model listing API, returning known Grok models")
+
+    # Hardcoded list of known xAI Grok models
+    # These are the models available through xAI's API
+    return [
+        {
+            "id": "grok-beta",
+            "slug": "grok-beta",
+            "canonical_slug": "grok-beta",
+            "name": "Grok Beta",
+            "description": "xAI's Grok model (beta version) - A conversational AI assistant",
+            "context_length": 131072,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "5",
+                "completion": "15",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+        {
+            "id": "grok-2",
+            "slug": "grok-2",
+            "canonical_slug": "grok-2",
+            "name": "Grok 2",
+            "description": "xAI's Grok 2 model - Advanced conversational AI",
+            "context_length": 131072,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "5",
+                "completion": "15",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+        {
+            "id": "grok-2-1212",
+            "slug": "grok-2-1212",
+            "canonical_slug": "grok-2-1212",
+            "name": "Grok 2 (December 2024)",
+            "description": "xAI's Grok 2 model from December 2024",
+            "context_length": 131072,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "5",
+                "completion": "15",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+        {
+            "id": "grok-vision-beta",
+            "slug": "grok-vision-beta",
+            "canonical_slug": "grok-vision-beta",
+            "name": "Grok Vision Beta",
+            "description": "xAI's Grok model with vision capabilities (beta)",
+            "context_length": 8192,
+            "architecture": {
+                "modality": "text+image->text",
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "5",
+                "completion": "15",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+    ]
