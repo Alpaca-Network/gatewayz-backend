@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.config.supabase_config import get_supabase_client
+from src.services.payments import StripeService
 
 # Skip all tests in this module if referral_code column doesn't exist
 def _has_referral_schema():
@@ -43,6 +44,12 @@ pytestmark = pytest.mark.skipif(
 def client():
     """FastAPI test client"""
     return TestClient(app)
+
+
+@pytest.fixture
+def stripe_service():
+    """Provide StripeService instance for direct handler invocation"""
+    return StripeService()
 
 
 @pytest.fixture
@@ -288,7 +295,8 @@ class TestPaymentWebhookReferralIntegration:
         mock_notification,
         mock_stripe_session,
         supabase_client,
-        test_users_for_webhook
+        test_users_for_webhook,
+        stripe_service
     ):
         """
         Test that second purchase does NOT trigger referral bonus
@@ -336,7 +344,7 @@ class TestPaymentWebhookReferralIntegration:
         mock_stripe_session.return_value = mock_session_2
 
         try:
-            handle_checkout_completed(mock_session_2)
+            stripe_service._handle_checkout_completed(mock_session_2)
         except Exception as e:
             print(f"Second purchase error: {e}")
 
@@ -438,7 +446,8 @@ class TestWebhookEdgeCases:
     def test_webhook_with_missing_metadata(
         self,
         mock_stripe_session,
-        supabase_client
+        supabase_client,
+        stripe_service
     ):
         """Test webhook handling when metadata is missing"""
         mock_session = Mock()
@@ -450,11 +459,9 @@ class TestWebhookEdgeCases:
         mock_session.metadata = {}  # Empty metadata
         mock_stripe_session.return_value = mock_session
 
-        from src.services.payments import handle_checkout_completed
-
         # Should handle gracefully without crashing
         try:
-            handle_checkout_completed(mock_session)
+            stripe_service._handle_checkout_completed(mock_session)
             print(f"✓ Webhook handled missing metadata gracefully")
         except Exception as e:
             # Expected to fail but shouldn't crash the server
@@ -464,7 +471,8 @@ class TestWebhookEdgeCases:
     def test_webhook_with_invalid_user_id(
         self,
         mock_stripe_session,
-        supabase_client
+        supabase_client,
+        stripe_service
     ):
         """Test webhook handling with non-existent user ID"""
         mock_session = Mock()
@@ -476,11 +484,9 @@ class TestWebhookEdgeCases:
         mock_session.metadata = {"user_id": "99999999"}  # Non-existent user
         mock_stripe_session.return_value = mock_session
 
-        from src.services.payments import handle_checkout_completed
-
         # Should handle gracefully
         try:
-            handle_checkout_completed(mock_session)
+            stripe_service._handle_checkout_completed(mock_session)
         except Exception as e:
             print(f"✓ Webhook handled invalid user ID: {e}")
 
