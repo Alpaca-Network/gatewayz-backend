@@ -224,7 +224,6 @@ jobs:
 
             // Check if Claude made any commits
             const { execSync } = require('child_process');
-            const fs = require('fs');
 
             try {
               const newCommits = execSync('git log --oneline ${{ github.event.workflow_run.head_sha }}..HEAD').toString();

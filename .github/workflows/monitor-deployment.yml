@@ -27,26 +27,38 @@ jobs:
         continue-on-error: true
         run: |
           echo "Checking production deployment..."
-          railway project switch --id $RAILWAY_PROJECT_ID
-          railway environment switch --name production
 
           DOMAIN="${{ secrets.RAILWAY_DOMAIN }}"
-          HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" https://$DOMAIN/health || echo "error\n000")
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
 
-          HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -1)
-          BODY=$(echo "$HEALTH_RESPONSE" | head -n -1)
+          # Retry logic for health check
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Health check attempt $ATTEMPT/$MAX_ATTEMPTS..."
+            HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 10 https://$DOMAIN/health || echo "error\n000")
 
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $BODY"
+            HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -1)
+            BODY=$(echo "$HEALTH_RESPONSE" | head -n -1)
 
-          if [ "$HTTP_CODE" == "200" ]; then
-            echo "health_status=healthy" >> $GITHUB_OUTPUT
-            echo "✅ Production deployment is healthy"
-          else
-            echo "health_status=unhealthy" >> $GITHUB_OUTPUT
-            echo "⚠️ Production deployment returned HTTP $HTTP_CODE"
-            exit 1
-          fi
+            echo "HTTP Status: $HTTP_CODE"
+
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "health_status=healthy" >> $GITHUB_OUTPUT
+              echo "✅ Production deployment is healthy"
+              exit 0
+            fi
+
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "Retrying in 5 seconds..."
+              sleep 5
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "health_status=unhealthy" >> $GITHUB_OUTPUT
+          echo "⚠️ Production deployment unhealthy after $MAX_ATTEMPTS attempts"
+          exit 1
 
       - name: Get deployment logs
         if: steps.prod-health.outcome == 'failure'
@@ -56,7 +68,7 @@ jobs:
           railway environment switch --name production
           railway logs --tail 100 || true
 
-      - name: Create issue if health check fails
+      - name: Create issue if health check fails (with deduplication)
         if: steps.prod-health.outcome == 'failure'
         uses: actions/github-script@v7
         with:
@@ -88,7 +100,7 @@ jobs:
             [View Workflow Run](${context.payload.repository.html_url}/actions/runs/${context.runId})
             `;
 
-            // Check if issue already exists
+            // Check if issue already exists (and is recent - within last 6 hours)
             const { data: issues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -96,7 +108,11 @@ jobs:
               labels: ['deployment-alert']
             });
 
-            const existingIssue = issues.find(issue => issue.title.includes('Production Deployment Health Check Failed'));
+            const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+            const existingIssue = issues.find(issue =>
+              issue.title.includes('Production Deployment Health Check Failed') &&
+              new Date(issue.created_at) > sixHoursAgo
+            );
 
             if (!existingIssue) {
               await github.rest.issues.create({
@@ -108,7 +124,7 @@ jobs:
               });
               console.log('✅ Created health check failure issue');
             } else {
-              console.log('ℹ️ Health check failure issue already exists');
+              console.log('ℹ️ Health check failure issue already exists (created within last 6 hours)');
             }
 
       - name: Check staging health
@@ -116,23 +132,44 @@ jobs:
         continue-on-error: true
         run: |
           echo "Checking staging deployment..."
-          railway project switch --id $RAILWAY_PROJECT_ID
-          railway environment switch --name staging
 
-          # Staging domain (adjust if different)
-          STAGING_DOMAIN="staging-${{ secrets.RAILWAY_DOMAIN }}"
-
-          HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" https://$STAGING_DOMAIN/health || echo "error\n000")
-
-          HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -1)
-
-          if [ "$HTTP_CODE" == "200" ]; then
-            echo "health_status=healthy" >> $GITHUB_OUTPUT
-            echo "✅ Staging deployment is healthy"
+          # Staging domain - derive from production domain if available
+          if [ ! -z "${{ secrets.STAGING_DOMAIN }}" ]; then
+            STAGING_DOMAIN="${{ secrets.STAGING_DOMAIN }}"
           else
-            echo "health_status=unhealthy" >> $GITHUB_OUTPUT
-            echo "⚠️ Staging deployment returned HTTP $HTTP_CODE"
+            # Fallback: assume staging-<domain> pattern
+            STAGING_DOMAIN="staging-${{ secrets.RAILWAY_DOMAIN }}"
           fi
+
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
+
+          # Retry logic for health check
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Health check attempt $ATTEMPT/$MAX_ATTEMPTS..."
+            HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 10 https://$STAGING_DOMAIN/health || echo "error\n000")
+
+            HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -1)
+
+            echo "HTTP Status: $HTTP_CODE"
+
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "health_status=healthy" >> $GITHUB_OUTPUT
+              echo "✅ Staging deployment is healthy"
+              exit 0
+            fi
+
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "Retrying in 5 seconds..."
+              sleep 5
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "health_status=unhealthy" >> $GITHUB_OUTPUT
+          echo "⚠️ Staging deployment unhealthy after $MAX_ATTEMPTS attempts"
+          exit 1
 
   # Collect metrics
   collect-metrics:
