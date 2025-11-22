@@ -22,14 +22,12 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from typing import Any, Optional
 
-import google.auth
-import requests
-from google.auth.exceptions import GoogleAuthError
-from google.auth.transport.requests import Request as GoogleAuthRequest
+import httpx
 
 from src.config import Config
 
@@ -42,13 +40,12 @@ _vertexai = None
 _GenerativeModel = None
 _MessageToDict = None
 
-_TEMP_CREDENTIALS_FILE = None
-_VERTEX_SDK_CHECKED = False
-_VERTEX_SDK_AVAILABLE = False
-_VERTEX_SDK_ERROR: Optional[ImportError] = None
-
-_CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
-_VERTEX_REST_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_REST_TIMEOUT_SECONDS", "60"))
+_VERTEX_API_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+_TOKEN_CACHE = {"token": None, "expiry": 0.0}
+_TOKEN_LOCK = threading.Lock()
+_TEMP_CREDENTIALS_FILE: Optional[str] = None
+_TEMP_CREDENTIALS_LOCK = threading.Lock()
+_DEFAULT_TRANSPORT = "rest"
 
 
 def _ensure_vertex_imports():
@@ -71,6 +68,43 @@ def _ensure_vertex_imports():
     return _vertexai, _GenerativeModel
 
 
+def _prepare_vertex_environment():
+    """Validate config and prepare credential files for Vertex AI access."""
+    if not Config.GOOGLE_PROJECT_ID:
+        raise ValueError(
+            "GOOGLE_PROJECT_ID is not configured. Set this environment variable to your GCP project ID. "
+            "For example: GOOGLE_PROJECT_ID=my-project-123"
+        )
+
+    if not Config.GOOGLE_VERTEX_LOCATION:
+        raise ValueError(
+            "GOOGLE_VERTEX_LOCATION is not configured. Set this to a valid GCP region. "
+            "For example: GOOGLE_VERTEX_LOCATION=us-central1"
+        )
+
+    # If raw credentials JSON is provided but GOOGLE_APPLICATION_CREDENTIALS is not set,
+    # write the JSON to a temp file (once) and reuse it for the process lifetime.
+    if os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON") and not os.environ.get(
+        "GOOGLE_APPLICATION_CREDENTIALS"
+    ):
+        global _TEMP_CREDENTIALS_FILE
+        with _TEMP_CREDENTIALS_LOCK:
+            if _TEMP_CREDENTIALS_FILE and os.path.exists(_TEMP_CREDENTIALS_FILE):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _TEMP_CREDENTIALS_FILE
+                return
+
+            logger.info("GOOGLE_VERTEX_CREDENTIALS_JSON detected - writing to temp file for ADC")
+            creds_json = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
+
+            temp_creds_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+            temp_creds_file.write(creds_json or "")
+            temp_creds_file.close()
+
+            _TEMP_CREDENTIALS_FILE = temp_creds_file.name
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_file.name
+            logger.info(f"Wrote credentials to temp file: {temp_creds_file.name}")
+
+
 def _ensure_protobuf_imports():
     """Ensure protobuf utilities are imported. Raises ImportError if not available."""
     global _MessageToDict
@@ -88,79 +122,72 @@ def _ensure_protobuf_imports():
     return _MessageToDict
 
 
-def _prepare_google_application_credentials() -> Optional[str]:
-    """Ensure GOOGLE_APPLICATION_CREDENTIALS is set when raw JSON is provided."""
-    global _TEMP_CREDENTIALS_FILE
-
-    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-        return os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-
-    creds_json = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
-    if not creds_json:
-        return None
-
-    if _TEMP_CREDENTIALS_FILE and os.path.exists(_TEMP_CREDENTIALS_FILE):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _TEMP_CREDENTIALS_FILE
-        return _TEMP_CREDENTIALS_FILE
-
+def _get_google_vertex_access_token(force_refresh: bool = False) -> str:
+    """Fetch (and cache) an OAuth2 access token for Vertex REST API calls."""
     try:
-        temp_creds_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        temp_creds_file.write(creds_json)
-        temp_creds_file.close()
-        _TEMP_CREDENTIALS_FILE = temp_creds_file.name
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_file.name
-        logger.info(f"Wrote credentials to temp file: {temp_creds_file.name}")
-        return temp_creds_file.name
-    except Exception as exc:
-        logger.warning(f"Failed to persist GOOGLE_VERTEX_CREDENTIALS_JSON to temp file: {exc}")
-        return None
+        import google.auth
+        from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
+    except ImportError as e:
+        raise ImportError(
+            "google-auth is required for Google Vertex REST transport. "
+            "Install google-auth>=2.0 to enable Vertex AI access without the SDK."
+        ) from e
 
+    _prepare_vertex_environment()
 
-def _is_vertex_sdk_available() -> bool:
-    """Check if the Vertex SDK can be imported (cached result)."""
-    global _VERTEX_SDK_CHECKED, _VERTEX_SDK_AVAILABLE, _VERTEX_SDK_ERROR
-    if _VERTEX_SDK_CHECKED:
-        return _VERTEX_SDK_AVAILABLE
+    with _TOKEN_LOCK:
+        if (
+            not force_refresh
+            and _TOKEN_CACHE["token"]
+            and _TOKEN_CACHE["expiry"] - 60 > time.time()
+        ):
+            return _TOKEN_CACHE["token"]  # type: ignore[return-value]
 
-    try:
-        _ensure_vertex_imports()
-        _VERTEX_SDK_AVAILABLE = True
-        logger.debug("Vertex AI SDK import succeeded")
-    except ImportError as import_error:
-        _VERTEX_SDK_AVAILABLE = False
-        _VERTEX_SDK_ERROR = import_error
-        logger.warning(
-            "Vertex AI SDK import failed (%s). Falling back to REST transport when configured.",
-            import_error,
+    credentials = None
+
+    # Prefer raw JSON credentials if provided
+    if os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON"):
+        try:
+            creds_info = json.loads(os.environ["GOOGLE_VERTEX_CREDENTIALS_JSON"])
+        except json.JSONDecodeError as decode_error:
+            raise ValueError(
+                "GOOGLE_VERTEX_CREDENTIALS_JSON is not valid JSON. "
+                "Ensure the environment variable contains the raw service account JSON."
+            ) from decode_error
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_info, scopes=[_VERTEX_API_SCOPE]
         )
-    finally:
-        _VERTEX_SDK_CHECKED = True
 
-    return _VERTEX_SDK_AVAILABLE
+    # Fallback to GOOGLE_APPLICATION_CREDENTIALS file path
+    elif os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        credentials = service_account.Credentials.from_service_account_file(
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"], scopes=[_VERTEX_API_SCOPE]
+        )
 
+    # Finally, use Application Default Credentials (gcloud, metadata server, etc.)
+    else:
+        credentials, _ = google.auth.default(scopes=[_VERTEX_API_SCOPE])
 
-def _build_generation_config_dict(
-    max_tokens: Optional[int],
-    temperature: Optional[float],
-    top_p: Optional[float],
-    *,
-    for_rest: bool = False,
-) -> dict:
-    generation_config: dict[str, Any] = {}
-    max_tokens_key = "maxOutputTokens" if for_rest else "max_output_tokens"
-    top_p_key = "topP" if for_rest else "top_p"
+    request = Request()
+    credentials.refresh(request)
 
-    if max_tokens is not None:
-        generation_config[max_tokens_key] = max_tokens
-    if temperature is not None:
-        generation_config["temperature"] = temperature
-    if top_p is not None:
-        generation_config[top_p_key] = top_p
-    return generation_config
+    token = credentials.token
+    expiry_ts = (
+        credentials.expiry.timestamp()
+        if getattr(credentials, "expiry", None)
+        else time.time() + 3500
+    )
+
+    with _TOKEN_LOCK:
+        _TOKEN_CACHE["token"] = token
+        _TOKEN_CACHE["expiry"] = expiry_ts
+
+    return token
 
 
 def _sanitize_system_content(content: Any) -> str:
-    """Convert system content (string or structured) into plain text."""
+    """Normalize system message content into plain text."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -168,14 +195,15 @@ def _sanitize_system_content(content: Any) -> str:
         for item in content:
             if isinstance(item, dict) and item.get("type") == "text":
                 text_parts.append(item.get("text", ""))
-        return "\n".join(filter(None, text_parts))
+        return "\n".join(part for part in text_parts if part)
     return str(content)
 
 
 def _prepare_vertex_contents(messages: list) -> tuple[list, Optional[str]]:
-    """Split system instructions and conversational contents for REST API."""
+    """Split OpenAI messages into conversational content and system instruction."""
     system_messages = []
     conversational_messages = []
+
     for message in messages:
         role = message.get("role", "user")
         if role == "system":
@@ -186,25 +214,6 @@ def _prepare_vertex_contents(messages: list) -> tuple[list, Optional[str]]:
     contents = _build_vertex_content(conversational_messages)
     system_instruction = "\n\n".join(filter(None, system_messages)) if system_messages else None
     return contents, system_instruction
-
-
-def _get_google_access_token(scopes: Optional[list[str]] = None) -> str:
-    """Obtain an access token using ADC or provided credentials."""
-    _prepare_google_application_credentials()
-    scopes = scopes or [_CLOUD_PLATFORM_SCOPE]
-    try:
-        credentials, _ = google.auth.default(scopes=scopes)
-        if not credentials.valid or credentials.expired:
-            credentials.refresh(GoogleAuthRequest())
-        if not credentials.token:
-            raise GoogleAuthError("Received empty access token from Google credentials")
-        return credentials.token
-    except GoogleAuthError as auth_error:
-        logger.error("Failed to obtain Google access token: %s", auth_error, exc_info=True)
-        raise ValueError(f"Unable to obtain Google access token: {auth_error}") from auth_error
-    except Exception as exc:
-        logger.error("Unexpected error obtaining Google access token: %s", exc, exc_info=True)
-        raise ValueError(f"Unable to obtain Google access token: {exc}") from exc
 
 
 def initialize_vertex_ai():
@@ -226,21 +235,8 @@ def initialize_vertex_ai():
     try:
         logger.info("Initializing Vertex AI with Application Default Credentials")
 
-        # Validate configuration
-        if not Config.GOOGLE_PROJECT_ID:
-            raise ValueError(
-                "GOOGLE_PROJECT_ID is not configured. Set this environment variable to your GCP project ID. "
-                "For example: GOOGLE_PROJECT_ID=my-project-123"
-            )
-
-        if not Config.GOOGLE_VERTEX_LOCATION:
-            raise ValueError(
-                "GOOGLE_VERTEX_LOCATION is not configured. Set this to a valid GCP region. "
-                "For example: GOOGLE_VERTEX_LOCATION=us-central1"
-            )
-
-        # Ensure ADC can locate credentials
-        _prepare_google_application_credentials()
+        # Validate configuration & prepare environment
+        _prepare_vertex_environment()
 
         # Ensure Vertex AI SDK is available
         vertexai, _ = _ensure_vertex_imports()
@@ -331,9 +327,13 @@ def _make_google_vertex_request_sdk(
 
         # Step 4: Build generation config
         try:
-            generation_config = _build_generation_config_dict(
-                max_tokens, temperature, top_p, for_rest=False
-            )
+            generation_config = {}
+            if max_tokens is not None:
+                generation_config["max_output_tokens"] = max_tokens
+            if temperature is not None:
+                generation_config["temperature"] = temperature
+            if top_p is not None:
+                generation_config["top_p"] = top_p
             logger.debug(f"Generation config: {generation_config}")
         except Exception as config_error:
             logger.error(f"Failed to build generation config: {config_error}", exc_info=True)
@@ -408,73 +408,94 @@ def _make_google_vertex_request_rest(
     top_p: Optional[float] = None,
     **kwargs,
 ) -> dict:
-    """Make request to Google Vertex AI using the REST API (no SDK dependencies)."""
+    """Make request to Google Vertex AI using the public REST API."""
+    logger.info(f"Making Google Vertex REST request for model: {model}")
+
     try:
-        logger.info(f"Making Google Vertex REST request for model: {model}")
-
-        if not Config.GOOGLE_PROJECT_ID:
-            raise ValueError(
-                "GOOGLE_PROJECT_ID is not configured. Set this environment variable to your GCP project ID. "
-                "For example: GOOGLE_PROJECT_ID=my-project-123"
-            )
-
-        if not Config.GOOGLE_VERTEX_LOCATION:
-            raise ValueError(
-                "GOOGLE_VERTEX_LOCATION is not configured. Set this to a valid GCP region. "
-                "For example: GOOGLE_VERTEX_LOCATION=us-central1"
-            )
+        _prepare_vertex_environment()
 
         model_name = transform_google_vertex_model_id(model)
-        contents, system_instruction = _prepare_vertex_contents(messages)
-        generation_config = _build_generation_config_dict(
-            max_tokens, temperature, top_p, for_rest=True
-        )
+        logger.info(f"Using REST model name: {model_name}")
 
         tools = kwargs.get("tools")
         if tools:
+            logger.info(
+                "Tools parameter detected for Vertex REST call (count=%s). "
+                "Tool/function calling translation is not yet implemented.",
+                len(tools) if isinstance(tools, list) else 0,
+            )
             logger.warning(
-                "Google Vertex REST transport currently ignores tools/function-calling metadata."
+                "Function calling is not currently supported for Vertex REST transport. "
+                "Requests will proceed without tool definitions."
             )
 
-        payload: dict[str, Any] = {"contents": contents}
+        contents, system_instruction = _prepare_vertex_contents(messages)
+        request_body: dict[str, Any] = {"contents": contents}
+
         if system_instruction:
-            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+            request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        generation_config: dict[str, Any] = {}
+        if max_tokens is not None:
+            generation_config["maxOutputTokens"] = max_tokens
+        if temperature is not None:
+            generation_config["temperature"] = temperature
+        if top_p is not None:
+            generation_config["topP"] = top_p
         if generation_config:
-            payload["generationConfig"] = generation_config
+            request_body["generationConfig"] = generation_config
 
-        access_token = _get_google_access_token()
+        if kwargs.get("safety_settings"):
+            request_body["safetySettings"] = kwargs["safety_settings"]
 
-        endpoint = (
-            f"https://{Config.GOOGLE_VERTEX_LOCATION}-aiplatform.googleapis.com/"
-            f"v1beta1/projects/{Config.GOOGLE_PROJECT_ID}/locations/{Config.GOOGLE_VERTEX_LOCATION}"
-            f"/publishers/google/models/{model_name}:generateContent"
+        url = (
+            f"https://{Config.GOOGLE_VERTEX_LOCATION}-aiplatform.googleapis.com/v1/"
+            f"projects/{Config.GOOGLE_PROJECT_ID}/"
+            f"locations/{Config.GOOGLE_VERTEX_LOCATION}/"
+            f"publishers/google/models/{model_name}:generateContent"
         )
 
-        logger.debug(f"Calling Vertex REST endpoint: {endpoint}")
-        response = requests.post(
-            endpoint,
-            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=_VERTEX_REST_TIMEOUT,
-        )
-        logger.debug(f"Vertex REST response status: {response.status_code}")
+        timeout_seconds = kwargs.get("vertex_timeout") or Config.GOOGLE_VERTEX_TIMEOUT
+
+        def _execute_request(force_refresh_token: bool = False) -> httpx.Response:
+            access_token = _get_google_vertex_access_token(force_refresh=force_refresh_token)
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+            client_timeout = httpx.Timeout(timeout_seconds)
+            with httpx.Client(timeout=client_timeout) as client:
+                return client.post(url, headers=headers, json=request_body)
+
+        response = _execute_request()
+        if response.status_code == 401:
+            logger.warning("Vertex REST call returned 401. Refreshing token and retrying once.")
+            response = _execute_request(force_refresh_token=True)
 
         if response.status_code >= 400:
-            try:
-                error_payload = response.json()
-            except ValueError:
-                error_payload = {"error": {"message": response.text}}
-            message = error_payload.get("error", {}).get("message", response.text)
             logger.error(
-                "Google Vertex REST API error %s: %s", response.status_code, message, exc_info=True
+                "Vertex REST call failed. status=%s body=%s",
+                response.status_code,
+                response.text[:500],
             )
-            raise ValueError(f"Google Vertex REST API error: {message}")
+            raise ValueError(
+                f"Vertex REST API returned HTTP {response.status_code}: {response.text[:2000]}"
+            )
 
-        response_data = response.json()
+        try:
+            response_data = response.json()
+        except ValueError as parse_error:
+            raise ValueError(
+                f"Failed to parse Vertex REST response as JSON: {response.text[:2000]}"
+            ) from parse_error
+
         return _process_google_vertex_rest_response(response_data, model)
 
-    except Exception as exc:
-        logger.error(f"Google Vertex REST request failed: {exc}", exc_info=True)
+    except httpx.RequestError as request_error:
+        logger.error("HTTP request to Vertex REST API failed: %s", request_error, exc_info=True)
+        raise ValueError(f"Vertex REST API request failed: {request_error}") from request_error
+    except Exception as e:
+        logger.error("Google Vertex REST request failed: %s", e, exc_info=True)
         raise
 
 
@@ -486,38 +507,63 @@ def make_google_vertex_request_openai(
     top_p: Optional[float] = None,
     **kwargs,
 ) -> dict:
-    """Public entrypoint that routes requests to SDK or REST transport."""
-    transport = getattr(Config, "GOOGLE_VERTEX_TRANSPORT", "auto") or "auto"
-    transport = transport.lower()
-    if transport not in {"auto", "sdk", "rest"}:
+    """Public entry point that routes to SDK or REST transport."""
+    transport = (Config.GOOGLE_VERTEX_TRANSPORT or _DEFAULT_TRANSPORT).lower()
+    allowed_transports = {"rest", "sdk", "auto"}
+    if transport not in allowed_transports:
         logger.warning(
-            "Unknown GOOGLE_VERTEX_TRANSPORT value '%s'. Falling back to 'auto'.", transport
+            "Unknown GOOGLE_VERTEX_TRANSPORT value '%s'. Falling back to '%s'.",
+            transport,
+            _DEFAULT_TRANSPORT,
         )
-        transport = "auto"
+        transport = _DEFAULT_TRANSPORT
 
-    if transport == "rest":
-        return _make_google_vertex_request_rest(
-            messages, model, max_tokens=max_tokens, temperature=temperature, top_p=top_p, **kwargs
-        )
+    logger.info(f"Google Vertex transport preference: {transport}")
 
-    if transport == "sdk":
-        return _make_google_vertex_request_sdk(
-            messages, model, max_tokens=max_tokens, temperature=temperature, top_p=top_p, **kwargs
-        )
+    def _attempt_sdk_request() -> Optional[dict]:
+        try:
+            return _make_google_vertex_request_sdk(
+                messages=messages,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                **kwargs,
+            )
+        except ImportError as sdk_error:
+            logger.warning(
+                "Vertex SDK unavailable (%s). Falling back to REST transport.", sdk_error
+            )
+        except ValueError as sdk_value_error:
+            if "libstdc++.so.6" not in str(sdk_value_error):
+                raise
+            logger.warning(
+                "Detected libstdc++.so.6 import error when using Vertex SDK. "
+                "Automatically switching to REST transport."
+            )
+        except Exception as sdk_exception:
+            if "libstdc++.so.6" in str(sdk_exception):
+                logger.warning(
+                    "Vertex SDK failed due to missing libstdc++.so.6. Using REST transport."
+                )
+            else:
+                raise
+        return None
 
-    # Auto mode: prefer SDK when available, otherwise fall back to REST.
-    if _is_vertex_sdk_available():
-        return _make_google_vertex_request_sdk(
-            messages, model, max_tokens=max_tokens, temperature=temperature, top_p=top_p, **kwargs
-        )
+    if transport in {"sdk", "auto"}:
+        sdk_response = _attempt_sdk_request()
+        if sdk_response is not None:
+            return sdk_response
+        logger.info("Vertex SDK request unavailable; falling back to REST transport.")
 
-    if _VERTEX_SDK_ERROR:
-        logger.info("Vertex SDK unavailable (%s). Using REST fallback.", _VERTEX_SDK_ERROR)
-    else:
-        logger.info("Vertex SDK unavailable. Using REST fallback.")
-
+    # REST is default or fallback
     return _make_google_vertex_request_rest(
-        messages, model, max_tokens=max_tokens, temperature=temperature, top_p=top_p, **kwargs
+        messages=messages,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        **kwargs,
     )
 
 
@@ -991,29 +1037,27 @@ def diagnose_google_vertex_credentials() -> dict:
 
     result["steps"].append(step2)
 
-    # Step 3: Try to initialize Vertex AI
+    # Step 3: Try to initialize Vertex AI / fetch access token
     step3 = {"step": "Vertex AI initialization", "passed": False, "details": ""}
-    transport = getattr(Config, "GOOGLE_VERTEX_TRANSPORT", "auto") or "auto"
-    transport = transport.lower()
-    sdk_required = transport == "sdk" or (transport == "auto" and _is_vertex_sdk_available())
+    transport = (Config.GOOGLE_VERTEX_TRANSPORT or _DEFAULT_TRANSPORT).lower()
+    try:
+        _get_google_vertex_access_token(force_refresh=True)
+        result["initialization_successful"] = True
+        step3["passed"] = True
+        step3["details"] = "Successfully obtained Vertex access token via REST transport"
 
-    if transport == "rest":
-        step3["passed"] = True
-        step3["details"] = "Skipped Vertex AI SDK init (transport=rest)"
-        result["initialization_successful"] = True
-    elif not sdk_required:
-        step3["passed"] = True
-        step3["details"] = "Vertex SDK unavailable; REST fallback will be used"
-        result["initialization_successful"] = True
-    else:
-        try:
-            initialize_vertex_ai()
-            result["initialization_successful"] = True
-            step3["passed"] = True
-            step3["details"] = "Successfully initialized Vertex AI with ADC"
-        except Exception as e:
-            step3["details"] = f"Failed to initialize: {str(e)[:200]}"
-            result["error"] = str(e)
+        if transport in {"sdk", "auto"}:
+            try:
+                initialize_vertex_ai()
+                step3["details"] += " | SDK initialization successful"
+            except Exception as sdk_error:
+                sdk_msg = str(sdk_error)[:200]
+                step3["details"] += f" | SDK initialization failed: {sdk_msg}"
+                logger.warning("Vertex SDK diagnostics failed: %s", sdk_msg)
+
+    except Exception as e:
+        step3["details"] = f"Failed to initialize: {str(e)[:200]}"
+        result["error"] = str(e)
 
     result["steps"].append(step3)
 
