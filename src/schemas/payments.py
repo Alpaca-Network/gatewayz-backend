@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 # ==================== Enums ====================
 
@@ -133,7 +133,11 @@ class PaymentRecord(BaseModel):
     id: int
     user_id: int
     stripe_payment_intent_id: str | None = None
-    stripe_session_id: str | None = None
+    stripe_checkout_session_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("stripe_checkout_session_id", "stripe_session_id"),
+        serialization_alias="stripe_checkout_session_id",
+    )
     stripe_customer_id: str | None = None
     amount: float
     currency: str
@@ -402,7 +406,9 @@ class CreateSubscriptionCheckoutRequest(BaseModel):
     mode: str = Field(
         default="subscription", description="Checkout mode (subscription, payment, or setup)"
     )
-    metadata: dict[str, Any] | None = Field(default_factory=dict, description="Additional metadata")
+    metadata: dict[str, Any] | None = Field(
+        default_factory=dict, description="Additional metadata"
+    )
 
     @field_validator("mode")
     @classmethod

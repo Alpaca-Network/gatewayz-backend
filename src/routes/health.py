@@ -6,7 +6,7 @@ and health status across all providers and gateways.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -215,7 +215,7 @@ async def perform_health_check(
 
         return {
             "message": "Health check initiated",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "force_refresh": request.force_refresh,
         }
     except Exception as e:
@@ -244,7 +244,7 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
 
         return {
             "message": "Health check completed",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "models_checked": models_count,
             "providers_checked": providers_count,
             "system_status": system_health.overall_status.value if system_health else "unknown",
@@ -307,7 +307,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=successful_requests,
             failed_requests=failed_requests,
             error_rate=error_rate,
-            last_updated=system_health.last_updated or datetime.now(timezone.utc),
+            last_updated=system_health.last_updated or datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
@@ -355,7 +355,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 degraded_models=0,
                 unhealthy_models=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
         else:
             # Convert SystemHealthMetrics to SystemHealthResponse
@@ -370,7 +370,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 degraded_models=system_health_metrics.degraded_models,
                 unhealthy_models=system_health_metrics.unhealthy_models,
                 system_uptime=system_health_metrics.system_uptime,
-                last_updated=system_health_metrics.last_updated or datetime.now(timezone.utc),
+                last_updated=system_health_metrics.last_updated or datetime.now(UTC),
             )
 
         # Get providers health
@@ -471,7 +471,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
         except Exception as e:
             logger.warning(f"Failed to get uptime metrics, using defaults: {e}")
@@ -485,7 +485,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         logger.info("Creating HealthDashboardResponse")
@@ -499,7 +499,7 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
             providers=providers_status,
             models=models_status,
             uptime_metrics=uptime_metrics,
-            last_updated=system_health.last_updated or datetime.now(timezone.utc),
+            last_updated=system_health.last_updated or datetime.now(UTC),
             monitoring_active=health_monitor.monitoring_active,
         )
 
@@ -529,7 +529,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                 "status": "unknown",
                 "message": "Health data not available - monitoring may not be started",
                 "monitoring_active": health_monitor.monitoring_active,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         return {
@@ -541,7 +541,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
             "timestamp": (
                 system_health.last_updated.isoformat()
                 if system_health.last_updated
-                else datetime.now(timezone.utc).isoformat()
+                else datetime.now(UTC).isoformat()
             ),
         }
     except Exception as e:
@@ -549,7 +549,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
         return {
             "status": "error",
             "message": "Failed to retrieve health status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -568,13 +568,13 @@ async def get_monitoring_status(api_key: str = Depends(get_api_key)):
             "availability_data_available": len(availability_service.availability_cache) > 0,
             "health_models_count": len(health_monitor.health_data),
             "availability_models_count": len(availability_service.availability_cache),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get monitoring status: {e}")
         return {
             "error": "Failed to retrieve monitoring status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -587,7 +587,10 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.start_monitoring()
-        return {"message": "Health monitoring started", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "message": "Health monitoring started",
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to start health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to start health monitoring") from e
@@ -602,7 +605,138 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     """
     try:
         await health_monitor.stop_monitoring()
-        return {"message": "Health monitoring stopped", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "message": "Health monitoring stopped",
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to stop health monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop health monitoring") from e
+
+
+@router.get("/health/google-vertex", tags=["health"])
+async def check_google_vertex_health():
+    """
+    Check Google Vertex AI provider health
+
+    Returns detailed diagnostics about Google Vertex AI configuration and credentials:
+    - Configuration (project ID, region)
+    - Credential loading status
+    - Access token generation status
+    - Overall health status
+
+    This endpoint does not require authentication and provides diagnostic information
+    that can help troubleshoot Google Vertex AI integration issues.
+
+    Example response:
+    ```json
+    {
+        "provider": "google-vertex",
+        "health_status": "healthy",
+        "status": "healthy",
+        "diagnosis": {
+            "credentials_available": true,
+            "credential_source": "env_json",
+            "project_id": "my-project",
+            "location": "us-central1",
+            "token_available": true,
+            "token_valid": true,
+            "error": null,
+            "steps": [...]
+        },
+        "timestamp": "2025-01-01T12:00:00Z"
+    }
+    ```
+    """
+    try:
+        from src.services.google_vertex_client import diagnose_google_vertex_credentials
+
+        diagnosis = diagnose_google_vertex_credentials()
+
+        return {
+            "provider": "google-vertex",
+            "health_status": diagnosis.get("health_status", "unhealthy"),
+            "status": diagnosis.get("health_status", "unhealthy"),
+            "diagnosis": diagnosis,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to check Google Vertex AI health: {e}", exc_info=True)
+        return {
+            "provider": "google-vertex",
+            "health_status": "unhealthy",
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+
+@router.get("/health/database", tags=["health"])
+async def database_health():
+    """
+    Check database connectivity and health
+
+    Returns database connection status and any errors.
+    This is critical for startup diagnostics in Railway.
+    """
+    try:
+        from src.config.supabase_config import supabase
+
+        logger.info("Checking database connectivity...")
+        # Try a simple query to verify connection
+        supabase.table("users").limit(1).execute()
+
+        logger.info("✅ Database connection verified")
+        return {
+            "status": "healthy",
+            "database": "supabase",
+            "connection": "verified",
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "database": "supabase",
+            "connection": "failed",
+            "error": str(e),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+
+@router.get("/health/providers", tags=["health"])
+async def provider_health():
+    """
+    Check provider import status
+
+    Returns which providers successfully imported and which failed.
+    This is essential for debugging chat endpoint issues in Railway.
+    """
+    try:
+        from src.routes.chat import _provider_import_errors
+
+        # Count total providers and failed
+        total_providers = 16  # Based on the code, there are 16 providers
+        failed_count = len(_provider_import_errors)
+        loaded_count = total_providers - failed_count
+
+        logger.info(
+            f"Provider status: {loaded_count}/{total_providers} loaded, {failed_count} failed"
+        )
+
+        return {
+            "status": "healthy" if failed_count == 0 else "degraded",
+            "total_providers": total_providers,
+            "loaded_providers": loaded_count,
+            "failed_providers": failed_count,
+            "failures": _provider_import_errors if _provider_import_errors else None,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error checking provider health: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }

@@ -4,7 +4,7 @@ Provides functions to analyze usage across different gateways and providers
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -92,7 +92,7 @@ def get_gateway_stats(
     Get comprehensive statistics for a specific gateway
 
     Args:
-        gateway: Gateway name (e.g., 'openrouter', 'portkey', 'deepinfra')
+        gateway: Gateway name (e.g., 'openrouter', 'featherless', 'deepinfra')
         time_range: Time range: '1h', '24h', '7d', '30d', 'all'
         user_id: Optional user filter
 
@@ -143,7 +143,10 @@ def get_gateway_stats(
 
 
 def get_trending_models(
-    gateway: str | None = "all", time_range: str = "24h", limit: int = 10, sort_by: str = "requests"
+    gateway: str | None = "all",
+    time_range: str = "24h",
+    limit: int = 10,
+    sort_by: str = "requests",
 ) -> list[dict[str, Any]]:
     """
     Get trending models based on usage
@@ -238,7 +241,9 @@ def get_trending_models(
         return []
 
 
-def get_all_gateways_summary(time_range: str = "24h", user_id: int | None = None) -> dict[str, Any]:
+def get_all_gateways_summary(
+    time_range: str = "24h", user_id: int | None = None
+) -> dict[str, Any]:
     """
     Get summary statistics for all gateways
 
@@ -250,7 +255,7 @@ def get_all_gateways_summary(time_range: str = "24h", user_id: int | None = None
         Dictionary with statistics for each gateway
     """
     try:
-        gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes"]
+        gateways = ["openrouter", "featherless", "deepinfra", "chutes"]
 
         summary = {
             "time_range": time_range,
@@ -358,7 +363,7 @@ def get_top_models_by_provider(
 def _get_time_filter(time_range: str) -> str | None:
     """Convert time range string to ISO timestamp"""
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if time_range == "1h":
             delta = timedelta(hours=1)

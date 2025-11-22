@@ -30,7 +30,9 @@ class AnalyticsEvent(BaseModel):
 
 
 @router.post("/events")
-async def log_event(event: AnalyticsEvent, current_user: dict | None = Depends(get_current_user)):
+async def log_event(
+    event: AnalyticsEvent, current_user: dict | None = Depends(get_current_user)
+):
     """
     Log an analytics event to both Statsig and PostHog via backend
 

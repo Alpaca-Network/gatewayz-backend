@@ -7,24 +7,24 @@ Endpoints for handling Stripe webhooks and payment operations
 import inspect
 import logging
 from typing import Any
-from fastapi import APIRouter, HTTPException, Request, Header, Depends
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from src.db.payments import (
+    get_payment,
+    get_user_payments,
+)
 from src.schemas.payments import (
-    WebhookProcessingResult,
     CreateCheckoutSessionRequest,
     CreatePaymentIntentRequest,
     CreateRefundRequest,
     CreateSubscriptionCheckoutRequest,
+    WebhookProcessingResult,
 )
-from src.services.payments import StripeService
-
 from src.security import deps as security_deps
 from src.security.deps import security as bearer_security
-from src.db.payments import (
-    get_user_payments,
-    get_payment,
-)
+from src.services.payments import StripeService
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -496,7 +496,8 @@ async def get_payment_details(
             "status": payment["status"],
             "payment_method": payment["payment_method"],
             "stripe_payment_intent_id": payment.get("stripe_payment_intent_id"),
-            "stripe_session_id": payment.get("stripe_session_id"),
+            "stripe_session_id": payment.get("stripe_checkout_session_id")
+            or payment.get("stripe_session_id"),
             "stripe_customer_id": payment.get("stripe_customer_id"),
             "created_at": payment["created_at"],
             "updated_at": payment.get("updated_at"),

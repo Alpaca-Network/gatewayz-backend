@@ -4,7 +4,7 @@ Handles logging and retrieval of user API activity
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -48,7 +48,7 @@ def log_activity(
 
         activity_data = {
             "user_id": user_id_int,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "model": model,
             "provider": provider,
             "tokens": tokens,
@@ -79,7 +79,10 @@ def log_activity(
 
 
 def get_user_activity_stats(
-    user_id: int, from_date: str | None = None, to_date: str | None = None, days: int | None = None
+    user_id: int,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    days: int | None = None,
 ) -> dict[str, Any]:
     """
     Get aggregated activity statistics for a user
@@ -98,19 +101,19 @@ def get_user_activity_stats(
 
         # Calculate date range
         if from_date and to_date:
-            start_date = datetime.fromisoformat(from_date).replace(tzinfo=timezone.utc).isoformat()
+            start_date = datetime.fromisoformat(from_date).replace(tzinfo=UTC).isoformat()
             end_date = (
                 datetime.fromisoformat(to_date)
-                .replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+                .replace(hour=23, minute=59, second=59, tzinfo=UTC)
                 .isoformat()
             )
         elif days:
-            start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            end_date = datetime.now(timezone.utc).isoformat()
+            start_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+            end_date = datetime.now(UTC).isoformat()
         else:
             # Default to last 30 days
-            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-            end_date = datetime.now(timezone.utc).isoformat()
+            start_date = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+            end_date = datetime.now(UTC).isoformat()
 
         # Fetch activity records
         result = (
@@ -249,12 +252,12 @@ def get_user_activity_log(
 
         # Apply date filters
         if from_date:
-            start_date = datetime.fromisoformat(from_date).replace(tzinfo=timezone.utc).isoformat()
+            start_date = datetime.fromisoformat(from_date).replace(tzinfo=UTC).isoformat()
             query = query.gte("timestamp", start_date)
         if to_date:
             end_date = (
                 datetime.fromisoformat(to_date)
-                .replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+                .replace(hour=23, minute=59, second=59, tzinfo=UTC)
                 .isoformat()
             )
             query = query.lte("timestamp", end_date)

@@ -21,6 +21,8 @@ ALLOWED_PARAMS = {
     "frequency_penalty",
     "presence_penalty",
     "response_format",
+    "tools",
+    "stream",
 }
 
 
@@ -91,6 +93,19 @@ def _prepare_model(model: str) -> str:
 
 
 def _build_payload(messages: list[dict[str, Any]], model: str, **kwargs) -> dict[str, Any]:
+    # Validate messages format
+    if not isinstance(messages, list):
+        logger.error(f"Messages must be a list, got {type(messages).__name__}")
+        raise TypeError(f"Messages must be a list, got {type(messages).__name__}")
+
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            logger.error(f"Message {i} must be a dict, got {type(msg).__name__}: {msg}")
+            raise TypeError(f"Message {i} must be a dict, got {type(msg).__name__}")
+        if "role" not in msg or "content" not in msg:
+            logger.error(f"Message {i} missing required fields (role, content): {msg}")
+            raise ValueError(f"Message {i} missing required fields (role, content): {msg}")
+
     payload = {
         "messages": messages,
         "model": _prepare_model(model),
@@ -131,17 +146,19 @@ def make_huggingface_request_openai_stream(
 ) -> Generator[HFStreamChunk, None, None]:
     """Stream responses from Hugging Face Router using SSE."""
     client = get_huggingface_client(timeout=300.0)
-    payload = _build_payload(messages, model, **kwargs)
-    payload["stream"] = True
-
-    logger.info("Making Hugging Face streaming request with model: %s", payload["model"])
-    logger.debug(
-        "HF streaming request payload: message_count=%s, payload_keys=%s",
-        len(messages),
-        list(payload.keys()),
-    )
 
     try:
+        payload = _build_payload(messages, model, **kwargs)
+        payload["stream"] = True
+
+        logger.info("Making Hugging Face streaming request with model: %s", payload["model"])
+        logger.debug(
+            "HF streaming request payload: message_count=%s, payload_keys=%s, all_params=%s",
+            len(messages),
+            list(payload.keys()),
+            {k: type(v).__name__ for k, v in payload.items()},
+        )
+
         with client.stream("POST", "/chat/completions", json=payload) as response:
             response.raise_for_status()
             logger.info(
@@ -162,6 +179,9 @@ def make_huggingface_request_openai_stream(
                     except json.JSONDecodeError as err:
                         logger.warning("Failed to decode Hugging Face stream chunk: %s", err)
                         continue
+    except (TypeError, ValueError) as ve:
+        logger.error("Invalid request format for HuggingFace: %s", ve)
+        raise
     except Exception as e:
         logger.error("Hugging Face streaming request failed for model '%s': %s", model, e)
         raise
@@ -178,13 +198,23 @@ def process_huggingface_response(response):
         choices = []
         for choice in response.get("choices", []):
             message = choice.get("message") or {}
+            msg_dict = {
+                "role": message.get("role", "assistant"),
+                "content": message.get("content", ""),
+            }
+
+            # Include tool_calls if present (for function calling)
+            if "tool_calls" in message:
+                msg_dict["tool_calls"] = message["tool_calls"]
+
+            # Include function_call if present (for legacy function_call format)
+            if "function_call" in message:
+                msg_dict["function_call"] = message["function_call"]
+
             choices.append(
                 {
                     "index": choice.get("index", 0),
-                    "message": {
-                        "role": message.get("role", "assistant"),
-                        "content": message.get("content", ""),
-                    },
+                    "message": msg_dict,
                     "finish_reason": choice.get("finish_reason"),
                 }
             )
