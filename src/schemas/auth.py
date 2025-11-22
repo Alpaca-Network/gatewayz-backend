@@ -33,12 +33,28 @@ class PrivyLinkedAccount(BaseModel):
             raise ValueError(f"Account type must be one of {valid_types}, got {v}")
         return v
 
-    @field_validator("email", "address")
+    @field_validator("email", "address", mode="after")
     @classmethod
-    def validate_email_format(cls, v):
-        """Validate email format if provided"""
-        if v is not None and "@" not in v:
-            raise ValueError("Invalid email format")
+    def validate_email_format(cls, v, info):
+        """Validate email format if provided.
+
+        Email validation only applies when the account type is email-based.
+        Wallet addresses (type="wallet") don't require email format.
+        """
+        # Skip validation if value is None
+        if v is None:
+            return v
+
+        # Get the account type from the validation context
+        account_type = info.data.get("type")
+
+        # Email-based account types must have @ symbol
+        email_account_types = {"email", "google_oauth", "github", "apple_oauth", "discord"}
+        if account_type in email_account_types:
+            if "@" not in v:
+                raise ValueError("Invalid email format")
+
+        # Wallet accounts don't require email format validation
         return v
 
 
