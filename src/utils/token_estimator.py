@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from typing import Any
+from collections.abc import Iterable
 
 
 def _extract_text_length_from_content(content: Any) -> int:
@@ -29,8 +30,8 @@ def _extract_text_length_from_content(content: Any) -> int:
 
 
 def estimate_message_tokens(
-    messages: Optional[Iterable[dict]],
-    max_tokens: Optional[int] = None,
+    messages: Iterable[dict] | None,
+    max_tokens: int | None = None,
     *,
     fallback_tokens: int = 256,
 ) -> int:

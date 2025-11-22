@@ -1,5 +1,5 @@
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 from src.config.config import Config
 from src.config.supabase_config import get_supabase_client

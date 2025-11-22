@@ -4,8 +4,8 @@ Handles coupon creation, validation, and redemption
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, UTC
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -24,12 +24,12 @@ def create_coupon(
     max_uses: int,
     valid_until: datetime,
     coupon_type: str = "promotional",
-    created_by: Optional[int] = None,
+    created_by: int | None = None,
     created_by_type: str = "admin",
-    assigned_to_user_id: Optional[int] = None,
-    description: Optional[str] = None,
-    valid_from: Optional[datetime] = None,
-) -> Optional[Dict[str, Any]]:
+    assigned_to_user_id: int | None = None,
+    description: str | None = None,
+    valid_from: datetime | None = None,
+) -> dict[str, Any] | None:
     """
     Create a new coupon
 
@@ -71,7 +71,7 @@ def create_coupon(
             "coupon_type": coupon_type,
             "created_by_type": created_by_type,
             "valid_until": valid_until.isoformat(),
-            "valid_from": (valid_from or datetime.now(timezone.utc)).isoformat(),
+            "valid_from": (valid_from or datetime.now(UTC)).isoformat(),
         }
 
         if created_by:
@@ -97,7 +97,7 @@ def create_coupon(
         raise
 
 
-def get_coupon_by_code(code: str) -> Optional[Dict[str, Any]]:
+def get_coupon_by_code(code: str) -> dict[str, Any] | None:
     """Get coupon by code (case-insensitive)"""
     try:
         client = get_supabase_client()
@@ -115,7 +115,7 @@ def get_coupon_by_code(code: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_coupon_by_id(coupon_id: int) -> Optional[Dict[str, Any]]:
+def get_coupon_by_id(coupon_id: int) -> dict[str, Any] | None:
     """Get coupon by ID"""
     try:
         client = get_supabase_client()
@@ -133,14 +133,14 @@ def get_coupon_by_id(coupon_id: int) -> Optional[Dict[str, Any]]:
 
 
 def list_coupons(
-    scope: Optional[str] = None,
-    coupon_type: Optional[str] = None,
-    is_active: Optional[bool] = None,
-    created_by: Optional[int] = None,
-    assigned_to_user_id: Optional[int] = None,
+    scope: str | None = None,
+    coupon_type: str | None = None,
+    is_active: bool | None = None,
+    created_by: int | None = None,
+    assigned_to_user_id: int | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     List coupons with filters
 
@@ -189,7 +189,7 @@ def list_coupons(
         return []
 
 
-def update_coupon(coupon_id: int, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_coupon(coupon_id: int, updates: dict[str, Any]) -> dict[str, Any] | None:
     """
     Update coupon fields
 
@@ -248,7 +248,7 @@ def deactivate_coupon(coupon_id: int) -> bool:
 # ============================================
 
 
-def validate_coupon(code: str, user_id: int) -> Dict[str, Any]:
+def validate_coupon(code: str, user_id: int) -> dict[str, Any]:
     """
     Validate if a coupon can be redeemed by a user
     Uses the database function for validation
@@ -314,8 +314,8 @@ def validate_coupon(code: str, user_id: int) -> Dict[str, Any]:
 
 
 def redeem_coupon(
-    code: str, user_id: int, ip_address: Optional[str] = None, user_agent: Optional[str] = None
-) -> Dict[str, Any]:
+    code: str, user_id: int, ip_address: str | None = None, user_agent: str | None = None
+) -> dict[str, Any]:
     """
     Redeem a coupon for a user
     Handles the complete redemption flow with transaction safety
@@ -447,7 +447,7 @@ def redeem_coupon(
 # ============================================
 
 
-def get_available_coupons_for_user(user_id: int) -> List[Dict[str, Any]]:
+def get_available_coupons_for_user(user_id: int) -> list[dict[str, Any]]:
     """
     Get all coupons available for a specific user
     Uses the database function for efficiency
@@ -471,7 +471,7 @@ def get_available_coupons_for_user(user_id: int) -> List[Dict[str, Any]]:
         return []
 
 
-def get_user_redemption_history(user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+def get_user_redemption_history(user_id: int, limit: int = 50) -> list[dict[str, Any]]:
     """
     Get redemption history for a user
 
@@ -506,7 +506,7 @@ def get_user_redemption_history(user_id: int, limit: int = 50) -> List[Dict[str,
 # ============================================
 
 
-def get_coupon_analytics(coupon_id: int) -> Dict[str, Any]:
+def get_coupon_analytics(coupon_id: int) -> dict[str, Any]:
     """
     Get analytics for a specific coupon
 
@@ -545,7 +545,7 @@ def get_coupon_analytics(coupon_id: int) -> Dict[str, Any]:
             ),
             "remaining_uses": coupon["max_uses"] - coupon["times_used"],
             "is_expired": datetime.fromisoformat(coupon["valid_until"].replace("Z", "+00:00"))
-            < datetime.now(timezone.utc),
+            < datetime.now(UTC),
             "recent_redemptions": redemptions[:10],  # Last 10
         }
 
@@ -554,7 +554,7 @@ def get_coupon_analytics(coupon_id: int) -> Dict[str, Any]:
         return {}
 
 
-def get_all_coupons_stats() -> Dict[str, Any]:
+def get_all_coupons_stats() -> dict[str, Any]:
     """
     Get overall coupon system statistics
 

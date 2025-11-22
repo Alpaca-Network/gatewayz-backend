@@ -10,8 +10,8 @@ import hmac
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, UTC
+from typing import Any
 
 from cryptography.fernet import Fernet
 
@@ -112,7 +112,7 @@ def _ip_in_cidr(ip: str, cidr: str) -> bool:
         return False
 
 
-def validate_ip_allowlist(client_ip: str, allowed_ips: List[str]) -> bool:
+def validate_ip_allowlist(client_ip: str, allowed_ips: list[str]) -> bool:
     """
     Validate if client IP is in the allowlist
 
@@ -144,7 +144,7 @@ def validate_ip_allowlist(client_ip: str, allowed_ips: List[str]) -> bool:
         return False
 
 
-def validate_domain_referrers(referer: str, allowed_domains: List[str]) -> bool:
+def validate_domain_referrers(referer: str, allowed_domains: list[str]) -> bool:
     """
     Validate if referer domain is in the allowlist
 
@@ -186,7 +186,7 @@ def validate_domain_referrers(referer: str, allowed_domains: List[str]) -> bool:
 
 
 def validate_api_key_security(
-    api_key: str, client_ip: Optional[str] = None, referer: Optional[str] = None
+    api_key: str, client_ip: str | None = None, referer: str | None = None
 ) -> str:
     """
     Validate API key with comprehensive security checks
@@ -258,9 +258,9 @@ def validate_api_key_security(
 
 
 def _validate_key_constraints(
-    key_data: Dict[str, Any],
-    client_ip: Optional[str],
-    referer: Optional[str],
+    key_data: dict[str, Any],
+    client_ip: str | None,
+    referer: str | None,
     table_name: str,
     client: Any,
 ) -> None:
@@ -302,7 +302,7 @@ def _validate_key_constraints(
                     expiration_str = expiration_str + "+00:00"
 
                 expiration = datetime.fromisoformat(expiration_str)
-                now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
 
                 if expiration < now:
                     raise ValueError("API key has expired")
@@ -337,7 +337,7 @@ def _validate_key_constraints(
     # 6. Update last used timestamp
     try:
         client.table(table_name).update(
-            {"last_used_at": datetime.now(timezone.utc).isoformat()}
+            {"last_used_at": datetime.now(UTC).isoformat()}
         ).eq("id", key_id).execute()
     except Exception as e:
         logger.warning(f"Failed to update last_used_at for key {key_id}: {e}")
@@ -351,7 +351,7 @@ def _validate_key_constraints(
 class SecurityManager:
     """Advanced security manager for API keys and encryption"""
 
-    def __init__(self, encryption_key: Optional[str] = None):
+    def __init__(self, encryption_key: str | None = None):
         """
         Initialize security manager
 

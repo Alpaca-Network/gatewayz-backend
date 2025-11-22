@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -43,7 +43,7 @@ _MessageToDict = None
 _VERTEX_API_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 _TOKEN_CACHE = {"token": None, "expiry": 0.0}
 _TOKEN_LOCK = threading.Lock()
-_TEMP_CREDENTIALS_FILE: Optional[str] = None
+_TEMP_CREDENTIALS_FILE: str | None = None
 _TEMP_CREDENTIALS_LOCK = threading.Lock()
 _DEFAULT_TRANSPORT = "rest"
 
@@ -199,7 +199,7 @@ def _sanitize_system_content(content: Any) -> str:
     return str(content)
 
 
-def _prepare_vertex_contents(messages: list) -> tuple[list, Optional[str]]:
+def _prepare_vertex_contents(messages: list) -> tuple[list, str | None]:
     """Split OpenAI messages into conversational content and system instruction."""
     system_messages = []
     conversational_messages = []
@@ -277,9 +277,9 @@ def transform_google_vertex_model_id(model_id: str) -> str:
 def _make_google_vertex_request_sdk(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> dict:
     """Make request to Google Vertex AI using the Vertex AI SDK with ADC
@@ -403,9 +403,9 @@ def _make_google_vertex_request_sdk(
 def _make_google_vertex_request_rest(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> dict:
     """Make request to Google Vertex AI using the public REST API."""
@@ -502,9 +502,9 @@ def _make_google_vertex_request_rest(
 def make_google_vertex_request_openai(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> dict:
     """Public entry point that routes to SDK or REST transport."""
@@ -520,7 +520,7 @@ def make_google_vertex_request_openai(
 
     logger.info(f"Google Vertex transport preference: {transport}")
 
-    def _attempt_sdk_request() -> Optional[dict]:
+    def _attempt_sdk_request() -> dict | None:
         try:
             return _make_google_vertex_request_sdk(
                 messages=messages,
@@ -635,9 +635,9 @@ def _process_google_vertex_sdk_response(response: Any, model: str) -> dict:
 def make_google_vertex_request_openai_stream(
     messages: list,
     model: str,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     **kwargs,
 ) -> Iterator[str]:
     """Make streaming request to Google Vertex AI

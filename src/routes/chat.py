@@ -4,13 +4,25 @@ import logging
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.utils.performance_tracker import PerformanceTracker
+import importlib
+
+import src.db.activity as activity_module
+import src.db.api_keys as api_keys_module
+import src.db.chat_history as chat_history_module
+import src.db.plans as plans_module
+import src.db.rate_limits as rate_limits_module
+import src.db.users as users_module
+from src.config import Config
+from src.schemas import ProxyRequest, ResponseRequest
+from src.security.deps import get_api_key
+from src.utils.rate_limit_headers import get_rate_limit_headers
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -43,18 +55,6 @@ except ImportError:
         return MockSpan()
 
 
-import importlib
-
-import src.db.activity as activity_module
-import src.db.api_keys as api_keys_module
-import src.db.chat_history as chat_history_module
-import src.db.plans as plans_module
-import src.db.rate_limits as rate_limits_module
-import src.db.users as users_module
-from src.config import Config
-from src.schemas import ProxyRequest, ResponseRequest
-from src.security.deps import get_api_key
-from src.utils.rate_limit_headers import get_rate_limit_headers
 
 # Import provider clients with graceful error handling
 # This prevents a single provider's import failure from breaking the entire chat endpoint
@@ -801,7 +801,7 @@ async def chat_completions(
     req: ProxyRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     # === 0) Setup / sanity ===
@@ -1217,7 +1217,7 @@ async def chat_completions(
                         headers=stream_headers,
                     )
                 except Exception as exc:
-                    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -1429,7 +1429,7 @@ async def chat_completions(
                 model = request_model
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -1703,7 +1703,7 @@ async def unified_responses(
     req: ResponseRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -2042,7 +2042,7 @@ async def unified_responses(
                             **optional,
                         )
 
-                    async def response_stream_generator():
+                    async def response_stream_generator(stream=stream, request_model=request_model):
                         """Transform chat/completions stream to responses format with usage tracking"""
                         async for chunk_data in stream_generator(
                             stream,

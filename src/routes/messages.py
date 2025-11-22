@@ -8,7 +8,7 @@ import importlib
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -196,7 +196,7 @@ async def anthropic_messages(
     req: MessagesRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -237,7 +237,7 @@ async def anthropic_messages(
     ```
     """
     # Initialize performance tracker
-    tracker = PerformanceTracker(endpoint="/v1/messages")
+    PerformanceTracker(endpoint="/v1/messages")
 
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
@@ -604,7 +604,7 @@ async def anthropic_messages(
                 model = request_model
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)

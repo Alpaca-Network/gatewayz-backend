@@ -7,8 +7,7 @@ Monitors errors continuously and generates fixes without manual intervention.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 from src.config import Config
 from src.services.bug_fix_generator import BugFixGenerator, get_bug_fix_generator
@@ -43,12 +42,12 @@ class AutonomousMonitor:
         self.auto_fix_enabled = auto_fix_enabled
         self.critical_error_threshold = critical_error_threshold
         self.lookback_hours = lookback_hours
-        self.error_monitor: Optional[ErrorMonitor] = None
-        self.bug_fix_generator: Optional[BugFixGenerator] = None
+        self.error_monitor: ErrorMonitor | None = None
+        self.bug_fix_generator: BugFixGenerator | None = None
         self.is_running = False
-        self.last_scan: Optional[datetime] = None
+        self.last_scan: datetime | None = None
         self.errors_since_last_fix: int = 0
-        self.task: Optional[asyncio.Task] = None
+        self.task: asyncio.Task | None = None
 
     async def initialize(self):
         """Initialize the monitor services."""
@@ -223,7 +222,7 @@ class AutonomousMonitor:
 
 
 # Singleton instance
-_autonomous_monitor: Optional[AutonomousMonitor] = None
+_autonomous_monitor: AutonomousMonitor | None = None
 
 
 def get_autonomous_monitor() -> AutonomousMonitor:

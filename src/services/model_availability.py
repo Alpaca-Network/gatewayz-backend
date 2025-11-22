@@ -12,9 +12,9 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ class ModelAvailability:
     status: AvailabilityStatus
     last_checked: datetime
     success_rate: float
-    response_time_ms: Optional[float]
+    response_time_ms: float | None
     error_count: int
     circuit_breaker_state: CircuitBreakerState
-    fallback_models: List[str]
-    maintenance_until: Optional[datetime] = None
-    error_message: Optional[str] = None
+    fallback_models: list[str]
+    maintenance_until: datetime | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -124,9 +124,9 @@ class ModelAvailabilityService:
     """Enhanced model availability service"""
 
     def __init__(self):
-        self.availability_cache: Dict[str, ModelAvailability] = {}
-        self.circuit_breakers: Dict[str, CircuitBreaker] = {}
-        self.fallback_mappings: Dict[str, List[str]] = {}
+        self.availability_cache: dict[str, ModelAvailability] = {}
+        self.circuit_breakers: dict[str, CircuitBreaker] = {}
+        self.fallback_mappings: dict[str, list[str]] = {}
         self.config = AvailabilityConfig()
         self.monitoring_active = False
 
@@ -225,7 +225,7 @@ class ModelAvailabilityService:
             provider=model_health.provider,
             gateway=model_health.gateway,
             status=availability_status,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=model_health.success_rate,
             response_time_ms=model_health.response_time_ms,
             error_count=model_health.error_count,
@@ -238,7 +238,7 @@ class ModelAvailabilityService:
 
     def get_model_availability(
         self, model_id: str, gateway: str = None
-    ) -> Optional[ModelAvailability]:
+    ) -> ModelAvailability | None:
         """Get availability for a specific model"""
         if gateway:
             model_key = f"{gateway}:{model_id}"
@@ -252,7 +252,7 @@ class ModelAvailabilityService:
 
     def get_available_models(
         self, gateway: str = None, provider: str = None
-    ) -> List[ModelAvailability]:
+    ) -> list[ModelAvailability]:
         """Get all available models"""
         available = []
 
@@ -266,7 +266,7 @@ class ModelAvailabilityService:
 
         return available
 
-    def get_fallback_models(self, model_id: str) -> List[str]:
+    def get_fallback_models(self, model_id: str) -> list[str]:
         """Get fallback models for a given model"""
         return self.fallback_mappings.get(model_id, [])
 
@@ -282,13 +282,13 @@ class ModelAvailabilityService:
 
         # Check maintenance
         if availability.maintenance_until and availability.maintenance_until > datetime.now(
-            timezone.utc
+            UTC
         ):
             return False
 
         return availability.status == AvailabilityStatus.AVAILABLE
 
-    def get_best_available_model(self, preferred_model: str, gateway: str = None) -> Optional[str]:
+    def get_best_available_model(self, preferred_model: str, gateway: str = None) -> str | None:
         """Get the best available model, with fallbacks"""
         # Check if preferred model is available
         if self.is_model_available(preferred_model, gateway):
@@ -310,7 +310,7 @@ class ModelAvailabilityService:
 
         return None
 
-    def get_availability_summary(self) -> Dict[str, Any]:
+    def get_availability_summary(self) -> dict[str, Any]:
         """Get availability summary"""
         total_models = len(self.availability_cache)
         available_models = len(
@@ -361,7 +361,7 @@ class ModelAvailabilityService:
             ),
             "gateway_stats": gateway_stats,
             "monitoring_active": self.monitoring_active,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     def set_maintenance_mode(self, model_id: str, gateway: str, until: datetime):

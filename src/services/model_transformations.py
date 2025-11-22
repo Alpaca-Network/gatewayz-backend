@@ -9,7 +9,6 @@ This module handles transformations between user-friendly model IDs
 
 import logging
 
-from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
@@ -180,7 +179,7 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     return model_id
 
 
-def get_model_id_mapping(provider: str) -> Dict[str, str]:
+def get_model_id_mapping(provider: str) -> dict[str, str]:
     """
     Get simplified -> native format mapping for a specific provider.
     This maps user-friendly input to what the provider API expects.
@@ -665,7 +664,7 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[str] = None) -> Optional[str]:
+def detect_provider_from_model_id(model_id: str, preferred_provider: str | None = None) -> str | None:
     """
     Try to detect which provider a model belongs to based on its ID.
 

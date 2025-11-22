@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -13,8 +12,8 @@ router = APIRouter()
 
 @router.get("/ranking/models", tags=["ranking"])
 async def get_ranking_models(
-    limit: Optional[int] = Query(None, description="Limit number of results"),
-    offset: Optional[int] = Query(0, description="Offset for pagination"),
+    limit: int | None = Query(None, description="Limit number of results"),
+    offset: int | None = Query(0, description="Offset for pagination"),
 ):
     """Get all models from latest_models table for ranking page with logo URLs"""
     try:

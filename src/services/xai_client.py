@@ -112,7 +112,7 @@ def fetch_models_from_xai():
     Returns a hardcoded list of known xAI Grok models instead.
     """
     logger.info("xAI does not provide a public model listing API, returning known Grok models")
-    
+
     # Hardcoded list of known xAI Grok models
     # These are the models available through xAI's API
     return [

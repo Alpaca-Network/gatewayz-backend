@@ -4,7 +4,7 @@ Modelz API client for fetching model token data and filtering models.
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from fastapi import HTTPException
@@ -28,8 +28,8 @@ async def get_modelz_client() -> httpx.AsyncClient:
 
 
 async def fetch_modelz_tokens(
-    is_graduated: Optional[bool] = None, use_cache: bool = True
-) -> List[Dict[str, Any]]:
+    is_graduated: bool | None = None, use_cache: bool = True
+) -> list[dict[str, Any]]:
     """
     Fetch model tokens from Modelz API with optional graduation filter and caching.
 
@@ -124,8 +124,8 @@ async def fetch_modelz_tokens(
 
 
 async def get_modelz_model_ids(
-    is_graduated: Optional[bool] = None, use_cache: bool = True
-) -> List[str]:
+    is_graduated: bool | None = None, use_cache: bool = True
+) -> list[str]:
     """
     Get a list of model IDs that exist on Modelz.
 
@@ -162,7 +162,7 @@ async def get_modelz_model_ids(
 
 
 async def check_model_exists_on_modelz(
-    model_id: str, is_graduated: Optional[bool] = None, use_cache: bool = True
+    model_id: str, is_graduated: bool | None = None, use_cache: bool = True
 ) -> bool:
     """
     Check if a specific model exists on Modelz.
@@ -181,7 +181,7 @@ async def check_model_exists_on_modelz(
 
 async def get_modelz_model_details(
     model_id: str, use_cache: bool = True
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Get detailed information about a specific model from Modelz.
 
@@ -210,7 +210,7 @@ async def get_modelz_model_details(
     return None
 
 
-async def refresh_modelz_cache() -> Dict[str, Any]:
+async def refresh_modelz_cache() -> dict[str, Any]:
     """
     Force refresh the Modelz cache by fetching fresh data from the API.
 
@@ -253,7 +253,7 @@ async def refresh_modelz_cache() -> Dict[str, Any]:
         return {"status": "error", "message": f"Failed to refresh Modelz cache: {str(e)}"}
 
 
-def get_modelz_cache_status() -> Dict[str, Any]:
+def get_modelz_cache_status() -> dict[str, Any]:
     """
     Get the current status of the Modelz cache.
 

@@ -26,15 +26,15 @@ logger = logging.getLogger(__name__)
 def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
     """
     Check if the Tempo OTLP endpoint is reachable.
-    
+
     This performs a basic DNS resolution and TCP connection test to verify
     that the endpoint exists and is accepting connections before attempting
     to initialize OpenTelemetry exporters.
-    
+
     Args:
         endpoint: The OTLP endpoint URL (e.g., "http://tempo.railway.internal:4318")
         timeout: Connection timeout in seconds (default: 2.0)
-    
+
     Returns:
         bool: True if endpoint is reachable, False otherwise
     """
@@ -43,15 +43,15 @@ def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
         parsed = urlparse(endpoint)
         host = parsed.hostname
         port = parsed.port
-        
+
         if not host:
             logger.warning(f"Invalid Tempo endpoint URL: {endpoint}")
             return False
-        
+
         # Default port based on scheme if not specified
         if not port:
             port = 4318 if parsed.scheme == "http" else 4317
-        
+
         # Try to resolve the hostname (DNS check)
         try:
             socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -61,7 +61,7 @@ def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
                 f"Tracing will be disabled. Ensure Tempo service is deployed and reachable."
             )
             return False
-        
+
         # Try to establish a TCP connection
         sock = None
         try:
@@ -77,7 +77,7 @@ def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
         finally:
             if sock:
                 sock.close()
-    
+
     except Exception as e:
         logger.warning(f"Unexpected error checking Tempo endpoint: {e}")
         return False
@@ -97,7 +97,7 @@ def init_tempo_otlp():
     # Check if Tempo endpoint is reachable before initializing
     tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
     logger.info(f"Checking Tempo endpoint availability: {tempo_endpoint}")
-    
+
     if not check_tempo_endpoint_reachable(tempo_endpoint):
         logger.warning(
             f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
@@ -235,7 +235,7 @@ class trace_span:
             span.set_attribute("result", "success")
     """
 
-    def __init__(self, name: str, attributes: Optional[dict] = None):
+    def __init__(self, name: str, attributes: dict | None = None):
         self.name = name
         self.attributes = attributes or {}
         self.span = None

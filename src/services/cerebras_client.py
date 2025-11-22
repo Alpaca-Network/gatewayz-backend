@@ -7,7 +7,7 @@ Falls back to OpenAI SDK with custom base URL if the official SDK is not availab
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from typing import Any
 
@@ -15,7 +15,7 @@ from typing import Any
 try:
     from datetime import UTC
 except ImportError:
-    UTC = timezone.utc
+    UTC = UTC
 
 from src.cache import _cerebras_models_cache
 

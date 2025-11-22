@@ -5,7 +5,6 @@ This module provides utilities for tracing LLM calls using Braintrust.
 Learn more at https://www.braintrust.dev/docs
 """
 
-import asyncio
 import functools
 import logging
 import inspect

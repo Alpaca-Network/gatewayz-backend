@@ -6,8 +6,8 @@ Handles all Stripe payment operations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from datetime import datetime, timedelta, UTC
+from typing import Any
 
 import stripe
 
@@ -74,7 +74,7 @@ class StripeService:
         return getattr(session_obj, field, None)
 
     @staticmethod
-    def _metadata_to_dict(metadata: Any) -> Dict[str, Any]:
+    def _metadata_to_dict(metadata: Any) -> dict[str, Any]:
         """Convert Stripe metadata object into a plain dictionary."""
         if metadata is None:
             return {}
@@ -130,7 +130,7 @@ class StripeService:
         if isinstance(value, bool):
             return int(value)
 
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             return int(round(value))
 
         if isinstance(value, str):
@@ -144,7 +144,7 @@ class StripeService:
 
         return None
 
-    def _hydrate_checkout_session_metadata(self, session: Any) -> tuple[Any, Dict[str, Any]]:
+    def _hydrate_checkout_session_metadata(self, session: Any) -> tuple[Any, dict[str, Any]]:
         """
         Ensure we have metadata for a checkout session by re-fetching it from Stripe when needed.
         """
@@ -171,7 +171,7 @@ class StripeService:
             )
             return session, {}
 
-    def _lookup_payment_record(self, session: Any) -> Dict[str, Any] | None:
+    def _lookup_payment_record(self, session: Any) -> dict[str, Any] | None:
         """
         Look up the local payment record using payment_intent or checkout session id.
         """
@@ -284,7 +284,7 @@ class StripeService:
                     "credits": str(credits),
                     **(request.metadata or {}),
                 },
-                expires_at=int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp()),
+                expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             )
 
             # Update payment with session ID
@@ -301,7 +301,7 @@ class StripeService:
                 status=PaymentStatus.PENDING,
                 amount=request.amount,
                 currency=request.currency.value,
-                expires_at=datetime.fromtimestamp(session.expires_at, tz=timezone.utc),
+                expires_at=datetime.fromtimestamp(session.expires_at, tz=UTC),
             )
 
         except stripe.StripeError as e:
@@ -312,7 +312,7 @@ class StripeService:
             logger.error(f"Error creating checkout session: {e}")
             raise
 
-    def retrieve_checkout_session(self, session_id: str) -> Dict[str, Any]:
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         """Retrieve checkout session details"""
         try:
             session = stripe.checkout.Session.retrieve(session_id)
@@ -395,7 +395,7 @@ class StripeService:
             logger.error(f"Error creating payment intent: {e}")
             raise
 
-    def retrieve_payment_intent(self, payment_intent_id: str) -> Dict[str, Any]:
+    def retrieve_payment_intent(self, payment_intent_id: str) -> dict[str, Any]:
         """Retrieve payment intent details"""
         try:
             intent = stripe.PaymentIntent.retrieve(payment_intent_id)
@@ -438,7 +438,7 @@ class StripeService:
                     event_type=event["type"],
                     event_id=event["id"],
                     message=f"Event {event['id']} already processed (duplicate)",
-                    processed_at=datetime.now(timezone.utc),
+                    processed_at=datetime.now(UTC),
                 )
 
             # Extract user_id from event metadata if available
@@ -487,7 +487,7 @@ class StripeService:
                 event_type=event["type"],
                 event_id=event["id"],
                 message=f"Event {event['type']} processed successfully",
-                processed_at=datetime.now(timezone.utc),
+                processed_at=datetime.now(UTC),
             )
 
         except ValueError as e:
@@ -717,7 +717,7 @@ class StripeService:
                 currency=refund.currency,
                 status=refund.status,
                 reason=refund.reason,
-                created_at=datetime.fromtimestamp(refund.created, tz=timezone.utc),
+                created_at=datetime.fromtimestamp(refund.created, tz=UTC),
             )
 
         except stripe.StripeError as e:
@@ -779,7 +779,7 @@ class StripeService:
                 client.table("users").update(
                     {
                         "stripe_customer_id": stripe_customer_id,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("id", user_id).execute()
 
@@ -865,7 +865,7 @@ class StripeService:
                 "stripe_subscription_id": subscription.id,
                 "stripe_product_id": product_id,
                 "stripe_customer_id": subscription.customer,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
             # Add subscription end date if available
@@ -911,7 +911,7 @@ class StripeService:
             update_data = {
                 "subscription_status": status,
                 "tier": tier,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
             if subscription.current_period_end:
@@ -961,7 +961,7 @@ class StripeService:
                     "subscription_status": "canceled",
                     "tier": "basic",
                     "stripe_subscription_id": None,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
@@ -1032,7 +1032,7 @@ class StripeService:
                 {
                     "subscription_status": "past_due",
                     "tier": "basic",  # Downgrade tier on payment failure
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
