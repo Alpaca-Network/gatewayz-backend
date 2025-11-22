@@ -14,6 +14,8 @@ from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
+_ENCRYPTION_METADATA_FIELDS = ("encrypted_key", "key_version", "key_hash", "last4")
+
 
 # near the top of the module
 def _pct(used: int, limit: Optional[int]) -> Optional[float]:
@@ -22,21 +24,55 @@ def _pct(used: int, limit: Optional[int]) -> Optional[float]:
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
 
 
-def _insert_api_key_row(client, api_key_data):
+def _strip_encryption_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    stripped_payload = payload.copy()
+    for field in _ENCRYPTION_METADATA_FIELDS:
+        stripped_payload.pop(field, None)
+    return stripped_payload
+
+
+def _insert_api_key_row(client, payload: Dict[str, Any], fallback_payload: Optional[Dict[str, Any]] = None):
+    """Insert API key row, retrying without optional encryption columns if schema cache is stale."""
     try:
-        return client.table("api_keys_new").insert(api_key_data).execute()
+        return client.table("api_keys_new").insert(payload).execute()
     except Exception as insert_error:
-        if is_schema_cache_error(insert_error):
-            sanitized_error = sanitize_for_logging(str(insert_error))
-            logger.warning(
-                "PostgREST schema cache stale while creating API key; refreshing cache and retrying. "
-                "Original error: %s",
-                sanitized_error,
+        if not is_schema_cache_error(insert_error):
+            raise
+
+        sanitized_error = sanitize_for_logging(str(insert_error))
+        logger.warning(
+            "api_keys_new insert failed because PostgREST schema cache is stale (%s). "
+            "Retrying without optional encryption metadata so user onboarding can continue.",
+            sanitized_error,
+        )
+
+        stripped_payload = (
+            fallback_payload.copy()
+            if fallback_payload is not None
+            else _strip_encryption_metadata(payload)
+        )
+
+        try:
+            result = client.table("api_keys_new").insert(stripped_payload).execute()
+        except Exception as fallback_error:
+            sanitized_fallback = sanitize_for_logging(str(fallback_error))
+            logger.error(
+                "Fallback api_keys_new insert without encryption metadata also failed: %s",
+                sanitized_fallback,
             )
             if refresh_postgrest_schema_cache():
-                return client.table("api_keys_new").insert(api_key_data).execute()
-            logger.error("Failed to refresh PostgREST schema cache; aborting API key creation.")
-        raise
+                logger.info("Retrying api_keys_new insert after refreshing PostgREST schema cache.")
+                return client.table("api_keys_new").insert(stripped_payload).execute()
+            raise
+
+        if refresh_postgrest_schema_cache():
+            logger.info("PostgREST schema cache refresh requested after fallback insert.")
+        else:
+            logger.warning(
+                "Could not refresh PostgREST schema cache; encrypted columns will stay disabled until cache reloads."
+            )
+
+        return result
 
 
 def check_key_name_uniqueness(
@@ -205,7 +241,7 @@ def create_api_key(
         base_api_key_data.update(trial_data)
 
         # Optional encrypted fields should only be sent if we have values
-        optional_encrypted_fields = {}
+        optional_encrypted_fields: Dict[str, Any] = {}
         if encrypted_token is not None:
             optional_encrypted_fields["encrypted_key"] = encrypted_token
         if key_version is not None:
@@ -217,19 +253,7 @@ def create_api_key(
 
         api_key_data = {**base_api_key_data, **optional_encrypted_fields}
 
-        try:
-            result = _insert_api_key_row(client, api_key_data)
-        except Exception as insert_error:
-            error_message = str(insert_error)
-            optional_field_names = {"encrypted_key", "key_version", "key_hash", "last4"}
-            if any(field in error_message for field in optional_field_names):
-                logger.warning(
-                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
-                    sanitize_for_logging(error_message),
-                )
-                result = _insert_api_key_row(client, base_api_key_data)
-            else:
-                raise
+        result = _insert_api_key_row(client, api_key_data, base_api_key_data)
 
         if not result.data:
             raise ValueError("Failed to create API key")
