@@ -5,6 +5,10 @@ from typing import Any, Dict, List, Optional
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
+from src.db.postgrest_schema import (
+    is_schema_cache_error,
+    refresh_postgrest_schema_cache,
+)
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
@@ -16,6 +20,23 @@ def _pct(used: int, limit: Optional[int]) -> Optional[float]:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
+
+
+def _insert_api_key_row(client, api_key_data):
+    try:
+        return client.table("api_keys_new").insert(api_key_data).execute()
+    except Exception as insert_error:
+        if is_schema_cache_error(insert_error):
+            sanitized_error = sanitize_for_logging(str(insert_error))
+            logger.warning(
+                "PostgREST schema cache stale while creating API key; refreshing cache and retrying. "
+                "Original error: %s",
+                sanitized_error,
+            )
+            if refresh_postgrest_schema_cache():
+                return client.table("api_keys_new").insert(api_key_data).execute()
+            logger.error("Failed to refresh PostgREST schema cache; aborting API key creation.")
+        raise
 
 
 def check_key_name_uniqueness(
@@ -197,7 +218,7 @@ def create_api_key(
         api_key_data = {**base_api_key_data, **optional_encrypted_fields}
 
         try:
-            result = client.table("api_keys_new").insert(api_key_data).execute()
+            result = _insert_api_key_row(client, api_key_data)
         except Exception as insert_error:
             error_message = str(insert_error)
             optional_field_names = {"encrypted_key", "key_version", "key_hash", "last4"}
@@ -206,7 +227,7 @@ def create_api_key(
                     "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
                     sanitize_for_logging(error_message),
                 )
-                result = client.table("api_keys_new").insert(base_api_key_data).execute()
+                result = _insert_api_key_row(client, base_api_key_data)
             else:
                 raise
 
