@@ -58,6 +58,12 @@ def _insert_api_key_row(
     return client.table("api_keys_new").insert(payload).execute()
 
 
+def _is_optional_column_error(error: Exception) -> bool:
+    """Detect whether an insert failure references optional encrypted columns."""
+    message = str(error)
+    return any(column in message for column in ENCRYPTED_COLUMNS)
+
+
 def _handle_schema_cache_insert_error(
     client, api_key_payload: Dict[str, Any], original_error: APIError
 ):
@@ -235,7 +241,7 @@ def create_api_key(
             )
 
         # Combine base data with trial data
-        api_key_data = {
+        base_api_key_data = {
             "user_id": user_id,
             "key_name": key_name,
             "api_key": api_key,
@@ -249,20 +255,39 @@ def create_api_key(
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
             "last_used_at": datetime.now(timezone.utc).isoformat(),
-            # New optional encrypted fields (columns added via migration)
-            "encrypted_key": encrypted_token,
-            "key_version": key_version,
-            "key_hash": api_key_hash,
-            "last4": api_key_last4,
         }
 
         # Add trial data if this is a primary key
-        api_key_data.update(trial_data)
+        base_api_key_data.update(trial_data)
+
+        # Optional encrypted fields should only be sent if we have values populated
+        optional_encrypted_fields = {}
+        if encrypted_token is not None:
+            optional_encrypted_fields["encrypted_key"] = encrypted_token
+        if key_version is not None:
+            optional_encrypted_fields["key_version"] = key_version
+        if api_key_hash is not None:
+            optional_encrypted_fields["key_hash"] = api_key_hash
+        if api_key_last4 is not None:
+            optional_encrypted_fields["last4"] = api_key_last4
+
+        api_key_data = {**base_api_key_data, **optional_encrypted_fields}
 
         try:
             result = _insert_api_key_row(client, api_key_data, include_encrypted_fields=True)
         except APIError as api_error:
             result = _handle_schema_cache_insert_error(client, api_key_data, api_error)
+        except Exception as insert_error:
+            if _is_optional_column_error(insert_error):
+                logger.warning(
+                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
+                    sanitize_for_logging(str(insert_error)),
+                )
+                result = _insert_api_key_row(
+                    client, base_api_key_data, include_encrypted_fields=False
+                )
+            else:
+                raise
 
         if not result.data:
             raise ValueError("Failed to create API key")
