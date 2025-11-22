@@ -5,8 +5,6 @@ Handles model pricing calculations and credit cost computation
 
 import logging
 
-from src.services.models import get_cached_models
-
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +24,14 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         }
     """
     try:
+        # Import here to avoid circular imports
+        from src.services.models import _is_building_catalog, get_cached_models
+
+        # If we're building the catalog, return default pricing to avoid circular dependency
+        if _is_building_catalog():
+            logger.debug(f"Returning default pricing for {model_id} (catalog building in progress)")
+            return {"prompt": 0.00002, "completion": 0.00002, "found": False}
+
         # Get all models from cache
         models = get_cached_models("all")
         if not models:
@@ -96,8 +102,9 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
     try:
         pricing = get_model_pricing(model_id)
 
-        prompt_cost = prompt_tokens * pricing["prompt"]
-        completion_cost = completion_tokens * pricing["completion"]
+        # Pricing is per 1M tokens, so divide by 1,000,000
+        prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000_000
+        completion_cost = (completion_tokens * pricing["completion"]) / 1_000_000
         total_cost = prompt_cost + completion_cost
 
         logger.info(

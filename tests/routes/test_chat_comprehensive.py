@@ -27,7 +27,6 @@ import src.db.plans as plans_module
 import src.db.chat_history as chat_history_module
 import src.db.activity as activity_module
 import src.services.openrouter_client as openrouter_module
-import src.services.portkey_client as portkey_module
 import src.services.vercel_ai_gateway_client as vercel_ai_gateway_module
 import src.services.rate_limiting as rate_limiting_module
 import src.services.trial_validation as trial_module
@@ -425,13 +424,19 @@ def client(sb, monkeypatch):
 
     # 4) Mock rate limiting
     class MockRateLimitManager:
-        async def check_rate_limit(self, api_key, tokens_used=0):
+        async def check_rate_limit(self, api_key, config=None, tokens_used=0):
             result = MagicMock()
             result.allowed = True
             result.remaining_requests = 100
             result.remaining_tokens = 10000
             result.retry_after = 0
             result.reason = None
+            # Add rate limit header fields
+            result.ratelimit_limit_requests = 250
+            result.ratelimit_limit_tokens = 10000
+            result.ratelimit_reset_requests = 1700000000
+            result.ratelimit_reset_tokens = 1700000000
+            result.burst_window_description = "100 per 60 seconds"
             return result
 
         async def release_concurrency(self, api_key):

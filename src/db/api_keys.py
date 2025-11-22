@@ -1,14 +1,20 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
+from src.db.postgrest_schema import (
+    is_schema_cache_error,
+    refresh_postgrest_schema_cache,
+)
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
+
+_ENCRYPTION_METADATA_FIELDS = ("encrypted_key", "key_version", "key_hash", "last4")
 
 
 # near the top of the module
@@ -16,6 +22,57 @@ def _pct(used: int, limit: int | None) -> float | None:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
+
+
+def _strip_encryption_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    stripped_payload = payload.copy()
+    for field in _ENCRYPTION_METADATA_FIELDS:
+        stripped_payload.pop(field, None)
+    return stripped_payload
+
+
+def _insert_api_key_row(client, payload: dict[str, Any], fallback_payload: dict[str, Any] | None = None):
+    """Insert API key row, retrying without optional encryption columns if schema cache is stale."""
+    try:
+        return client.table("api_keys_new").insert(payload).execute()
+    except Exception as insert_error:
+        if not is_schema_cache_error(insert_error):
+            raise
+
+        sanitized_error = sanitize_for_logging(str(insert_error))
+        logger.warning(
+            "api_keys_new insert failed because PostgREST schema cache is stale (%s). "
+            "Retrying without optional encryption metadata so user onboarding can continue.",
+            sanitized_error,
+        )
+
+        stripped_payload = (
+            fallback_payload.copy()
+            if fallback_payload is not None
+            else _strip_encryption_metadata(payload)
+        )
+
+        try:
+            result = client.table("api_keys_new").insert(stripped_payload).execute()
+        except Exception as fallback_error:
+            sanitized_fallback = sanitize_for_logging(str(fallback_error))
+            logger.error(
+                "Fallback api_keys_new insert without encryption metadata also failed: %s",
+                sanitized_fallback,
+            )
+            if refresh_postgrest_schema_cache():
+                logger.info("Retrying api_keys_new insert after refreshing PostgREST schema cache.")
+                return client.table("api_keys_new").insert(stripped_payload).execute()
+            raise
+
+        if refresh_postgrest_schema_cache():
+            logger.info("PostgREST schema cache refresh requested after fallback insert.")
+        else:
+            logger.warning(
+                "Could not refresh PostgREST schema cache; encrypted columns will stay disabled until cache reloads."
+            )
+
+        return result
 
 
 def check_key_name_uniqueness(
@@ -96,7 +153,7 @@ def create_api_key(
         expiration_date = None
         if expiration_days:
             expiration_date = (
-                datetime.now(timezone.utc) + timedelta(days=expiration_days)
+                datetime.now(UTC) + timedelta(days=expiration_days)
             ).isoformat()
 
         # Set default permissions if none provided
@@ -107,7 +164,7 @@ def create_api_key(
         # Set up trial for new users (if this is their first key)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(timezone.utc)
+            trial_start = datetime.now(UTC)
             trial_end = trial_start + timedelta(days=3)
             trial_data = {
                 "is_trial": True,
@@ -129,6 +186,28 @@ def create_api_key(
             encrypted_token, key_version = encrypt_api_key(api_key)
             api_key_hash = sha256_key_hash(api_key)
             api_key_last4 = last4(api_key)
+        except RuntimeError as hash_error:
+            # KEY_HASH_SALT is required - fail fast with clear error message
+            if "KEY_HASH_SALT" in str(hash_error):
+                error_msg = (
+                    "API key creation requires KEY_HASH_SALT environment variable. "
+                    "Generate a 16+ character random salt:\n"
+                    "  python -c \"import secrets; print('KEY_HASH_SALT=' + secrets.token_hex(32))\"\n"
+                    "Then set it in your environment variables."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg) from hash_error
+            # Encryption keys are optional - log warning and continue
+            logger.warning(
+                "Encryption unavailable; proceeding without encrypted fields: %s",
+                sanitize_for_logging(str(hash_error)),
+            )
+            encrypted_token, key_version, api_key_hash, api_key_last4 = (
+                None,
+                None,
+                None,
+                (api_key[-4:] if api_key else None),
+            )
         except Exception as enc_e:
             logger.warning(
                 "Encryption unavailable or failed; proceeding without encrypted fields: %s",
@@ -142,7 +221,7 @@ def create_api_key(
             )
 
         # Combine base data with trial data
-        api_key_data = {
+        base_api_key_data = {
             "user_id": user_id,
             "key_name": key_name,
             "api_key": api_key,
@@ -155,18 +234,26 @@ def create_api_key(
             "scope_permissions": scope_permissions,
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
-            "last_used_at": datetime.now(timezone.utc).isoformat(),
-            # New optional encrypted fields (columns added via migration)
-            "encrypted_key": encrypted_token,
-            "key_version": key_version,
-            "key_hash": api_key_hash,
-            "last4": api_key_last4,
+            "last_used_at": datetime.now(UTC).isoformat(),
         }
 
         # Add trial data if this is a primary key
-        api_key_data.update(trial_data)
+        base_api_key_data.update(trial_data)
 
-        result = client.table("api_keys_new").insert(api_key_data).execute()
+        # Optional encrypted fields should only be sent if we have values
+        optional_encrypted_fields: dict[str, Any] = {}
+        if encrypted_token is not None:
+            optional_encrypted_fields["encrypted_key"] = encrypted_token
+        if key_version is not None:
+            optional_encrypted_fields["key_version"] = key_version
+        if api_key_hash is not None:
+            optional_encrypted_fields["key_hash"] = api_key_hash
+        if api_key_last4 is not None:
+            optional_encrypted_fields["last4"] = api_key_last4
+
+        api_key_data = {**base_api_key_data, **optional_encrypted_fields}
+
+        result = _insert_api_key_row(client, api_key_data, base_api_key_data)
 
         if not result.data:
             raise ValueError("Failed to create API key")
@@ -208,7 +295,7 @@ def create_api_key(
                         "max_requests": max_requests,
                         "is_primary": is_primary,
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:
@@ -261,7 +348,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
                             days_remaining = max(0, (expiration - now).days)
                     except Exception as date_error:
                         logger.warning(
@@ -283,8 +370,8 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                     "id": key["id"],
                     "key_name": key["key_name"],
                     "api_key": key["api_key"],
-                    "environment_tag": key.get("environment_tag", "live"),
-                    "scope_permissions": key.get("scope_permissions", {}),
+                    "environment_tag": key.get("environment_tag") or "live",
+                    "scope_permissions": key.get("scope_permissions") or {},
                     "is_active": key["is_active"],
                     "is_primary": key.get("is_primary", False),
                     "expiration_date": key.get("expiration_date"),
@@ -293,8 +380,8 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                     "requests_used": key.get("requests_used", 0),
                     "requests_remaining": requests_remaining,
                     "usage_percentage": usage_percentage,
-                    "ip_allowlist": key.get("ip_allowlist", []),
-                    "domain_referrers": key.get("domain_referrers", []),
+                    "ip_allowlist": key.get("ip_allowlist") or [],
+                    "domain_referrers": key.get("domain_referrers") or [],
                     "created_at": key.get("created_at"),
                     "updated_at": key.get("updated_at"),
                     "last_used_at": key.get("last_used_at"),
@@ -322,66 +409,52 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
     try:
         client = get_supabase_client()
 
-        # Check if this is a new API key (gw_ prefix)
-        is_new_key = api_key.startswith("gw_")
+        # Delete from the api_keys_new table
+        result = (
+            client.table("api_keys_new")
+            .delete()
+            .eq("api_key", api_key)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
-        if is_new_key:
-            # Delete from the new api_keys_new table
-            result = (
-                client.table("api_keys_new")
-                .delete()
-                .eq("api_key", api_key)
-                .eq("user_id", user_id)
-                .execute()
-            )
+        if result.data:
+            # Also delete associated rate limit configs
+            try:
+                client.table("rate_limit_configs").delete().eq(
+                    "api_key_id", result.data[0]["id"]
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete rate limit configs for key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(str(e)),
+                )
 
-            if result.data:
-                # Also delete associated rate limit configs
-                try:
-                    client.table("rate_limit_configs").delete().eq(
-                        "api_key_id", result.data[0]["id"]
-                    ).execute()
-                except Exception as e:
-                    logger.warning(
-                        "Failed to delete rate limit configs for key %s: %s",
-                        sanitize_for_logging(api_key[:20] + "..."),
-                        sanitize_for_logging(str(e)),
-                    )
+            # Create audit log entry
+            try:
+                client.table("api_key_audit_logs").insert(
+                    {
+                        "user_id": user_id,
+                        "action": "delete",
+                        "api_key_id": result.data[0]["id"],
+                        "details": {
+                            "deleted_at": datetime.now(UTC).isoformat(),
+                            "key_name": result.data[0].get("key_name", "Unknown"),
+                            "environment_tag": result.data[0].get("environment_tag", "unknown"),
+                        },
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to create audit log for key deletion: %s",
+                    sanitize_for_logging(str(e)),
+                )
 
-                # Create audit log entry
-                try:
-                    client.table("api_key_audit_logs").insert(
-                        {
-                            "user_id": user_id,
-                            "action": "delete",
-                            "api_key_id": result.data[0]["id"],
-                            "details": {
-                                "deleted_at": datetime.now(timezone.utc).isoformat(),
-                                "key_name": result.data[0].get("key_name", "Unknown"),
-                                "environment_tag": result.data[0].get("environment_tag", "unknown"),
-                            },
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ).execute()
-                except Exception as e:
-                    logger.warning(
-                        "Failed to create audit log for key deletion: %s",
-                        sanitize_for_logging(str(e)),
-                    )
-
-                return True
-            else:
-                return False
+            return True
         else:
-            # Fallback to old system for legacy keys
-            result = (
-                client.table("api_keys")
-                .delete()
-                .eq("api_key", api_key)
-                .eq("user_id", user_id)
-                .execute()
-            )
-            return bool(result.data)
+            return False
 
     except Exception as e:
         logger.error("Failed to delete API key: %s", sanitize_for_logging(str(e)))
@@ -396,10 +469,9 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
     try:
         client = get_supabase_client()
 
-        # First, try to get the key from the new api_keys table
+        # Check if key exists in api_keys_new table
         try:
-            # Check if key exists in api_keys table first
-            key_result = client.table("api_keys").select("*").eq("api_key", api_key).execute()
+            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
             if key_result.data:
                 key_data = key_result.data[0]
@@ -422,7 +494,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
 
                             if expiration < now:
                                 logger.warning(
@@ -462,62 +534,28 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 
         except Exception as e:
             logger.warning(
-                "New API key validation failed, falling back to old system: %s",
+                "API key validation failed: %s",
                 sanitize_for_logging(str(e)),
             )
 
-        # Fallback: Check if key exists in the old users table (for backward compatibility)
+        # Fallback: Check if key exists in the users table (for backward compatibility)
         user = get_user(api_key)
         if user:
-            # This is a legacy key, create a default entry in api_keys table
-            try:
-                # Check if key already exists in api_keys table
-                existing_key = client.table("api_keys").select("*").eq("api_key", api_key).execute()
-
-                if not existing_key.data:
-                    # Create a default entry for this legacy key
-                    client.table("api_keys").insert(
-                        {
-                            "user_id": user["id"],
-                            "key_name": "Legacy Key",
-                            "api_key": api_key,
-                            "is_active": True,
-                            "expiration_date": None,  # No expiration for legacy keys
-                            "max_requests": None,  # No request limit for legacy keys
-                            "requests_used": 0,
-                        }
-                    ).execute()
-
-                    logger.info(
-                        "Created legacy key entry for user %s",
-                        sanitize_for_logging(str(user["id"])),
-                    )
-
-                # Return legacy key info
-                return {
-                    "user_id": user["id"],
-                    "api_key": api_key,
-                    "key_id": 0,  # Legacy key
-                    "key_name": "Legacy Key",
-                    "is_active": True,
-                    "expiration_date": None,
-                    "max_requests": None,
-                    "requests_used": 0,
-                }
-
-            except Exception as e:
-                logger.error("Failed to create legacy key entry: %s", sanitize_for_logging(str(e)))
-                # Still return user info even if we can't create the entry
-                return {
-                    "user_id": user["id"],
-                    "api_key": api_key,
-                    "key_id": 0,
-                    "key_name": "Legacy Key",
-                    "is_active": True,
-                    "expiration_date": None,
-                    "max_requests": None,
-                    "requests_used": 0,
-                }
+            # This is a legacy key - return legacy key info
+            logger.info(
+                "Using legacy key for user %s",
+                sanitize_for_logging(str(user["id"])),
+            )
+            return {
+                "user_id": user["id"],
+                "api_key": api_key,
+                "key_id": 0,  # Legacy key
+                "key_name": "Legacy Key",
+                "is_active": True,
+                "expiration_date": None,
+                "max_requests": None,
+                "requests_used": 0,
+            }
 
         return None
 
@@ -529,7 +567,6 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 def increment_api_key_usage(api_key: str) -> None:
     """Increment the request count for an API key"""
     # Lazy import to avoid circular dependency
-    from src.db.users import get_user
 
     try:
         client = get_supabase_client()
@@ -545,8 +582,8 @@ def increment_api_key_usage(api_key: str) -> None:
                 client.table("api_keys_new").update(
                     {
                         "requests_used": current_usage + 1,
-                        "last_used_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "last_used_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("api_key", api_key).execute()
                 return
@@ -554,41 +591,6 @@ def increment_api_key_usage(api_key: str) -> None:
         except Exception as e:
             logger.warning(
                 "Failed to update usage in api_keys_new table: %s", sanitize_for_logging(str(e))
-            )
-
-        # Fallback to old system (api_keys table)
-        try:
-            # Check if key exists in api_keys table
-            existing_key = client.table("api_keys").select("*").eq("api_key", api_key).execute()
-
-            if existing_key.data:
-                # Update existing entry
-                current_usage = existing_key.data[0]["requests_used"]
-                client.table("api_keys").update(
-                    {
-                        "requests_count": current_usage + 1,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                ).eq("api_key", api_key).execute()
-            else:
-                # Key doesn't exist, create entry
-                user = get_user(api_key)
-                if user:
-                    client.table("api_keys").insert(
-                        {
-                            "user_id": user["id"],
-                            "key_name": "Legacy Key",
-                            "api_key": api_key,
-                            "is_active": True,
-                            "expiration_date": None,
-                            "max_requests": None,
-                            "requests_count": 1,
-                        }
-                    ).execute()
-
-        except Exception as e:
-            logger.error(
-                "Failed to update usage in api_keys table: %s", sanitize_for_logging(str(e))
             )
 
     except Exception as e:
@@ -600,97 +602,49 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        # Check if this is a new API key (gw_ prefix)
-        is_new_key = api_key.startswith("gw_")
+        # Query the api_keys_new table
+        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
-        if is_new_key:
-            # Query the new api_keys_new table
-            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+        if not key_result.data:
+            logger.warning(
+                "API key not found in api_keys_new table: %s",
+                sanitize_for_logging(api_key[:20] + "..."),
+            )
+            return {
+                "api_key": api_key,
+                "key_name": "Unknown",
+                "is_active": False,
+                "requests_used": 0,
+                "max_requests": None,
+                "requests_remaining": None,
+                "usage_percentage": None,
+                "environment_tag": "unknown",
+                "created_at": None,
+                "last_used_at": None,
+            }
 
-            if not key_result.data:
-                logger.warning(
-                    "API key not found in api_keys_new table: %s",
-                    sanitize_for_logging(api_key[:20] + "..."),
-                )
-                return {
-                    "api_key": api_key,
-                    "key_name": "Unknown",
-                    "is_active": False,
-                    "requests_used": 0,
-                    "max_requests": None,
-                    "requests_remaining": None,
-                    "usage_percentage": None,
-                    "environment_tag": "unknown",
-                    "created_at": None,
-                    "last_used_at": None,
-                }
+        key_data = key_result.data[0]
 
-            key_data = key_result.data[0]
+        # Calculate requests remaining and usage percentage
+        requests_remaining = None
+        usage_percentage = None
 
-            # Calculate requests remaining and usage percentage
+        if key_data.get("max_requests"):
             requests_remaining = max(0, key_data["max_requests"] - key_data.get("requests_used", 0))
             usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
 
-            if key_data.get("max_requests"):
-                requests_remaining = max(
-                    0, key_data["max_requests"] - key_data.get("requests_used", 0)
-                )
-                usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
-
-            return {
-                "api_key": api_key,
-                "key_name": key_data.get("key_name", "Unnamed Key"),
-                "is_active": key_data.get("is_active", False),
-                "requests_used": key_data.get("requests_used", 0),
-                "max_requests": key_data.get("max_requests"),
-                "requests_remaining": requests_remaining,
-                "usage_percentage": usage_percentage,
-                "environment_tag": key_data.get("environment_tag", "live"),
-                "created_at": key_data.get("created_at"),
-                "last_used_at": key_data.get("last_used_at"),
-            }
-        else:
-            # Fallback to old system for legacy keys
-            key_result = client.table("api_keys").select("*").eq("api_key", api_key).execute()
-
-            if not key_result.data:
-                return {
-                    "api_key": api_key,
-                    "key_name": "Legacy Key",
-                    "is_active": True,
-                    "requests_used": 0,
-                    "max_requests": None,
-                    "requests_remaining": None,
-                    "usage_percentage": None,
-                    "environment_tag": "legacy",
-                    "created_at": None,
-                    "last_used_at": None,
-                }
-
-            key_data = key_result.data[0]
-
-            # Calculate requests remaining and usage percentage
-            requests_remaining = max(0, key_data["max_requests"] - key_data.get("requests_used", 0))
-            usage_percentage = _pct(key_data.get("requests_used", 0), key_data["max_requests"])
-
-            if key_data.get("max_requests"):
-                requests_remaining = max(
-                    0, key_data["max_requests"] - key_data.get("requests_count", 0)
-                )
-                usage_percentage = _pct(key_data.get("requests_count", 0), key_data["max_requests"])
-
-            return {
-                "api_key": api_key,
-                "key_name": key_data.get("key_name", "Legacy Key"),
-                "is_active": key_data.get("is_active", True),
-                "requests_used": key_data.get("requests_count", 0),
-                "max_requests": key_data.get("max_requests"),
-                "requests_remaining": requests_remaining,
-                "usage_percentage": usage_percentage,
-                "environment_tag": "legacy",
-                "created_at": key_data.get("created_at"),
-                "last_used_at": key_data.get("updated_at"),
-            }
+        return {
+            "api_key": api_key,
+            "key_name": key_data.get("key_name", "Unnamed Key"),
+            "is_active": key_data.get("is_active", False),
+            "requests_used": key_data.get("requests_used", 0),
+            "max_requests": key_data.get("max_requests"),
+            "requests_remaining": requests_remaining,
+            "usage_percentage": usage_percentage,
+            "environment_tag": key_data.get("environment_tag", "live"),
+            "created_at": key_data.get("created_at"),
+            "last_used_at": key_data.get("last_used_at"),
+        }
 
     except Exception as e:
         logger.error(
@@ -761,7 +715,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         if "expiration_days" in update_data:
             if update_data["expiration_days"] is not None:
                 update_data["expiration_date"] = (
-                    datetime.now(timezone.utc) + timedelta(days=update_data["expiration_days"])
+                    datetime.now(UTC) + timedelta(days=update_data["expiration_days"])
                 ).isoformat()
             else:
                 update_data["expiration_date"] = None
@@ -769,7 +723,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             del update_data["expiration_days"]
 
         # Add timestamp
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Update the API key
         result = client.table("api_keys_new").update(update_data).eq("id", key_id).execute()
@@ -783,7 +737,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                 client.table("rate_limit_configs").update(
                     {
                         "max_requests": updates["max_requests"],
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("api_key_id", key_id).execute()
             except Exception as e:
@@ -802,9 +756,9 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                         "updated_fields": list(updates.keys()),
                         "old_values": {k: key_data.get(k) for k in updates.keys() if k in key_data},
                         "new_values": updates,
-                        "update_timestamp": datetime.now(timezone.utc).isoformat(),
+                        "update_timestamp": datetime.now(UTC).isoformat(),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as e:
@@ -848,27 +802,11 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         )
 
         if not key_result.data:
-            # Fallback to legacy key check
-            logger.info(
-                "API key %s not found in api_keys_new, checking legacy table",
-                sanitize_for_logging(api_key[:15] + "..."),
+            logger.warning(
+                "API key not found in api_keys_new table: %s",
+                sanitize_for_logging(api_key[:10] + "..."),
             )
-            legacy_result = (
-                client.table("api_keys")
-                .select("scope_permissions, is_active")
-                .eq("api_key", api_key)
-                .execute()
-            )
-            if not legacy_result.data:
-                logger.warning(
-                    "API key not found in any table: %s", sanitize_for_logging(api_key[:10] + "...")
-                )
-                return False
-            key_data = legacy_result.data[0]
-            logger.info(
-                "Found in legacy table - is_active: %s, has is_primary: False (legacy)",
-                key_data.get("is_active"),
-            )
+            return False
         else:
             key_data = key_result.data[0]
             logger.info(
@@ -978,7 +916,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
                         expiration_str = expiration_str + "+00:00"
 
                     expiration = datetime.fromisoformat(expiration_str)
-                    now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                    now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
                     days_remaining = max(0, (expiration - now).days)
             except Exception as date_error:
                 logger.warning(
@@ -1002,8 +940,8 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
             "id": key_data["id"],
             "key_name": key_data["key_name"],
             "api_key": key_data["api_key"],
-            "environment_tag": key_data.get("environment_tag", "live"),
-            "scope_permissions": key_data.get("scope_permissions", {}),
+            "environment_tag": key_data.get("environment_tag") or "live",
+            "scope_permissions": key_data.get("scope_permissions") or {},
             "is_active": key_data["is_active"],
             "is_primary": key_data.get("is_primary", False),
             "expiration_date": key_data.get("expiration_date"),
@@ -1012,8 +950,8 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
             "requests_used": key_data.get("requests_used", 0),
             "requests_remaining": requests_remaining,
             "usage_percentage": usage_percentage,
-            "ip_allowlist": key_data.get("ip_allowlist", []),
-            "domain_referrers": key_data.get("domain_referrers", []),
+            "ip_allowlist": key_data.get("ip_allowlist") or [],
+            "domain_referrers": key_data.get("domain_referrers") or [],
             "created_at": key_data.get("created_at"),
             "updated_at": key_data.get("updated_at"),
             "last_used_at": key_data.get("last_used_at"),

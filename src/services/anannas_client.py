@@ -3,9 +3,15 @@ import logging
 from openai import OpenAI
 
 from src.config import Config
+<<<<<<< HEAD
 
 # Initialize logging
 logging.basicConfig(level=logging.ERROR)
+=======
+from src.services.anthropic_transformer import extract_message_with_tools
+
+# Initialize logging
+>>>>>>> main
 logger = logging.getLogger(__name__)
 
 
@@ -18,9 +24,13 @@ def get_anannas_client():
         if not Config.ANANNAS_API_KEY:
             raise ValueError("Anannas API key not configured")
 
+<<<<<<< HEAD
         return OpenAI(
             base_url="https://api.anannas.ai/v1", api_key=Config.ANANNAS_API_KEY
         )
+=======
+        return OpenAI(base_url="https://api.anannas.ai/v1", api_key=Config.ANANNAS_API_KEY)
+>>>>>>> main
     except Exception as e:
         logger.error(f"Failed to initialize Anannas client: {e}")
         raise
@@ -65,11 +75,27 @@ def make_anannas_request_openai_stream(messages, model, **kwargs):
 def process_anannas_response(response):
     """Process Anannas response to extract relevant data"""
     try:
+<<<<<<< HEAD
+=======
+        choices = []
+        for choice in response.choices:
+            msg = extract_message_with_tools(choice.message)
+
+            choices.append(
+                {
+                    "index": choice.index,
+                    "message": msg,
+                    "finish_reason": choice.finish_reason,
+                }
+            )
+
+>>>>>>> main
         return {
             "id": response.id,
             "object": response.object,
             "created": response.created,
             "model": response.model,
+<<<<<<< HEAD
             "choices": [
                 {
                     "index": choice.index,
@@ -78,6 +104,9 @@ def process_anannas_response(response):
                 }
                 for choice in response.choices
             ],
+=======
+            "choices": choices,
+>>>>>>> main
             "usage": (
                 {
                     "prompt_tokens": response.usage.prompt_tokens,

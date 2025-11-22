@@ -14,12 +14,17 @@ os.environ.setdefault('APP_ENV', 'testing')
 os.environ.setdefault('SUPABASE_URL', 'https://xxxxxxxxxxxxx.supabase.co')
 os.environ.setdefault('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4eHh4eHh4eHh4eHgiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTYwMDAwMDAwMCwiZXhwIjoxOTAwMDAwMDAwfQ.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 os.environ.setdefault('OPENROUTER_API_KEY', 'sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('PORTKEY_API_KEY', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 os.environ.setdefault('ADMIN_API_KEY', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 os.environ.setdefault('ENCRYPTION_KEY', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+os.environ.setdefault('AI_SDK_API_KEY', 'sk-xxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 os.environ.setdefault('STRIPE_SECRET_KEY', 'sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 os.environ.setdefault('STRIPE_WEBHOOK_SECRET', 'whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 os.environ.setdefault('FRONTEND_URL', 'http://localhost:3000')
+
+# Disable monitoring services during tests to avoid network calls and async task issues
+os.environ.setdefault('PROMETHEUS_ENABLED', 'false')
+os.environ.setdefault('TEMPO_ENABLED', 'false')
+os.environ.setdefault('LOKI_ENABLED', 'false')
 
 from src.config.supabase_config import get_supabase_client
 from tests.factories import (
@@ -139,7 +144,6 @@ def clean_test_user(supabase_client, test_prefix):
     try:
         if created_keys:
             supabase_client.table("api_keys_new").delete().in_("id", created_keys).execute()
-            supabase_client.table("api_keys").delete().in_("user_id", created_users).execute()
 
         if created_users:
             supabase_client.table("users").delete().in_("id", created_users).execute()
@@ -156,7 +160,6 @@ def isolated_test_data(supabase_client, test_prefix):
     """
     cleanup_data = {
         'users': [],
-        'api_keys': [],
         'api_keys_new': [],
         'chat_sessions': [],
         'chat_messages': [],
@@ -183,9 +186,6 @@ def isolated_test_data(supabase_client, test_prefix):
         if cleanup_data['api_keys_new']:
             supabase_client.table("api_keys_new").delete().in_("id", cleanup_data['api_keys_new']).execute()
 
-        if cleanup_data['api_keys']:
-            supabase_client.table("api_keys").delete().in_("user_id", cleanup_data['api_keys']).execute()
-
         if cleanup_data['users']:
             supabase_client.table("users").delete().in_("id", cleanup_data['users']).execute()
 
@@ -196,8 +196,8 @@ def isolated_test_data(supabase_client, test_prefix):
 @pytest.fixture(autouse=True)
 def skip_if_no_database(request):
     """Skip tests that require database if credentials are not available"""
-    # Skip if test uses in-memory stub (sb fixture)
-    if 'sb' in request.fixturenames:
+    # Skip if test uses in-memory stub (sb fixture or fake_supabase fixture)
+    if 'sb' in request.fixturenames or 'fake_supabase' in request.fixturenames:
         return  # Don't skip tests that use the in-memory stub
 
     # Don't skip health check and ping tests - they don't require a database
@@ -228,7 +228,6 @@ def mock_env_vars(monkeypatch):
         'SUPABASE_URL': os.getenv('SUPABASE_URL', 'https://test.supabase.co'),
         'SUPABASE_KEY': os.getenv('SUPABASE_KEY', 'test-key'),
         'OPENROUTER_API_KEY': os.getenv('OPENROUTER_API_KEY', 'test-openrouter-key'),
-        'PORTKEY_API_KEY': os.getenv('PORTKEY_API_KEY', 'test-portkey-key'),
         'ENCRYPTION_KEY': os.getenv('ENCRYPTION_KEY', 'test-encryption-key-32-bytes-long!'),
         'ADMIN_API_KEY': os.getenv('ADMIN_API_KEY', 'test-admin-key'),
     }
