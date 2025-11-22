@@ -571,6 +571,19 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "mistral-7b": "mistral-7b-instruct",
             "mixtral-8x7b": "mixtral-8x7b-instruct",
         },
+        "xai": {
+            # XAI Grok models - pass-through format
+            # Models are referenced by their simple names (e.g., "grok-2", "grok-beta")
+            # Can also use xai/grok-* format
+            "grok-beta": "grok-beta",
+            "grok-2": "grok-2",
+            "grok-2-1212": "grok-2-1212",
+            "grok-vision-beta": "grok-vision-beta",
+            "xai/grok-beta": "grok-beta",
+            "xai/grok-2": "grok-2",
+            "xai/grok-2-1212": "grok-2-1212",
+            "xai/grok-vision-beta": "grok-vision-beta",
+        },
     }
 
     return mappings.get(provider, {})
@@ -787,6 +800,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "alpaca-network",
         "alibaba-cloud",
         "fal",
+        "xai",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -854,6 +868,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
             "tripo3d",
         ]:
             return "fal"
+
+        # XAI models (e.g., "xai/grok-2")
+        if org == "xai":
+            return "xai"
+
+    # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")
+    if model_id.startswith("grok-"):
+        logger.info(f"Detected XAI provider for Grok model '{model_id}'")
+        return "xai"
 
     logger.debug(f"Could not detect provider for model '{model_id}'")
     return None
