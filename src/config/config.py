@@ -51,6 +51,8 @@ class Config:
     # Supabase Configuration
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+    # Optional direct Postgres connection string for maintenance tasks
+    SUPABASE_DB_DSN = os.environ.get("SUPABASE_DB_DSN")
 
     # OpenRouter Configuration
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
