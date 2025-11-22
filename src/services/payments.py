@@ -66,6 +66,37 @@ class StripeService:
 
         logger.info("Stripe service initialized")
 
+    @staticmethod
+    def _get_session_value(session_obj: Any, field: str):
+        """Safely extract a field from a Stripe session object or dict."""
+        if isinstance(session_obj, dict):
+            return session_obj.get(field)
+        return getattr(session_obj, field, None)
+
+    @staticmethod
+    def _metadata_to_dict(metadata: Any) -> Dict[str, Any]:
+        """Convert Stripe metadata object into a plain dictionary."""
+        if metadata is None:
+            return {}
+        if isinstance(metadata, dict):
+            return metadata
+        to_dict = getattr(metadata, "to_dict", None)
+        if callable(to_dict):
+            try:
+                return to_dict()
+            except Exception:
+                pass
+        to_dict_recursive = getattr(metadata, "to_dict_recursive", None)
+        if callable(to_dict_recursive):
+            try:
+                return to_dict_recursive()
+            except Exception:
+                pass
+        try:
+            return dict(metadata)
+        except Exception:
+            return {}
+
     # ==================== Checkout Sessions ====================
 
     @staticmethod
@@ -126,7 +157,7 @@ class StripeService:
             return session, {}
 
         try:
-            refreshed_session = stripe.checkout.Session.retrieve(session_id)
+            refreshed_session = stripe.checkout.Session.retrieve(session_id, expand=["metadata"])
             refreshed_metadata = self._get_stripe_object_value(refreshed_session, "metadata") or {}
             if refreshed_metadata:
                 logger.info(
@@ -473,6 +504,10 @@ class StripeService:
             session, metadata = self._hydrate_checkout_session_metadata(session)
 
             session_id = self._get_stripe_object_value(session, "id")
+            if session_id is None and not metadata:
+                raise ValueError(
+                    "Checkout session payload is missing metadata and session id; cannot process payment"
+                )
             payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
             user_id = self._coerce_to_int(metadata.get("user_id"))
             payment_id = self._coerce_to_int(metadata.get("payment_id"))
