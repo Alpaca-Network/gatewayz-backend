@@ -138,11 +138,18 @@ def test_invalid_api_key(mock_get_user, mock_enforce_limits, mock_trial, client,
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
-def test_plan_limit_exceeded_precheck(mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+def test_plan_limit_exceeded_precheck(mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
     """Test that plan limit exceeded returns 429"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": False, "reason": "plan cap"}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Hi"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
 
     rate_mgr = _RateLimitMgr(True, True)
     with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):

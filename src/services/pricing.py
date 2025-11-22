@@ -4,12 +4,11 @@ Handles model pricing calculations and credit cost computation
 """
 
 import logging
-from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 
-def get_model_pricing(model_id: str) -> Dict[str, float]:
+def get_model_pricing(model_id: str) -> dict[str, float]:
     """
     Get pricing information for a specific model
 
