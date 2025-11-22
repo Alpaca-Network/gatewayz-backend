@@ -459,6 +459,68 @@ class TestWebhooks:
             stripe_service._handle_checkout_completed(session_without_data)
 
     @patch('stripe.Webhook.construct_event')
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_recovers_missing_metadata(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        mock_is_processed,
+        mock_record_event,
+        mock_construct_event,
+        stripe_service,
+    ):
+        """Ensure webhook handler falls back to Supabase when metadata is absent."""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
+
+        missing_metadata_session = {
+            'id': 'cs_missing_meta',
+            'payment_intent': 'pi_missing_meta',
+            'metadata': None,
+            'client_reference_id': '1',
+            'amount_total': 2500,
+        }
+
+        def _lookup(identifier):
+            if identifier in {'pi_missing_meta', 'cs_missing_meta'}:
+                return {
+                    'id': 42,
+                    'user_id': 1,
+                    'credits_purchased': 2500,
+                }
+            return None
+
+        mock_get_payment.side_effect = _lookup
+
+        mock_event = {
+            'id': 'evt_missing_meta',
+            'type': 'checkout.session.completed',
+            'data': {'object': missing_metadata_session},
+        }
+        mock_construct_event.return_value = mock_event
+
+        result = stripe_service.handle_webhook(b'payload', 'signature')
+
+        assert result.success is True
+        mock_add_credits.assert_called_once()
+        add_call = mock_add_credits.call_args[1]
+        assert add_call['user_id'] == 1
+        assert add_call['payment_id'] == 42
+        assert add_call['credits'] == 25.0  # 2500 cents → $25
+
+        mock_update_payment.assert_called_once_with(
+            payment_id=42,
+            status='completed',
+            stripe_payment_intent_id='pi_missing_meta',
+        )
+
+    @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.update_payment_status')
     @patch('src.services.payments.add_credits_to_user')
