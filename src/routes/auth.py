@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -174,7 +174,7 @@ def _handle_existing_user(
         display_name=existing_user.get("username") or display_name,
         email=user_email,
         credits=user_credits,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -493,7 +493,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                     ),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "welcome_email_sent": False,
                 }
 
@@ -515,7 +515,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                             if field != "created_at" and partial_user.get(field) != value
                         }
                         if update_fields:
-                            update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+                            update_fields["updated_at"] = datetime.now(UTC).isoformat()
                             updated_result = (
                                 client.table("users")
                                 .update(update_fields)
@@ -725,7 +725,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=display_name or user_data["username"],
                 email=email,
                 credits=new_user_credits,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
             )
 
     except Exception as e:
@@ -785,7 +785,7 @@ async def register_user(request: UserRegistrationRequest):
                     if hasattr(request.auth_method, "value")
                     else str(request.auth_method)
                 ),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "welcome_email_sent": False,
             }
 
@@ -921,7 +921,7 @@ async def register_user(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     except HTTPException:
@@ -987,7 +987,7 @@ async def reset_password(token: str):
         token_data = token_result.data[0]
         expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
 
-        if datetime.now(timezone.utc).replace(tzinfo=expires_at.tzinfo) > expires_at:
+        if datetime.now(UTC).replace(tzinfo=expires_at.tzinfo) > expires_at:
             raise HTTPException(status_code=400, detail="Reset token has expired")
 
         # Update password (in a real app, you'd hash this)
