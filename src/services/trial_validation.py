@@ -5,8 +5,8 @@ Direct trial validation without complex service layer
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import datetime, UTC
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -18,7 +18,7 @@ def _parse_trial_end_utc(s: str) -> datetime:
     if "T" not in s:
         # Date-only -> use end of that day timezone.utc (friendliest interpretation)
         d = datetime.fromisoformat(s)
-        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=UTC)
     # Full datetime
     if s.endswith("Z"):
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
@@ -26,13 +26,13 @@ def _parse_trial_end_utc(s: str) -> datetime:
         dt = datetime.fromisoformat(s)
     # Ensure timezone.utc-aware
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt
 
 
-def validate_trial_access(api_key: str) -> Dict[str, Any]:
+def validate_trial_access(api_key: str) -> dict[str, Any]:
     """Validate trial access for an API key - simplified version"""
     try:
         client = get_supabase_client()
@@ -86,7 +86,7 @@ def validate_trial_access(api_key: str) -> Dict[str, Any]:
         if trial_end_date:
             try:
                 trial_end = _parse_trial_end_utc(trial_end_date)
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 if trial_end <= now:
                     return {
                         "is_valid": False,

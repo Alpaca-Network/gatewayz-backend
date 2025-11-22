@@ -14,9 +14,7 @@ Note: OpenTelemetry is optional. If not installed, tracing will be gracefully di
 """
 
 import logging
-import os
 import socket
-from typing import Optional
 from urllib.parse import urlparse
 
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
@@ -49,11 +47,11 @@ logger = logging.getLogger(__name__)
 def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
     """
     Check if the OTLP endpoint is reachable.
-    
+
     Args:
         endpoint: The OTLP endpoint URL
         timeout: Connection timeout in seconds
-    
+
     Returns:
         bool: True if endpoint is reachable, False otherwise
     """
@@ -62,15 +60,15 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
         parsed = urlparse(endpoint)
         host = parsed.hostname
         port = parsed.port
-        
+
         if not host:
             logger.warning(f"Invalid endpoint URL: {endpoint}")
             return False
-        
+
         # Default port if not specified
         if not port:
             port = 4318 if parsed.scheme == "http" else 4317
-        
+
         # Try to resolve the hostname (DNS check)
         try:
             socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -80,7 +78,7 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
                 f"Tracing will be disabled."
             )
             return False
-        
+
         # Try to establish a TCP connection
         sock = None
         try:
@@ -96,7 +94,7 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
         finally:
             if sock:
                 sock.close()
-    
+
     except Exception as e:
         logger.warning(f"Unexpected error checking endpoint: {e}")
         return False
@@ -114,7 +112,7 @@ class OpenTelemetryConfig:
     """
 
     _initialized = False
-    _tracer_provider: Optional[TracerProvider] = None
+    _tracer_provider: TracerProvider | None = None
 
     @classmethod
     def initialize(cls) -> bool:
@@ -311,7 +309,7 @@ def instrument_fastapi_application(app) -> bool:
 
 
 # Helper function to get current trace context
-def get_current_trace_id() -> Optional[str]:
+def get_current_trace_id() -> str | None:
     """
     Get the current trace ID as a hex string.
 
@@ -331,7 +329,7 @@ def get_current_trace_id() -> Optional[str]:
     return None
 
 
-def get_current_span_id() -> Optional[str]:
+def get_current_span_id() -> str | None:
     """
     Get the current span ID as a hex string.
 
