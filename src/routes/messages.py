@@ -274,6 +274,14 @@ async def anthropic_messages(
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
 
+        # Pre-check plan limits before processing (fail fast)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
         # === 2) Transform Anthropic format to OpenAI format ===
         messages_data = [msg.model_dump() for msg in req.messages]
         openai_messages, openai_params = transform_anthropic_to_openai(
