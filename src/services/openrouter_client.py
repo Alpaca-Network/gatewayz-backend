@@ -1,7 +1,6 @@
 import logging
 
 from fastapi import APIRouter
-from openai import OpenAI
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools

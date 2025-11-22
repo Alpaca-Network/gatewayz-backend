@@ -6,9 +6,9 @@ Unified Pydantic models for payment integrations (Stripe, subscriptions, credits
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 # ==================== Enums ====================
 
@@ -98,9 +98,9 @@ class PaymentCreate(BaseModel):
     currency: str = "usd"
     payment_method: str = "stripe"
     status: PaymentStatus = PaymentStatus.PENDING
-    stripe_payment_intent_id: Optional[str] = None
-    stripe_customer_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    stripe_payment_intent_id: str | None = None
+    stripe_customer_id: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class PaymentResponse(BaseModel):
@@ -112,19 +112,19 @@ class PaymentResponse(BaseModel):
     currency: str
     payment_method: str
     status: PaymentStatus
-    stripe_payment_intent_id: Optional[str] = None
-    stripe_customer_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    stripe_payment_intent_id: str | None = None
+    stripe_customer_id: str | None = None
+    metadata: dict[str, Any] | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class PaymentUpdate(BaseModel):
     """Update payment"""
 
-    status: Optional[PaymentStatus] = None
-    stripe_payment_intent_id: Optional[str] = None
-    error_message: Optional[str] = None
+    status: PaymentStatus | None = None
+    stripe_payment_intent_id: str | None = None
+    error_message: str | None = None
 
 
 class PaymentRecord(BaseModel):
@@ -132,20 +132,24 @@ class PaymentRecord(BaseModel):
 
     id: int
     user_id: int
-    stripe_payment_intent_id: Optional[str] = None
-    stripe_session_id: Optional[str] = None
-    stripe_customer_id: Optional[str] = None
+    stripe_payment_intent_id: str | None = None
+    stripe_checkout_session_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("stripe_checkout_session_id", "stripe_session_id"),
+        serialization_alias="stripe_checkout_session_id",
+    )
+    stripe_customer_id: str | None = None
     amount: float
     currency: str
     status: PaymentStatus
-    payment_method_type: Optional[StripePaymentMethodType] = None
-    description: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    payment_method_type: StripePaymentMethodType | None = None
+    description: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    failed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
+    failed_at: datetime | None = None
+    error_message: str | None = None
 
 
 # ==================== Stripe Checkout Session Models ====================
@@ -156,11 +160,11 @@ class CreateCheckoutSessionRequest(BaseModel):
 
     amount: int = Field(..., description="Amount in cents (e.g., 2999 for $29.99)", gt=0)
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
-    success_url: Optional[str] = Field(None, description="URL to redirect on success")
-    cancel_url: Optional[str] = Field(None, description="URL to redirect on cancel")
-    customer_email: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    description: Optional[str] = "Gatewayz Credits Purchase"
+    success_url: str | None = Field(None, description="URL to redirect on success")
+    cancel_url: str | None = Field(None, description="URL to redirect on cancel")
+    customer_email: str | None = None
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
+    description: str | None = "Gatewayz Credits Purchase"
 
     @field_validator("amount")
     @classmethod
@@ -192,12 +196,12 @@ class CreatePaymentIntentRequest(BaseModel):
 
     amount: int = Field(..., gt=0, description="Amount in cents")
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
-    payment_method_types: List[StripePaymentMethodType] = Field(
+    payment_method_types: list[StripePaymentMethodType] = Field(
         default=[StripePaymentMethodType.CARD]
     )
-    customer_email: Optional[str] = None
-    description: Optional[str] = "Gatewayz Credits"
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    customer_email: str | None = None
+    description: str | None = "Gatewayz Credits"
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
     automatic_payment_methods: bool = Field(default=True)
 
 
@@ -210,15 +214,15 @@ class PaymentIntentResponse(BaseModel):
     status: PaymentStatus
     amount: int
     currency: str
-    next_action: Optional[Dict[str, Any]] = None
+    next_action: dict[str, Any] | None = None
 
 
 class UpdatePaymentIntentRequest(BaseModel):
     """Request to update a payment intent"""
 
-    amount: Optional[int] = Field(None, gt=0)
-    metadata: Optional[Dict[str, Any]] = None
-    description: Optional[str] = None
+    amount: int | None = Field(None, gt=0)
+    metadata: dict[str, Any] | None = None
+    description: str | None = None
 
 
 # ==================== Customer Models ====================
@@ -228,10 +232,10 @@ class CreateStripeCustomerRequest(BaseModel):
     """Request to create a Stripe customer"""
 
     email: str
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    description: Optional[str] = None
+    name: str | None = None
+    phone: str | None = None
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
+    description: str | None = None
 
 
 class StripeCustomerResponse(BaseModel):
@@ -239,9 +243,9 @@ class StripeCustomerResponse(BaseModel):
 
     customer_id: str
     email: str
-    name: Optional[str] = None
+    name: str | None = None
     created_at: datetime
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ==================== Refund Models ====================
@@ -251,9 +255,9 @@ class CreateRefundRequest(BaseModel):
     """Request to create a refund"""
 
     payment_intent_id: str
-    amount: Optional[int] = Field(None, description="Amount to refund in cents")
-    reason: Optional[str] = Field(None, description="Reason for refund")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    amount: int | None = Field(None, description="Amount to refund in cents")
+    reason: str | None = Field(None, description="Reason for refund")
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class RefundResponse(BaseModel):
@@ -264,7 +268,7 @@ class RefundResponse(BaseModel):
     amount: int
     currency: str
     status: str
-    reason: Optional[str] = None
+    reason: str | None = None
     created_at: datetime
 
 
@@ -276,7 +280,7 @@ class StripeWebhookEvent(BaseModel):
 
     id: str
     type: StripeWebhookEventType
-    data: Dict[str, Any]
+    data: dict[str, Any]
     created: int
     livemode: bool
 
@@ -289,10 +293,10 @@ class WebhookProcessingResult(BaseModel):
     event_id: str
     processed_at: datetime
     message: str
-    user_id: Optional[int] = None
-    payment_id: Optional[int] = None
-    credits_added: Optional[int] = None
-    error: Optional[str] = None
+    user_id: int | None = None
+    payment_id: int | None = None
+    credits_added: int | None = None
+    error: str | None = None
 
 
 # ==================== Credit Package Models ====================
@@ -306,16 +310,16 @@ class CreditPackage(BaseModel):
     credits: int
     amount: int = Field(..., description="Amount in cents")
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
-    discount_percentage: Optional[float] = Field(None, ge=0, le=100)
+    discount_percentage: float | None = Field(None, ge=0, le=100)
     popular: bool = False
-    description: Optional[str] = None
-    features: List[str] = Field(default_factory=list)
+    description: str | None = None
+    features: list[str] = Field(default_factory=list)
 
 
 class CreditPackagesResponse(BaseModel):
     """Available credit packages"""
 
-    packages: List[CreditPackage]
+    packages: list[CreditPackage]
     currency: StripeCurrency
 
 
@@ -325,7 +329,7 @@ class CreditPurchaseRequest(BaseModel):
     amount_usd: float
     payment_method: PaymentMethod
     payment_token: str
-    wallet_address: Optional[str] = None
+    wallet_address: str | None = None
 
 
 class CreditPurchaseResponse(BaseModel):
@@ -335,7 +339,7 @@ class CreditPurchaseResponse(BaseModel):
     user_id: int
     credits_purchased: int
     amount_paid_usd: float
-    amount_paid_paca: Optional[float]
+    amount_paid_paca: float | None
     payment_method: PaymentMethod
     status: str
     timestamp: datetime
@@ -360,7 +364,7 @@ class SubscriptionPlan(BaseModel):
     price_usd: float
     price_paca: float
     credits_per_month: int
-    features: List[str]
+    features: list[str]
     is_active: bool
 
 
@@ -370,7 +374,7 @@ class CreateSubscriptionRequest(BaseModel):
     plan_id: int
     payment_method: PaymentMethod
     payment_token: str
-    wallet_address: Optional[str] = None
+    wallet_address: str | None = None
 
 
 class SubscriptionResponse(BaseModel):
@@ -385,7 +389,7 @@ class SubscriptionResponse(BaseModel):
     credits_allocated: int
     payment_method: PaymentMethod
     amount_paid_usd: float
-    amount_paid_paca: Optional[float]
+    amount_paid_paca: float | None
 
 
 # ==================== Stripe Subscription Checkout Models ====================
@@ -396,13 +400,13 @@ class CreateSubscriptionCheckoutRequest(BaseModel):
 
     price_id: str = Field(..., description="Stripe price ID (e.g., price_1SNk2KLVT8n4vaEn7lHNPYWB)")
     product_id: str = Field(..., description="Stripe product ID (e.g., prod_TKOqQPhVRxNp4Q)")
-    customer_email: Optional[str] = Field(None, description="Customer email address")
+    customer_email: str | None = Field(None, description="Customer email address")
     success_url: str = Field(..., description="URL to redirect on successful subscription")
     cancel_url: str = Field(..., description="URL to redirect on canceled subscription")
     mode: str = Field(
         default="subscription", description="Checkout mode (subscription, payment, or setup)"
     )
-    metadata: Optional[Dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         default_factory=dict, description="Additional metadata"
     )
 
@@ -420,7 +424,7 @@ class SubscriptionCheckoutResponse(BaseModel):
 
     session_id: str = Field(..., description="Stripe checkout session ID")
     url: str = Field(..., description="Stripe checkout URL to redirect user to")
-    customer_id: Optional[str] = Field(None, description="Stripe customer ID if created")
+    customer_id: str | None = Field(None, description="Stripe customer ID if created")
     status: str = Field(default="open", description="Checkout session status")
 
 
@@ -434,9 +438,9 @@ class StripePriceModel(BaseModel):
     product_id: str
     amount: int
     currency: StripeCurrency
-    interval: Optional[str] = None  # "month", "year"
-    interval_count: Optional[int] = None
-    nickname: Optional[str] = None
+    interval: str | None = None  # "month", "year"
+    interval_count: int | None = None
+    nickname: str | None = None
     active: bool = True
 
 
@@ -445,10 +449,10 @@ class StripeProductModel(BaseModel):
 
     product_id: str
     name: str
-    description: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    description: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
-    prices: List[StripePriceModel] = Field(default_factory=list)
+    prices: list[StripePriceModel] = Field(default_factory=list)
 
 
 # ==================== Payment History & Stats ====================
@@ -460,7 +464,7 @@ class PaymentHistoryResponse(BaseModel):
     total_payments: int
     total_amount: float
     currency: str
-    payments: List[PaymentRecord]
+    payments: list[PaymentRecord]
 
 
 class PaymentSummary(BaseModel):
@@ -472,17 +476,17 @@ class PaymentSummary(BaseModel):
     failed_payments: int
     refunded_amount: float
     currency: StripeCurrency
-    last_payment_date: Optional[datetime] = None
+    last_payment_date: datetime | None = None
     lifetime_credits_purchased: int
 
 
 class PaymentStatsResponse(BaseModel):
     """Payment statistics"""
 
-    today: Dict[str, Any]
-    this_week: Dict[str, Any]
-    this_month: Dict[str, Any]
-    all_time: Dict[str, Any]
+    today: dict[str, Any]
+    this_week: dict[str, Any]
+    this_month: dict[str, Any]
+    all_time: dict[str, Any]
 
 
 # ==================== Transaction Models ====================
@@ -494,7 +498,7 @@ class TransactionRecord(BaseModel):
     id: str
     amount: float
     currency: str
-    description: Optional[str] = None
+    description: str | None = None
     status: str
     created_at: datetime
     type: str  # "payment", "refund", "adjustment"
@@ -508,7 +512,7 @@ class StripeErrorResponse(BaseModel):
 
     error: str
     message: str
-    type: Optional[str] = None
-    code: Optional[str] = None
-    decline_code: Optional[str] = None
-    param: Optional[str] = None
+    type: str | None = None
+    code: str | None = None
+    decline_code: str | None = None
+    param: str | None = None

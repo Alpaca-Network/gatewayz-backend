@@ -1,8 +1,8 @@
 import logging
 import secrets
 import string
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import datetime, UTC
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.constants import SETTINGS_CREDITS_URL
@@ -286,7 +286,7 @@ def create_user_referral_code(user_id: int) -> str:
 
 def validate_referral_code(
     referral_code: str, user_id: int
-) -> Optional[tuple[bool, Optional[str], Dict[str, Any]]]:
+) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
     Validate if a referral code can be used by a user.
 
@@ -353,7 +353,7 @@ def validate_referral_code(
 
 def apply_referral_bonus(
     user_id: int, referral_code: str, purchase_amount: float
-) -> Optional[tuple[bool, Optional[str], Dict[str, Any]]]:
+) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
     Apply referral bonus to both user and referrer after a qualifying purchase.
 
@@ -398,7 +398,7 @@ def apply_referral_bonus(
             referral_result = (
                 client.table("referrals")
                 .update(
-                    {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}
+                    {"status": "completed", "completed_at": datetime.now(UTC).isoformat()}
                 )
                 .eq("id", existing_referral.data[0]["id"])
                 .execute()
@@ -414,7 +414,7 @@ def apply_referral_bonus(
                 "referral_code": referral_code,
                 "bonus_amount": REFERRAL_BONUS,
                 "status": "completed",
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "completed_at": datetime.now(UTC).isoformat(),
             }
 
             referral_result = client.table("referrals").insert(referral_data).execute()
@@ -504,7 +504,7 @@ def apply_referral_bonus(
         return False, f"Failed to apply referral bonus: {str(e)}", None
 
 
-def get_referral_stats(user_id: int) -> Optional[Dict[str, Any]]:
+def get_referral_stats(user_id: int) -> dict[str, Any] | None:
     """Get referral statistics for a user"""
     try:
         client = get_supabase_client()
@@ -601,7 +601,7 @@ def get_referral_stats(user_id: int) -> Optional[Dict[str, Any]]:
 
 def track_referral_signup(
     referral_code: str, referred_user_id: int
-) -> Optional[tuple[bool, Optional[str], Dict[str, Any]]]:
+) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
     Track when a user signs up with a referral code (creates pending referral record).
 
@@ -648,7 +648,7 @@ def track_referral_signup(
             "referral_code": referral_code,
             "bonus_amount": REFERRAL_BONUS,
             "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         referral_result = client.table("referrals").insert(referral_data).execute()

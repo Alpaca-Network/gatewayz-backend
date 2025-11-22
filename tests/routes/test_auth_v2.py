@@ -453,6 +453,37 @@ def test_privy_auth_new_user_creation(client, sb):
     assert users.data[0]['privy_user_id'] == 'privy_new_123'
 
 
+def test_privy_auth_email_address_field_extraction(client, sb):
+    """Email accounts that use address field should still be processed"""
+    request_data = {
+        "user": {
+            "id": "privy_address_123",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "email",
+                    "address": "address_only@example.com",
+                    "first_verified_at": 1705123456,
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False,
+        },
+        "token": "privy_token_address",
+        "is_new_user": True,
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['email'] == 'address_only@example.com'
+    assert data['auth_method'] == 'email'
+    assert '@privy.user' not in data['email']
+
+
 def test_privy_auth_google_oauth(client, sb):
     """Test authentication with Google OAuth"""
     request_data = {

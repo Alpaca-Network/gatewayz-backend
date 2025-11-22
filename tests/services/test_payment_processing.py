@@ -409,6 +409,117 @@ class TestWebhooks:
             stripe_payment_intent_id='pi_test_123'
         )
 
+    @patch('stripe.checkout.Session.retrieve')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_refetches_metadata_when_missing(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_session_retrieve,
+        stripe_service
+    ):
+        """Ensure checkout handler refetches the session when metadata is missing"""
+
+        # Partial session payload received from Stripe webhook (missing metadata)
+        partial_session = Mock()
+        partial_session.id = 'cs_missing_meta'
+        partial_session.payment_intent = None
+        partial_session.metadata = None
+
+        # Full session returned by retrieve()
+        full_session = Mock()
+        full_session.id = 'cs_missing_meta'
+        full_session.payment_intent = 'pi_full'
+        full_session.metadata = {
+            'user_id': '1',
+            'credits': '2500',
+            'payment_id': '42'
+        }
+        mock_session_retrieve.return_value = full_session
+
+        stripe_service._handle_checkout_completed(partial_session)
+
+        mock_session_retrieve.assert_called_once_with('cs_missing_meta', expand=['metadata'])
+        mock_add_credits.assert_called_once()
+        assert mock_add_credits.call_args[1]['credits'] == 25.0
+        mock_update_payment.assert_called_once_with(
+            payment_id=42,
+            status='completed',
+            stripe_payment_intent_id='pi_full'
+        )
+
+    def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
+        """Ensure handler fails fast when both metadata and session id are missing"""
+        session_without_data = Mock()
+        session_without_data.id = None
+        session_without_data.metadata = None
+
+        with pytest.raises(ValueError, match="missing metadata and session id"):
+            stripe_service._handle_checkout_completed(session_without_data)
+
+    @patch('stripe.Webhook.construct_event')
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_recovers_missing_metadata(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        mock_is_processed,
+        mock_record_event,
+        mock_construct_event,
+        stripe_service,
+    ):
+        """Ensure webhook handler falls back to Supabase when metadata is absent."""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
+
+        missing_metadata_session = {
+            'id': 'cs_missing_meta',
+            'payment_intent': 'pi_missing_meta',
+            'metadata': None,
+            'client_reference_id': '1',
+            'amount_total': 2500,
+        }
+
+        def _lookup(identifier):
+            if identifier in {'pi_missing_meta', 'cs_missing_meta'}:
+                return {
+                    'id': 42,
+                    'user_id': 1,
+                    'credits_purchased': 2500,
+                }
+            return None
+
+        mock_get_payment.side_effect = _lookup
+
+        mock_event = {
+            'id': 'evt_missing_meta',
+            'type': 'checkout.session.completed',
+            'data': {'object': missing_metadata_session},
+        }
+        mock_construct_event.return_value = mock_event
+
+        result = stripe_service.handle_webhook(b'payload', 'signature')
+
+        assert result.success is True
+        mock_add_credits.assert_called_once()
+        add_call = mock_add_credits.call_args[1]
+        assert add_call['user_id'] == 1
+        assert add_call['payment_id'] == 42
+        assert add_call['credits'] == 25.0  # 2500 cents → $25
+
+        mock_update_payment.assert_called_once_with(
+            payment_id=42,
+            status='completed',
+            stripe_payment_intent_id='pi_missing_meta',
+        )
+
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.update_payment_status')
@@ -679,3 +790,74 @@ class TestPaymentIntegration:
         assert webhook_result.success is True
         mock_add_credits.assert_called_once()
         assert mock_add_credits.call_args[1]['credits'] == 10.0  # $10
+
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_missing_credits_uses_amount_total(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        stripe_service
+    ):
+        """Ensure handler falls back to session amount when credits metadata is missing"""
+
+        session = Mock()
+        session.metadata = {
+            'user_id': '1',
+            'payment_id': '1',
+            'credits': None
+        }
+        session.amount_total = 2500  # cents
+        session.amount_subtotal = None
+        session.id = 'cs_test_fallback'
+        session.payment_intent = 'pi_test_fallback'
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['credits'] == 25.0  # 2500 cents → $25
+        mock_update_payment.assert_called_once_with(
+            payment_id=1,
+            status='completed',
+            stripe_payment_intent_id='pi_test_fallback'
+        )
+
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_missing_ids_uses_payment_lookup(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        stripe_service
+    ):
+        """Ensure handler can recover user/payment IDs from Supabase when metadata is incomplete"""
+
+        session = Mock()
+        session.metadata = {
+            'credits': '1500'
+        }
+        session.id = 'cs_missing_ids'
+        session.payment_intent = 'pi_missing_ids'
+        session.amount_total = None
+
+        mock_get_payment.return_value = {
+            'id': 42,
+            'user_id': 7,
+            'amount_usd': 15.0
+        }
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_get_payment.assert_called_once_with('pi_missing_ids')
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 7
+        assert add_kwargs['credits'] == 15.0
+        mock_update_payment.assert_called_once_with(
+            payment_id=42,
+            status='completed',
+            stripe_payment_intent_id='pi_missing_ids'
+        )

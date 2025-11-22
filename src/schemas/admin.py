@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -16,7 +16,7 @@ class UsageMetrics(BaseModel):
     cost_this_month: float
     average_tokens_per_request: float
     most_used_model: str
-    last_request_time: Optional[datetime] = None
+    last_request_time: datetime | None = None
 
 
 class UserMonitorResponse(BaseModel):
@@ -24,7 +24,7 @@ class UserMonitorResponse(BaseModel):
     api_key: str
     current_credits: int
     usage_metrics: UsageMetrics
-    rate_limits: Dict[str, Any]
+    rate_limits: dict[str, Any]
 
 
 class AdminMonitorResponse(BaseModel):
@@ -34,7 +34,7 @@ class AdminMonitorResponse(BaseModel):
     total_tokens_today: int
     total_cost_today: float
     system_usage_metrics: UsageMetrics
-    top_users_by_usage: List[Dict[str, Any]]
+    top_users_by_usage: list[dict[str, Any]]
 
 
 class RateLimitConfig(BaseModel):
@@ -54,8 +54,8 @@ class SetRateLimitRequest(BaseModel):
 class RateLimitResponse(BaseModel):
     api_key: str
     current_limits: RateLimitConfig
-    current_usage: Dict[str, Any]
-    reset_times: Dict[str, datetime]
+    current_usage: dict[str, Any]
+    reset_times: dict[str, datetime]
 
 
 class UsageRecord(BaseModel):

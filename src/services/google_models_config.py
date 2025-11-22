@@ -6,7 +6,6 @@ multiple providers: direct Vertex AI access and OpenRouter proxy.
 """
 
 import logging
-from typing import List
 
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
@@ -18,7 +17,7 @@ from src.services.multi_provider_registry import (
 logger = logging.getLogger(__name__)
 
 
-def get_google_models() -> List[MultiProviderModel]:
+def get_google_models() -> list[MultiProviderModel]:
     """
     Get Google models configured with multiple providers.
 

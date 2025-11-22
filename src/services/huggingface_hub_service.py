@@ -14,7 +14,7 @@ operations and model discovery.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from huggingface_hub import HfApi, hf_hub_download, list_models
 from huggingface_hub.utils import RepositoryNotFoundError
@@ -36,12 +36,12 @@ def get_hf_api_client() -> HfApi:
 
 
 def list_huggingface_models(
-    task: Optional[str] = "text-generation",
-    filter_kwargs: Optional[Dict[str, Any]] = None,
+    task: str | None = "text-generation",
+    filter_kwargs: dict[str, Any] | None = None,
     limit: int = 50,
     sort: str = "likes",
     direction: int = -1,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     List HuggingFace models using the SDK with advanced filtering.
 
@@ -61,7 +61,7 @@ def list_huggingface_models(
     try:
         logger.info(f"Listing HuggingFace models with task={task}, sort={sort}")
 
-        api = get_hf_api_client()
+        get_hf_api_client()
 
         # Build filter
         filters = {}
@@ -100,9 +100,9 @@ def list_huggingface_models(
 
 def search_models_by_query(
     query: str,
-    task: Optional[str] = None,
+    task: str | None = None,
     limit: int = 20,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Search for HuggingFace models by query.
 
@@ -117,7 +117,7 @@ def search_models_by_query(
     try:
         logger.info(f"Searching HuggingFace models for: '{query}'")
 
-        api = get_hf_api_client()
+        get_hf_api_client()
 
         filters = {}
         if task:
@@ -147,7 +147,7 @@ def search_models_by_query(
         return []
 
 
-def get_model_details(model_id: str) -> Optional[Dict[str, Any]]:
+def get_model_details(model_id: str) -> dict[str, Any] | None:
     """
     Get detailed information about a specific model.
 
@@ -176,7 +176,7 @@ def get_model_details(model_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_model_card(model_id: str) -> Optional[str]:
+def get_model_card(model_id: str) -> str | None:
     """
     Download and retrieve the model card (README) for a model.
 
@@ -200,7 +200,7 @@ def get_model_card(model_id: str) -> Optional[str]:
             token=Config.HUG_API_KEY if Config.HUG_API_KEY else None,
         )
 
-        with open(readme_path, "r", encoding="utf-8") as f:
+        with open(readme_path, encoding="utf-8") as f:
             card_content = f.read()
 
         logger.info(f"Successfully retrieved model card for {model_id}")
@@ -214,7 +214,7 @@ def get_model_card(model_id: str) -> Optional[str]:
 def list_models_by_author(
     author: str,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     List all models from a specific author/organization.
 
@@ -249,7 +249,7 @@ def list_models_by_author(
         return []
 
 
-def get_model_files(model_id: str) -> Optional[List[Dict[str, Any]]]:
+def get_model_files(model_id: str) -> list[dict[str, Any]] | None:
     """
     Get information about all files in a model repository.
 
@@ -315,7 +315,7 @@ def check_model_inference_availability(model_id: str) -> bool:
         return False
 
 
-def normalize_model_info(model_info: Any) -> Optional[Dict[str, Any]]:
+def normalize_model_info(model_info: Any) -> dict[str, Any] | None:
     """
     Normalize HuggingFace SDK model info to our internal schema.
 

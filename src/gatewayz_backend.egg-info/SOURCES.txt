@@ -128,7 +128,9 @@ src/services/models.py
 src/services/modelz_client.py
 src/services/multi_provider_registry.py
 src/services/near_client.py
+src/services/nebius_client.py
 src/services/notification.py
+src/services/novita_client.py
 src/services/openrouter_client.py
 src/services/payments.py
 src/services/ping.py

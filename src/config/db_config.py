@@ -7,7 +7,6 @@ PostgreSQL connection management for Docker-based database
 import logging
 import os
 from contextlib import contextmanager
-from typing import Optional
 
 # Conditional imports
 try:

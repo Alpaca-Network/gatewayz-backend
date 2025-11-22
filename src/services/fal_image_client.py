@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -12,7 +12,7 @@ from src.config import Config
 logger = logging.getLogger(__name__)
 
 # Cache for Fal.ai models catalog
-_fal_models_cache: Optional[List[Dict[str, Any]]] = None
+_fal_models_cache: list[dict[str, Any]] | None = None
 
 # Fal.ai API configuration
 FAL_API_BASE = "https://fal.run"
@@ -22,7 +22,7 @@ FAL_QUEUE_POLL_INTERVAL = 1.0  # seconds
 FAL_QUEUE_MAX_WAIT = 300.0  # 5 minutes
 
 
-def load_fal_models_catalog() -> List[Dict[str, Any]]:
+def load_fal_models_catalog() -> list[dict[str, Any]]:
     """Load Fal.ai models catalog from the static JSON file
 
     Returns:
@@ -57,7 +57,7 @@ def load_fal_models_catalog() -> List[Dict[str, Any]]:
         return []
 
 
-def get_fal_models() -> List[Dict[str, Any]]:
+def get_fal_models() -> list[dict[str, Any]]:
     """Get list of all available Fal.ai models
 
     Returns:
@@ -66,7 +66,7 @@ def get_fal_models() -> List[Dict[str, Any]]:
     return load_fal_models_catalog()
 
 
-def get_fal_models_by_type(model_type: str) -> List[Dict[str, Any]]:
+def get_fal_models_by_type(model_type: str) -> list[dict[str, Any]]:
     """Get Fal.ai models filtered by type
 
     Args:
@@ -142,7 +142,7 @@ def _build_fal_payload(
     size: str,
     n: int,
     **kwargs,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build Fal.ai request payload
 
     Args:
@@ -179,7 +179,7 @@ def _build_fal_payload(
     return payload
 
 
-def _extract_images_from_response(fal_response: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _extract_images_from_response(fal_response: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract images from Fal.ai response in OpenAI format
 
     Fal.ai responses vary by model type. This function handles:
@@ -237,7 +237,7 @@ def make_fal_image_request(
     size: str = "1024x1024",
     n: int = 1,
     **kwargs,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request to Fal.ai
 
     This endpoint supports ALL 839+ models available on Fal.ai!

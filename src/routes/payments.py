@@ -6,7 +6,7 @@ Endpoints for handling Stripe webhooks and payment operations
 
 import inspect
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -145,9 +145,9 @@ async def stripe_webhook(
 # ==================== Checkout Sessions ====================
 
 
-@router.post("/checkout-session", response_model=Dict[str, Any])
+@router.post("/checkout-session", response_model=dict[str, Any])
 async def create_checkout_session(
-    request: CreateCheckoutSessionRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: CreateCheckoutSessionRequest, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe checkout session for hosted payment page
@@ -209,7 +209,7 @@ async def create_checkout_session(
 
 @router.get("/checkout-session/{session_id}")
 async def get_checkout_session(
-    session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+    session_id: str, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retrieve checkout session details
@@ -241,9 +241,9 @@ async def get_checkout_session(
 # ==================== Payment Intents ====================
 
 
-@router.post("/payment-intent", response_model=Dict[str, Any])
+@router.post("/payment-intent", response_model=dict[str, Any])
 async def create_payment_intent(
-    request: CreatePaymentIntentRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: CreatePaymentIntentRequest, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe payment intent for custom payment flows
@@ -294,7 +294,7 @@ async def create_payment_intent(
 
 @router.get("/payment-intent/{payment_intent_id}")
 async def get_payment_intent(
-    payment_intent_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+    payment_intent_id: str, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retrieve payment intent details
@@ -376,9 +376,9 @@ async def get_credit_packages():
 # ==================== Refunds ====================
 
 
-@router.post("/refund", response_model=Dict[str, Any])
+@router.post("/refund", response_model=dict[str, Any])
 async def create_refund(
-    request: CreateRefundRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: CreateRefundRequest, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a refund for a payment (admin only)
@@ -421,7 +421,7 @@ async def create_refund(
 
 @router.get("/payments")
 async def get_payment_history(
-    limit: int = 50, offset: int = 0, current_user: Dict[str, Any] = Depends(get_current_user)
+    limit: int = 50, offset: int = 0, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get payment history for the authenticated user
@@ -465,7 +465,7 @@ async def get_payment_history(
 
 @router.get("/payments/{payment_id}")
 async def get_payment_details(
-    payment_id: int, current_user: Dict[str, Any] = Depends(get_current_user)
+    payment_id: int, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get details of a specific payment
@@ -496,7 +496,8 @@ async def get_payment_details(
             "status": payment["status"],
             "payment_method": payment["payment_method"],
             "stripe_payment_intent_id": payment.get("stripe_payment_intent_id"),
-            "stripe_session_id": payment.get("stripe_session_id"),
+            "stripe_session_id": payment.get("stripe_checkout_session_id")
+            or payment.get("stripe_session_id"),
             "stripe_customer_id": payment.get("stripe_customer_id"),
             "created_at": payment["created_at"],
             "updated_at": payment.get("updated_at"),
@@ -515,10 +516,10 @@ async def get_payment_details(
 # ==================== Subscription Checkout ====================
 
 
-@router.post("/subscription-checkout", response_model=Dict[str, Any])
+@router.post("/subscription-checkout", response_model=dict[str, Any])
 async def create_subscription_checkout(
     request: CreateSubscriptionCheckoutRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Create a Stripe checkout session for subscription
