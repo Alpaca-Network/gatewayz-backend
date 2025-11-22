@@ -164,7 +164,7 @@ def create_api_key(
             )
 
         # Combine base data with trial data
-        api_key_data = {
+        base_api_key_data = {
             "user_id": user_id,
             "key_name": key_name,
             "api_key": api_key,
@@ -178,17 +178,37 @@ def create_api_key(
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
             "last_used_at": datetime.now(timezone.utc).isoformat(),
-            # New optional encrypted fields (columns added via migration)
-            "encrypted_key": encrypted_token,
-            "key_version": key_version,
-            "key_hash": api_key_hash,
-            "last4": api_key_last4,
         }
 
         # Add trial data if this is a primary key
-        api_key_data.update(trial_data)
+        base_api_key_data.update(trial_data)
 
-        result = client.table("api_keys_new").insert(api_key_data).execute()
+        # Optional encrypted fields should only be sent if we have values
+        optional_encrypted_fields = {}
+        if encrypted_token is not None:
+            optional_encrypted_fields["encrypted_key"] = encrypted_token
+        if key_version is not None:
+            optional_encrypted_fields["key_version"] = key_version
+        if api_key_hash is not None:
+            optional_encrypted_fields["key_hash"] = api_key_hash
+        if api_key_last4 is not None:
+            optional_encrypted_fields["last4"] = api_key_last4
+
+        api_key_data = {**base_api_key_data, **optional_encrypted_fields}
+
+        try:
+            result = client.table("api_keys_new").insert(api_key_data).execute()
+        except Exception as insert_error:
+            error_message = str(insert_error)
+            optional_field_names = {"encrypted_key", "key_version", "key_hash", "last4"}
+            if any(field in error_message for field in optional_field_names):
+                logger.warning(
+                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
+                    sanitize_for_logging(error_message),
+                )
+                result = client.table("api_keys_new").insert(base_api_key_data).execute()
+            else:
+                raise
 
         if not result.data:
             raise ValueError("Failed to create API key")
