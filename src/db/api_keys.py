@@ -238,7 +238,19 @@ def create_api_key(
 
         api_key_data = {**base_api_key_data, **optional_encrypted_fields}
 
-        result = _insert_api_key_row(client, api_key_data, base_api_key_data)
+        try:
+            result = client.table("api_keys_new").insert(api_key_data).execute()
+        except Exception as insert_error:
+            error_message = str(insert_error)
+            optional_field_names = {"encrypted_key", "key_version", "key_hash", "last4"}
+            if any(field in error_message for field in optional_field_names):
+                logger.warning(
+                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
+                    sanitize_for_logging(error_message),
+                )
+                result = client.table("api_keys_new").insert(base_api_key_data).execute()
+            else:
+                raise
 
         if not result.data:
             raise ValueError("Failed to create API key")

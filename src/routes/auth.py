@@ -439,14 +439,44 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 }
 
                 try:
-                    user_insert = client.table("users").insert(user_payload).execute()
-                    if not user_insert.data:
-                        raise HTTPException(
-                            status_code=500, detail="Failed to create user account"
-                        ) from creation_error
+                    # Detect partially created user records from failed enhanced creation
+                    partial_user = users_module.get_user_by_privy_id(
+                        request.user.id
+                    ) or users_module.get_user_by_username(username)
 
-                    created_user = user_insert.data[0]
-                    api_key_value = f"gw_live_{username}_fallback"
+                    created_user = None
+                    if partial_user:
+                        logger.warning(
+                            "Detected partially created user %s after create_enhanced_user failure; reusing existing record",
+                            partial_user.get("id"),
+                        )
+                        update_fields = {
+                            field: value
+                            for field, value in user_payload.items()
+                            if field != "created_at" and partial_user.get(field) != value
+                        }
+                        if update_fields:
+                            update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+                            updated_result = (
+                                client.table("users")
+                                .update(update_fields)
+                                .eq("id", partial_user["id"])
+                                .execute()
+                            )
+                            if updated_result.data:
+                                partial_user = updated_result.data[0]
+                            else:
+                                partial_user.update(update_fields)
+                        created_user = partial_user
+                    else:
+                        user_insert = client.table("users").insert(user_payload).execute()
+                        if not user_insert.data:
+                            raise HTTPException(
+                                status_code=500, detail="Failed to create user account"
+                            ) from creation_error
+                        created_user = user_insert.data[0]
+
+                    api_key_value = None
 
                     # ISSUE FIX #5: Ensure environment_tag is valid before using it
                     env_tag = request.environment_tag or "live"
@@ -458,24 +488,53 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         env_tag = "live"
 
                     try:
-                        client.table("api_keys_new").insert(
-                            {
-                                "user_id": created_user["id"],
-                                "api_key": api_key_value,
-                                "key_name": "Primary API Key",
-                                "is_primary": True,
-                                "is_active": True,
-                                "environment_tag": env_tag,
-                            }
-                        ).execute()
-                        logger.info(
-                            f"Created API key for fallback user {created_user['id']} "
-                            f"with environment_tag: {env_tag}"
+                        existing_key_result = (
+                            client.table("api_keys_new")
+                            .select("api_key")
+                            .eq("user_id", created_user["id"])
+                            .eq("is_active", True)
+                            .order("is_primary", desc=True)
+                            .order("created_at", desc=False)
+                            .limit(1)
+                            .execute()
                         )
+                        if existing_key_result.data:
+                            api_key_value = existing_key_result.data[0]["api_key"]
+                            logger.info(
+                                f"Reusing existing API key for fallback user {created_user['id']}"
+                            )
+                        else:
+                            api_key_value = f"gw_live_{username}_fallback"
+                            client.table("api_keys_new").insert(
+                                {
+                                    "user_id": created_user["id"],
+                                    "api_key": api_key_value,
+                                    "key_name": "Primary API Key",
+                                    "is_primary": True,
+                                    "is_active": True,
+                                    "environment_tag": env_tag,
+                                }
+                            ).execute()
+                            logger.info(
+                                f"Created API key for fallback user {created_user['id']} "
+                                f"with environment_tag: {env_tag}"
+                            )
                     except Exception as api_key_error:
+                        if not api_key_value:
+                            api_key_value = f"gw_live_{username}_fallback"
                         logger.error(
                             f"Failed to create API key for user {created_user['id']}: "
                             f"{api_key_error}, proceeding without API key in api_keys_new table"
+                        )
+
+                    try:
+                        client.table("users").update({"api_key": api_key_value}).eq(
+                            "id", created_user["id"]
+                        ).execute()
+                    except Exception as api_key_update_error:
+                        logger.warning(
+                            f"Failed to update users.api_key for fallback user {created_user['id']}: "
+                            f"{api_key_update_error}"
                         )
 
                     user_data = {
