@@ -1,5 +1,7 @@
 import logging
+import secrets
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -32,6 +34,148 @@ def _resolve_account_email(account) -> str | None:
         if value and "@" in value:
             return value
     return None
+
+
+def _generate_unique_username(client, base_username: str) -> str:
+    """Generate a username that does not conflict with existing records."""
+    sanitized = base_username or "user"
+    candidate = sanitized
+    attempts = 0
+
+    while attempts < 5:
+        existing = (
+            client.table("users").select("id").eq("username", candidate).limit(1).execute()
+        )
+        if not existing.data:
+            return candidate
+
+        attempts += 1
+        token = secrets.token_hex(2)
+        candidate = f"{sanitized}_{token}"
+
+    # Last resort: append a longer random suffix
+    return f"{sanitized}_{secrets.token_hex(4)}"
+
+
+def _handle_existing_user(
+    existing_user: dict[str, Any],
+    request: PrivyAuthRequest,
+    background_tasks: BackgroundTasks,
+    auth_method: AuthMethod,
+    display_name: str | None,
+    email: str | None,
+) -> PrivyAuthResponse:
+    """Build a consistent response for existing users."""
+    logger.info(f"Existing Privy user found: {existing_user['id']}")
+    logger.info(
+        f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}"
+    )
+    logger.info(
+        "User credits at login: %s (type: %s)",
+        existing_user.get("credits", "NOT_FOUND"),
+        type(existing_user.get("credits")).__name__,
+    )
+
+    client = supabase_config.get_supabase_client()
+    api_key_to_return = existing_user.get("api_key")
+
+    try:
+        all_keys_result = (
+            client.table("api_keys_new")
+            .select("api_key, is_primary, created_at")
+            .eq("user_id", existing_user["id"])
+            .eq("is_active", True)
+            .order("is_primary", desc=True)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        if all_keys_result.data:
+            sorted_keys = sorted(
+                all_keys_result.data,
+                key=lambda k: (not k.get("is_primary", False), k.get("created_at", "")),
+            )
+            api_key_to_return = sorted_keys[0]["api_key"]
+            key_type = "primary" if sorted_keys[0].get("is_primary") else "active"
+            logger.info(
+                "Returning %s API key for user %s from %s active keys",
+                key_type,
+                existing_user["id"],
+                len(sorted_keys),
+            )
+        else:
+            logger.warning(
+                "No API keys found in api_keys_new for user %s, using legacy key",
+                existing_user["id"],
+            )
+    except Exception as key_error:
+        logger.error(
+            "Error retrieving API keys for user %s: %s, falling back to legacy key",
+            existing_user["id"],
+            key_error,
+        )
+
+    user_credits = existing_user.get("credits")
+    try:
+        if user_credits is None:
+            logger.warning("User %s has None/null credits, defaulting to 0.0", existing_user["id"])
+            user_credits = 0.0
+        else:
+            user_credits = float(user_credits)
+            logger.debug(
+                "Normalized user %s credits to float: %s", existing_user["id"], user_credits
+            )
+    except (ValueError, TypeError) as credits_error:
+        logger.error(
+            "Failed to convert credits for user %s (value: %s, type: %s): %s, defaulting to 0.0",
+            existing_user["id"],
+            user_credits,
+            type(user_credits).__name__,
+            credits_error,
+        )
+        user_credits = 0.0
+
+    user_email = existing_user.get("email") or email
+    logger.info(
+        "Welcome email check - User ID: %s, Welcome sent: %s",
+        existing_user["id"],
+        existing_user.get("welcome_email_sent", "Not set"),
+    )
+
+    if user_email:
+        background_tasks.add_task(
+            _send_welcome_email_background,
+            user_id=existing_user["id"],
+            username=existing_user.get("username") or display_name,
+            email=user_email,
+            credits=user_credits,
+        )
+    else:
+        logger.warning("No email found for user %s, skipping welcome email", existing_user["id"])
+
+    background_tasks.add_task(
+        _log_auth_activity_background,
+        user_id=existing_user["id"],
+        auth_method=auth_method,
+        privy_user_id=request.user.id,
+        is_new_user=False,
+    )
+
+    logger.info("Returning login response with credits: %s", user_credits)
+
+    return PrivyAuthResponse(
+        success=True,
+        message="Login successful",
+        user_id=existing_user["id"],
+        api_key=api_key_to_return,
+        auth_method=auth_method,
+        privy_user_id=request.user.id,
+        is_new_user=False,
+        display_name=existing_user.get("username") or display_name,
+        email=user_email,
+        credits=user_credits,
+        timestamp=datetime.now(timezone.utc),
+    )
 
 
 # Background task functions for non-blocking operations
@@ -276,128 +420,13 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     logger.error(f"Failed to update privy_user_id: {e}")
 
         if existing_user:
-            # Existing user - return their info
-            logger.info(f"Existing Privy user found: {existing_user['id']}")
-            logger.info(
-                f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}"
-            )
-            logger.info(
-                f"User credits at login: {existing_user.get('credits', 'NOT_FOUND')} (type: {type(existing_user.get('credits')).__name__})"
-            )
-
-            # ISSUE FIX #1: Get API key with a single query and proper sorting
-            # Multiple order() calls should be chained - Supabase applies them in sequence
-            client = supabase_config.get_supabase_client()
-
-            api_key_to_return = existing_user["api_key"]  # Default fallback
-
-            try:
-                # Get all active keys, ordered by: 1) primary first (desc), 2) creation date (asc)
-                all_keys_result = (
-                    client.table("api_keys_new")
-                    .select("api_key, is_primary, created_at")
-                    .eq("user_id", existing_user["id"])
-                    .eq("is_active", True)
-                    .order("is_primary", desc=True)
-                    .order("created_at", desc=False)
-                    .execute()
-                )
-
-                if all_keys_result.data and len(all_keys_result.data) > 0:
-                    # Sort in Python to ensure correct ordering
-                    # Primary keys first, then by creation date ascending
-                    sorted_keys = sorted(
-                        all_keys_result.data,
-                        key=lambda k: (
-                            not k.get(
-                                "is_primary", False
-                            ),  # False sorts before True (primary first)
-                            k.get("created_at", ""),  # Then by creation date
-                        ),
-                    )
-                    api_key_to_return = sorted_keys[0]["api_key"]
-                    key_type = "primary" if sorted_keys[0].get("is_primary") else "active"
-                    logger.info(
-                        f"Returning {key_type} API key for user {existing_user['id']} "
-                        f"from {len(sorted_keys)} active keys"
-                    )
-                else:
-                    logger.warning(
-                        f"No API keys found in api_keys_new for user {existing_user['id']}, "
-                        "using legacy key from users table"
-                    )
-            except Exception as key_error:
-                logger.error(
-                    f"Error retrieving API keys for user {existing_user['id']}: {key_error}, "
-                    "falling back to legacy key"
-                )
-
-            # ISSUE FIX #4: Ensure credits is a float value with error handling
-            # Normalize credits BEFORE passing to background tasks to ensure consistency
-            user_credits = existing_user.get("credits")
-            try:
-                if user_credits is None:
-                    logger.warning(
-                        f"User {existing_user['id']} has None/null credits, defaulting to 0.0"
-                    )
-                    user_credits = 0.0
-                else:
-                    # Try to convert to float
-                    user_credits = float(user_credits)
-                    logger.debug(
-                        f"Normalized user {existing_user['id']} credits to float: {user_credits}"
-                    )
-            except (ValueError, TypeError) as credits_error:
-                logger.error(
-                    f"Failed to convert credits for user {existing_user['id']} "
-                    f"(value: {user_credits}, type: {type(user_credits).__name__}): {credits_error}, "
-                    "defaulting to 0.0"
-                )
-                user_credits = 0.0
-
-            # OPTIMIZATION: Send welcome email in background to avoid blocking the response
-            user_email = existing_user.get("email") or email
-            logger.info(
-                f"Welcome email check - User ID: {existing_user['id']}, Welcome sent: {existing_user.get('welcome_email_sent', 'Not set')}"
-            )
-
-            if user_email:
-                # Send email in background with normalized credits
-                background_tasks.add_task(
-                    _send_welcome_email_background,
-                    user_id=existing_user["id"],
-                    username=existing_user.get("username") or display_name,
-                    email=user_email,
-                    credits=user_credits,
-                )
-            else:
-                logger.warning(
-                    f"No email found for user {existing_user['id']}, skipping welcome email"
-                )
-
-            # OPTIMIZATION: Log authentication activity in background to avoid blocking
-            background_tasks.add_task(
-                _log_auth_activity_background,
-                user_id=existing_user["id"],
+            return _handle_existing_user(
+                existing_user=existing_user,
+                request=request,
+                background_tasks=background_tasks,
                 auth_method=auth_method,
-                privy_user_id=request.user.id,
-                is_new_user=False,
-            )
-
-            logger.info(f"Returning login response with credits: {user_credits}")
-
-            return PrivyAuthResponse(
-                success=True,
-                message="Login successful",
-                user_id=existing_user["id"],
-                api_key=api_key_to_return,
-                auth_method=auth_method,
-                privy_user_id=request.user.id,
-                is_new_user=False,
-                display_name=existing_user.get("username") or display_name,
-                email=existing_user.get("email") or email,
-                credits=user_credits,
-                timestamp=datetime.now(timezone.utc),
+                display_name=display_name,
+                email=email,
             )
         else:
             # New user - create account
@@ -425,7 +454,37 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
                 client = supabase_config.get_supabase_client()
 
+                # Re-check for existing user before attempting manual insert to avoid TOCTOU issues
+                existing_user_after_failure = users_module.get_user_by_privy_id(request.user.id)
+                if not existing_user_after_failure:
+                    existing_user_after_failure = users_module.get_user_by_username(username)
+
+                if existing_user_after_failure:
+                    logger.info(
+                        "Detected an existing user for Privy ID %s after fallback trigger; "
+                        "returning existing record instead of inserting a duplicate",
+                        request.user.id,
+                    )
+                    return _handle_existing_user(
+                        existing_user=existing_user_after_failure,
+                        request=request,
+                        background_tasks=background_tasks,
+                        auth_method=auth_method,
+                        display_name=display_name,
+                        email=email,
+                    )
+
                 fallback_email = email or f"{request.user.id}@privy.user"
+
+                resolved_username = _generate_unique_username(client, username)
+                if resolved_username != username:
+                    logger.info(
+                        "Username collision detected for base '%s'; resolved to '%s'",
+                        username,
+                        resolved_username,
+                    )
+                    username = resolved_username
+
                 user_payload = {
                     "username": username,
                     "email": fallback_email,
