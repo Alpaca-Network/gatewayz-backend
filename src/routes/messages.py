@@ -328,6 +328,17 @@ async def anthropic_messages(
                 detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
             )
 
+        # Rate limit precheck (before making upstream request)
+        rl_pre = None
+        if rate_limit_mgr:
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers={"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                )
+
         # === 2) Transform Anthropic format to OpenAI format ===
         messages_data = [msg.model_dump() for msg in req.messages]
         openai_messages, openai_params = transform_anthropic_to_openai(
