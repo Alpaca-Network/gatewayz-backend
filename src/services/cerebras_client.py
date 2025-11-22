@@ -7,7 +7,11 @@ Falls back to OpenAI SDK with custom base URL if the official SDK is not availab
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+try:  # Python 3.11+
+    from datetime import UTC
+except ImportError:  # Python 3.10 compatibility
+    UTC = timezone.utc
 import logging
 from typing import Any
 
