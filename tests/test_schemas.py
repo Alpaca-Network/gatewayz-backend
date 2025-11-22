@@ -127,9 +127,9 @@ class TestPrivyLinkedAccount:
         """Test creating account with only required field"""
         from src.schemas.auth import PrivyLinkedAccount
 
-        account = PrivyLinkedAccount(type="wallet")
+        account = PrivyLinkedAccount(type="email")
 
-        assert account.type == "wallet"
+        assert account.type == "email"
         assert account.email is None
         assert account.name is None
         assert account.verified_at is None
@@ -163,7 +163,7 @@ class TestPrivyUserData:
             created_at=1234567890,
             linked_accounts=[
                 PrivyLinkedAccount(type="email", email="test@example.com"),
-                PrivyLinkedAccount(type="wallet", subject="0x123abc")
+                PrivyLinkedAccount(type="google_oauth", email="user@gmail.com")
             ],
             has_accepted_terms=True
         )
