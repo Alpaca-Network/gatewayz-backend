@@ -1725,7 +1725,6 @@ async def unified_responses(
 
         environment_tag = user.get("environment_tag", "live")
 
-        # Validate trial access (plan limits checked both before and after usage)
         trial = await _to_thread(validate_trial_access, api_key)
         if not trial.get("is_valid", False):
             if trial.get("is_trial") and trial.get("is_expired"):
