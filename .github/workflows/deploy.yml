@@ -181,12 +181,19 @@ jobs:
         run: |
           echo "🚀 Deploying to Railway ($RAILWAY_ENVIRONMENT)..."
 
-          # Set Railway project and environment
-          railway project switch $RAILWAY_PROJECT_ID
-          railway environment switch $RAILWAY_ENVIRONMENT
+          # Set Railway project and environment (with proper syntax)
+          railway project switch --id "$RAILWAY_PROJECT_ID" || {
+            echo "⚠️ Failed to switch project, attempting deployment anyway..."
+          }
+          railway environment switch --name "$RAILWAY_ENVIRONMENT" || {
+            echo "⚠️ Failed to switch environment, attempting deployment anyway..."
+          }
 
           # Trigger deployment
-          railway up --service backend --detach
+          railway up --detach || {
+            echo "❌ Deployment trigger failed"
+            exit 1
+          }
 
           echo "✅ Deployment triggered"
 
