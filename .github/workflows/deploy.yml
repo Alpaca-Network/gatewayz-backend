@@ -182,8 +182,8 @@ jobs:
           echo "🚀 Deploying to Railway ($RAILWAY_ENVIRONMENT)..."
 
           # Set Railway project and environment
-          railway project switch --id $RAILWAY_PROJECT_ID
-          railway environment switch --name $RAILWAY_ENVIRONMENT
+          railway project switch $RAILWAY_PROJECT_ID
+          railway environment switch $RAILWAY_ENVIRONMENT
 
           # Trigger deployment
           railway up --service backend --detach
