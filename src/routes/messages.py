@@ -6,6 +6,7 @@ Compatible with Claude API: https://docs.claude.com/en/api/messages
 import asyncio
 import importlib
 import logging
+import os
 import time
 from typing import Optional
 
@@ -265,11 +266,42 @@ async def anthropic_messages(
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
+        # Plan limit pre-check before hitting providers
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
+        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
 
         # Initialize rate limit variables
         rl_final = None
+
+        if rate_limit_mgr and not disable_rate_limiting and not trial.get("is_trial", False):
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                await _to_thread(
+                    create_rate_limit_alert,
+                    api_key,
+                    "rate_limit_exceeded",
+                    {
+                        "reason": rl_pre.reason,
+                        "retry_after": rl_pre.retry_after,
+                        "remaining_requests": rl_pre.remaining_requests,
+                        "remaining_tokens": rl_pre.remaining_tokens,
+                    },
+                )
+                headers = get_rate_limit_headers(rl_pre)
+                if rl_pre.retry_after:
+                    headers["Retry-After"] = str(rl_pre.retry_after)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers=headers or None,
+                )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
