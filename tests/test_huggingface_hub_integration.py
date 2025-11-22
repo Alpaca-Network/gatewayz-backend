@@ -17,7 +17,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from huggingface_hub import ModelInfo
+
+try:
+    from huggingface_hub import ModelInfo
+except ModuleNotFoundError as exc:
+    pytest.skip(f"Missing optional dependency huggingface_hub: {exc}", allow_module_level=True)
 
 from src.main import create_app
 
