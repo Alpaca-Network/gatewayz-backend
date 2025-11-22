@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -29,9 +28,9 @@ class ValidateReferralRequest(BaseModel):
 
 class ValidateReferralResponse(BaseModel):
     valid: bool
-    message: Optional[str] = None
-    referrer_username: Optional[str] = None
-    referrer_email: Optional[str] = None
+    message: str | None = None
+    referrer_username: str | None = None
+    referrer_email: str | None = None
 
 
 class ReferralStatsResponse(BaseModel):
@@ -44,7 +43,7 @@ class ReferralStatsResponse(BaseModel):
     max_uses: int
     total_earned: float
     current_balance: float
-    referred_by_code: Optional[str]
+    referred_by_code: str | None
     referrals: list
 
 
