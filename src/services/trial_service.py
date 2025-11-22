@@ -7,7 +7,6 @@ Handles free trial logic, expiration, and conversion to paid subscriptions
 import logging
 import os
 from datetime import datetime
-from typing import Optional
 
 from src.schemas import PlanType, SubscriptionPlansResponse
 from src.schemas.plans import SubscriptionPlan
@@ -490,7 +489,7 @@ class TrialService:
                 error_message=f"Internal error: {str(e)}",
             )
 
-    async def _get_api_key_id(self, api_key: str) -> Optional[int]:
+    async def _get_api_key_id(self, api_key: str) -> int | None:
         """Get API key ID from the key string"""
         try:
             result = (
