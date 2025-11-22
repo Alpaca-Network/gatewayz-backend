@@ -13,6 +13,17 @@ from unittest.mock import patch, MagicMock
 import src.cache as cache_module
 
 
+@pytest.fixture(autouse=True)
+def reset_cache_state():
+    """Ensure cache globals start from a clean slate for every test."""
+    cache_module._models_cache["data"] = None
+    cache_module._models_cache["timestamp"] = None
+    cache_module._provider_cache["data"] = None
+    cache_module._provider_cache["timestamp"] = None
+    cache_module._multi_provider_catalog_cache["data"] = []
+    cache_module._multi_provider_catalog_cache["timestamp"] = None
+
+
 class TestCacheInitialization:
     """Test cache structure and initialization"""
 
