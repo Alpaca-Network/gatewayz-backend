@@ -22,8 +22,8 @@ def _is_schema_cache_miss(error: Exception) -> bool:
     return any(field in error_str for field in ("key_version", "encrypted_key", "key_hash", "last4"))
 
 
-def _insert_api_key_row(client, payload: Dict[str, Any]):
-    """Insert API key row, retrying without encryption columns if schema cache is stale."""
+def _insert_api_key_row(client, payload: Dict[str, Any], fallback_payload: Optional[Dict[str, Any]] = None):
+    """Insert API key row, retrying without optional encryption columns if schema cache is stale."""
     try:
         return client.table("api_keys_new").insert(payload).execute()
     except Exception as insert_error:
@@ -37,9 +37,12 @@ def _insert_api_key_row(client, payload: Dict[str, Any]):
             sanitize_for_logging(str(insert_error)),
         )
 
-        stripped_payload = deepcopy(payload)
-        for field in _ENCRYPTION_METADATA_FIELDS:
-            stripped_payload.pop(field, None)
+        if fallback_payload is not None:
+            stripped_payload = deepcopy(fallback_payload)
+        else:
+            stripped_payload = deepcopy(payload)
+            for field in _ENCRYPTION_METADATA_FIELDS:
+                stripped_payload.pop(field, None)
 
         result = client.table("api_keys_new").insert(stripped_payload).execute()
 
@@ -203,7 +206,7 @@ def create_api_key(
             )
 
         # Combine base data with trial data
-        api_key_data = {
+        base_api_key_data = {
             "user_id": user_id,
             "key_name": key_name,
             "api_key": api_key,
@@ -217,17 +220,25 @@ def create_api_key(
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
             "last_used_at": datetime.now(timezone.utc).isoformat(),
-            # New optional encrypted fields (columns added via migration)
-            "encrypted_key": encrypted_token,
-            "key_version": key_version,
-            "key_hash": api_key_hash,
-            "last4": api_key_last4,
         }
 
         # Add trial data if this is a primary key
-        api_key_data.update(trial_data)
+        base_api_key_data.update(trial_data)
 
-        result = _insert_api_key_row(client, api_key_data)
+        # Optional encrypted fields should only be sent if we have values
+        optional_encrypted_fields: Dict[str, Any] = {}
+        if encrypted_token is not None:
+            optional_encrypted_fields["encrypted_key"] = encrypted_token
+        if key_version is not None:
+            optional_encrypted_fields["key_version"] = key_version
+        if api_key_hash is not None:
+            optional_encrypted_fields["key_hash"] = api_key_hash
+        if api_key_last4 is not None:
+            optional_encrypted_fields["last4"] = api_key_last4
+
+        api_key_data = {**base_api_key_data, **optional_encrypted_fields}
+
+        result = _insert_api_key_row(client, api_key_data, base_api_key_data)
 
         if not result.data:
             raise ValueError("Failed to create API key")
