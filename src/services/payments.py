@@ -521,14 +521,31 @@ class StripeService:
             if user_id is None or payment_id is None or credits_cents is None:
                 payment_record = self._lookup_payment_record(session)
                 if payment_record:
+                    logger.warning(
+                        "Checkout session %s missing metadata. Fallback payment context recovered (payment_id=%s).",
+                        session_id,
+                        payment_record.get("id"),
+                    )
                     if payment_id is None:
                         payment_id = payment_record.get("id")
                     if user_id is None:
                         user_id = payment_record.get("user_id")
                     if credits_cents is None:
-                        amount_usd = payment_record.get("amount_usd", payment_record.get("amount"))
-                        if amount_usd is not None:
-                            credits_cents = int(round(float(amount_usd) * 100))
+                        fallback_fields = (
+                            payment_record.get("credits_purchased"),
+                            payment_record.get("amount_cents"),
+                        )
+                        for field_value in fallback_fields:
+                            credits_cents = self._coerce_to_int(field_value)
+                            if credits_cents is not None:
+                                break
+                        if credits_cents is None:
+                            amount_usd = payment_record.get("amount_usd", payment_record.get("amount"))
+                            if amount_usd is not None:
+                                try:
+                                    credits_cents = int(round(float(amount_usd) * 100))
+                                except (TypeError, ValueError):
+                                    credits_cents = None
 
             if credits_cents is None:
                 amount_total = self._coerce_to_int(
