@@ -1,5 +1,6 @@
 import logging
 import secrets
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -9,6 +10,44 @@ from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
+
+_ENCRYPTION_METADATA_FIELDS = ("encrypted_key", "key_version", "key_hash", "last4")
+
+
+def _is_schema_cache_miss(error: Exception) -> bool:
+    """True when Supabase/PostgREST is missing freshly added columns."""
+    error_str = str(error)
+    if "PGRST204" not in error_str and "PGRST205" not in error_str:
+        return False
+    return any(field in error_str for field in ("key_version", "encrypted_key", "key_hash", "last4"))
+
+
+def _insert_api_key_row(client, payload: Dict[str, Any]):
+    """Insert API key row, retrying without encryption columns if schema cache is stale."""
+    try:
+        return client.table("api_keys_new").insert(payload).execute()
+    except Exception as insert_error:
+        if not _is_schema_cache_miss(insert_error):
+            raise
+
+        logger.warning(
+            "api_keys_new insert failed because PostgREST schema cache is stale (%s). "
+            "Retrying without optional encryption metadata. Run the encryption migrations "
+            "or refresh the schema cache to restore encrypted storage.",
+            sanitize_for_logging(str(insert_error)),
+        )
+
+        stripped_payload = deepcopy(payload)
+        for field in _ENCRYPTION_METADATA_FIELDS:
+            stripped_payload.pop(field, None)
+
+        result = client.table("api_keys_new").insert(stripped_payload).execute()
+
+        logger.info(
+            "api_keys_new insert succeeded after removing encryption metadata. "
+            "Encrypted columns will be re-enabled automatically once the schema cache is refreshed."
+        )
+        return result
 
 
 # near the top of the module
@@ -188,7 +227,7 @@ def create_api_key(
         # Add trial data if this is a primary key
         api_key_data.update(trial_data)
 
-        result = client.table("api_keys_new").insert(api_key_data).execute()
+        result = _insert_api_key_row(client, api_key_data)
 
         if not result.data:
             raise ValueError("Failed to create API key")
