@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -341,6 +341,7 @@ from src.services.provider_failover import (
     should_failover,
 )
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.token_estimator import estimate_message_tokens
 
 
 # Backwards compatibility wrappers for test patches
@@ -428,6 +429,17 @@ def mask_key(k: str) -> str:
 
 async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
+    """Run a lightweight plan-limit precheck before making upstream calls."""
+    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
 
 
 def _fallback_get_user(api_key: str):
@@ -854,6 +866,9 @@ async def chat_completions(
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
+        # Fast-fail requests that would exceed plan limits before hitting any upstream provider
+        await _ensure_plan_capacity(user["id"], environment_tag)
+
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
 
@@ -941,6 +956,14 @@ async def chat_completions(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # === 2.2) Plan limit pre-check with estimated tokens ===
+        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         # Store original model for response
         original_model = req.model
@@ -1711,7 +1734,6 @@ async def unified_responses(
 
         environment_tag = user.get("environment_tag", "live")
 
-        # Validate trial access (plan limits checked both before and after usage)
         trial = await _to_thread(validate_trial_access, api_key)
         if not trial.get("is_valid", False):
             if trial.get("is_trial") and trial.get("is_expired"):
@@ -1835,6 +1857,14 @@ async def unified_responses(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # Plan limit pre-check for unified responses
+        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         # Store original model for response
         original_model = req.model
