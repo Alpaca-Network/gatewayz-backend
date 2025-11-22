@@ -407,8 +407,10 @@ async def get_models(
         if gateway_value in ("xai", "all"):
             xai_models = get_cached_models("xai") or []
             if gateway_value == "xai" and not xai_models:
-                logger.error("No Xai models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+                logger.info(
+                    "xAI gateway requested but no cached catalog is available; "
+                    "returning an empty list because xAI does not publish a public model listing"
+                )
 
         if gateway_value in ("novita", "all"):
             novita_models = get_cached_models("novita") or []
