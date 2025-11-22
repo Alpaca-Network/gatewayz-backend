@@ -831,6 +831,14 @@ async def chat_completions(
 
             environment_tag = user.get("environment_tag", "live")
 
+            # Step 1a: Plan limit pre-check (fast fail before hitting providers)
+            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+            if not pre_plan.get("allowed", False):
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+                )
+
             # Step 2: Only validate trial access (plan limits checked after token usage known)
             trial = await _to_thread(validate_trial_access, api_key)
 
@@ -1678,6 +1686,13 @@ async def unified_responses(
             raise HTTPException(status_code=401, detail="Invalid API key")
 
         environment_tag = user.get("environment_tag", "live")
+
+        # Plan limit pre-check before doing any work
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         # Only validate trial access (plan limits checked after token usage known)
         trial = await _to_thread(validate_trial_access, api_key)
