@@ -96,3 +96,4 @@ test_results.txt
 .user_test_user_*.txt
 .test_api_key
 
+.venv.old/
