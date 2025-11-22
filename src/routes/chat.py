@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -428,6 +428,17 @@ def mask_key(k: str) -> str:
 
 async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
+    """Run a lightweight plan-limit precheck before making upstream calls."""
+    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
 
 
 def _fallback_get_user(api_key: str):
@@ -854,8 +865,19 @@ async def chat_completions(
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
+        # Fast-fail requests that would exceed plan limits before hitting any upstream provider
+        await _ensure_plan_capacity(user["id"], environment_tag)
+
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
+
+        # Pre-check plan limits before making any upstream calls
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+            )
 
         # Allow disabling rate limiting for testing (DEV ONLY)
         import os
@@ -866,7 +888,31 @@ async def chat_completions(
         rl_pre = None
         rl_final = None
 
-        # Rate limiting will be checked after we know actual token usage (more accurate)
+        if (
+            not trial.get("is_trial", False)
+            and rate_limit_mgr
+            and not disable_rate_limiting
+        ):
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                await _to_thread(
+                    create_rate_limit_alert,
+                    api_key,
+                    "rate_limit_exceeded",
+                    {
+                        "reason": rl_pre.reason,
+                        "retry_after": rl_pre.retry_after,
+                        "remaining_requests": rl_pre.remaining_requests,
+                        "remaining_tokens": rl_pre.remaining_tokens,
+                    },
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers=(
+                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                    ),
+                )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
@@ -1679,7 +1725,7 @@ async def unified_responses(
 
         environment_tag = user.get("environment_tag", "live")
 
-        # Only validate trial access (plan limits checked after token usage known)
+        # Validate trial access (plan limits checked both before and after usage)
         trial = await _to_thread(validate_trial_access, api_key)
         if not trial.get("is_valid", False):
             if trial.get("is_trial") and trial.get("is_expired"):
@@ -1701,6 +1747,22 @@ async def unified_responses(
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
         rate_limit_mgr = get_rate_limit_manager()
+
+        # Pre-check plan limits before making any provider calls to avoid unnecessary work
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+            )
+        else:
+            logger.debug(
+                "Plan pre-check passed for user %s (env=%s): %s",
+                sanitize_for_logging(str(user.get("id"))),
+                environment_tag,
+                pre_plan,
+            )
+
         if not trial.get("is_trial", False):
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:

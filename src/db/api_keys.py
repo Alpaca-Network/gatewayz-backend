@@ -5,6 +5,10 @@ from typing import Any, Dict, List, Optional
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
+from src.db.postgrest_schema import (
+    is_schema_cache_error,
+    refresh_postgrest_schema_cache,
+)
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
@@ -16,6 +20,23 @@ def _pct(used: int, limit: Optional[int]) -> Optional[float]:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
+
+
+def _insert_api_key_row(client, api_key_data):
+    try:
+        return client.table("api_keys_new").insert(api_key_data).execute()
+    except Exception as insert_error:
+        if is_schema_cache_error(insert_error):
+            sanitized_error = sanitize_for_logging(str(insert_error))
+            logger.warning(
+                "PostgREST schema cache stale while creating API key; refreshing cache and retrying. "
+                "Original error: %s",
+                sanitized_error,
+            )
+            if refresh_postgrest_schema_cache():
+                return client.table("api_keys_new").insert(api_key_data).execute()
+            logger.error("Failed to refresh PostgREST schema cache; aborting API key creation.")
+        raise
 
 
 def check_key_name_uniqueness(
@@ -164,7 +185,7 @@ def create_api_key(
             )
 
         # Combine base data with trial data
-        api_key_data = {
+        base_api_key_data = {
             "user_id": user_id,
             "key_name": key_name,
             "api_key": api_key,
@@ -178,17 +199,37 @@ def create_api_key(
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
             "last_used_at": datetime.now(timezone.utc).isoformat(),
-            # New optional encrypted fields (columns added via migration)
-            "encrypted_key": encrypted_token,
-            "key_version": key_version,
-            "key_hash": api_key_hash,
-            "last4": api_key_last4,
         }
 
         # Add trial data if this is a primary key
-        api_key_data.update(trial_data)
+        base_api_key_data.update(trial_data)
 
-        result = client.table("api_keys_new").insert(api_key_data).execute()
+        # Optional encrypted fields should only be sent if we have values
+        optional_encrypted_fields = {}
+        if encrypted_token is not None:
+            optional_encrypted_fields["encrypted_key"] = encrypted_token
+        if key_version is not None:
+            optional_encrypted_fields["key_version"] = key_version
+        if api_key_hash is not None:
+            optional_encrypted_fields["key_hash"] = api_key_hash
+        if api_key_last4 is not None:
+            optional_encrypted_fields["last4"] = api_key_last4
+
+        api_key_data = {**base_api_key_data, **optional_encrypted_fields}
+
+        try:
+            result = _insert_api_key_row(client, api_key_data)
+        except Exception as insert_error:
+            error_message = str(insert_error)
+            optional_field_names = {"encrypted_key", "key_version", "key_hash", "last4"}
+            if any(field in error_message for field in optional_field_names):
+                logger.warning(
+                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
+                    sanitize_for_logging(error_message),
+                )
+                result = _insert_api_key_row(client, base_api_key_data)
+            else:
+                raise
 
         if not result.data:
             raise ValueError("Failed to create API key")

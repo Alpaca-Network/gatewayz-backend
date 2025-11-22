@@ -409,6 +409,55 @@ class TestWebhooks:
             stripe_payment_intent_id='pi_test_123'
         )
 
+    @patch('stripe.checkout.Session.retrieve')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_refetches_metadata_when_missing(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_session_retrieve,
+        stripe_service
+    ):
+        """Ensure checkout handler refetches the session when metadata is missing"""
+
+        # Partial session payload received from Stripe webhook (missing metadata)
+        partial_session = Mock()
+        partial_session.id = 'cs_missing_meta'
+        partial_session.payment_intent = None
+        partial_session.metadata = None
+
+        # Full session returned by retrieve()
+        full_session = Mock()
+        full_session.id = 'cs_missing_meta'
+        full_session.payment_intent = 'pi_full'
+        full_session.metadata = {
+            'user_id': '1',
+            'credits': '2500',
+            'payment_id': '42'
+        }
+        mock_session_retrieve.return_value = full_session
+
+        stripe_service._handle_checkout_completed(partial_session)
+
+        mock_session_retrieve.assert_called_once_with('cs_missing_meta', expand=['metadata'])
+        mock_add_credits.assert_called_once()
+        assert mock_add_credits.call_args[1]['credits'] == 25.0
+        mock_update_payment.assert_called_once_with(
+            payment_id=42,
+            status='completed',
+            stripe_payment_intent_id='pi_full'
+        )
+
+    def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
+        """Ensure handler fails fast when both metadata and session id are missing"""
+        session_without_data = Mock()
+        session_without_data.id = None
+        session_without_data.metadata = None
+
+        with pytest.raises(ValueError, match="missing metadata and session id"):
+            stripe_service._handle_checkout_completed(session_without_data)
+
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.record_processed_event')
     @patch('src.services.payments.is_event_processed')
