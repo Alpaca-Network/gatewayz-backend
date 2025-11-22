@@ -1,14 +1,25 @@
 import logging
-from openai import OpenAI
+
+import httpx
+
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.connection_pool import get_pooled_client
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
+# Standard timeout for Helicone
+HELICONE_TIMEOUT = httpx.Timeout(
+    connect=5.0,
+    read=60.0,
+    write=10.0,
+    pool=5.0,
+)
+
 
 def get_helicone_client():
-    """Get Helicone AI Gateway client using OpenAI-compatible interface
+    """Get Helicone AI Gateway client using OpenAI-compatible interface with connection pooling
 
     Helicone AI Gateway is an observability and monitoring platform that provides
     access to multiple AI providers with logging, caching, and analytics capabilities.
@@ -23,7 +34,13 @@ def get_helicone_client():
                 "Helicone AI Gateway API key not configured. Please set HELICONE_API_KEY environment variable."
             )
 
-        return OpenAI(base_url="https://ai-gateway.helicone.ai/v1", api_key=api_key)
+        # Use connection pool with standard timeout
+        return get_pooled_client(
+            provider="helicone",
+            base_url="https://ai-gateway.helicone.ai/v1",
+            api_key=api_key,
+            timeout=HELICONE_TIMEOUT,
+        )
     except Exception as e:
         logger.error(f"Failed to initialize Helicone AI Gateway client: {e}")
         raise
@@ -72,11 +89,13 @@ def process_helicone_response(response):
         for choice in response.choices:
             msg = extract_message_with_tools(choice.message)
 
-            choices.append({
-                "index": choice.index,
-                "message": msg,
-                "finish_reason": choice.finish_reason,
-            })
+            choices.append(
+                {
+                    "index": choice.index,
+                    "message": msg,
+                    "finish_reason": choice.finish_reason,
+                }
+            )
 
         return {
             "id": response.id,
@@ -113,6 +132,13 @@ def fetch_model_pricing_from_helicone(model_id: str):
     """
     try:
         import httpx
+
+        from src.services.models import _is_building_catalog
+
+        # If we're building the catalog, return None to avoid circular dependency
+        if _is_building_catalog():
+            logger.debug(f"Skipping pricing fetch for {model_id} (catalog building in progress)")
+            return None
 
         api_key = Config.HELICONE_API_KEY
         if not api_key or api_key == "placeholder-key":
@@ -164,7 +190,16 @@ def get_provider_pricing_for_helicone_model(model_id: str):
         # Cross-reference with known provider pricing from the system
         # This leverages the existing pricing infrastructure
         try:
+            from src.services.models import _is_building_catalog
             from src.services.pricing import get_model_pricing
+
+            # If we're building the catalog, return None to avoid circular dependency
+            # The pricing will be populated in a later pass if needed
+            if _is_building_catalog():
+                logger.debug(
+                    f"Skipping provider pricing lookup for {model_id} (catalog building in progress)"
+                )
+                return None
 
             # Try the full model ID first
             pricing = get_model_pricing(model_id)

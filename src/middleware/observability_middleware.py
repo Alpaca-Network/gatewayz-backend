@@ -15,20 +15,20 @@ Metrics exposed:
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from src.services.prometheus_metrics import (
-    http_request_duration,
-    fastapi_requests_duration_seconds,
-    record_http_response,
-    fastapi_requests_in_progress,
-    fastapi_request_size_bytes,
-    fastapi_response_size_bytes,
     APP_NAME,
+    fastapi_request_size_bytes,
+    fastapi_requests_duration_seconds,
+    fastapi_requests_in_progress,
+    fastapi_response_size_bytes,
+    http_request_duration,
+    record_http_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,10 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         method = request.method
         path = request.url.path
 
+        # Skip metrics collection for metrics endpoint to avoid recursion
+        if path == "/metrics":
+            return await call_next(request)
+
         # Normalize path for metrics (group dynamic segments)
         endpoint = self._normalize_path(path)
 
@@ -80,9 +84,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             request_size = 0
 
         # Increment in-progress requests gauge
-        fastapi_requests_in_progress.labels(
-            app_name=APP_NAME, method=method, path=endpoint
-        ).inc()
+        fastapi_requests_in_progress.labels(app_name=APP_NAME, method=method, path=endpoint).inc()
 
         # Record start time
         start_time = time.time()
@@ -124,9 +126,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             fastapi_requests_duration_seconds.labels(
                 app_name=APP_NAME, method=method, path=endpoint
             ).observe(duration)
-            http_request_duration.labels(method=method, endpoint=endpoint).observe(
-                duration
-            )
+            http_request_duration.labels(method=method, endpoint=endpoint).observe(duration)
             record_http_response(
                 method=method, endpoint=endpoint, status_code=status_code, app_name=APP_NAME
             )
@@ -142,9 +142,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             fastapi_requests_duration_seconds.labels(
                 app_name=APP_NAME, method=method, path=endpoint
             ).observe(duration)
-            http_request_duration.labels(method=method, endpoint=endpoint).observe(
-                duration
-            )
+            http_request_duration.labels(method=method, endpoint=endpoint).observe(duration)
             record_http_response(
                 method=method, endpoint=endpoint, status_code=500, app_name=APP_NAME
             )

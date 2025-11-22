@@ -3,16 +3,19 @@ Startup service for initializing health monitoring, availability services, and c
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
+from src.cache import initialize_fal_cache_from_catalog
+from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import clear_connection_pools, get_pool_stats
 from src.services.model_availability import availability_service
 from src.services.model_health_monitor import health_monitor
-from src.services.response_cache import get_cache
 from src.services.prometheus_remote_write import (
     init_prometheus_remote_write,
     shutdown_prometheus_remote_write,
 )
+from src.services.response_cache import get_cache
 from src.services.tempo_otlp import init_tempo_otlp, init_tempo_otlp_fastapi
 
 logger = logging.getLogger(__name__)
@@ -26,11 +29,29 @@ async def lifespan(app):
     # Startup
     logger.info("Starting health monitoring and observability services...")
 
+    # Validate critical environment variables at runtime startup
+    from src.config import Config
+
+    is_valid, missing_vars = Config.validate_critical_env_vars()
+    if not is_valid:
+        logger.error(f"❌ CRITICAL: Missing required environment variables: {missing_vars}")
+        logger.error("Application cannot start without these variables")
+        raise RuntimeError(f"Missing required environment variables: {missing_vars}")
+    else:
+        logger.info("✅ All critical environment variables validated")
+
     try:
+        # Initialize Fal.ai model cache from static catalog
+        try:
+            initialize_fal_cache_from_catalog()
+            logger.info("Fal.ai model cache initialized from catalog")
+        except Exception as e:
+            logger.warning(f"Fal.ai cache initialization warning: {e}")
+
         # Initialize Tempo/OpenTelemetry OTLP tracing
         try:
             init_tempo_otlp()
-            init_tempo_otlp_fastapi()
+            init_tempo_otlp_fastapi(app)
             logger.info("Tempo/OTLP tracing initialized")
         except Exception as e:
             logger.warning(f"Tempo/OTLP initialization warning: {e}")
@@ -58,6 +79,24 @@ async def lifespan(app):
         get_cache()
         logger.info("Response cache initialized")
 
+        # Initialize autonomous error monitoring
+        try:
+            error_monitoring_enabled = (
+                os.environ.get("ERROR_MONITORING_ENABLED", "true").lower() == "true"
+            )
+            auto_fix_enabled = os.environ.get("AUTO_FIX_ENABLED", "true").lower() == "true"
+            scan_interval = int(os.environ.get("ERROR_MONITOR_INTERVAL", "300"))
+
+            if error_monitoring_enabled:
+                await initialize_autonomous_monitor(
+                    enabled=True,
+                    scan_interval=scan_interval,
+                    auto_fix_enabled=auto_fix_enabled,
+                )
+                logger.info("✓ Autonomous error monitoring started")
+        except Exception as e:
+            logger.warning(f"Error monitoring initialization warning: {e}")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
@@ -70,6 +109,14 @@ async def lifespan(app):
     logger.info("Shutting down monitoring and observability services...")
 
     try:
+        # Stop autonomous error monitoring
+        try:
+            autonomous_monitor = get_autonomous_monitor()
+            await autonomous_monitor.stop()
+            logger.info("Autonomous error monitoring stopped")
+        except Exception as e:
+            logger.warning(f"Error monitoring shutdown warning: {e}")
+
         # Stop availability monitoring
         await availability_service.stop_monitoring()
         logger.info("Availability monitoring service stopped")

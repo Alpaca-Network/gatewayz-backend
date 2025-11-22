@@ -11,7 +11,6 @@ import os
 import redis
 from redis.exceptions import ConnectionError, RedisError
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Redis configuration
@@ -20,7 +19,7 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
 # Global Redis client
-_redis_client: Optional[redis.Redis] = None
+_redis_client: redis.Redis | None = None
 
 
 def get_redis_config() -> dict:
@@ -28,7 +27,7 @@ def get_redis_config() -> dict:
     return {"url": REDIS_URL, "password": REDIS_PASSWORD, "db": REDIS_DB}
 
 
-def get_redis_client() -> Optional[redis.Redis]:
+def get_redis_client() -> redis.Redis | None:
     """Get Redis client instance"""
     global _redis_client
 

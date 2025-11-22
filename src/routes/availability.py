@@ -6,24 +6,23 @@ circuit breakers, and reliability features.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional, Dict, List
+from datetime import datetime, UTC
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.security.deps import get_api_key
 from src.services.model_availability import ModelAvailability, availability_service
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/availability/models", response_model=List[ModelAvailability], tags=["availability"])
+@router.get("/availability/models", response_model=list[ModelAvailability], tags=["availability"])
 async def get_available_models(
-    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
-    provider: Optional[str] = Query(None, description="Filter by specific provider"),
-    status: Optional[str] = Query(None, description="Filter by availability status"),
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    provider: str | None = Query(None, description="Filter by specific provider"),
+    status: str | None = Query(None, description="Filter by availability status"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -53,7 +52,7 @@ async def get_available_models(
 )
 async def get_model_availability(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -81,10 +80,10 @@ async def get_model_availability(
         raise HTTPException(status_code=500, detail="Failed to retrieve model availability") from e
 
 
-@router.get("/availability/check/{model_id}", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/check/{model_id}", response_model=dict[str, Any], tags=["availability"])
 async def check_model_availability(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -125,11 +124,11 @@ async def check_model_availability(
 
 
 @router.get(
-    "/availability/fallback/{model_id}", response_model=Dict[str, Any], tags=["availability"]
+    "/availability/fallback/{model_id}", response_model=dict[str, Any], tags=["availability"]
 )
 async def get_fallback_models(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -167,10 +166,10 @@ async def get_fallback_models(
         raise HTTPException(status_code=500, detail="Failed to retrieve fallback models") from e
 
 
-@router.get("/availability/best/{model_id}", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/best/{model_id}", response_model=dict[str, Any], tags=["availability"])
 async def get_best_available_model(
     model_id: str,
-    gateway: Optional[str] = Query(None, description="Specific gateway to check"),
+    gateway: str | None = Query(None, description="Specific gateway to check"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -205,7 +204,7 @@ async def get_best_available_model(
         raise HTTPException(status_code=500, detail="Failed to get best available model") from e
 
 
-@router.get("/availability/summary", response_model=Dict[str, Any], tags=["availability"])
+@router.get("/availability/summary", response_model=dict[str, Any], tags=["availability"])
 async def get_availability_summary(api_key: str = Depends(get_api_key)):
     """
     Get availability summary across all models
@@ -228,7 +227,7 @@ async def get_availability_summary(api_key: str = Depends(get_api_key)):
 
 @router.post(
     "/availability/maintenance/{model_id}",
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
     tags=["availability", "admin"],
 )
 async def set_maintenance_mode(
@@ -254,7 +253,7 @@ async def set_maintenance_mode(
 
 @router.delete(
     "/availability/maintenance/{model_id}",
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
     tags=["availability", "admin"],
 )
 async def clear_maintenance_mode(model_id: str, gateway: str, api_key: str = Depends(get_api_key)):
@@ -276,7 +275,7 @@ async def clear_maintenance_mode(model_id: str, gateway: str, api_key: str = Dep
 
 
 @router.post(
-    "/availability/monitoring/start", response_model=Dict[str, Any], tags=["availability", "admin"]
+    "/availability/monitoring/start", response_model=dict[str, Any], tags=["availability", "admin"]
 )
 async def start_availability_monitoring(api_key: str = Depends(get_api_key)):
     """
@@ -288,7 +287,7 @@ async def start_availability_monitoring(api_key: str = Depends(get_api_key)):
         await availability_service.start_monitoring()
         return {
             "message": "Availability monitoring started",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to start availability monitoring: {e}")
@@ -298,7 +297,7 @@ async def start_availability_monitoring(api_key: str = Depends(get_api_key)):
 
 
 @router.post(
-    "/availability/monitoring/stop", response_model=Dict[str, Any], tags=["availability", "admin"]
+    "/availability/monitoring/stop", response_model=dict[str, Any], tags=["availability", "admin"]
 )
 async def stop_availability_monitoring(api_key: str = Depends(get_api_key)):
     """
@@ -310,14 +309,14 @@ async def stop_availability_monitoring(api_key: str = Depends(get_api_key)):
         await availability_service.stop_monitoring()
         return {
             "message": "Availability monitoring stopped",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to stop availability monitoring: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop availability monitoring") from e
 
 
-@router.get("/availability/status", response_model=Dict[str, Any], tags=["availability", "status"])
+@router.get("/availability/status", response_model=dict[str, Any], tags=["availability", "status"])
 async def get_availability_status(api_key: str = Depends(get_api_key)):
     """
     Get simple availability status for quick checks
@@ -340,5 +339,5 @@ async def get_availability_status(api_key: str = Depends(get_api_key)):
         return {
             "status": "error",
             "message": "Failed to retrieve availability status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }

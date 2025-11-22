@@ -13,7 +13,6 @@ Features:
 
 import logging
 import sys
-from typing import Dict, Any, Optional
 
 from src.config.config import Config
 
@@ -28,17 +27,23 @@ class LokiLogHandler(logging.Handler):
     to Loki via HTTP API.
     """
 
-    def __init__(self, loki_url: str, tags: Dict[str, str]):
+    def __init__(self, loki_url: str, tags: dict[str, str]):
         super().__init__()
         self.loki_url = loki_url
         self.tags = tags
         self._session = None
 
     def _get_session(self):
-        """Lazy-load HTTP session for sending logs."""
+        """Lazy-load HTTP session for sending logs with connection limits."""
         if self._session is None:
             import httpx
-            self._session = httpx.Client(timeout=5.0)
+
+            # Create client with strict timeouts and connection limits to prevent resource exhaustion
+            # Set max_connections to prevent too many concurrent connections
+            # Set max_keepalive_connections to limit persistent connections
+            limits = httpx.Limits(max_connections=10, max_keepalive_connections=5)
+            timeout = httpx.Timeout(5.0, connect=2.0)
+            self._session = httpx.Client(timeout=timeout, limits=limits)
         return self._session
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -53,37 +58,32 @@ class LokiLogHandler(logging.Handler):
             log_entry = self.format(record)
 
             # Get trace context if available
-            trace_id = getattr(record, 'trace_id', None)
-            span_id = getattr(record, 'span_id', None)
+            trace_id = getattr(record, "trace_id", None)
+            getattr(record, "span_id", None)
 
             # Build Loki labels
             labels = {**self.tags}
             if trace_id:
-                labels['trace_id'] = trace_id
-            if hasattr(record, 'request_path'):
-                labels['path'] = record.request_path
+                labels["trace_id"] = trace_id
+            if hasattr(record, "request_path"):
+                labels["path"] = record.request_path
 
             # Build Loki push payload
             # Format: {"streams": [{"stream": {...labels}, "values": [[timestamp_ns, log_line]]}]}
             timestamp_ns = str(int(record.created * 1_000_000_000))
-            payload = {
-                "streams": [
-                    {
-                        "stream": labels,
-                        "values": [[timestamp_ns, log_entry]]
-                    }
-                ]
-            }
+            payload = {"streams": [{"stream": labels, "values": [[timestamp_ns, log_entry]]}]}
 
-            # Send to Loki
+            # Send to Loki with timeout to prevent hanging
             session = self._get_session()
-            response = session.post(self.loki_url, json=payload)
+            response = session.post(self.loki_url, json=payload, timeout=5.0)
             response.raise_for_status()
 
-        except Exception as e:
-            # Don't fail the application if logging fails
-            # Use handleError to avoid infinite recursion
-            self.handleError(record)
+        except Exception:
+            # Silently ignore Loki logging failures to prevent cascade errors
+            # Do NOT use handleError() as it can trigger recursive logging
+            # Do NOT log the error as it can create infinite loops
+            # Just continue - the log will be lost but the application won't crash
+            pass
 
     def close(self) -> None:
         """Close HTTP session."""
@@ -111,7 +111,7 @@ class TraceContextFilter(logging.Filter):
             bool: Always True (don't filter out records)
         """
         try:
-            from src.config.opentelemetry_config import get_current_trace_id, get_current_span_id
+            from src.config.opentelemetry_config import get_current_span_id, get_current_trace_id
 
             trace_id = get_current_trace_id()
             span_id = get_current_span_id()
@@ -155,17 +155,17 @@ class StructuredFormatter(logging.Formatter):
         }
 
         # Add trace context if available
-        if hasattr(record, 'trace_id'):
-            log_data['trace_id'] = record.trace_id
-        if hasattr(record, 'span_id'):
-            log_data['span_id'] = record.span_id
+        if hasattr(record, "trace_id"):
+            log_data["trace_id"] = record.trace_id
+        if hasattr(record, "span_id"):
+            log_data["span_id"] = record.span_id
 
         # Add exception info if present
         if record.exc_info:
-            log_data['exception'] = self.formatException(record.exc_info)
+            log_data["exception"] = self.formatException(record.exc_info)
 
         # Add any extra fields
-        if hasattr(record, 'extra'):
+        if hasattr(record, "extra"):
             log_data.update(record.extra)
 
         return json.dumps(log_data)
@@ -202,7 +202,7 @@ def configure_logging() -> bool:
     # Use simple format for console in development, JSON in production
     if Config.IS_DEVELOPMENT:
         console_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
     else:
         console_formatter = StructuredFormatter()
@@ -222,7 +222,7 @@ def configure_logging() -> bool:
                     "app": Config.OTEL_SERVICE_NAME,
                     "environment": Config.APP_ENV,
                     "service": "gatewayz-api",
-                }
+                },
             )
             loki_handler.setLevel(logging.INFO)
             loki_handler.setFormatter(StructuredFormatter())

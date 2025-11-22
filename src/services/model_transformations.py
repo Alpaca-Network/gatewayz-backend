@@ -9,12 +9,17 @@ This module handles transformations between user-friendly model IDs
 
 import logging
 
-from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # Llama models are better served through OpenRouter, Featherless, or HuggingFace
+    # rather than directly through Cerebras which doesn't have native Llama models
+    "cerebras/llama-3.3-70b": "openrouter",
+    "cerebras/llama-3.3-70b-instruct": "openrouter",
+    "cerebras/llama-3.1-70b": "openrouter",
+    "cerebras/llama-3.1-70b-instruct": "openrouter",
 }
 
 # Gemini model name constants to reduce duplication
@@ -97,10 +102,10 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.debug(f"Model ID already in Fireworks format: {model_id}")
         return model_id
 
-    # If already has Portkey @ prefix, return as-is (already lowercase)
-    # EXCEPT for Google Vertex AI models which may use @google/models/ format
+    # If model starts with @, but is not a Google model, keep as-is
+    # (@ prefix is used by some providers but Portkey has been removed)
     if model_id.startswith("@") and not model_id.startswith("@google/models/"):
-        logger.debug(f"Model ID already in Portkey format: {model_id}")
+        logger.debug(f"Model ID with @ prefix (non-Google): {model_id}")
         return model_id
 
     provider_lower = provider.lower()
@@ -174,7 +179,7 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     return model_id
 
 
-def get_model_id_mapping(provider: str) -> Dict[str, str]:
+def get_model_id_mapping(provider: str) -> dict[str, str]:
     """
     Get simplified -> native format mapping for a specific provider.
     This maps user-friendly input to what the provider API expects.
@@ -250,11 +255,6 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
             "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
             "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
-        },
-        "portkey": {
-            # Portkey uses @ prefix
-            "openai/gpt-4": "@openai/gpt-4",
-            "anthropic/claude-3-opus": "@anthropic/claude-3-opus-20240229",
         },
         "huggingface": {
             # HuggingFace uses org/model format directly
@@ -472,6 +472,117 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "deepseek-v3": "deepseek-v3-1",
             "deepseek-v3-1": "deepseek-v3-1",  # Direct service name
         },
+        "alibaba-cloud": {
+            # Alibaba Cloud / DashScope models
+            # Uses OpenAI-compatible API with direct model IDs
+            # Reference: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+            # Qwen commercial models
+            "qwen/qwen-plus": "qwen-plus",
+            "qwen/qwen-max": "qwen-max",
+            "qwen/qwen-flash": "qwen-flash",
+            "qwen-plus": "qwen-plus",
+            "qwen-max": "qwen-max",
+            "qwen-flash": "qwen-flash",
+
+            # Qwen specialized models
+            "qwen/qwq-plus": "qwq-plus",
+            "qwen/qwen-long": "qwen-long",
+            "qwen/qwen-omni": "qwen-omni",
+            "qwen/qwen-vl": "qwen-vl",
+            "qwen/qwen-math": "qwen-math",
+            "qwen/qwen-mt": "qwen-mt",
+            "qwen/qvq": "qvq",
+            "qwq-plus": "qwq-plus",
+            "qwen-long": "qwen-long",
+            "qwen-omni": "qwen-omni",
+            "qwen-vl": "qwen-vl",
+            "qwen-math": "qwen-math",
+            "qwen-mt": "qwen-mt",
+            "qvq": "qvq",
+
+            # Qwen Coder models
+            "qwen/qwen-coder": "qwen-coder",
+            "qwen-coder": "qwen-coder",
+
+            # Qwen reasoning models
+            "qwen/qwq-32b-preview": "qwq-32b-preview",
+            "qwq-32b-preview": "qwq-32b-preview",
+
+            # Qwen thinking models
+            "qwen/qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
+            "qwen/qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
+            "qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
+            "qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
+
+            # Qwen 3 series
+            "qwen/qwen-3-30b": "qwen-3-30b-a3b-instruct",
+            "qwen/qwen-3-80b": "qwen-3-80b-a3b-instruct",
+            "qwen/qwen3-32b": "qwen-3-32b-a3b-instruct",
+            "qwen3-30b": "qwen-3-30b-a3b-instruct",
+            "qwen3-80b": "qwen-3-80b-a3b-instruct",
+            "qwen3-32b": "qwen-3-32b-a3b-instruct",
+
+            # Qwen 2.5 series
+            "qwen/qwen-2.5-72b": "qwen-2.5-72b-instruct",
+            "qwen/qwen-2.5-7b": "qwen-2.5-7b-instruct",
+            "qwen-2.5-72b": "qwen-2.5-72b-instruct",
+            "qwen-2.5-7b": "qwen-2.5-7b-instruct",
+
+            # Qwen 2 series
+            "qwen/qwen-2-72b": "qwen-2-72b-instruct",
+            "qwen/qwen-2-7b": "qwen-2-7b-instruct",
+            "qwen-2-72b": "qwen-2-72b-instruct",
+            "qwen-2-7b": "qwen-2-7b-instruct",
+
+            # Qwen 1.5 models
+            "qwen/qwen-1.5-72b": "qwen-1.5-72b-chat",
+            "qwen/qwen-1.5-14b": "qwen-1.5-14b-chat",
+            "qwen-1.5-72b": "qwen-1.5-72b-chat",
+            "qwen-1.5-14b": "qwen-1.5-14b-chat",
+
+            # Alternative naming formats (shorthand)
+            "qwen": "qwen-plus",  # Default to Plus for unspecified qwen
+            "qwen-max-latest": "qwen-max",
+            "qwen-plus-latest": "qwen-plus",
+        },
+        "clarifai": {
+            # Clarifai supports many models through its unified API
+            # Most models pass through directly using their standard naming
+            # Anthropic models
+            "anthropic/claude-3-opus": "claude-3-opus",
+            "anthropic/claude-3.5-sonnet": "claude-3.5-sonnet",
+            "claude-3-opus": "claude-3-opus",
+            "claude-3.5-sonnet": "claude-3.5-sonnet",
+            # OpenAI models
+            "openai/gpt-4": "gpt-4",
+            "openai/gpt-4-turbo": "gpt-4-turbo",
+            "gpt-4": "gpt-4",
+            "gpt-4-turbo": "gpt-4-turbo",
+            # Meta Llama models
+            "meta-llama/llama-3.1-70b": "llama-3.1-70b-instruct",
+            "meta-llama/llama-3-70b": "llama-3-70b-instruct",
+            "llama-3.1-70b": "llama-3.1-70b-instruct",
+            "llama-3-70b": "llama-3-70b-instruct",
+            # Mistral models
+            "mistralai/mistral-7b": "mistral-7b-instruct",
+            "mistralai/mixtral-8x7b": "mixtral-8x7b-instruct",
+            "mistral-7b": "mistral-7b-instruct",
+            "mixtral-8x7b": "mixtral-8x7b-instruct",
+        },
+        "xai": {
+            # XAI Grok models - pass-through format
+            # Models are referenced by their simple names (e.g., "grok-2", "grok-beta")
+            # Can also use xai/grok-* format
+            "grok-beta": "grok-beta",
+            "grok-2": "grok-2",
+            "grok-2-1212": "grok-2-1212",
+            "grok-vision-beta": "grok-vision-beta",
+            "xai/grok-beta": "grok-beta",
+            "xai/grok-2": "grok-2",
+            "xai/grok-2-1212": "grok-2-1212",
+            "xai/grok-vision-beta": "grok-vision-beta",
+        },
     }
 
     return mappings.get(provider, {})
@@ -553,7 +664,7 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[str] = None) -> Optional[str]:
+def detect_provider_from_model_id(model_id: str, preferred_provider: str | None = None) -> str | None:
     """
     Try to detect which provider a model belongs to based on its ID.
 
@@ -616,25 +727,28 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
     if model_id.startswith("accounts/fireworks/models/"):
         return "fireworks"
 
+    # Normalize to lowercase for consistency in all @ prefix checks
+    normalized_model = model_id.lower()
+
     # Check for Google Vertex AI models first (before Portkey check)
     if model_id.startswith("projects/") and "/models/" in model_id:
         return "google-vertex"
-    if model_id.startswith("@google/models/") and any(
-        pattern in model_id.lower()
+    if normalized_model.startswith("@google/models/") and any(
+        pattern in normalized_model
         for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
     ):
         # Patterns like "@google/models/gemini-2.5-flash"
         return "google-vertex"
     if (
         any(
-            pattern in model_id.lower()
+            pattern in normalized_model
             for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
         )
         and "/" not in model_id
     ):
         # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
         return "google-vertex"
-    if model_id.startswith("google/") and "gemini" in model_id.lower():
+    if model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
         # These can go to either Vertex AI or OpenRouter
         # Check if Vertex AI credentials are available
@@ -658,11 +772,14 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
             logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
             return "openrouter"
 
-    # Portkey format is @org/model (must have / to be valid)
+    # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
+    # After Portkey removal, @ prefix models are now routed through OpenRouter
+    # which supports multi-provider model format
     if model_id.startswith("@") and "/" in model_id:
-        # Only Portkey if not a Google format
-        if not model_id.startswith("@google/models/"):
-            return "portkey"
+        if not normalized_model.startswith("@google/models/"):
+            # Route @ prefix models (e.g., "@anthropic/claude-3-sonnet") to OpenRouter
+            logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
+            return "openrouter"
 
     # Check all mappings to see if this model exists
     for provider in [
@@ -670,7 +787,6 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "openrouter",
         "featherless",
         "together",
-        "portkey",
         "huggingface",
         "hug",
         "chutes",
@@ -681,7 +797,9 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "anannas",
         "near",
         "alpaca-network",
+        "alibaba-cloud",
         "fal",
+        "xai",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -723,6 +841,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         if org == "alpaca-network" or org == "alpaca":
             return "alpaca-network"
 
+        # Alibaba Cloud / Qwen models (e.g., "qwen/qwen-plus", "alibaba-cloud/qwen-max")
+        if org == "qwen" or org == "alibaba-cloud" or org == "alibaba":
+            return "alibaba-cloud"
+
         # DeepSeek models are primarily on Fireworks in this system
         if org == "deepseek-ai" and "deepseek" in model_name.lower():
             return "fireworks"
@@ -745,6 +867,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
             "tripo3d",
         ]:
             return "fal"
+
+        # XAI models (e.g., "xai/grok-2")
+        if org == "xai":
+            return "xai"
+
+    # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")
+    if model_id.startswith("grok-"):
+        logger.info(f"Detected XAI provider for Grok model '{model_id}'")
+        return "xai"
 
     logger.debug(f"Could not detect provider for model '{model_id}'")
     return None

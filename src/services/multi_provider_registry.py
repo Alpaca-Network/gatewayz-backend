@@ -1,13 +1,14 @@
 """Multi-provider model registry and canonical catalog support."""
 
 import logging
-from typing import List, Optional, Dict, Any, Iterable
 from dataclasses import dataclass, field
+from typing import Any, Optional
+from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
 
-def _merge_dicts(base: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_dicts(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     """Merge two dictionaries preferring non-empty values from the incoming dict."""
 
     if not incoming:
@@ -41,11 +42,13 @@ class ProviderConfig:
     model_id: str  # Provider-specific model ID
     priority: int = 1  # Lower number = higher priority (1 is highest)
     requires_credentials: bool = False  # Whether this provider needs user credentials
-    cost_per_1k_input: Optional[float] = None  # Cost in credits per 1k input tokens
-    cost_per_1k_output: Optional[float] = None  # Cost in credits per 1k output tokens
+    cost_per_1k_input: float | None = None  # Cost in credits per 1k input tokens
+    cost_per_1k_output: float | None = None  # Cost in credits per 1k output tokens
     enabled: bool = True  # Whether this provider is currently enabled
-    max_tokens: Optional[int] = None  # Max tokens supported by this provider
-    features: List[str] = field(default_factory=list)  # Supported features (e.g., "streaming", "function_calling")
+    max_tokens: int | None = None  # Max tokens supported by this provider
+    features: list[str] = field(
+        default_factory=list
+    )  # Supported features (e.g., "streaming", "function_calling")
 
     def __post_init__(self):
         """Validate the configuration"""
@@ -59,10 +62,10 @@ class MultiProviderModel:
 
     id: str  # Canonical model ID (what users specify)
     name: str  # Display name
-    providers: List[ProviderConfig]  # List of provider configurations
-    description: Optional[str] = None
-    context_length: Optional[int] = None
-    modalities: List[str] = field(default_factory=lambda: ["text"])
+    providers: list[ProviderConfig]  # List of provider configurations
+    description: str | None = None
+    context_length: int | None = None
+    modalities: list[str] = field(default_factory=lambda: ["text"])
 
     def __post_init__(self):
         """Validate and sort providers by priority"""
@@ -77,16 +80,16 @@ class MultiProviderModel:
             f"{[p.name for p in self.providers]}"
         )
 
-    def get_enabled_providers(self) -> List[ProviderConfig]:
+    def get_enabled_providers(self) -> list[ProviderConfig]:
         """Get list of enabled providers, sorted by priority"""
         return [p for p in self.providers if p.enabled]
 
-    def get_primary_provider(self) -> Optional[ProviderConfig]:
+    def get_primary_provider(self) -> ProviderConfig | None:
         """Get the highest priority enabled provider"""
         enabled = self.get_enabled_providers()
         return enabled[0] if enabled else None
 
-    def get_provider_by_name(self, name: str) -> Optional[ProviderConfig]:
+    def get_provider_by_name(self, name: str) -> ProviderConfig | None:
         """Get a specific provider configuration by name"""
         for provider in self.providers:
             if provider.name == name:
@@ -104,9 +107,9 @@ class CanonicalModelProvider:
 
     provider_slug: str
     native_model_id: str
-    capabilities: Dict[str, Any] = field(default_factory=dict)
-    pricing: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    pricing: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def merge(self, other: "CanonicalModelProvider") -> None:
         if other.provider_slug != self.provider_slug:
@@ -119,7 +122,7 @@ class CanonicalModelProvider:
         self.pricing = _merge_dicts(self.pricing, other.pricing)
         self.metadata = _merge_dicts(self.metadata, other.metadata)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "provider_slug": self.provider_slug,
             "native_model_id": self.native_model_id,
@@ -134,10 +137,10 @@ class CanonicalModel:
     """Canonical model definition spanning multiple providers."""
 
     id: str
-    display: Dict[str, Any] = field(default_factory=dict)
-    providers: Dict[str, CanonicalModelProvider] = field(default_factory=dict)
+    display: dict[str, Any] = field(default_factory=dict)
+    providers: dict[str, CanonicalModelProvider] = field(default_factory=dict)
 
-    def merge_display(self, incoming: Dict[str, Any]) -> None:
+    def merge_display(self, incoming: dict[str, Any]) -> None:
         if not incoming:
             return
         self.display = _merge_dicts(self.display, dict(incoming))
@@ -149,7 +152,7 @@ class CanonicalModel:
         else:
             self.providers[provider.provider_slug] = provider
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "display": self.display,
@@ -167,17 +170,16 @@ class MultiProviderRegistry:
     """
 
     def __init__(self):
-        self._models: Dict[str, MultiProviderModel] = {}
-        self._canonical_models: Dict[str, "CanonicalModel"] = {}
-        self._canonical_slug_index: Dict[str, str] = {}
+        self._models: dict[str, MultiProviderModel] = {}
+        self._canonical_models: dict[str, "CanonicalModel"] = {}
+        self._canonical_slug_index: dict[str, str] = {}
         logger.info("Initialized MultiProviderRegistry")
 
     def register_model(self, model: MultiProviderModel) -> None:
         """Register a multi-provider model"""
         self._models[model.id] = model
         logger.info(
-            f"Registered multi-provider model: {model.id} with "
-            f"{len(model.providers)} providers"
+            f"Registered multi-provider model: {model.id} with " f"{len(model.providers)} providers"
         )
 
         # Also register canonical representation for compatibility
@@ -212,12 +214,12 @@ class MultiProviderRegistry:
                 exc,
             )
 
-    def register_models(self, models: List[MultiProviderModel]) -> None:
+    def register_models(self, models: list[MultiProviderModel]) -> None:
         """Register multiple models at once"""
         for model in models:
             self.register_model(model)
 
-    def get_model(self, model_id: str) -> Optional[MultiProviderModel]:
+    def get_model(self, model_id: str) -> MultiProviderModel | None:
         """Get a multi-provider model by ID"""
         return self._models.get(model_id)
 
@@ -225,7 +227,7 @@ class MultiProviderRegistry:
         """Check if a model is registered"""
         return model_id in self._models
 
-    def get_all_models(self) -> List[MultiProviderModel]:
+    def get_all_models(self) -> list[MultiProviderModel]:
         """Get all registered models"""
         return list(self._models.values())
 
@@ -240,7 +242,7 @@ class MultiProviderRegistry:
         self._canonical_models.clear()
         self._canonical_slug_index.clear()
 
-    def _resolve_canonical_id(self, *candidates: Iterable[Optional[str]]) -> Optional[str]:
+    def _resolve_canonical_id(self, *candidates: Iterable[str | None]) -> str | None:
         for group in candidates:
             if not group:
                 continue
@@ -259,8 +261,8 @@ class MultiProviderRegistry:
 
     def register_canonical_provider(
         self,
-        canonical_id: Optional[str],
-        display_metadata: Optional[Dict[str, Any]],
+        canonical_id: str | None,
+        display_metadata: dict[str, Any] | None,
         provider: "CanonicalModelProvider",
     ) -> "CanonicalModel":
         """Register a canonical model provider mapping.
@@ -271,7 +273,7 @@ class MultiProviderRegistry:
             provider: Provider adapter definition.
         """
 
-        slug_candidates: List[str] = []
+        slug_candidates: list[str] = []
         if display_metadata:
             slug_candidates.extend(
                 str(value)
@@ -280,7 +282,7 @@ class MultiProviderRegistry:
             )
             aliases = display_metadata.get("aliases")
             if aliases:
-                if isinstance(aliases, (list, tuple, set)):
+                if isinstance(aliases, list | tuple | set):
                     slug_candidates.extend(str(alias) for alias in aliases if alias)
                 else:
                     slug_candidates.append(str(aliases))
@@ -293,9 +295,7 @@ class MultiProviderRegistry:
         slug_candidates.append(provider.native_model_id)
 
         resolved_id = (
-            canonical_id
-            or provider.metadata.get("canonical_slug")
-            or provider.native_model_id
+            canonical_id or provider.metadata.get("canonical_slug") or provider.native_model_id
         )
 
         existing_id = self._resolve_canonical_id(slug_candidates, [resolved_id])
@@ -320,19 +320,19 @@ class MultiProviderRegistry:
     def get_canonical_model(self, canonical_id: str) -> Optional["CanonicalModel"]:
         return self._canonical_models.get(canonical_id)
 
-    def get_canonical_models(self) -> List["CanonicalModel"]:
+    def get_canonical_models(self) -> list["CanonicalModel"]:
         return list(self._canonical_models.values())
 
-    def get_canonical_catalog_snapshot(self) -> List[Dict[str, Any]]:
+    def get_canonical_catalog_snapshot(self) -> list[dict[str, Any]]:
         return [model.to_dict() for model in self.get_canonical_models()]
 
     def select_provider(
         self,
         model_id: str,
-        preferred_provider: Optional[str] = None,
-        required_features: Optional[List[str]] = None,
-        max_cost: Optional[float] = None,
-    ) -> Optional[ProviderConfig]:
+        preferred_provider: str | None = None,
+        required_features: list[str] | None = None,
+        max_cost: float | None = None,
+    ) -> ProviderConfig | None:
         """
         Select the best provider for a model based on criteria.
 
@@ -359,8 +359,7 @@ class MultiProviderRegistry:
         # Filter by required features
         if required_features:
             candidates = [
-                p for p in candidates
-                if all(feature in p.features for feature in required_features)
+                p for p in candidates if all(feature in p.features for feature in required_features)
             ]
             if not candidates:
                 logger.warning(
@@ -371,22 +370,19 @@ class MultiProviderRegistry:
         # Filter by cost
         if max_cost is not None:
             candidates = [
-                p for p in candidates
+                p
+                for p in candidates
                 if p.cost_per_1k_input is None or p.cost_per_1k_input <= max_cost
             ]
             if not candidates:
-                logger.warning(
-                    f"No providers for {model_id} within cost limit: {max_cost}"
-                )
+                logger.warning(f"No providers for {model_id} within cost limit: {max_cost}")
                 return None
 
         # If preferred provider specified and available, use it
         if preferred_provider:
             for provider in candidates:
                 if provider.name == preferred_provider:
-                    logger.info(
-                        f"Selected preferred provider {preferred_provider} for {model_id}"
-                    )
+                    logger.info(f"Selected preferred provider {preferred_provider} for {model_id}")
                     return provider
             logger.warning(
                 f"Preferred provider {preferred_provider} not available for {model_id}, "
@@ -403,8 +399,8 @@ class MultiProviderRegistry:
     def get_fallback_providers(
         self,
         model_id: str,
-        exclude_provider: Optional[str] = None,
-    ) -> List[ProviderConfig]:
+        exclude_provider: str | None = None,
+    ) -> list[ProviderConfig]:
         """
         Get ordered list of fallback providers for a model.
 

@@ -1,4 +1,3 @@
-from typing import Dict
 import hashlib
 import os
 
@@ -9,13 +8,13 @@ except Exception:
     InvalidToken = Exception  # type: ignore
 
 
-def _load_keyring_from_env() -> tuple[int, Dict[int, "Fernet"]]:
+def _load_keyring_from_env() -> tuple[int, dict[int, "Fernet"]]:
     """Load keyring from env. Example:
     KEY_VERSION=1
     KEYRING_1=<base64_fernet_key>
     """
     current = int(os.getenv("KEY_VERSION", "1"))
-    keyring: Dict[int, Fernet] = {}
+    keyring: dict[int, Fernet] = {}
     # If cryptography is not available, fall back to no-op encryption
     if Fernet is None:
         return current, {}

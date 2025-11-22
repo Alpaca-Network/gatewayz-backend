@@ -1,25 +1,28 @@
 import logging
-from typing import Any, Optional, Dict, List
-from datetime import datetime, timedelta, timezone
-
-from src.db.api_keys import create_api_key
-from src.config.supabase_config import get_supabase_client
 import secrets
+from datetime import datetime, timedelta, UTC
+from typing import Any
+
+from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import create_api_key
 from src.utils.security_validators import sanitize_for_logging
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
 def create_enhanced_user(
-    username: str, email: str, auth_method: str, credits: int = 10, privy_user_id: Optional[str] = None
-) -> Dict[str, Any]:
+    username: str,
+    email: str,
+    auth_method: str,
+    credits: int = 10,
+    privy_user_id: str | None = None,
+) -> dict[str, Any]:
     """Create a new user with automatic 3-day trial and $10 credits"""
     try:
         client = get_supabase_client()
 
         # Prepare user data with trial setup
-        trial_start = datetime.now(timezone.utc)
+        trial_start = datetime.now(UTC)
         trial_end = trial_start + timedelta(days=3)
 
         user_data = {
@@ -84,7 +87,7 @@ def create_enhanced_user(
         raise RuntimeError(f"Failed to create enhanced user: {e}")
 
 
-def get_user(api_key: str) -> Optional[Dict[str, Any]]:
+def get_user(api_key: str) -> dict[str, Any] | None:
     """Get user by API key from unified system"""
     try:
         client = get_supabase_client()
@@ -125,7 +128,7 @@ def get_user(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     """
     Get user by user ID (primary key)
 
@@ -154,7 +157,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_privy_id(privy_user_id: str) -> Optional[Dict[str, Any]]:
+def get_user_by_privy_id(privy_user_id: str) -> dict[str, Any] | None:
     """Get user by Privy user ID"""
     try:
         client = get_supabase_client()
@@ -171,7 +174,7 @@ def get_user_by_privy_id(privy_user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+def get_user_by_username(username: str) -> dict[str, Any] | None:
     """Get user by username"""
     try:
         client = get_supabase_client()
@@ -193,8 +196,8 @@ def add_credits_to_user(
     credits: float,
     transaction_type: str = "admin_credit",
     description: str = "Credits added",
-    payment_id: Optional[int] = None,
-    metadata: Optional[dict] = None,
+    payment_id: int | None = None,
+    metadata: dict | None = None,
 ) -> None:
     """
     Add credits to user account by user ID and log the transaction
@@ -226,7 +229,9 @@ def add_credits_to_user(
         # Update user credits
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -272,7 +277,7 @@ def log_api_usage_transaction(
     api_key: str,
     cost: float,
     description: str = "API usage",
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
     is_trial: bool = False,
 ) -> None:
     """
@@ -287,7 +292,7 @@ def log_api_usage_transaction(
         is_trial: Whether user is on trial (if True, cost should be 0 and no credits deducted)
     """
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -328,7 +333,7 @@ def log_api_usage_transaction(
 
 
 def deduct_credits(
-    api_key: str, tokens: float, description: str = "API usage", metadata: Optional[dict] = None
+    api_key: str, tokens: float, description: str = "API usage", metadata: dict | None = None
 ) -> None:
     """
     Deduct credits from user account by API key and log the transaction
@@ -352,7 +357,7 @@ def deduct_credits(
         return
 
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -369,7 +374,9 @@ def deduct_credits(
         client = get_supabase_client()
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -413,7 +420,7 @@ def deduct_credits(
         raise RuntimeError(f"Failed to deduct credits: {e}") from e
 
 
-def get_all_users() -> List[Dict[str, Any]]:
+def get_all_users() -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
         result = client.table("users").select("*").execute()
@@ -465,7 +472,7 @@ def record_usage(
         client = get_supabase_client()
 
         # Ensure timestamp is timezone-aware
-        timestamp = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).replace(tzinfo=UTC).isoformat()
 
         # Only include columns that exist in the schema
         usage_data = {
@@ -493,7 +500,7 @@ def record_usage(
         # Don't raise the exception to avoid breaking the main flow
 
 
-def get_user_usage_metrics(api_key: str) -> Dict[str, Any]:
+def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
@@ -567,7 +574,7 @@ def get_user_usage_metrics(api_key: str) -> Dict[str, Any]:
         return None
 
 
-def get_admin_monitor_data() -> Dict[str, Any]:
+def get_admin_monitor_data() -> dict[str, Any]:
     """Get admin monitoring data with robust error handling"""
     try:
         client = get_supabase_client()
@@ -585,7 +592,9 @@ def get_admin_monitor_data() -> Dict[str, Any]:
         # This is the main source of truth for API usage tracking
         activity_logs = []
         try:
-            activity_result = client.table("activity_log").select("*").order("timestamp", desc=True).execute()
+            activity_result = (
+                client.table("activity_log").select("*").order("timestamp", desc=True).execute()
+            )
             activity_logs = activity_result.data or []
             logger.info(f"Retrieved {len(activity_logs)} activity log records")
         except Exception as e:
@@ -612,7 +621,9 @@ def get_admin_monitor_data() -> Dict[str, Any]:
 
         # Also check api_keys_new table for users who might not have api_key in users table
         try:
-            api_keys_result = client.table("api_keys_new").select("user_id, api_key, is_primary").execute()
+            api_keys_result = (
+                client.table("api_keys_new").select("user_id, api_key, is_primary").execute()
+            )
             if api_keys_result.data:
                 for key_data in api_keys_result.data:
                     user_id = key_data.get("user_id")
@@ -633,7 +644,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
             user_id = activity.get("user_id")
             # Look up API key from mapping
             api_key = user_id_to_api_key.get(user_id, "unknown")
-            
+
             # Create a usage record-like entry from activity log
             usage_record = {
                 "user_id": user_id,
@@ -659,7 +670,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
         len([user for user in users if user.get("credits", 0) > 0])
 
         # Calculate time-based statistics
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
@@ -676,7 +687,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
                     # Handle different timestamp formats
                     if "Z" in timestamp_str:
                         timestamp_str = timestamp_str.replace("Z", "+00:00")
-                    
+
                     # Fix malformed timestamps with odd-numbered microseconds
                     # e.g., "2025-10-14T15:24:27.81588+00:00" -> "2025-10-14T15:24:27.815880+00:00"
                     if "." in timestamp_str and "+" in timestamp_str:
@@ -695,7 +706,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
                                     elif len(micros_part) > 6:
                                         micros_part = micros_part[:6]
                                     timestamp_str = f"{seconds_part}.{micros_part}{tz_part}"
-                    
+
                     record_time = datetime.fromisoformat(timestamp_str)
 
                     if record_time > day_ago:
@@ -835,7 +846,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
         }
 
 
-def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str, Any]:
     """Update user profile information"""
     try:
         client = get_supabase_client()
@@ -856,7 +867,7 @@ def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str,
         if not update_data:
             raise ValueError("No valid profile fields to update")
 
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Update user profile
         result = client.table("users").update(update_data).eq("api_key", api_key).execute()
@@ -873,7 +884,7 @@ def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str,
         raise RuntimeError(f"Failed to update user profile: {e}")
 
 
-def get_user_profile(api_key: str) -> Dict[str, Any]:
+def get_user_profile(api_key: str) -> dict[str, Any]:
     """Get user profile information"""
     try:
         logger.info(f"get_user_profile called for API key: {api_key[:10]}...")
@@ -923,7 +934,9 @@ def mark_welcome_email_sent(user_id: int) -> bool:
 
         result = (
             client.table("users")
-            .update({"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )

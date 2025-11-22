@@ -1,28 +1,27 @@
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional, Dict, List
+from datetime import datetime, UTC
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def create_chat_session(user_id: int, title: str = None, model: str = None) -> Dict[str, Any]:
+def create_chat_session(user_id: int, title: str = None, model: str = None) -> dict[str, Any]:
     """Create a new chat session for a user"""
     try:
         client = get_supabase_client()
 
         # Generate title if not provided
         if not title:
-            title = f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+            title = f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}"
 
         session_data = {
             "user_id": user_id,
             "title": title,
             "model": model or "openai/gpt-3.5-turbo",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "is_active": True,
         }
 
@@ -47,7 +46,7 @@ def save_chat_message(
     model: str = None,
     tokens: int = 0,
     user_id: int = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Save a chat message to a session and update session's updated_at timestamp"""
     try:
         client = get_supabase_client()
@@ -58,7 +57,7 @@ def save_chat_message(
             "content": content,
             "model": model,
             "tokens": tokens,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         result = client.table("chat_messages").insert(message_data).execute()
@@ -69,7 +68,7 @@ def save_chat_message(
         message = result.data[0]
 
         # Update session's updated_at timestamp to reflect latest activity
-        update_time = datetime.now(timezone.utc).isoformat()
+        update_time = datetime.now(UTC).isoformat()
         update_data = {"updated_at": update_time}
 
         # If model is provided, also update session model
@@ -99,7 +98,7 @@ def save_chat_message(
         raise RuntimeError(f"Failed to save chat message: {e}") from e
 
 
-def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     """Get all chat sessions for a user"""
     try:
         client = get_supabase_client()
@@ -123,7 +122,7 @@ def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> Li
         raise RuntimeError(f"Failed to get chat sessions: {e}") from e
 
 
-def get_chat_session(session_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
     """Get a specific chat session with messages"""
     try:
         client = get_supabase_client()
@@ -169,7 +168,7 @@ def update_chat_session(
     try:
         client = get_supabase_client()
 
-        update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data = {"updated_at": datetime.now(UTC).isoformat()}
 
         if title:
             update_data["title"] = title
@@ -204,7 +203,7 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
         # Soft delete - mark as inactive
         result = (
             client.table("chat_sessions")
-            .update({"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update({"is_active": False, "updated_at": datetime.now(UTC).isoformat()})
             .eq("id", session_id)
             .eq("user_id", user_id)
             .execute()
@@ -222,7 +221,7 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
         raise RuntimeError(f"Failed to delete chat session: {e}") from e
 
 
-def get_chat_session_stats(user_id: int) -> Dict[str, Any]:
+def get_chat_session_stats(user_id: int) -> dict[str, Any]:
     """Get chat session statistics for a user"""
     try:
         client = get_supabase_client()
@@ -275,7 +274,7 @@ def get_chat_session_stats(user_id: int) -> Dict[str, Any]:
         raise RuntimeError(f"Failed to get chat session stats: {e}") from e
 
 
-def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search chat sessions by title or message content"""
     try:
         client = get_supabase_client()

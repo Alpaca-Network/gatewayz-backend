@@ -1,11 +1,12 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.cache import _huggingface_cache, _models_cache, _provider_cache
 from src.config import Config
+from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
 from src.db.trials import get_trial_analytics
 from src.db.users import (
@@ -15,7 +16,6 @@ from src.db.users import (
     get_all_users,
     get_user,
 )
-from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.enhanced_notification_service import enhanced_notification_service
 from src.schemas import (
     AddCreditsRequest,
@@ -78,7 +78,7 @@ async def create_api_key(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status="trial",
             message="API key created successfully!",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     except ValueError as e:
@@ -154,14 +154,14 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
             # Still return the data but log the error
             return {
                 "status": "success",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "data": monitor_data,
                 "warning": "Data retrieved with errors, some information may be incomplete",
             }
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": monitor_data,
         }
 
@@ -218,7 +218,7 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
             "status": "success",
             "message": "Provider cache refreshed successfully",
             "total_providers": len(providers) if providers else 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -231,7 +231,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     try:
         cache_age = None
         if _provider_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
 
         return {
             "status": "success",
@@ -244,7 +244,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
                     len(_provider_cache["data"]) if _provider_cache["data"] else 0
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -258,7 +258,9 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
     try:
         cache_age = None
         if _huggingface_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _huggingface_cache["timestamp"]).total_seconds()
+            cache_age = (
+                datetime.now(UTC) - _huggingface_cache["timestamp"]
+            ).total_seconds()
 
         return {
             "huggingface_cache": {
@@ -267,7 +269,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
                 "total_cached_models": len(_huggingface_cache["data"]),
                 "cached_model_ids": list(_huggingface_cache["data"].keys()),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -286,7 +288,7 @@ async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_adm
 
         return {
             "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -336,7 +338,7 @@ async def admin_test_huggingface(
                     ),
                 },
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -392,7 +394,7 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_models": sample_models,
                 "cache_timestamp": _models_cache.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - _models_cache["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - _models_cache["timestamp"]).total_seconds()
                     if _models_cache.get("timestamp")
                     else None
                 ),
@@ -402,13 +404,13 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_providers": sample_providers,
                 "cache_timestamp": _provider_cache.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
                     if _provider_cache.get("timestamp")
                     else None
                 ),
             },
             "provider_matching_test": provider_matching_test,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -491,12 +493,12 @@ async def test_provider_matching():
             "cache_info": {
                 "provider_cache_timestamp": _provider_cache.get("timestamp"),
                 "provider_cache_age": (
-                    (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
                     if _provider_cache.get("timestamp")
                     else None
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -539,7 +541,7 @@ async def test_refresh_providers():
                 "provider_site_url": enhanced_model.get("provider_site_url"),
                 "model_logo_url": enhanced_model.get("model_logo_url"),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -585,7 +587,7 @@ async def test_openrouter_providers():
                 }
                 for p in providers[:5]
             ],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -611,7 +613,7 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         return {
             "status": "success",
             "message": "Rate limit cache cleared successfully. New requests will reload configuration.",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -655,7 +657,7 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
                 "status": "success",
                 "total_users": 0,
                 "users": [],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         users = result.data
@@ -690,7 +692,7 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
                 "subscription_breakdown": subscription_stats,
             },
             "users": users,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -897,7 +899,7 @@ async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_a
             "api_keys": api_keys,
             "recent_usage": recent_usage,
             "recent_activity": recent_activity,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:

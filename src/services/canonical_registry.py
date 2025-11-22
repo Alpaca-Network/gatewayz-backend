@@ -7,15 +7,14 @@ dynamic, registry-driven provider selection and failover.
 """
 
 import logging
-from typing import List, Dict, Optional, Any, Set
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any
 
-from src.services.multi_provider_registry import MultiProviderModel, ProviderConfig, get_registry
 from src.services.models import (
-    get_cached_models,
     get_all_models_parallel,
 )
+from src.services.multi_provider_registry import MultiProviderModel, ProviderConfig, get_registry
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -34,28 +33,28 @@ class CanonicalModel:
     # Core metadata - aggregated from all providers
     id: str  # Canonical model ID (what users specify)
     name: str  # Display name
-    description: Optional[str] = None
-    created: Optional[str] = None  # ISO date string
+    description: str | None = None
+    created: str | None = None  # ISO date string
 
     # Architecture metadata - consistent across providers
-    modality: Optional[str] = None
-    input_modalities: List[str] = field(default_factory=lambda: ["text"])
-    output_modalities: List[str] = field(default_factory=lambda: ["text"])
-    context_length: Optional[int] = None
-    tokenizer: Optional[str] = None
-    instruct_type: Optional[str] = None
+    modality: str | None = None
+    input_modalities: list[str] = field(default_factory=lambda: ["text"])
+    output_modalities: list[str] = field(default_factory=lambda: ["text"])
+    context_length: int | None = None
+    tokenizer: str | None = None
+    instruct_type: str | None = None
 
     # Provider configurations
-    providers: List[ProviderConfig] = field(default_factory=list)
+    providers: list[ProviderConfig] = field(default_factory=list)
 
     # Capabilities and features - aggregated
-    supported_parameters: List[str] = field(default_factory=list)
-    default_parameters: Dict[str, Any] = field(default_factory=dict)
-    features: Set[str] = field(default_factory=set)  # Available features across providers
+    supported_parameters: list[str] = field(default_factory=list)
+    default_parameters: dict[str, Any] = field(default_factory=dict)
+    features: set[str] = field(default_factory=set)  # Available features across providers
 
     # Pricing information - best/worst across providers
-    best_pricing: Optional[Dict[str, float]] = None  # Lowest costs
-    pricing_range: Optional[Dict[str, Dict[str, float]]] = None  # min/max pricing
+    best_pricing: dict[str, float] | None = None  # Lowest costs
+    pricing_range: dict[str, dict[str, float]] | None = None  # min/max pricing
 
     def __post_init__(self):
         """Aggregate metadata and sort providers by priority"""
@@ -75,34 +74,44 @@ class CanonicalModel:
             return
 
         pricing_data = {
-            "input": {"min": float('inf'), "max": 0, "providers": []},
-            "output": {"min": float('inf'), "max": 0, "providers": []}
+            "input": {"min": float("inf"), "max": 0, "providers": []},
+            "output": {"min": float("inf"), "max": 0, "providers": []},
         }
 
         for provider in self.providers:
             if provider.cost_per_1k_input is not None:
-                pricing_data["input"]["min"] = min(pricing_data["input"]["min"], provider.cost_per_1k_input)
-                pricing_data["input"]["max"] = max(pricing_data["input"]["max"], provider.cost_per_1k_input)
+                pricing_data["input"]["min"] = min(
+                    pricing_data["input"]["min"], provider.cost_per_1k_input
+                )
+                pricing_data["input"]["max"] = max(
+                    pricing_data["input"]["max"], provider.cost_per_1k_input
+                )
                 pricing_data["input"]["providers"].append(provider.name)
 
             if provider.cost_per_1k_output is not None:
-                pricing_data["output"]["min"] = min(pricing_data["output"]["min"], provider.cost_per_1k_output)
-                pricing_data["output"]["max"] = max(pricing_data["output"]["max"], provider.cost_per_1k_output)
+                pricing_data["output"]["min"] = min(
+                    pricing_data["output"]["min"], provider.cost_per_1k_output
+                )
+                pricing_data["output"]["max"] = max(
+                    pricing_data["output"]["max"], provider.cost_per_1k_output
+                )
                 pricing_data["output"]["providers"].append(provider.name)
 
         # Set aggregated data
         if pricing_data["input"]["providers"]:
             self.best_pricing = {
                 "input": pricing_data["input"]["min"],
-                "output": pricing_data["output"]["min"] if pricing_data["output"]["providers"] else None,
+                "output": (
+                    pricing_data["output"]["min"] if pricing_data["output"]["providers"] else None
+                ),
             }
             self.pricing_range = pricing_data
 
-    def get_enabled_providers(self) -> List[ProviderConfig]:
+    def get_enabled_providers(self) -> list[ProviderConfig]:
         """Get list of enabled providers, sorted by priority"""
         return [p for p in self.providers if p.enabled]
 
-    def get_primary_provider(self) -> Optional[ProviderConfig]:
+    def get_primary_provider(self) -> ProviderConfig | None:
         """Get the highest priority enabled provider"""
         enabled = self.get_enabled_providers()
         return enabled[0] if enabled else None
@@ -123,7 +132,7 @@ class CanonicalModel:
         self.providers.sort(key=lambda p: p.priority)
         self._aggregate_pricing()
 
-    def get_provider_by_name(self, name: str) -> Optional[ProviderConfig]:
+    def get_provider_by_name(self, name: str) -> ProviderConfig | None:
         """Get provider configuration by name"""
         for provider in self.providers:
             if provider.name == name:
@@ -131,7 +140,7 @@ class CanonicalModel:
         return None
 
     @property
-    def available_providers(self) -> List[str]:
+    def available_providers(self) -> list[str]:
         """Get list of available provider names"""
         return [p.name for p in self.get_enabled_providers()]
 
@@ -148,8 +157,8 @@ class CanonicalModelRegistry:
     """
 
     def __init__(self):
-        self._canonical_models: Dict[str, CanonicalModel] = {}
-        self._bridge_map: Dict[str, str] = {}  # provider_model_id -> canonical_model_id
+        self._canonical_models: dict[str, CanonicalModel] = {}
+        self._bridge_map: dict[str, str] = {}  # provider_model_id -> canonical_model_id
         self._multi_provider_registry = get_registry()
 
         logger.info("Initialized CanonicalModelRegistry")
@@ -168,7 +177,7 @@ class CanonicalModelRegistry:
         logger.info(f"Retrieved {len(all_models)} model definitions from all providers")
 
         # Group models by logical identifier
-        logical_groups: Dict[str, List[Dict]] = defaultdict(list)
+        logical_groups: dict[str, list[dict]] = defaultdict(list)
 
         for model in all_models:
             logical_id = self._normalize_model_id_for_grouping(model.get("id", ""))
@@ -188,12 +197,12 @@ class CanonicalModelRegistry:
             except Exception as e:
                 logger.error(
                     f"Failed to create canonical model for '{logical_id}': {sanitize_for_logging(str(e))}",
-                    exc_info=True
+                    exc_info=True,
                 )
 
         logger.info(f"Created {len(self._canonical_models)} canonical models")
 
-    def _normalize_model_id_for_grouping(self, model_id: str) -> Optional[str]:
+    def _normalize_model_id_for_grouping(self, model_id: str) -> str | None:
         """Normalize model IDs for logical grouping (e.g., model name without provider prefixes)"""
         if not model_id:
             return None
@@ -203,19 +212,27 @@ class CanonicalModelRegistry:
 
         # Remove provider prefixes
         prefixes = [
-            "anthropic/", "claude-",
-            "openai/", "gpt-", "chatgpt-",
-            "google/", "vertex/", "gemini-",
-            "anthropic/", "claude-",
-            "meta/", "llama-",
-            "mistral/", "mistralai/",
+            "anthropic/",
+            "claude-",
+            "openai/",
+            "gpt-",
+            "chatgpt-",
+            "google/",
+            "vertex/",
+            "gemini-",
+            "anthropic/",
+            "claude-",
+            "meta/",
+            "llama-",
+            "mistral/",
+            "mistralai/",
             # Add more patterns as needed
         ]
 
         base_name = model_id
         for prefix in prefixes:
             if base_name.startswith(prefix):
-                base_name = base_name[len(prefix):]
+                base_name = base_name[len(prefix) :]
 
         # Handle specific model families
         model_mapping = {
@@ -249,7 +266,7 @@ class CanonicalModelRegistry:
         # Default - use base name with version numbers simplified
         return base_name.replace("/", "-").replace("_", "-")
 
-    def _create_canonical_model(self, logical_id: str, model_variants: List[Dict]):
+    def _create_canonical_model(self, logical_id: str, model_variants: list[dict]):
         """Create a canonical model from provider variants"""
         # Use the first variant as the base for metadata
         primary_variant = model_variants[0]
@@ -269,11 +286,17 @@ class CanonicalModelRegistry:
         canonical = CanonicalModel(
             id=logical_id,
             name=primary_variant.get("name", logical_id),
-            description=primary_variant.get("description", f"Model {logical_id} available on multiple providers"),
+            description=primary_variant.get(
+                "description", f"Model {logical_id} available on multiple providers"
+            ),
             context_length=primary_variant.get("context_length"),
             modality=primary_variant.get("architecture", {}).get("modality", "text->text"),
-            input_modalities=primary_variant.get("architecture", {}).get("input_modalities", ["text"]),
-            output_modalities=primary_variant.get("architecture", {}).get("output_modalities", ["text"]),
+            input_modalities=primary_variant.get("architecture", {}).get(
+                "input_modalities", ["text"]
+            ),
+            output_modalities=primary_variant.get("architecture", {}).get(
+                "output_modalities", ["text"]
+            ),
             tokenizer=primary_variant.get("architecture", {}).get("tokenizer"),
             instruct_type=primary_variant.get("architecture", {}).get("instruct_type"),
             supported_parameters=primary_variant.get("supported_parameters", []),
@@ -299,7 +322,7 @@ class CanonicalModelRegistry:
             if provider_id:
                 self._bridge_map[provider_id] = logical_id
 
-    def _extract_provider_config(self, model_variant: Dict) -> Optional[ProviderConfig]:
+    def _extract_provider_config(self, model_variant: dict) -> ProviderConfig | None:
         """Extract ProviderConfig from a model variant"""
         source_gateway = model_variant.get("source_gateway")
         if not source_gateway:
@@ -307,12 +330,12 @@ class CanonicalModelRegistry:
 
         # Determine priority based on provider reliability/routing
         priority_map = {
-            "openrouter": 1,      # Highest priority - main router
-            "google-vertex": 2,   # Fast, reliable
-            "together": 3,        # Good coverage
-            "fireworks": 4,       # Solid provider
-            "featherless": 5,     # Many models
-            "deepinfra": 6,       # Good performance
+            "openrouter": 1,  # Highest priority - main router
+            "google-vertex": 2,  # Fast, reliable
+            "together": 3,  # Good coverage
+            "fireworks": 4,  # Solid provider
+            "featherless": 5,  # Many models
+            "deepinfra": 6,  # Good performance
             # Add more priorities as needed
         }
 
@@ -341,7 +364,7 @@ class CanonicalModelRegistry:
             max_tokens=model_variant.get("context_length"),
         )
 
-    def _parse_pricing(self, pricing_str: Optional[str]) -> Optional[float]:
+    def _parse_pricing(self, pricing_str: str | None) -> float | None:
         """Parse pricing string to float"""
         if not pricing_str:
             return None
@@ -350,19 +373,19 @@ class CanonicalModelRegistry:
         except (ValueError, TypeError):
             return None
 
-    def get_canonical_model(self, model_id: str) -> Optional[CanonicalModel]:
+    def get_canonical_model(self, model_id: str) -> CanonicalModel | None:
         """Get canonical model by ID"""
         return self._canonical_models.get(model_id)
 
-    def get_canonical_id(self, provider_model_id: str) -> Optional[str]:
+    def get_canonical_id(self, provider_model_id: str) -> str | None:
         """Get canonical model ID for a provider-specific model ID"""
         return self._bridge_map.get(provider_model_id)
 
-    def list_canonical_models(self) -> List[CanonicalModel]:
+    def list_canonical_models(self) -> list[CanonicalModel]:
         """List all canonical models"""
         return list(self._canonical_models.values())
 
-    def get_provider_model_id(self, canonical_id: str, provider_name: str) -> Optional[str]:
+    def get_provider_model_id(self, canonical_id: str, provider_name: str) -> str | None:
         """Get provider-specific model ID for a canonical model"""
         canonical = self.get_canonical_model(canonical_id)
         if not canonical:
@@ -374,15 +397,17 @@ class CanonicalModelRegistry:
 
         return None
 
-    def search_models(self, query: str, limit: int = 50) -> List[CanonicalModel]:
+    def search_models(self, query: str, limit: int = 50) -> list[CanonicalModel]:
         """Search canonical models by name or description"""
         query = query.lower()
         results = []
 
         for model in self._canonical_models.values():
-            if (query in model.id.lower() or
-                query in model.name.lower() or
-                (model.description and query in model.description.lower())):
+            if (
+                query in model.id.lower()
+                or query in model.name.lower()
+                or (model.description and query in model.description.lower())
+            ):
                 results.append(model)
                 if len(results) >= limit:
                     break

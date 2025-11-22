@@ -44,16 +44,6 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=openrouter")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
-    def test_get_providers_portkey(self, mock_models):
-        """Test getting Portkey providers"""
-        mock_models.return_value = [
-            {"id": "openai/gpt-4", "provider_slug": "openai"}
-        ]
-
-        response = client.get("/v1/provider?gateway=portkey")
-        assert response.status_code in [200, 503, 500]
-
     @patch('src.routes.catalog.get_cached_providers')
     @patch('src.routes.catalog.get_cached_models')
     def test_get_providers_all_gateways(self, mock_models, mock_providers):
@@ -198,6 +188,25 @@ class TestGetProvidersEndpoint:
 class TestModelsEndpoint:
     """Test coverage for the unified /models endpoint used by the UI."""
 
+    @patch('src.routes.catalog.get_cached_models')
+    def test_nebius_gateway_returns_empty_catalog(self, mock_get_cached_models):
+        """Requests for Nebius should return 200 even if no catalog is available."""
+
+        def fake_get_cached_models(gateway: str):
+            assert gateway == "nebius"
+            return []
+
+        mock_get_cached_models.side_effect = fake_get_cached_models
+
+        response = client.get("/models?gateway=nebius&include_huggingface=false")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["gateway"] == "nebius"
+        assert payload["total"] == 0
+        assert payload["returned"] == 0
+        assert payload["data"] == []
+
     @patch('src.routes.catalog.enhance_providers_with_logos_and_sites')
     @patch('src.routes.catalog.get_cached_providers')
     @patch('src.routes.catalog.get_cached_models')
@@ -221,7 +230,6 @@ class TestModelsEndpoint:
             gateway = (gateway or "").lower()
             catalog_by_gateway = {
                 "openrouter": [sample_model],
-                "portkey": [],
                 "featherless": [],
                 "deepinfra": [],
                 "chutes": [],

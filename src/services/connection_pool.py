@@ -13,12 +13,11 @@ from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 
-from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Global connection pool instances
-_client_pool: Dict[str, OpenAI] = {}
-_async_client_pool: Dict[str, AsyncOpenAI] = {}
+_client_pool: dict[str, OpenAI] = {}
+_async_client_pool: dict[str, AsyncOpenAI] = {}
 _pool_lock = Lock()
 
 # Connection pool configuration
@@ -56,6 +55,14 @@ def _get_http_client(
     )
 
 
+def get_http_client(
+    timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+    limits: httpx.Limits = DEFAULT_LIMITS,
+) -> httpx.Client:
+    """Get a pooled HTTP client with connection pooling and keepalive (public API)."""
+    return _get_http_client(timeout=timeout, limits=limits)
+
+
 def _get_async_http_client(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     limits: httpx.Limits = DEFAULT_LIMITS,
@@ -73,14 +80,14 @@ def get_pooled_client(
     provider: str,
     base_url: str,
     api_key: str,
-    default_headers: Optional[Dict[str, str]] = None,
-    timeout: Optional[httpx.Timeout] = None,
+    default_headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
 ) -> OpenAI:
     """
     Get or create a pooled OpenAI client for a specific provider.
 
     Args:
-        provider: Provider name (e.g., 'openrouter', 'portkey')
+        provider: Provider name (e.g., 'openrouter', 'featherless')
         base_url: API base URL
         api_key: API key for authentication
         default_headers: Optional headers to include in all requests
@@ -116,14 +123,14 @@ def get_pooled_async_client(
     provider: str,
     base_url: str,
     api_key: str,
-    default_headers: Optional[Dict[str, str]] = None,
-    timeout: Optional[httpx.Timeout] = None,
+    default_headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
 ) -> AsyncOpenAI:
     """
     Get or create a pooled AsyncOpenAI client for a specific provider.
 
     Args:
-        provider: Provider name (e.g., 'openrouter', 'portkey')
+        provider: Provider name (e.g., 'openrouter', 'featherless')
         base_url: API base URL
         api_key: API key for authentication
         default_headers: Optional headers to include in all requests
@@ -179,7 +186,7 @@ def clear_connection_pools():
         logger.info("Cleared all connection pools")
 
 
-def get_pool_stats() -> Dict[str, int]:
+def get_pool_stats() -> dict[str, int]:
     """Get statistics about current connection pools."""
     with _pool_lock:
         return {
@@ -203,36 +210,6 @@ def get_openrouter_pooled_client() -> OpenAI:
             "HTTP-Referer": Config.OPENROUTER_SITE_URL,
             "X-TitleSection": Config.OPENROUTER_SITE_NAME,
         },
-    )
-
-
-def get_portkey_pooled_client(
-    provider: Optional[str] = None,
-    virtual_key: Optional[str] = None,
-) -> OpenAI:
-    """Get pooled client for Portkey."""
-    if not Config.PORTKEY_API_KEY:
-        raise ValueError("Portkey API key not configured")
-
-    headers = {
-        "x-portkey-api-key": Config.PORTKEY_API_KEY,
-    }
-
-    resolved_virtual_key = virtual_key or Config.get_portkey_virtual_key(provider)
-    if resolved_virtual_key:
-        headers["x-portkey-virtual-key"] = resolved_virtual_key
-
-    if provider:
-        headers["x-portkey-provider"] = provider
-
-    # Create unique cache key based on provider/virtual_key combination
-    cache_suffix = f"_{provider}_{virtual_key}" if provider or virtual_key else ""
-
-    return get_pooled_client(
-        provider=f"portkey{cache_suffix}",
-        base_url="https://api.portkey.ai/v1",
-        api_key=Config.PORTKEY_API_KEY,
-        default_headers=headers,
     )
 
 
@@ -318,4 +295,17 @@ def get_chutes_pooled_client() -> OpenAI:
         provider="chutes",
         base_url="https://llm.chutes.ai/v1",
         api_key=Config.CHUTES_API_KEY,
+    )
+
+
+def get_clarifai_pooled_client() -> OpenAI:
+    """Get pooled client for Clarifai."""
+    if not Config.CLARIFAI_API_KEY:
+        raise ValueError("Clarifai API key not configured")
+
+    return get_pooled_client(
+        provider="clarifai",
+        base_url="https://api.clarifai.com/v1",
+        api_key=Config.CLARIFAI_API_KEY,
+        default_headers={"X-Clarifai-PAT": Config.CLARIFAI_API_KEY},
     )

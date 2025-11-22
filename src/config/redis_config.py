@@ -1,4 +1,4 @@
-#!/usr/bin/.env python3
+#!/usr/bin/env python3
 """
 Redis Configuration Module
 Handles Redis connection and configuration for rate limiting and caching.
@@ -10,7 +10,6 @@ import os
 import redis
 from redis.connection import ConnectionPool
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
@@ -30,8 +29,8 @@ class RedisConfig:
             os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
         )
 
-        self._client: Optional[redis.Redis] = None
-        self._pool: Optional[ConnectionPool] = None
+        self._client: redis.Redis | None = None
+        self._pool: ConnectionPool | None = None
 
     def get_connection_pool(self) -> ConnectionPool:
         """Get Redis connection pool"""
@@ -103,7 +102,7 @@ class RedisConfig:
             logger.warning(f"Failed to set cache key {key}: {e}")
         return False
 
-    def get_cache(self, key: str) -> Optional[str]:
+    def get_cache(self, key: str) -> str | None:
         """Get cache value"""
         try:
             client = self.get_client()
@@ -124,7 +123,7 @@ class RedisConfig:
             logger.warning(f"Failed to delete cache key {key}: {e}")
         return False
 
-    def increment_counter(self, key: str, amount: int = 1, ttl: int = 300) -> Optional[int]:
+    def increment_counter(self, key: str, amount: int = 1, ttl: int = 300) -> int | None:
         """Increment counter with TTL"""
         try:
             client = self.get_client()
@@ -138,7 +137,7 @@ class RedisConfig:
             logger.warning(f"Failed to increment counter {key}: {e}")
         return None
 
-    def get_counter(self, key: str) -> Optional[int]:
+    def get_counter(self, key: str) -> int | None:
         """Get counter value"""
         try:
             client = self.get_client()
@@ -163,7 +162,7 @@ class RedisConfig:
             logger.warning(f"Failed to set hash {key}.{field}: {e}")
         return False
 
-    def get_hash(self, key: str, field: str) -> Optional[str]:
+    def get_hash(self, key: str, field: str) -> str | None:
         """Get hash field value"""
         try:
             client = self.get_client()
@@ -264,7 +263,7 @@ def get_redis_config() -> RedisConfig:
     return _redis_config
 
 
-def get_redis_client() -> Optional[redis.Redis]:
+def get_redis_client() -> redis.Redis | None:
     """Get Redis client instance"""
     config = get_redis_config()
     return config.get_client()

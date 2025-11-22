@@ -1,16 +1,25 @@
 import logging
 
-from openai import OpenAI
+import httpx
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.connection_pool import get_pooled_client
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
+# Extended timeout for large models
+NEAR_TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=120.0,  # Near AI models can be slow (e.g., DeepSeek-V3.1)
+    write=10.0,
+    pool=5.0,
+)
+
 
 def get_near_client():
-    """Get Near AI client using OpenAI-compatible interface
+    """Get Near AI client using OpenAI-compatible interface with connection pooling
 
     Near AI is a decentralized AI infrastructure providing private, verifiable, and user-owned AI services
     Base URL: https://cloud-api.near.ai/v1
@@ -19,11 +28,12 @@ def get_near_client():
         if not Config.NEAR_API_KEY:
             raise ValueError("Near AI API key not configured")
 
-        # Use extended timeout for large models (e.g., Qwen3-30B-A3B)
-        return OpenAI(
+        # Use connection pool with extended timeout for large models
+        return get_pooled_client(
+            provider="near",
             base_url="https://cloud-api.near.ai/v1",
             api_key=Config.NEAR_API_KEY,
-            timeout=120.0,
+            timeout=NEAR_TIMEOUT,
         )
     except Exception as e:
         logger.error(f"Failed to initialize Near AI client: {e}")
@@ -73,11 +83,13 @@ def process_near_response(response):
         for choice in response.choices:
             msg = extract_message_with_tools(choice.message)
 
-            choices.append({
-                "index": choice.index,
-                "message": msg,
-                "finish_reason": choice.finish_reason,
-            })
+            choices.append(
+                {
+                    "index": choice.index,
+                    "message": msg,
+                    "finish_reason": choice.finish_reason,
+                }
+            )
 
         return {
             "id": response.id,

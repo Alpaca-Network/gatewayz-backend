@@ -8,8 +8,8 @@ with auto-fix capabilities for cache refresh.
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, UTC
+from typing import Any
 
 import httpx
 
@@ -29,7 +29,6 @@ from src.cache import (
     _near_models_cache,
     _nebius_models_cache,
     _novita_models_cache,
-    _portkey_models_cache,
     _together_models_cache,
     _xai_models_cache,
 )
@@ -47,15 +46,6 @@ GATEWAY_CONFIG = {
         "cache": _models_cache,
         "min_expected_models": 100,
         "header_type": "bearer",
-    },
-    "portkey": {
-        "name": "Portkey",
-        "url": "https://api.portkey.ai/v1/models",
-        "api_key_env": "PORTKEY_API_KEY",
-        "api_key": Config.PORTKEY_API_KEY,
-        "cache": _portkey_models_cache,
-        "min_expected_models": 10,
-        "header_type": "portkey",
     },
     "featherless": {
         "name": "Featherless",
@@ -204,7 +194,7 @@ GATEWAY_CONFIG = {
 }
 
 
-def build_headers(gateway_config: Dict[str, Any]) -> Dict[str, str]:
+def build_headers(gateway_config: dict[str, Any]) -> dict[str, str]:
     """Build authentication headers based on gateway type"""
     api_key = gateway_config.get("api_key")
     if not api_key:
@@ -214,8 +204,6 @@ def build_headers(gateway_config: Dict[str, Any]) -> Dict[str, str]:
 
     if header_type == "bearer":
         return {"Authorization": f"Bearer {api_key}"}
-    elif header_type == "portkey":
-        return {"x-portkey-api-key": api_key}
     elif header_type == "google":
         # Google uses API key as query parameter, not header
         return {}
@@ -230,7 +218,7 @@ def build_headers(gateway_config: Dict[str, Any]) -> Dict[str, str]:
         return {}
 
 
-async def test_gateway_endpoint(gateway_name: str, config: Dict[str, Any]) -> Tuple[bool, str, int]:
+async def test_gateway_endpoint(gateway_name: str, config: dict[str, Any]) -> tuple[bool, str, int]:
     """
     Test a gateway endpoint directly via HTTP (async)
 
@@ -287,7 +275,7 @@ async def test_gateway_endpoint(gateway_name: str, config: Dict[str, Any]) -> Tu
         return False, f"Error: {str(e)[:100]}", 0
 
 
-def test_gateway_cache(gateway_name: str, config: Dict[str, Any]) -> Tuple[bool, str, int, List]:
+def test_gateway_cache(gateway_name: str, config: dict[str, Any]) -> tuple[bool, str, int, list]:
     """
     Test gateway using cached models from the application
 
@@ -313,7 +301,7 @@ def test_gateway_cache(gateway_name: str, config: Dict[str, Any]) -> Tuple[bool,
 
         # Check cache age
         if cache_timestamp:
-            cache_age = (datetime.now(timezone.utc) - cache_timestamp).total_seconds()
+            cache_age = (datetime.now(UTC) - cache_timestamp).total_seconds()
             age_hours = cache_age / 3600
             age_str = f"{age_hours:.1f}h old" if age_hours >= 1 else f"{cache_age:.0f}s old"
         else:
@@ -335,7 +323,7 @@ def test_gateway_cache(gateway_name: str, config: Dict[str, Any]) -> Tuple[bool,
         return False, f"Cache check error: {str(e)[:100]}", 0, []
 
 
-def clear_gateway_cache(gateway_name: str, config: Dict[str, Any]) -> bool:
+def clear_gateway_cache(gateway_name: str, config: dict[str, Any]) -> bool:
     """Clear the cache for a gateway to force refresh"""
     try:
         cache = config.get("cache")
@@ -351,8 +339,8 @@ def clear_gateway_cache(gateway_name: str, config: Dict[str, Any]) -> bool:
 
 
 async def check_single_gateway(
-    gateway_name: str, config: Dict[str, Any], auto_fix: bool = True, verbose: bool = False
-) -> Dict[str, Any]:
+    gateway_name: str, config: dict[str, Any], auto_fix: bool = True, verbose: bool = False
+) -> dict[str, Any]:
     """
     Check a single gateway (async)
 
@@ -381,7 +369,9 @@ async def check_single_gateway(
         return gateway_result
 
     # Test 1: Direct endpoint test (async)
-    endpoint_success, endpoint_msg, endpoint_count = await test_gateway_endpoint(gateway_name, config)
+    endpoint_success, endpoint_msg, endpoint_count = await test_gateway_endpoint(
+        gateway_name, config
+    )
     gateway_result["endpoint_test"] = {
         "success": endpoint_success,
         "message": endpoint_msg,
@@ -398,6 +388,7 @@ async def check_single_gateway(
         "success": cache_success,
         "message": cache_msg,
         "model_count": cache_count,
+        "models": cached_models,
     }
 
     if verbose:
@@ -423,7 +414,7 @@ async def check_single_gateway(
                 gateway_result["auto_fix_successful"] = True
                 is_healthy = True
                 if verbose:
-                    logger.info(f"  ✅ Auto-fix successful")
+                    logger.info("  ✅ Auto-fix successful")
 
     # Set final status
     gateway_result["final_status"] = "healthy" if is_healthy else "unhealthy"
@@ -432,8 +423,8 @@ async def check_single_gateway(
 
 
 async def run_comprehensive_check(
-    auto_fix: bool = True, verbose: bool = False, gateway: Optional[str] = None
-) -> Dict[str, Any]:
+    auto_fix: bool = True, verbose: bool = False, gateway: str | None = None
+) -> dict[str, Any]:
     """
     Run comprehensive check on all gateways (async, parallel execution)
 
@@ -456,7 +447,7 @@ async def run_comprehensive_check(
         gateways_to_check = GATEWAY_CONFIG
 
     results = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "total_gateways": len(gateways_to_check),
         "healthy": 0,
         "unhealthy": 0,
@@ -474,14 +465,16 @@ async def run_comprehensive_check(
 
     # Wait for all checks to complete with a timeout
     try:
-        gateway_results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=60.0)
+        gateway_results = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True), timeout=60.0
+        )
     except asyncio.TimeoutError:
         logger.error("Gateway health check timed out after 60 seconds")
         # Return partial results
         gateway_results = [{"final_status": "timeout", "name": "Timeout"} for _ in gateway_names]
 
     # Process results
-    for gateway_name, gateway_result in zip(gateway_names, gateway_results):
+    for gateway_name, gateway_result in zip(gateway_names, gateway_results, strict=False):
         if isinstance(gateway_result, Exception):
             logger.error(f"Error checking {gateway_name}: {gateway_result}")
             gateway_result = {

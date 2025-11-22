@@ -7,14 +7,13 @@ with the next available provider.
 """
 
 import logging
-from typing import Optional, Any, Callable, Dict, List
 from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Any
+from collections.abc import Callable
 
 from src.services.multi_provider_registry import (
     get_registry,
-    ProviderConfig,
-    MultiProviderModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,9 +36,9 @@ class ProviderHealthTracker:
         self.timeout_seconds = timeout_seconds
 
         # Track failures per provider per model
-        self._failures: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._failures: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         # Track when providers were disabled
-        self._disabled_until: Dict[str, Dict[str, datetime]] = defaultdict(dict)
+        self._disabled_until: dict[str, dict[str, datetime]] = defaultdict(dict)
 
     def record_success(self, model_id: str, provider_name: str) -> None:
         """Record a successful request, resetting failure count"""
@@ -125,10 +124,10 @@ class ProviderSelector:
         self,
         model_id: str,
         execute_fn: Callable[[str, str], Any],  # Function that takes (provider_name, model_id)
-        preferred_provider: Optional[str] = None,
-        required_features: Optional[List[str]] = None,
+        preferred_provider: str | None = None,
+        required_features: list[str] | None = None,
         max_retries: int = 3,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a request with automatic failover to alternative providers.
 
@@ -183,12 +182,11 @@ class ProviderSelector:
             model_id=model_id,
             exclude_provider=primary.name,
         )
-        providers_to_try.extend(fallbacks[:max_retries - 1])
+        providers_to_try.extend(fallbacks[: max_retries - 1])
 
         # Filter out providers that are circuit-broken
         providers_to_try = [
-            p for p in providers_to_try
-            if self.health_tracker.is_available(model_id, p.name)
+            p for p in providers_to_try if self.health_tracker.is_available(model_id, p.name)
         ]
 
         if not providers_to_try:
@@ -277,7 +275,7 @@ class ProviderSelector:
             "attempts": attempts,
         }
 
-    def get_model_providers(self, model_id: str) -> Optional[List[str]]:
+    def get_model_providers(self, model_id: str) -> list[str] | None:
         """Get list of provider names available for a model"""
         model = self.registry.get_model(model_id)
         if not model:
@@ -285,7 +283,7 @@ class ProviderSelector:
 
         return [p.name for p in model.get_enabled_providers()]
 
-    def check_provider_health(self, model_id: str, provider_name: str) -> Dict[str, Any]:
+    def check_provider_health(self, model_id: str, provider_name: str) -> dict[str, Any]:
         """
         Check the health status of a provider for a model.
 

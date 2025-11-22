@@ -175,16 +175,17 @@ jobs:
             ${{ runner.os }}-pytest-
 
       - name: Run tests shard ${{ matrix.shard }}
+        id: test_run
         env:
           PYTEST_SPLIT_DURATION_FILE: .pytest-split-durations
           # Test environment variables
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || 'test-key' }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'test-key' }}
-          PORTKEY_API_KEY: ${{ secrets.PORTKEY_API_KEY || 'test-key' }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'test-encryption-key-32-bytes!' }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY || 'test-admin-key' }}
         run: |
+          set +e  # Don't exit on failure - we need to capture output
           # Run tests with pytest-xdist (use all cores) and pytest-split (shard across runners)
           # Target: 25% coverage (current baseline)
           # Exclude smoke tests (they require a running server)
@@ -195,9 +196,20 @@ jobs:
             --cov=src \
             --cov-report=xml \
             --cov-report=term \
-            -m "not smoke"
+            -m "not smoke" 2>&1 | tee test-output-shard-${{ matrix.shard }}.txt
 
-          echo "✅ Tests passed for shard ${{ matrix.shard }}"
+          TEST_EXIT_CODE=$?
+
+          # Check if tests failed
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
+            echo "✅ Tests passed for shard ${{ matrix.shard }}"
+            echo "tests_failed=false" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Tests failed for shard ${{ matrix.shard }}"
+            echo "tests_failed=true" >> $GITHUB_OUTPUT
+          fi
+
+          exit $TEST_EXIT_CODE
 
       - name: Save timings for next run
         if: always()
@@ -217,12 +229,20 @@ jobs:
           path: .pytest-split-durations
           if-no-files-found: ignore
 
+      - name: Upload test output for Codex
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-shard-${{ matrix.shard }}
+          path: test-output-shard-${{ matrix.shard }}.txt
+          if-no-files-found: ignore
+
       - name: Upload coverage for shard ${{ matrix.shard }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.shard }}
-          path: coverage.xml
+          path: .coverage
           if-no-files-found: ignore
 
   # Job 3B: Merge coverage reports
@@ -231,6 +251,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: always()
+    outputs:
+      has_failures: ${{ steps.check_tests.outputs.has_failures }}
 
     steps:
       - name: Checkout code
@@ -251,14 +273,90 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-*
+          path: coverage-artifacts
+
+      - name: Merge test output files
+        if: always()
+        run: |
+          # Consolidate all test output from shards
+          if ls test-output-shard-*.txt 2>/dev/null; then
+            cat test-output-shard-*.txt > all-test-output.txt
+            echo "Test outputs merged successfully"
+          fi
+
+      - name: Download test outputs
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-output-shard-*
           merge-multiple: true
+
+      - name: Check for test failures and consolidate
+        id: check_tests
+        if: always()
+        run: |
+          set +e
+          # Consolidate all test outputs
+          cat test-output-shard-*.txt > all-test-output.txt 2>/dev/null || echo "No test outputs to merge"
+
+          # Check if any tests failed
+          if grep -q "FAILED\|ERROR" all-test-output.txt 2>/dev/null; then
+            echo "has_failures=true" >> $GITHUB_OUTPUT
+            echo "❌ Test failures detected - Codex will attempt fixes"
+          else
+            echo "has_failures=false" >> $GITHUB_OUTPUT
+            echo "✅ No test failures detected"
+          fi
 
       - name: Merge coverage reports
         run: |
-          # Combine all coverage files
-          coverage combine || true
-          coverage xml || true
-          coverage report --fail-under=25 || true
+          # Each artifact is downloaded to coverage-artifacts/<artifact-name>/.coverage
+          # We need to rename them to avoid conflicts during combine
+          echo "📊 Merging coverage from all shards..."
+
+          # Create a directory for all coverage files
+          mkdir -p coverage-data
+
+          # Copy and rename each .coverage file from the downloaded artifacts
+          count=1
+          for artifact_dir in coverage-artifacts/coverage-*; do
+            if [ -d "$artifact_dir" ] && [ -f "$artifact_dir/.coverage" ]; then
+              echo "Found coverage file in $artifact_dir"
+              cp "$artifact_dir/.coverage" "coverage-data/.coverage.shard-$count"
+              count=$((count + 1))
+            fi
+          done
+
+          # List what we found
+          echo "Coverage files to merge:"
+          ls -la coverage-data/ || echo "⚠️ No coverage files found"
+
+          # Move coverage files to current directory for combining
+          if [ -d coverage-data ] && [ "$(ls -A coverage-data)" ]; then
+            mv coverage-data/.coverage.* . 2>/dev/null
+
+            # Combine all coverage files into one .coverage file
+            echo "Combining coverage files..."
+            coverage combine --keep || echo "⚠️ Coverage combine had warnings"
+
+            # Generate XML report from combined coverage
+            echo "Generating coverage XML..."
+            coverage xml -o coverage.xml || echo "⚠️ Coverage XML generation had warnings"
+
+            # Display coverage report
+            echo "Coverage Summary:"
+            coverage report --fail-under=25 || echo "⚠️ Coverage below 25% threshold"
+
+            # Verify the coverage.xml was created
+            if [ -f coverage.xml ]; then
+              echo "✅ Coverage XML generated successfully"
+              ls -lh coverage.xml
+            else
+              echo "❌ Error: coverage.xml was not generated"
+            fi
+          else
+            echo "❌ No coverage files found to merge"
+          fi
 
       - name: Check coverage progress
         if: always()
@@ -271,10 +369,19 @@ jobs:
           echo ""
           echo "Run locally: pytest tests/ --cov=src --cov-report=html"
 
+      - name: Upload consolidated test output
+        if: always() && steps.check_tests.outputs.has_failures == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failures
+          path: all-test-output.txt
+          if-no-files-found: ignore
+
       - name: Upload merged coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.xml
           flags: unittests
           name: codecov-gatewayz
@@ -405,6 +512,43 @@ jobs:
               console.log('✅ Claude on-failure workflow triggered successfully');
             } catch (error) {
               console.error('⚠️ Failed to trigger workflow:', error.message);
+              // Don't fail the job - this is a best-effort notification
+            }
+
+  # Job 5C: Trigger Codex Auto-Fix (for test failures)
+  trigger-codex-on-test-failure:
+    name: Trigger Codex Auto-Fix
+    runs-on: ubuntu-latest
+    needs: [coverage]
+    if: failure() && needs.coverage.outputs.has_failures == 'true'
+    permissions:
+      actions: write
+
+    steps:
+      - name: Check if test-failures artifact exists
+        id: check_artifact
+        run: |
+          echo "Waiting to verify test failure artifact..."
+          echo "Codex will be triggered to fix test failures"
+
+      - name: Dispatch codex test fixer workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              console.log('Triggering Codex test fixer workflow...');
+              const response = await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'test-failure-auto-fix.yml',
+                ref: context.ref,
+                inputs: {
+                  'test_output_artifact': 'test-failures'
+                }
+              });
+              console.log('✅ Codex test fixer workflow triggered successfully');
+            } catch (error) {
+              console.error('⚠️ Failed to trigger Codex workflow:', error.message);
               // Don't fail the job - this is a best-effort notification
             }
 

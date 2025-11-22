@@ -10,9 +10,8 @@ Documentation: https://docs.statsig.com/server/pythonSDK
 
 import logging
 import os
-from typing import Any, Optional, Dict
+from typing import Any
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
@@ -116,8 +115,8 @@ class StatsigService:
         self,
         user_id: str,
         event_name: str,
-        value: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        value: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """
         Log an event to Statsig.

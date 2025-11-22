@@ -6,8 +6,6 @@ import logging
 import httpx
 from fastapi import HTTPException
 
-from typing import Optional, Dict, List
-
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
 # translate into HTTP responses. Make these imports optional so the module
@@ -29,11 +27,13 @@ except ImportError:  # pragma: no cover - handled gracefully below
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
+    "cerebras",
     "huggingface",
     "featherless",
     "vercel-ai-gateway",
     "aihubmix",
     "anannas",
+    "alibaba-cloud",
     "fireworks",
     "together",
     "google-vertex",
@@ -43,20 +43,29 @@ FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 
 
-def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
-    """Return the provider attempt order starting with the initial provider."""
+def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
+    """Return the provider attempt order starting with the initial provider.
+
+    Always includes all eligible providers in the failover chain.
+    Provider availability checks happen at request time, not at chain building time.
+    """
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
-    chain: List[str] = []
+    chain: list[str] = []
     if provider:
         chain.append(provider)
 
     for candidate in FALLBACK_PROVIDER_PRIORITY:
         if candidate not in chain:
             chain.append(candidate)
+
+    # Always include openrouter as ultimate fallback if nothing else is available
+    if not chain or (len(chain) == 1 and chain[0] == provider and provider != "openrouter"):
+        if "openrouter" not in chain:
+            chain.append("openrouter")
 
     return chain
 
@@ -91,6 +100,8 @@ def map_provider_error(
             "access token",
             "credential",
             "authentication",
+            "api key",
+            "not configured",
             "id_token",
             "service account",
             "GOOGLE_APPLICATION_CREDENTIALS",
@@ -124,7 +135,7 @@ def map_provider_error(
         except (TypeError, ValueError):
             status = 500
         detail = "Upstream error"
-        headers: Optional[Dict[str, str]] = None
+        headers: dict[str, str] | None = None
 
         if RateLimitError and isinstance(exc, RateLimitError):
             retry_after = None
@@ -177,7 +188,7 @@ def map_provider_error(
     if OpenAIError and isinstance(exc, OpenAIError):
         return HTTPException(status_code=502, detail=str(exc))
 
-    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
         return HTTPException(status_code=504, detail="Upstream timeout")
 
     if isinstance(exc, httpx.HTTPStatusError):
@@ -198,7 +209,9 @@ def map_provider_error(
             )
         if 400 <= status < 500:
             # Extract error details from response
-            error_detail = f"Provider '{provider}' rejected request for model '{model}' (HTTP {status})"
+            error_detail = (
+                f"Provider '{provider}' rejected request for model '{model}' (HTTP {status})"
+            )
             try:
                 response_body = exc.response.text[:500] if exc.response.text else "No response body"
                 error_detail += f" | Response: {response_body}"

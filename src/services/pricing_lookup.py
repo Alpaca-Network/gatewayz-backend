@@ -6,16 +6,15 @@ Provides manual pricing lookup for providers that don't expose pricing via API
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing import Any
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Cache for pricing data
-_pricing_cache: Optional[Dict[str, Any]] = None
+_pricing_cache: dict[str, Any] | None = None
 
 
-def load_manual_pricing() -> Dict[str, Any]:
+def load_manual_pricing() -> dict[str, Any]:
     """Load manual pricing data from JSON file"""
     global _pricing_cache
 
@@ -40,7 +39,7 @@ def load_manual_pricing() -> Dict[str, Any]:
         return {}
 
 
-def get_model_pricing(gateway: str, model_id: str) -> Optional[Dict[str, str]]:
+def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
     """
     Get pricing for a specific model from manual pricing data
 
@@ -79,7 +78,7 @@ def get_model_pricing(gateway: str, model_id: str) -> Optional[Dict[str, str]]:
         return None
 
 
-def enrich_model_with_pricing(model_data: Dict[str, Any], gateway: str) -> Dict[str, Any]:
+def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[str, Any]:
     """
     Enrich model data with manual pricing if available
 
@@ -115,7 +114,7 @@ def enrich_model_with_pricing(model_data: Dict[str, Any], gateway: str) -> Dict[
         return model_data
 
 
-def get_all_gateway_pricing(gateway: str) -> Dict[str, Dict[str, str]]:
+def get_all_gateway_pricing(gateway: str) -> dict[str, dict[str, str]]:
     """
     Get all pricing for a specific gateway
 
@@ -143,7 +142,7 @@ def get_all_gateway_pricing(gateway: str) -> Dict[str, Dict[str, str]]:
         return {}
 
 
-def get_pricing_metadata() -> Dict[str, Any]:
+def get_pricing_metadata() -> dict[str, Any]:
     """Get pricing metadata (last updated, sources, etc.)"""
     try:
         pricing_data = load_manual_pricing()

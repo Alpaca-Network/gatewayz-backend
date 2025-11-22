@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import Generator
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import httpx
 
@@ -22,13 +22,14 @@ ALLOWED_PARAMS = {
     "presence_penalty",
     "response_format",
     "tools",
+    "stream",
 }
 
 
 class HFStreamChoice:
     """Lightweight structure that mimics OpenAI stream choice objects."""
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: dict[str, Any]):
         self.index = data.get("index", 0)
         self.delta = SimpleNamespace(**(data.get("delta") or {}))
         self.message = SimpleNamespace(**data["message"]) if data.get("message") else None
@@ -38,7 +39,7 @@ class HFStreamChoice:
 class HFStreamChunk:
     """Stream chunk compatible with OpenAI client chunks."""
 
-    def __init__(self, payload: Dict[str, Any]):
+    def __init__(self, payload: dict[str, Any]):
         self.id = payload.get("id")
         self.object = payload.get("object")
         self.created = payload.get("created")
@@ -56,7 +57,7 @@ class HFStreamChunk:
             self.usage = None
 
 
-def _build_timeout_config(timeout: Union[float, Optional[httpx.Timeout]]) -> httpx.Timeout:
+def _build_timeout_config(timeout: float | httpx.Timeout | None) -> httpx.Timeout:
     if isinstance(timeout, httpx.Timeout):
         return timeout
 
@@ -70,7 +71,7 @@ def _build_timeout_config(timeout: Union[float, Optional[httpx.Timeout]]) -> htt
     )
 
 
-def get_huggingface_client(timeout: Union[float, Optional[httpx.Timeout]] = None) -> httpx.Client:
+def get_huggingface_client(timeout: float | httpx.Timeout | None = None) -> httpx.Client:
     """Create an HTTPX client for the Hugging Face Router API."""
     if not Config.HUG_API_KEY:
         raise ValueError("Hugging Face API key (HUG_API_KEY) not configured")
@@ -91,7 +92,20 @@ def _prepare_model(model: str) -> str:
     return f"{model}:hf-inference"
 
 
-def _build_payload(messages: List[Dict[str, Any]], model: str, **kwargs) -> Dict[str, Any]:
+def _build_payload(messages: list[dict[str, Any]], model: str, **kwargs) -> dict[str, Any]:
+    # Validate messages format
+    if not isinstance(messages, list):
+        logger.error(f"Messages must be a list, got {type(messages).__name__}")
+        raise TypeError(f"Messages must be a list, got {type(messages).__name__}")
+
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            logger.error(f"Message {i} must be a dict, got {type(msg).__name__}: {msg}")
+            raise TypeError(f"Message {i} must be a dict, got {type(msg).__name__}")
+        if "role" not in msg or "content" not in msg:
+            logger.error(f"Message {i} missing required fields (role, content): {msg}")
+            raise ValueError(f"Message {i} missing required fields (role, content): {msg}")
+
     payload = {
         "messages": messages,
         "model": _prepare_model(model),
@@ -132,17 +146,19 @@ def make_huggingface_request_openai_stream(
 ) -> Generator[HFStreamChunk, None, None]:
     """Stream responses from Hugging Face Router using SSE."""
     client = get_huggingface_client(timeout=300.0)
-    payload = _build_payload(messages, model, **kwargs)
-    payload["stream"] = True
-
-    logger.info("Making Hugging Face streaming request with model: %s", payload["model"])
-    logger.debug(
-        "HF streaming request payload: message_count=%s, payload_keys=%s",
-        len(messages),
-        list(payload.keys()),
-    )
 
     try:
+        payload = _build_payload(messages, model, **kwargs)
+        payload["stream"] = True
+
+        logger.info("Making Hugging Face streaming request with model: %s", payload["model"])
+        logger.debug(
+            "HF streaming request payload: message_count=%s, payload_keys=%s, all_params=%s",
+            len(messages),
+            list(payload.keys()),
+            {k: type(v).__name__ for k, v in payload.items()},
+        )
+
         with client.stream("POST", "/chat/completions", json=payload) as response:
             response.raise_for_status()
             logger.info(
@@ -163,6 +179,9 @@ def make_huggingface_request_openai_stream(
                     except json.JSONDecodeError as err:
                         logger.warning("Failed to decode Hugging Face stream chunk: %s", err)
                         continue
+    except (TypeError, ValueError) as ve:
+        logger.error("Invalid request format for HuggingFace: %s", ve)
+        raise
     except Exception as e:
         logger.error("Hugging Face streaming request failed for model '%s': %s", model, e)
         raise

@@ -9,24 +9,95 @@ Features:
 - HTTPX and Requests library instrumentation
 - Context propagation for distributed tracing
 - Integration with Railway/Grafana observability stack
+
+Note: OpenTelemetry is optional. If not installed, tracing will be gracefully disabled.
 """
 
 import logging
-import os
-from typing import Optional
+import socket
+from urllib.parse import urlparse
 
-from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION, DEPLOYMENT_ENVIRONMENT
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+# Try to import OpenTelemetry - it's optional for deployments like Vercel
+try:
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+    from opentelemetry.sdk.resources import (
+        DEPLOYMENT_ENVIRONMENT,
+        SERVICE_NAME,
+        SERVICE_VERSION,
+        Resource,
+    )
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+
+    OPENTELEMETRY_AVAILABLE = True
+except ImportError:
+    OPENTELEMETRY_AVAILABLE = False
+    # Define dummy types for type hints
+    TracerProvider = None  # type: ignore
 
 from src.config.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+    """
+    Check if the OTLP endpoint is reachable.
+
+    Args:
+        endpoint: The OTLP endpoint URL
+        timeout: Connection timeout in seconds
+
+    Returns:
+        bool: True if endpoint is reachable, False otherwise
+    """
+    try:
+        # Parse the endpoint URL
+        parsed = urlparse(endpoint)
+        host = parsed.hostname
+        port = parsed.port
+
+        if not host:
+            logger.warning(f"Invalid endpoint URL: {endpoint}")
+            return False
+
+        # Default port if not specified
+        if not port:
+            port = 4318 if parsed.scheme == "http" else 4317
+
+        # Try to resolve the hostname (DNS check)
+        try:
+            socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            logger.warning(
+                f"Cannot resolve hostname '{host}': {e}. "
+                f"Tracing will be disabled."
+            )
+            return False
+
+        # Try to establish a TCP connection
+        sock = None
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            logger.debug(f"Successfully connected to {host}:{port}")
+            return True
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            logger.warning(
+                f"Endpoint {host}:{port} is not accepting connections: {e}. "
+                f"Tracing will be disabled."
+            )
+            return False
+        finally:
+            if sock:
+                sock.close()
+
+    except Exception as e:
+        logger.warning(f"Unexpected error checking endpoint: {e}")
+        return False
 
 
 class OpenTelemetryConfig:
@@ -41,7 +112,7 @@ class OpenTelemetryConfig:
     """
 
     _initialized = False
-    _tracer_provider: Optional[TracerProvider] = None
+    _tracer_provider: TracerProvider | None = None
 
     @classmethod
     def initialize(cls) -> bool:
@@ -55,6 +126,10 @@ class OpenTelemetryConfig:
             logger.debug("OpenTelemetry already initialized")
             return True
 
+        if not OPENTELEMETRY_AVAILABLE:
+            logger.info("⏭️  OpenTelemetry not available (package not installed)")
+            return False
+
         if not Config.TEMPO_ENABLED:
             logger.info("⏭️  OpenTelemetry tracing disabled (TEMPO_ENABLED=false)")
             return False
@@ -62,37 +137,53 @@ class OpenTelemetryConfig:
         try:
             logger.info("🔭 Initializing OpenTelemetry tracing...")
 
-            # Create resource with service metadata
-            resource = Resource.create({
-                SERVICE_NAME: Config.OTEL_SERVICE_NAME,
-                SERVICE_VERSION: "2.0.3",
-                DEPLOYMENT_ENVIRONMENT: Config.APP_ENV,
-                "service.namespace": "gatewayz",
-                "telemetry.sdk.language": "python",
-            })
-
-            # Create tracer provider
-            cls._tracer_provider = TracerProvider(resource=resource)
-
             # Configure OTLP exporter to Tempo
             tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
             logger.info(f"   Tempo endpoint: {tempo_endpoint}")
 
-            otlp_exporter = OTLPSpanExporter(
-                endpoint=f"{tempo_endpoint}/v1/traces",
-                headers={},  # Add authentication headers if needed
+            # Check if Tempo endpoint is reachable before attempting to create exporter
+            if not _check_endpoint_reachable(tempo_endpoint):
+                logger.warning(
+                    f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
+                    f"Ensure the Tempo service is deployed and accessible. "
+                    f"The application will continue without distributed tracing."
+                )
+                return False
+
+            # Create resource with service metadata
+            resource = Resource.create(
+                {
+                    SERVICE_NAME: Config.OTEL_SERVICE_NAME,
+                    SERVICE_VERSION: "2.0.3",
+                    DEPLOYMENT_ENVIRONMENT: Config.APP_ENV,
+                    "service.namespace": "gatewayz",
+                    "telemetry.sdk.language": "python",
+                }
             )
 
+            # Create tracer provider
+            cls._tracer_provider = TracerProvider(resource=resource)
+
+            # Create OTLP exporter with error handling for connection issues
+            try:
+                otlp_exporter = OTLPSpanExporter(
+                    endpoint=f"{tempo_endpoint}/v1/traces",
+                    headers={},  # Add authentication headers if needed
+                )
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
+                    f"Tracing will be disabled.",
+                    exc_info=True
+                )
+                return False
+
             # Add span processor for exporting traces
-            cls._tracer_provider.add_span_processor(
-                BatchSpanProcessor(otlp_exporter)
-            )
+            cls._tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
 
             # In development, also log traces to console
             if Config.IS_DEVELOPMENT:
-                cls._tracer_provider.add_span_processor(
-                    BatchSpanProcessor(ConsoleSpanExporter())
-                )
+                cls._tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
                 logger.info("   Console trace export enabled (development mode)")
 
             # Set global tracer provider
@@ -125,13 +216,20 @@ class OpenTelemetryConfig:
         Args:
             app: FastAPI application instance to instrument
         """
+        if not OPENTELEMETRY_AVAILABLE:
+            logger.debug("Skipping FastAPI instrumentation (OpenTelemetry not available)")
+            return
+
         if not cls._initialized or not Config.TEMPO_ENABLED:
             logger.debug("Skipping FastAPI instrumentation (tracing not enabled)")
             return
 
         try:
-            FastAPIInstrumentor.instrument_app(app)
-            logger.info("✅ FastAPI application instrumented with OpenTelemetry")
+            instrumented = instrument_fastapi_application(app)
+            if instrumented:
+                logger.info("✅ FastAPI application instrumented with OpenTelemetry")
+            else:
+                logger.debug("FastAPI instrumentation skipped (already instrumented or unavailable)")
         except Exception as e:
             logger.error(f"❌ Failed to instrument FastAPI: {e}", exc_info=True)
 
@@ -158,7 +256,7 @@ class OpenTelemetryConfig:
             cls._tracer_provider = None
 
     @classmethod
-    def get_tracer(cls, name: str) -> trace.Tracer:
+    def get_tracer(cls, name: str):
         """
         Get a tracer for creating custom spans.
 
@@ -166,41 +264,86 @@ class OpenTelemetryConfig:
             name: Name of the tracer (typically __name__ of the calling module)
 
         Returns:
-            OpenTelemetry Tracer instance
+            OpenTelemetry Tracer instance, or None if OpenTelemetry is not available
         """
+        if not OPENTELEMETRY_AVAILABLE:
+            return None
         return trace.get_tracer(name)
 
 
+def instrument_fastapi_application(app) -> bool:
+    """
+    Instrument a FastAPI application while remaining compatible with different
+    opentelemetry-instrumentation-fastapi versions.
+
+    Returns:
+        bool: True if instrumentation was applied, False if it was skipped.
+    """
+    if not OPENTELEMETRY_AVAILABLE:
+        logger.debug("OpenTelemetry not available; skipping FastAPI instrumentation")
+        return False
+
+    if app is None:
+        logger.debug("FastAPI app instance not provided; skipping instrumentation")
+        return False
+
+    instrumentor = FastAPIInstrumentor()
+
+    try:
+        instrumentor.instrument_app(app=app)
+        return True
+    except TypeError as exc:
+        message = str(exc)
+        if "instrument()" in message and "app" in message:
+            logger.debug(
+                "FastAPIInstrumentor.instrument_app requires explicit app argument; retrying with instrument(app=app)"
+            )
+            instrumentor.instrument(app=app)
+            return True
+        raise
+    except RuntimeError as exc:
+        if "already instrumented" in str(exc).lower():
+            logger.debug("FastAPI already instrumented; skipping re-instrumentation")
+            return False
+        raise
+
+
 # Helper function to get current trace context
-def get_current_trace_id() -> Optional[str]:
+def get_current_trace_id() -> str | None:
     """
     Get the current trace ID as a hex string.
 
     Returns:
         str: Trace ID in hex format (32 characters), or None if no active span
     """
+    if not OPENTELEMETRY_AVAILABLE:
+        return None
+
     try:
         span = trace.get_current_span()
         span_context = span.get_span_context()
         if span_context.is_valid:
-            return format(span_context.trace_id, '032x')
+            return format(span_context.trace_id, "032x")
     except Exception:
         pass
     return None
 
 
-def get_current_span_id() -> Optional[str]:
+def get_current_span_id() -> str | None:
     """
     Get the current span ID as a hex string.
 
     Returns:
         str: Span ID in hex format (16 characters), or None if no active span
     """
+    if not OPENTELEMETRY_AVAILABLE:
+        return None
+
     try:
         span = trace.get_current_span()
         span_context = span.get_span_context()
         if span_context.is_valid:
-            return format(span_context.span_id, '016x')
+            return format(span_context.span_id, "016x")
     except Exception:
         pass
     return None

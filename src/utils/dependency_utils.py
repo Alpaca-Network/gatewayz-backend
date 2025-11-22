@@ -6,13 +6,12 @@ Shared utilities for dependency injection and override execution
 
 import inspect
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import Request
 
 
-from typing import Optional
-async def execute_override(override: Callable[..., Any], request: Optional[Request] = None) -> Any:
+async def execute_override(override: Callable[..., Any], request: Request | None = None) -> Any:
     """
     Execute a patched override function, handling optional request parameter and awaiting results.
 

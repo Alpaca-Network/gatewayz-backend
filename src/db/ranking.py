@@ -1,15 +1,14 @@
 import logging
-from typing import Any, Optional, Dict, List
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
 def get_all_latest_models(
-    limit: Optional[int] = None, offset: Optional[int] = None
-) -> List[Dict[str, Any]]:
+    limit: int | None = None, offset: int | None = None
+) -> list[dict[str, Any]]:
     """Get all data from latest_models table for ranking page with logo URLs"""
     try:
         client = get_supabase_client()
@@ -94,7 +93,7 @@ def generate_logo_url_from_author(author: str) -> str:
     return f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
 
 
-def get_all_latest_apps() -> List[Dict[str, Any]]:
+def get_all_latest_apps() -> list[dict[str, Any]]:
     """Get all data from latest_apps table for ranking page"""
     try:
         client = get_supabase_client()

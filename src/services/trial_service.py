@@ -1,10 +1,9 @@
-#!/usr/bin/.env python3
+#!/usr/bin/env python3
 """
 Trial Management Service
 Handles free trial logic, expiration, and conversion to paid subscriptions
 """
 
-from typing import Optional
 import logging
 import os
 from datetime import datetime
@@ -490,10 +489,12 @@ class TrialService:
                 error_message=f"Internal error: {str(e)}",
             )
 
-    async def _get_api_key_id(self, api_key: str) -> Optional[int]:
+    async def _get_api_key_id(self, api_key: str) -> int | None:
         """Get API key ID from the key string"""
         try:
-            result = self.supabase.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+            result = (
+                self.supabase.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+            )
             if result.data and len(result.data) > 0:
                 return result.data[0]["id"]
             return None

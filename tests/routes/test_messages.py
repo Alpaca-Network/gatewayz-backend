@@ -460,6 +460,13 @@ class TestMessagesEndpointSuccess:
 
         rate_limit_result = Mock()
         rate_limit_result.allowed = True
+        rate_limit_result.remaining_requests = 249
+        rate_limit_result.remaining_tokens = 9900
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
         rate_limit_mgr_instance.release_concurrency = AsyncMock()
@@ -561,6 +568,13 @@ class TestMessagesEndpointCredits:
 
         rate_limit_result = Mock()
         rate_limit_result.allowed = True
+        rate_limit_result.remaining_requests = 249
+        rate_limit_result.remaining_tokens = 9900
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
         mock_rate_limit_mgr.return_value = rate_limit_mgr_instance
@@ -586,8 +600,12 @@ class TestMessagesEndpointRateLimiting:
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
     @patch('src.routes.messages.get_rate_limit_manager')
+    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
     def test_messages_endpoint_rate_limit_exceeded(
         self,
+        mock_process_or,
+        mock_make_or,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
@@ -600,6 +618,11 @@ class TestMessagesEndpointRateLimiting:
         mock_get_user.return_value = mock_user
         mock_enforce_plan.return_value = {'allowed': True}
         mock_validate_trial.return_value = {'is_valid': True, 'is_trial': False}
+        mock_make_or.return_value = {"_raw": True}
+        mock_process_or.return_value = {
+            "content": [{"type": "text", "text": "test"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
         # Rate limit exceeded
         rate_limit_result = Mock()
@@ -608,6 +631,11 @@ class TestMessagesEndpointRateLimiting:
         rate_limit_result.retry_after = 60
         rate_limit_result.remaining_requests = 0
         rate_limit_result.remaining_tokens = 0
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
 
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
@@ -633,8 +661,12 @@ class TestMessagesEndpointPlanLimits:
     @patch('src.routes.messages.get_user')
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
+    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
     def test_messages_endpoint_plan_limit_exceeded(
         self,
+        mock_process_or,
+        mock_make_or,
         mock_validate_trial,
         mock_enforce_plan,
         mock_get_user,
@@ -649,6 +681,11 @@ class TestMessagesEndpointPlanLimits:
             'reason': 'Monthly token limit exceeded'
         }
         mock_validate_trial.return_value = {'is_valid': True, 'is_trial': False}
+        mock_make_or.return_value = {"_raw": True}
+        mock_process_or.return_value = {
+            "content": [{"type": "text", "text": "test"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
         response = client.post(
             '/v1/messages',
@@ -768,8 +805,10 @@ class TestMessagesEndpointFailover:
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
     @patch('src.routes.messages.get_rate_limit_manager')
-    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_featherless_response')
+    @patch('src.routes.messages.make_featherless_request_openai')
     @patch('src.routes.messages.process_openrouter_response')
+    @patch('src.routes.messages.make_openrouter_request_openai')
     @patch('src.routes.messages.build_provider_failover_chain')
     @patch('src.routes.messages.calculate_cost')
     @patch('src.routes.messages.deduct_credits')
@@ -786,8 +825,10 @@ class TestMessagesEndpointFailover:
         mock_deduct_credits,
         mock_calculate_cost,
         mock_build_chain,
-        mock_process_response,
-        mock_make_request,
+        mock_make_openrouter_request,
+        mock_process_openrouter_response,
+        mock_make_featherless_request,
+        mock_process_featherless_response,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
@@ -805,18 +846,24 @@ class TestMessagesEndpointFailover:
 
         rate_limit_result = Mock()
         rate_limit_result.allowed = True
+        rate_limit_result.remaining_requests = 249
+        rate_limit_result.remaining_tokens = 9900
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
         rate_limit_mgr_instance.release_concurrency = AsyncMock()
         mock_rate_limit_mgr.return_value = rate_limit_mgr_instance
 
         # First provider fails, second succeeds
-        mock_build_chain.return_value = ['openrouter', 'portkey']
-        mock_make_request.side_effect = [
-            Exception("Provider error"),  # First attempt fails
-            mock_openai_response  # Second attempt succeeds
-        ]
-        mock_process_response.return_value = mock_openai_response
+        mock_build_chain.return_value = ['openrouter', 'featherless']
+        mock_make_openrouter_request.side_effect = Exception("Provider error")
+        mock_make_featherless_request.return_value = mock_openai_response
+        mock_process_openrouter_response.return_value = mock_openai_response
+        mock_process_featherless_response.return_value = mock_openai_response
         mock_calculate_cost.return_value = 0.01
 
         # Execute

@@ -1,7 +1,7 @@
 """Cache module for storing model and provider data"""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +24,6 @@ _multi_provider_catalog_cache = {
     "timestamp": None,
     "ttl": 900,  # 15 minutes TTL for aggregated catalog snapshots
     "stale_ttl": 1800,
-}
-
-_portkey_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 1800,  # 30 minute TTL for Portkey catalog
-    "stale_ttl": 3600,
 }
 
 _featherless_models_cache = {
@@ -176,6 +169,13 @@ _anannas_models_cache = {
     "stale_ttl": 7200,
 }
 
+_alibaba_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Alibaba Cloud catalog
+    "stale_ttl": 7200,
+}
+
 # BACKWARD COMPATIBILITY: Alias for old cache name
 # Some deployed modules may still reference the old name
 _hug_models_cache = _huggingface_models_cache
@@ -186,7 +186,6 @@ def get_models_cache(gateway: str):
     """Get cache for a specific gateway"""
     cache_map = {
         "openrouter": _models_cache,
-        "portkey": _portkey_models_cache,
         "featherless": _featherless_models_cache,
         "deepinfra": _deepinfra_models_cache,
         "chutes": _chutes_models_cache,
@@ -207,6 +206,7 @@ def get_models_cache(gateway: str):
         "helicone": _helicone_models_cache,
         "aihubmix": _aihubmix_models_cache,
         "anannas": _anannas_models_cache,
+        "alibaba": _alibaba_models_cache,
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -221,7 +221,6 @@ def clear_models_cache(gateway: str):
     """Clear cache for a specific gateway"""
     cache_map = {
         "openrouter": _models_cache,
-        "portkey": _portkey_models_cache,
         "featherless": _featherless_models_cache,
         "deepinfra": _deepinfra_models_cache,
         "chutes": _chutes_models_cache,
@@ -242,6 +241,7 @@ def clear_models_cache(gateway: str):
         "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
         "aihubmix": _aihubmix_models_cache,
         "anannas": _anannas_models_cache,
+        "alibaba": _alibaba_models_cache,
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())
@@ -269,25 +269,25 @@ def clear_modelz_cache():
 
 def is_cache_fresh(cache: dict) -> bool:
     """Check if cache is within fresh TTL
-    
+
     Note: Only checks timestamp, not data value. This allows empty lists []
     to be treated as valid cached values (representing "no models found").
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     return cache_age < cache.get("ttl", 3600)
 
 
 def is_cache_stale_but_usable(cache: dict) -> bool:
     """Check if cache is stale but within stale-while-revalidate window
-    
+
     Note: Only checks timestamp, not data value. This allows empty lists []
     to be treated as valid cached values (representing "no models found").
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", ttl * 2)
     return ttl <= cache_age < stale_ttl
@@ -317,7 +317,7 @@ def initialize_fal_cache_from_catalog():
         # Store raw models temporarily - will be normalized on first access
         # This avoids circular import with models.py
         _fal_models_cache["data"] = raw_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fal_models_cache["timestamp"] = datetime.now(UTC)
         logger.debug(f"Preloaded {len(raw_models)} FAL models from catalog")
 
     except (ImportError, OSError) as error:
@@ -341,13 +341,15 @@ def initialize_featherless_cache_from_catalog():
         if raw_models and len(raw_models) > 0:
             # Successfully loaded from export
             _featherless_models_cache["data"] = raw_models
-            _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+            _featherless_models_cache["timestamp"] = datetime.now(UTC)
             logger.debug(f"Preloaded {len(raw_models)} Featherless models from catalog export")
         else:
             # No export available - initialize empty to enable lazy loading via API
             _featherless_models_cache["data"] = []
             _featherless_models_cache["timestamp"] = None
-            logger.debug("Featherless cache initialized empty - will load from API on first request")
+            logger.debug(
+                "Featherless cache initialized empty - will load from API on first request"
+            )
 
     except (ImportError, OSError) as error:
         # Log failure but continue - initialize empty cache for lazy loading

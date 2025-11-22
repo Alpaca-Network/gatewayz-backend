@@ -1,61 +1,89 @@
-import logging
-import json
-from pathlib import Path
 import csv
-from typing import Any, Dict, Optional, Union, List
+import json
+import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, UTC
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
-from src.config import Config
+import httpx
+from fastapi import APIRouter
+
 from src.cache import (
-    _huggingface_cache,
-    _models_cache,
-    _portkey_models_cache,
-    _featherless_models_cache,
-    _chutes_models_cache,
-    _groq_models_cache,
-    _fireworks_models_cache,
-    _together_models_cache,
-    _deepinfra_models_cache,
-    _google_vertex_models_cache,
-    _cerebras_models_cache,
-    _nebius_models_cache,
-    _xai_models_cache,
-    _novita_models_cache,
-    _huggingface_models_cache,
-    _aimo_models_cache,
-    _near_models_cache,
-    _fal_models_cache,
-    _vercel_ai_gateway_models_cache,
-    _helicone_models_cache,
-    _anannas_models_cache,
+    _FAL_CACHE_INIT_DEFERRED,
     _aihubmix_models_cache,
+    _aimo_models_cache,
+    _alibaba_models_cache,
+    _anannas_models_cache,
+    _cerebras_models_cache,
+    _chutes_models_cache,
+    _deepinfra_models_cache,
+    _fal_models_cache,
+    _featherless_models_cache,
+    _fireworks_models_cache,
+    _google_vertex_models_cache,
+    _groq_models_cache,
+    _helicone_models_cache,
+    _huggingface_cache,
+    _huggingface_models_cache,
+    _models_cache,
     _multi_provider_catalog_cache,
+    _near_models_cache,
+    _nebius_models_cache,
+    _novita_models_cache,
+    _together_models_cache,
+    _vercel_ai_gateway_models_cache,
+    _xai_models_cache,
     is_cache_fresh,
     should_revalidate_in_background,
-    _FAL_CACHE_INIT_DEFERRED,
 )
-from fastapi import APIRouter
-from datetime import datetime, timezone
-from src.services.pricing_lookup import enrich_model_with_pricing
-from src.services.portkey_providers import (
-    fetch_models_from_google_vertex,
-    fetch_models_from_cerebras,
-    fetch_models_from_nebius,
-    fetch_models_from_xai,
-    fetch_models_from_novita,
-)
+from src.config import Config
+from src.services.google_models_config import register_google_models_in_canonical_registry
+from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
+from src.services.model_transformations import detect_provider_from_model_id
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
-from src.services.google_models_config import register_google_models_in_canonical_registry
-from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
-from src.services.model_transformations import detect_provider_from_model_id
+from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.google_vertex_client import fetch_models_from_google_vertex
+from src.services.nebius_client import fetch_models_from_nebius
+from src.services.novita_client import fetch_models_from_novita
+from src.services.xai_client import fetch_models_from_xai
+from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
 
-import httpx
-
 logger = logging.getLogger(__name__)
+
+# Global lock and flag to prevent circular dependencies during catalog building
+# Using a global lock instead of threading.local() to ensure the flag is visible
+# across all threads spawned by ThreadPoolExecutor during parallel model fetching
+_building_catalog_lock = threading.Lock()
+_building_catalog_flag = False
+
+
+def _is_building_catalog() -> bool:
+    """Check if we're currently building the model catalog
+
+    Uses a global lock to ensure thread-safety and visibility across
+    all threads spawned by ThreadPoolExecutor.
+    """
+    with _building_catalog_lock:
+        return _building_catalog_flag
+
+
+def _set_building_catalog(active: bool):
+    """Set the building catalog flag
+
+    Uses a global lock to ensure thread-safety and visibility across
+    all threads spawned by ThreadPoolExecutor.
+    """
+    global _building_catalog_flag
+    with _building_catalog_lock:
+        _building_catalog_flag = active
+
 
 # Modality constants to reduce duplication
 MODALITY_TEXT_TO_TEXT = "text->text"
@@ -66,11 +94,11 @@ MODALITY_TEXT_TO_AUDIO = "text->audio"
 class AggregatedCatalog(list):
     """List-like wrapper that also exposes canonical model metadata."""
 
-    def __init__(self, models: Optional[list], canonical_models: Optional[list]):
+    def __init__(self, models: list | None, canonical_models: list | None):
         super().__init__(models or [])
         self.canonical_models = canonical_models or []
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {"models": list(self), "canonical_models": self.canonical_models}
 
 
@@ -83,7 +111,7 @@ def _normalize_provider_slug(provider_slug: str) -> str:
     return mapping.get(provider_slug.lower(), provider_slug.lower())
 
 
-def _extract_modalities(record: dict) -> List[str]:
+def _extract_modalities(record: dict) -> list[str]:
     modalities = record.get("modalities")
     if isinstance(modalities, list) and modalities:
         return modalities
@@ -107,7 +135,7 @@ def _extract_modalities(record: dict) -> List[str]:
     return ["text"]
 
 
-def _register_canonical_records(provider_slug: str, models: Optional[list]) -> None:
+def _register_canonical_records(provider_slug: str, models: list | None) -> None:
     if not models:
         return
 
@@ -119,11 +147,7 @@ def _register_canonical_records(provider_slug: str, models: Optional[list]) -> N
             if not isinstance(record, dict):
                 continue
 
-            canonical_id = (
-                record.get("canonical_slug")
-                or record.get("slug")
-                or record.get("id")
-            )
+            canonical_id = record.get("canonical_slug") or record.get("slug") or record.get("id")
 
             if not canonical_id:
                 continue
@@ -131,8 +155,7 @@ def _register_canonical_records(provider_slug: str, models: Optional[list]) -> N
             display_metadata = {
                 "name": record.get("name") or record.get("display_name"),
                 "description": record.get("description"),
-                "context_length": record.get("context_length")
-                or record.get("max_context_length"),
+                "context_length": record.get("context_length") or record.get("max_context_length"),
                 "modalities": _extract_modalities(record),
                 "slug": record.get("slug"),
                 "canonical_slug": record.get("canonical_slug"),
@@ -143,10 +166,8 @@ def _register_canonical_records(provider_slug: str, models: Optional[list]) -> N
 
             pricing = record.get("pricing") or {}
             capabilities = {
-                "context_length": record.get("context_length")
-                or record.get("max_context_length"),
-                "max_output_tokens": record.get("max_tokens")
-                or record.get("max_output_tokens"),
+                "context_length": record.get("context_length") or record.get("max_context_length"),
+                "max_output_tokens": record.get("max_tokens") or record.get("max_output_tokens"),
                 "modalities": _extract_modalities(record),
                 "supported_parameters": record.get("supported_parameters"),
                 "default_parameters": record.get("default_parameters"),
@@ -175,7 +196,7 @@ def _register_canonical_records(provider_slug: str, models: Optional[list]) -> N
 
 def _fresh_cached_models(cache: dict, provider_slug: str):
     if cache.get("data") and cache.get("timestamp"):
-        cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+        cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
         if cache_age < cache.get("ttl", 0):
             _register_canonical_records(provider_slug, cache["data"])
             return cache["data"]
@@ -374,7 +395,6 @@ def get_all_models_parallel():
     try:
         gateways = [
             "openrouter",
-            "portkey",
             "featherless",
             "deepinfra",
             "cerebras",
@@ -392,11 +412,14 @@ def get_all_models_parallel():
             "helicone",
             "anannas",
             "aihubmix",
+            "alibaba",
         ]
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
         # Since get_cached_models uses synchronous httpx, we use threads
-        with ThreadPoolExecutor(max_workers=16) as executor:
+        # Reduced max_workers from 16 to 8 to prevent thread exhaustion
+        # in case of recursive calls or errors
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(get_cached_models, gw): gw for gw in gateways}
             all_models = []
 
@@ -405,6 +428,12 @@ def get_all_models_parallel():
                     models = future.result(timeout=30)
                     if models:
                         all_models.extend(models)
+                except TimeoutError:
+                    gateway_name = futures[future]
+                    logger.warning(
+                        "Timeout fetching models from %s after 30s",
+                        sanitize_for_logging(gateway_name),
+                    )
                 except Exception as e:
                     gateway_name = futures[future]
                     logger.warning(
@@ -423,7 +452,6 @@ def get_all_models_parallel():
 def get_all_models_sequential():
     """Fallback sequential fetching (original implementation)"""
     openrouter_models = get_cached_models("openrouter") or []
-    portkey_models = get_cached_models("portkey") or []
     featherless_models = get_cached_models("featherless") or []
     deepinfra_models = get_cached_models("deepinfra") or []
     cerebras_models = get_cached_models("cerebras") or []
@@ -441,9 +469,9 @@ def get_all_models_sequential():
     helicone_models = get_cached_models("helicone") or []
     anannas_models = get_cached_models("anannas") or []
     aihubmix_models = get_cached_models("aihubmix") or []
+    alibaba_models = get_cached_models("alibaba") or []
     return (
         openrouter_models
-        + portkey_models
         + featherless_models
         + deepinfra_models
         + cerebras_models
@@ -461,6 +489,7 @@ def get_all_models_sequential():
         + helicone_models
         + anannas_models
         + aihubmix_models
+        + alibaba_models
     )
 
 
@@ -473,15 +502,20 @@ def _build_multi_provider_catalog() -> AggregatedCatalog:
     except Exception as exc:  # pragma: no cover - defensive guard
         logger.debug("Failed to register Google canonical models: %s", exc)
 
-    models = get_all_models_parallel()
-    canonical_snapshot = registry.get_canonical_catalog_snapshot()
-    return AggregatedCatalog(models, canonical_snapshot)
+    # Set flag to prevent circular dependencies during catalog building
+    _set_building_catalog(True)
+    try:
+        models = get_all_models_parallel()
+        canonical_snapshot = registry.get_canonical_catalog_snapshot()
+        return AggregatedCatalog(models, canonical_snapshot)
+    finally:
+        _set_building_catalog(False)
 
 
 def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
     catalog = _build_multi_provider_catalog()
     _multi_provider_catalog_cache["data"] = catalog
-    _multi_provider_catalog_cache["timestamp"] = datetime.now(timezone.utc)
+    _multi_provider_catalog_cache["timestamp"] = datetime.now(UTC)
     return catalog
 
 
@@ -489,14 +523,6 @@ def get_cached_models(gateway: str = "openrouter"):
     """Get cached models or fetch from the requested gateway if cache is expired"""
     try:
         gateway = (gateway or "openrouter").lower()
-
-        if gateway == "portkey":
-            cached = _fresh_cached_models(_portkey_models_cache, "portkey")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_portkey()
-            _register_canonical_records("portkey", result)
-            return result
 
         if gateway == "featherless":
             cached = _fresh_cached_models(_featherless_models_cache, "featherless")
@@ -591,7 +617,7 @@ def get_cached_models(gateway: str = "openrouter"):
 
             cache = _huggingface_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     # Validate cache has reasonable number of models (should be 500+, not just 9)
                     cache_size = len(cache["data"])
@@ -629,7 +655,7 @@ def get_cached_models(gateway: str = "openrouter"):
             if result and not cache["data"]:
                 logger.info("Manually updating HuggingFace cache after fetch")
                 _huggingface_models_cache["data"] = result
-                _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
+                _huggingface_models_cache["timestamp"] = datetime.now(UTC)
 
             _register_canonical_records("huggingface", result)
             return result
@@ -690,11 +716,19 @@ def get_cached_models(gateway: str = "openrouter"):
             _register_canonical_records("aihubmix", result)
             return result
 
+        if gateway == "alibaba":
+            cached = _fresh_cached_models(_alibaba_models_cache, "alibaba")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_alibaba()
+            _register_canonical_records("alibaba", result)
+            return result
+
         if gateway == "all":
             cache = _multi_provider_catalog_cache
             # Check timestamp only - empty list [] is a valid cached value
             if cache.get("timestamp") is not None:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
                 if cache_age < cache.get("stale_ttl", cache["ttl"]):
@@ -756,61 +790,11 @@ def fetch_models_from_openrouter():
             if "pricing" in model:
                 model["pricing"] = sanitize_pricing(model["pricing"])
         _models_cache["data"] = models
-        _models_cache["timestamp"] = datetime.now(timezone.utc)
+        _models_cache["timestamp"] = datetime.now(UTC)
 
         return _models_cache["data"]
     except Exception as e:
         logger.error("Failed to fetch models from OpenRouter: %s", sanitize_for_logging(str(e)))
-        return None
-
-
-def fetch_models_from_portkey():
-    """Fetch models from Portkey API and normalize to the catalog schema"""
-    try:
-        if not Config.PORTKEY_API_KEY:
-            logger.error("Portkey API key not configured")
-            return None
-
-        headers = {"x-portkey-api-key": Config.PORTKEY_API_KEY, "Content-Type": "application/json"}
-
-        # Portkey API returns all models in a single request (no pagination support)
-        url = "https://api.portkey.ai/v1/models"
-        logger.info("Fetching Portkey models from %s", sanitize_for_logging(str(url)))
-
-        response = httpx.get(url, headers=headers, timeout=20.0)
-        response.raise_for_status()
-
-        payload = response.json()
-        logger.info(
-            f"Portkey API response structure: {json.dumps({k: type(v).__name__ for k, v in payload.items()}, indent=2)}"
-        )
-
-        raw_models = payload.get("data", [])
-        logger.info(f"Fetched {len(raw_models)} models from Portkey")
-
-        # Get OpenRouter models for pricing cross-reference
-        openrouter_models = get_cached_models("openrouter") or []
-
-        normalized_models = [
-            normalize_portkey_model(model, openrouter_models) for model in raw_models if model
-        ]
-
-        _portkey_models_cache["data"] = normalized_models
-        _portkey_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        logger.info(f"Cached {len(normalized_models)} Portkey models with pricing cross-reference")
-        return _portkey_models_cache["data"]
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            "Portkey HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch models from Portkey: %s", sanitize_for_logging(str(e)), exc_info=True
-        )
         return None
 
 
@@ -856,7 +840,7 @@ def fetch_models_from_deepinfra():
         normalized_models = [normalize_deepinfra_model(model) for model in raw_models if model]
 
         _deepinfra_models_cache["data"] = normalized_models
-        _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _deepinfra_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
         return _deepinfra_models_cache["data"]
@@ -872,96 +856,6 @@ def fetch_models_from_deepinfra():
             "Failed to fetch models from DeepInfra: %s", sanitize_for_logging(str(e)), exc_info=True
         )
         return None
-
-
-def normalize_portkey_model(portkey_model: dict, openrouter_models: list = None) -> dict:
-    """Normalize Portkey catalog entries to resemble OpenRouter model shape"""
-    slug = (
-        portkey_model.get("slug") or portkey_model.get("canonical_slug") or portkey_model.get("id")
-    )
-    if not slug:
-        return {"source_gateway": "portkey", "raw_portkey": portkey_model or {}}
-
-    provider_slug = slug.split("/")[0] if "/" in slug else slug
-    provider_slug = provider_slug.lstrip("@")
-
-    model_handle = slug.split("/")[-1]
-    display_name = model_handle.replace("-", " ").replace("_", " ").title()
-
-    # Try to find matching OpenRouter model for pricing
-    pricing = None
-    description_suffix = "Pricing data not available from Portkey API."
-
-    if openrouter_models:
-        # Clean up the slug for matching
-        clean_slug = slug.lstrip("@").split(":")[0]  # Remove @ prefix and :free/:extended suffixes
-
-        # Try multiple matching strategies
-        for or_model in openrouter_models:
-            or_slug = or_model.get("id", "")
-            or_slug_clean = or_slug.split(":")[0]
-
-            # Strategy 1: Exact match
-            if or_slug.lower() == slug.lower():
-                pricing = sanitize_pricing(or_model.get("pricing"))
-                description_suffix = "Pricing from OpenRouter (exact match)."
-                break
-
-            # Strategy 2: Match without prefixes/suffixes
-            if or_slug_clean.lower() == clean_slug.lower():
-                pricing = sanitize_pricing(or_model.get("pricing"))
-                description_suffix = "Pricing from OpenRouter (approximate match)."
-                break
-
-            # Strategy 3: Match canonical slug
-            or_canonical = or_model.get("canonical_slug", "")
-            if or_canonical and or_canonical.lower() == clean_slug.lower():
-                pricing = sanitize_pricing(or_model.get("pricing"))
-                description_suffix = "Pricing from OpenRouter (canonical match)."
-                break
-
-    # If no match found, use null
-    if not pricing:
-        pricing = {
-            "prompt": None,
-            "completion": None,
-            "request": None,
-            "image": None,
-            "web_search": None,
-            "internal_reasoning": None,
-        }
-
-    description = f"Portkey catalog entry for {slug}. {description_suffix}"
-
-    architecture = {
-        "modality": MODALITY_TEXT_TO_TEXT,
-        "input_modalities": ["text"],
-        "output_modalities": ["text"],
-        "tokenizer": None,
-        "instruct_type": None,
-    }
-
-    return {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": None,
-        "description": description,
-        "context_length": 0,
-        "architecture": architecture,
-        "pricing": pricing,
-        "top_provider": None,
-        "per_request_limits": None,
-        "supported_parameters": [],
-        "default_parameters": {},
-        "provider_slug": provider_slug,
-        "provider_site_url": None,
-        "model_logo_url": None,
-        "source_gateway": "portkey",
-        "raw_portkey": portkey_model,
-    }
 
 
 def fetch_models_from_featherless():
@@ -1011,7 +905,7 @@ def fetch_models_from_featherless():
                 )
 
         _featherless_models_cache["data"] = normalized_models
-        _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _featherless_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
         return _featherless_models_cache["data"]
@@ -1102,7 +996,7 @@ def fetch_models_from_chutes():
             normalized_models = [normalize_chutes_model(model) for model in raw_models if model]
 
             _chutes_models_cache["data"] = normalized_models
-            _chutes_models_cache["timestamp"] = datetime.now(timezone.utc)
+            _chutes_models_cache["timestamp"] = datetime.now(UTC)
 
             logger.info(f"Loaded {len(normalized_models)} models from Chutes static catalog")
             return _chutes_models_cache["data"]
@@ -1161,7 +1055,7 @@ def fetch_models_from_groq():
         normalized_models = [normalize_groq_model(model) for model in raw_models if model]
 
         _groq_models_cache["data"] = normalized_models
-        _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _groq_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Groq models")
         return _groq_models_cache["data"]
@@ -1350,7 +1244,7 @@ def fetch_models_from_fireworks():
         normalized_models = [normalize_fireworks_model(model) for model in raw_models if model]
 
         _fireworks_models_cache["data"] = normalized_models
-        _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fireworks_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
         return _fireworks_models_cache["data"]
@@ -1491,7 +1385,7 @@ def fetch_models_from_together():
         normalized_models = [normalize_together_model(model) for model in raw_models if model]
 
         _together_models_cache["data"] = normalized_models
-        _together_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _together_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Together models")
         return _together_models_cache["data"]
@@ -1634,7 +1528,7 @@ def fetch_models_from_aimo():
         )
 
         _aimo_models_cache["data"] = deduplicated_models
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
 
         return _aimo_models_cache["data"]
     except httpx.HTTPStatusError as e:
@@ -1669,7 +1563,7 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     provider_prefixes = ["google/", "openai/", "anthropic/", "meta/", "meta-llama/", "mistralai/"]
     for prefix in provider_prefixes:
         if model_name.lower().startswith(prefix):
-            model_name_normalized = model_name[len(prefix):]
+            model_name_normalized = model_name[len(prefix) :]
             break
 
     # Get provider information (use first provider if multiple)
@@ -1698,7 +1592,9 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     canonical_slug = model_name_normalized.lower()
 
     display_name = aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
-    base_description = f"AIMO Network decentralized model {model_name_normalized} provided by {provider_name}."
+    base_description = (
+        f"AIMO Network decentralized model {model_name_normalized} provided by {provider_name}."
+    )
     description = base_description
 
     context_length = aimo_model.get("context_length", 0)
@@ -1786,23 +1682,23 @@ def fetch_models_from_near():
 
         try:
             # Try to fetch models from Near AI
-            # Note: Using standard OpenAI-compatible /models endpoint
+            # Note: Using Near AI's model list endpoint which includes pricing
             response = httpx.get(
-                "https://cloud-api.near.ai/v1/models",
+                "https://cloud-api.near.ai/v1/model/list",
                 headers=headers,
                 timeout=20.0,
             )
             response.raise_for_status()
 
             payload = response.json()
-            raw_models = payload.get("data", [])
+            raw_models = payload.get("models", [])
 
             if raw_models:
                 # Normalize models
                 normalized_models = [normalize_near_model(model) for model in raw_models if model]
 
                 _near_models_cache["data"] = normalized_models
-                _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+                _near_models_cache["timestamp"] = datetime.now(UTC)
 
                 logger.info(f"Fetched {len(normalized_models)} Near AI models from API")
                 return _near_models_cache["data"]
@@ -1814,18 +1710,47 @@ def fetch_models_from_near():
 
         # Fallback to known Near AI models if API doesn't return results
         # Reference: https://cloud.near.ai/models for current available models
+        # Pricing from https://cloud-api.near.ai/v1/model/list (as of 2025-01)
         logger.info("Using fallback Near AI model list")
         fallback_models = [
-            {"id": "deepseek-ai/DeepSeek-V3.1", "owned_by": "DeepSeek"},
-            {"id": "openai/gpt-oss-120b", "owned_by": "GPT"},
-            {"id": "Qwen/Qwen3-30B-A3B-Instruct-2507", "owned_by": "Qwen"},
-            {"id": "zai-org/GLM-4.6", "owned_by": "Zhipu AI"},
+            {
+                "id": "deepseek-ai/DeepSeek-V3.1",
+                "modelId": "deepseek-ai/DeepSeek-V3.1",
+                "owned_by": "DeepSeek",
+                "inputCostPerToken": {"amount": 1, "scale": -6},  # $1.00 per million tokens
+                "outputCostPerToken": {"amount": 2.5, "scale": -6},  # $2.50 per million tokens
+                "metadata": {"contextLength": 128000},
+            },
+            {
+                "id": "openai/gpt-oss-120b",
+                "modelId": "openai/gpt-oss-120b",
+                "owned_by": "GPT",
+                "inputCostPerToken": {"amount": 0.2, "scale": -6},  # $0.20 per million tokens
+                "outputCostPerToken": {"amount": 0.6, "scale": -6},  # $0.60 per million tokens
+                "metadata": {"contextLength": 131000},
+            },
+            {
+                "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+                "modelId": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+                "owned_by": "Qwen",
+                "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
+                "outputCostPerToken": {"amount": 0.45, "scale": -6},  # $0.45 per million tokens
+                "metadata": {"contextLength": 262000},
+            },
+            {
+                "id": "zai-org/GLM-4.6",
+                "modelId": "zai-org/GLM-4.6",
+                "owned_by": "Zhipu AI",
+                "inputCostPerToken": {"amount": 0.75, "scale": -6},  # $0.75 per million tokens
+                "outputCostPerToken": {"amount": 2.0, "scale": -6},  # $2.00 per million tokens
+                "metadata": {"contextLength": 200000},
+            },
         ]
 
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
 
         _near_models_cache["data"] = normalized_models
-        _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _near_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Using {len(normalized_models)} fallback Near AI models")
         return _near_models_cache["data"]
@@ -1843,28 +1768,43 @@ def normalize_near_model(near_model: dict) -> dict:
     - User-owned AI services
     - Cryptographic verification and on-chain auditing
     """
-    model_id = near_model.get("id")
+    model_id = near_model.get("modelId")
     if not model_id:
-        logger.warning(
-            "Near AI model missing 'id' field: %s", sanitize_for_logging(str(near_model))
-        )
-        return None
+        # Fallback to 'id' for backward compatibility
+        model_id = near_model.get("id")
+        if not model_id:
+            logger.warning(
+                "Near AI model missing 'modelId' field: %s", sanitize_for_logging(str(near_model))
+            )
+            return None
 
     slug = f"near/{model_id}"
     provider_slug = "near"
 
+    # Extract metadata from Near AI API response
+    metadata = near_model.get("metadata") or {}
     display_name = (
-        near_model.get("display_name") or model_id.replace("-", " ").replace("_", " ").title()
+        metadata.get("displayName")
+        or near_model.get("display_name")
+        or model_id.replace("-", " ").replace("_", " ").title()
     )
     near_model.get("owned_by", "Near Protocol")
 
     # Highlight security features in description
-    base_description = near_model.get("description") or f"Near AI hosted model {model_id}."
+    base_description = (
+        metadata.get("description")
+        or near_model.get("description")
+        or f"Near AI hosted model {model_id}."
+    )
     security_features = " Security: Private AI inference with decentralized execution, cryptographic verification, and on-chain auditing."
     description = f"{base_description}{security_features}"
 
-    metadata = near_model.get("metadata") or {}
-    context_length = metadata.get("context_length") or near_model.get("context_length") or 0
+    context_length = (
+        metadata.get("contextLength")
+        or metadata.get("context_length")
+        or near_model.get("context_length")
+        or 0
+    )
 
     pricing = {
         "prompt": None,
@@ -1875,17 +1815,39 @@ def normalize_near_model(near_model: dict) -> dict:
         "internal_reasoning": None,
     }
 
-    # Extract pricing if available from Near AI
-    pricing_info = near_model.get("pricing", {})
-    if pricing_info:
-        pricing["prompt"] = (
-            str(pricing_info.get("prompt")) if pricing_info.get("prompt") is not None else None
-        )
-        pricing["completion"] = (
-            str(pricing_info.get("completion"))
-            if pricing_info.get("completion") is not None
-            else None
-        )
+    # Extract pricing from Near AI API response
+    # Near AI provides pricing as inputCostPerToken and outputCostPerToken with amount and scale
+    # Scale is in powers of 10 (e.g., -9 means 10^-9 = per token, convert to per million tokens)
+    input_cost = near_model.get("inputCostPerToken", {})
+    output_cost = near_model.get("outputCostPerToken", {})
+
+    if input_cost and isinstance(input_cost, dict):
+        input_amount = input_cost.get("amount", 0)
+        input_scale = input_cost.get("scale", -9)  # Default scale is -9 (per token)
+        # Convert to per million tokens (multiply by 10^6 and adjust for scale)
+        # Price per million = amount * 10^(6 + scale)
+        if input_amount > 0:
+            pricing["prompt"] = str(input_amount * (10 ** (6 + input_scale)))
+
+    if output_cost and isinstance(output_cost, dict):
+        output_amount = output_cost.get("amount", 0)
+        output_scale = output_cost.get("scale", -9)  # Default scale is -9 (per token)
+        # Convert to per million tokens
+        if output_amount > 0:
+            pricing["completion"] = str(output_amount * (10 ** (6 + output_scale)))
+
+    # Fallback to old pricing format for backward compatibility
+    if not pricing["prompt"] and not pricing["completion"]:
+        pricing_info = near_model.get("pricing", {})
+        if pricing_info:
+            pricing["prompt"] = (
+                str(pricing_info.get("prompt")) if pricing_info.get("prompt") is not None else None
+            )
+            pricing["completion"] = (
+                str(pricing_info.get("completion"))
+                if pricing_info.get("completion") is not None
+                else None
+            )
 
     architecture = {
         "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
@@ -1951,7 +1913,7 @@ def fetch_models_from_fal():
         normalized_models = [normalize_fal_model(model) for model in raw_models if model]
 
         _fal_models_cache["data"] = normalized_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fal_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Fal.ai models from catalog")
         return _fal_models_cache["data"]
@@ -1960,7 +1922,7 @@ def fetch_models_from_fal():
         return []
 
 
-def normalize_fal_model(fal_model: dict) -> Optional[dict]:
+def normalize_fal_model(fal_model: dict) -> dict | None:
     """Normalize Fal.ai catalog entries to resemble OpenRouter model shape
 
     Fal.ai features:
@@ -2070,7 +2032,7 @@ def fetch_models_from_vercel_ai_gateway():
         normalized_models = [normalize_vercel_model(model) for model in response.data if model]
 
         _vercel_ai_gateway_models_cache["data"] = normalized_models
-        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Vercel AI Gateway")
         return _vercel_ai_gateway_models_cache["data"]
@@ -2081,7 +2043,7 @@ def fetch_models_from_vercel_ai_gateway():
         return []
 
 
-def normalize_vercel_model(model) -> Optional[dict]:
+def normalize_vercel_model(model) -> dict | None:
     """Normalize Vercel AI Gateway model to catalog schema
 
     Vercel models can originate from various providers (OpenAI, Google, Anthropic, etc.)
@@ -2186,7 +2148,6 @@ def get_vercel_model_pricing(model_id: str) -> dict:
     }
 
 
-
 def fetch_specific_model_from_together(provider_name: str, model_name: str):
     """Fetch specific model data from Together by searching cached models"""
     try:
@@ -2209,38 +2170,6 @@ def fetch_specific_model_from_together(provider_name: str, model_name: str):
     except Exception as e:
         logger.error(
             "Failed to fetch specific model %s/%s from Together: %s",
-            sanitize_for_logging(provider_name),
-            sanitize_for_logging(model_name),
-            sanitize_for_logging(str(e)),
-        )
-        return None
-
-
-def fetch_specific_model_from_portkey(provider_name: str, model_name: str):
-    """Fetch specific model data from Portkey by searching cached models"""
-    try:
-        # Construct the model ID
-        model_id = f"{provider_name}/{model_name}"
-
-        # First check cache
-        portkey_models = get_cached_models("portkey")
-        if portkey_models:
-            for model in portkey_models:
-                if model.get("id", "").lower() == model_id.lower():
-                    return model
-
-        # If not in cache, try to fetch fresh data
-        fresh_models = fetch_models_from_portkey()
-        if fresh_models:
-            for model in fresh_models:
-                if model.get("id", "").lower() == model_id.lower():
-                    return model
-
-        logger.warning("Model %s not found in Portkey catalog", sanitize_for_logging(model_id))
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch specific model %s/%s from Portkey: %s",
             sanitize_for_logging(provider_name),
             sanitize_for_logging(model_name),
             sanitize_for_logging(str(e)),
@@ -2568,7 +2497,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
+        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
     """
     try:
         model_id = f"{provider_name}/{model_name}".lower()
@@ -2576,7 +2505,6 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
         # Check each gateway's cache
         gateways = [
             "openrouter",
-            "portkey",
             "featherless",
             "deepinfra",
             "chutes",
@@ -2663,9 +2591,11 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             if "openrouter" not in candidate_gateways:
                 candidate_gateways.append("openrouter")
 
+            if "huggingface" not in candidate_gateways:
+                candidate_gateways.append("huggingface")
+
         fetchers = {
             "openrouter": fetch_specific_model_from_openrouter,
-            "portkey": fetch_specific_model_from_portkey,
             "featherless": fetch_specific_model_from_featherless,
             "deepinfra": fetch_specific_model_from_deepinfra,
             "chutes": fetch_specific_model_from_chutes,
@@ -2731,7 +2661,7 @@ def fetch_huggingface_model(hugging_face_id: str):
 
         # Cache the result
         _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+        _huggingface_cache["timestamp"] = datetime.now(UTC)
 
         return model_data
     except httpx.HTTPStatusError as e:
@@ -2801,7 +2731,7 @@ def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
         return openrouter_model
 
 
-def _extract_model_provider_slug(model: dict) -> Optional[str]:
+def _extract_model_provider_slug(model: dict) -> str | None:
     """Determine provider slug from a model payload."""
     if not model:
         return None
@@ -2827,7 +2757,7 @@ def _extract_model_provider_slug(model: dict) -> Optional[str]:
     return None
 
 
-def _normalize_provider_slug(provider: Any) -> Optional[str]:
+def _normalize_provider_slug(provider: Any) -> str | None:
     """Extract provider slug from a provider record."""
     if provider is None:
         return None
@@ -2849,8 +2779,8 @@ def _normalize_provider_slug(provider: Any) -> Optional[str]:
 
 
 def get_model_count_by_provider(
-    provider_or_models: Any, models_data: Optional[list] = None
-) -> Union[int, Dict[str, int]]:
+    provider_or_models: Any, models_data: list | None = None
+) -> int | dict[str, int]:
     """Return model counts.
 
     Backwards-compatible shim that supports two call styles:
@@ -2876,7 +2806,7 @@ def get_model_count_by_provider(
         models = provider_or_models or []
         providers = models_data or []
 
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         for model in models:
             slug = _extract_model_provider_slug(model)
@@ -2917,12 +2847,26 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
         # Generate model logo URL using Google favicon service
         model_logo_url = None
         if provider_site_url:
-            # Clean the site URL for favicon service
-            clean_url = provider_site_url.replace("https://", "").replace("http://", "")
-            if clean_url.startswith("www."):
-                clean_url = clean_url[4:]
-            model_logo_url = f"https://www.google.com/s2/favicons?domain={clean_url}&sz=128"
-            logger.info(f"Generated model_logo_url: {model_logo_url}")
+            # Extract domain from URL for favicon service
+            try:
+                parsed_url = urlparse(provider_site_url)
+                domain = parsed_url.netloc or parsed_url.path
+                # Remove www. prefix if present
+                if domain.startswith("www."):
+                    domain = domain[4:]
+                model_logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+                # Use debug logging instead of info to avoid Railway rate limiting
+                logger.debug(f"Generated model_logo_url: {model_logo_url}")
+            except Exception as e:
+                logger.warning(f"Failed to parse provider_site_url '{provider_site_url}': {e}")
+                # Fallback to old method
+                clean_url = (
+                    provider_site_url.replace("https://", "").replace("http://", "").split("/")[0]
+                )
+                if clean_url.startswith("www."):
+                    clean_url = clean_url[4:]
+                model_logo_url = f"https://www.google.com/s2/favicons?domain={clean_url}&sz=128"
+                logger.debug(f"Generated model_logo_url (fallback): {model_logo_url}")
 
         # Add provider information to model
         enhanced_model = {
@@ -2964,18 +2908,16 @@ def fetch_models_from_aihubmix():
         normalized_models = [normalize_aihubmix_model(model) for model in response.data if model]
 
         _aihubmix_models_cache["data"] = normalized_models
-        _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aihubmix_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
         return _aihubmix_models_cache["data"]
     except Exception as e:
-        logger.error(
-            "Failed to fetch models from AiHubMix: %s", sanitize_for_logging(str(e))
-        )
+        logger.error("Failed to fetch models from AiHubMix: %s", sanitize_for_logging(str(e)))
         return []
 
 
-def normalize_aihubmix_model(model) -> Optional[dict]:
+def normalize_aihubmix_model(model) -> dict | None:
     """Normalize AiHubMix model to catalog schema
 
     AiHubMix models use OpenAI-compatible naming conventions.
@@ -2993,7 +2935,7 @@ def normalize_aihubmix_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from AiHubMix"),
+            "description": getattr(model, "description", "Model from AiHubMix"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -3046,7 +2988,7 @@ def fetch_models_from_helicone():
         normalized_models = [normalize_helicone_model(model) for model in response.data if model]
 
         _helicone_models_cache["data"] = normalized_models
-        _helicone_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _helicone_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Helicone AI Gateway")
         return _helicone_models_cache["data"]
@@ -3057,7 +2999,7 @@ def fetch_models_from_helicone():
         return []
 
 
-def normalize_helicone_model(model) -> Optional[dict]:
+def normalize_helicone_model(model) -> dict | None:
     """Normalize Helicone AI Gateway model to catalog schema
 
     Helicone models can originate from various providers (OpenAI, Anthropic, etc.)
@@ -3087,7 +3029,9 @@ def normalize_helicone_model(model) -> Optional[dict]:
         provider_slug = "google"
 
     # Get description - Helicone doesn't provide this, so we create one
-    description = getattr(model, "description", None) or "Model available through Helicone AI Gateway"
+    description = (
+        getattr(model, "description", None) or "Model available through Helicone AI Gateway"
+    )
 
     # Get context length if available
     context_length = getattr(model, "context_length", 4096)
@@ -3139,6 +3083,15 @@ def get_helicone_model_pricing(model_id: str) -> dict:
     Returns:
         dict with 'prompt', 'completion', 'request', and 'image' pricing fields
     """
+    # If we're building the catalog, return default pricing to avoid circular dependency
+    if _is_building_catalog():
+        return {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0",
+            "image": "0",
+        }
+
     try:
         from src.services.helicone_client import fetch_model_pricing_from_helicone
 
@@ -3193,18 +3146,16 @@ def fetch_models_from_anannas():
         normalized_models = [normalize_anannas_model(model) for model in response.data if model]
 
         _anannas_models_cache["data"] = normalized_models
-        _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _anannas_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Anannas")
         return _anannas_models_cache["data"]
     except Exception as e:
-        logger.error(
-            "Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e))
-        )
+        logger.error("Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e)))
         return []
 
 
-def normalize_anannas_model(model) -> Optional[dict]:
+def normalize_anannas_model(model) -> dict | None:
     """Normalize Anannas model to catalog schema
 
     Anannas models use OpenAI-compatible naming conventions.
@@ -3222,7 +3173,7 @@ def normalize_anannas_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from Anannas"),
+            "description": getattr(model, "description", "Model from Anannas"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -3247,4 +3198,83 @@ def normalize_anannas_model(model) -> Optional[dict]:
         }
     except Exception as e:
         logger.error("Failed to normalize Anannas model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def fetch_models_from_alibaba():
+    """Fetch models from Alibaba Cloud (DashScope) via OpenAI-compatible API
+
+    Alibaba Cloud provides access to Qwen models through a unified OpenAI-compatible endpoint.
+    """
+    try:
+        # Check if API key is configured
+        if not Config.ALIBABA_CLOUD_API_KEY:
+            logger.warning("Alibaba Cloud API key not configured - skipping model fetch")
+            return []
+
+        from src.services.alibaba_cloud_client import get_alibaba_cloud_client
+
+        client = get_alibaba_cloud_client()
+        response = client.models.list()
+
+        if not response or not hasattr(response, "data"):
+            logger.warning("No models returned from Alibaba Cloud")
+            return []
+
+        # Normalize models
+        normalized_models = [normalize_alibaba_model(model) for model in response.data if model]
+
+        _alibaba_models_cache["data"] = normalized_models
+        _alibaba_models_cache["timestamp"] = datetime.now(UTC)
+
+        logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
+        return _alibaba_models_cache["data"]
+    except Exception as e:
+        logger.error("Failed to fetch models from Alibaba Cloud: %s", sanitize_for_logging(str(e)))
+        return []
+
+
+def normalize_alibaba_model(model) -> dict | None:
+    """Normalize Alibaba Cloud model to catalog schema
+
+    Alibaba models use OpenAI-compatible naming conventions.
+    """
+    model_id = getattr(model, "id", None)
+    if not model_id:
+        logger.warning("Alibaba Cloud model missing 'id': %s", sanitize_for_logging(str(model)))
+        return None
+
+    try:
+        return {
+            "id": model_id,
+            "slug": f"alibaba/{model_id}",
+            "canonical_slug": f"alibaba/{model_id}",
+            "hugging_face_id": None,
+            "name": getattr(model, "name", model_id),
+            "created": getattr(model, "created_at", None),
+            "description": getattr(model, "description", "Model from Alibaba Cloud"),
+            "context_length": getattr(model, "context_length", 4096),
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": "0",
+                "completion": "0",
+                "request": "0",
+                "image": "0",
+            },
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "alibaba",
+            "provider_site_url": "https://dashscope.aliyun.com",
+            "model_logo_url": None,
+            "source_gateway": "alibaba",
+        }
+    except Exception as e:
+        logger.error("Failed to normalize Alibaba Cloud model: %s", sanitize_for_logging(str(e)))
         return None

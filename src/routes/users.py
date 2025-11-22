@@ -1,21 +1,19 @@
 import logging
+from datetime import datetime, timedelta, UTC
 
-from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, HTTPException
 
-from fastapi import Depends, HTTPException
-
+import src.db.credit_transactions as credit_transactions_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
-import src.db.credit_transactions as credit_transactions_module
+import src.services.trial_validation as trial_module
 from src.schemas import (
-    UserProfileResponse,
-    DeleteAccountResponse,
-    UserProfileUpdate,
     DeleteAccountRequest,
+    DeleteAccountResponse,
+    UserProfileResponse,
+    UserProfileUpdate,
 )
 from src.security.deps import get_api_key
-from fastapi import APIRouter
-import src.services.trial_validation as trial_module
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
@@ -128,7 +126,7 @@ async def user_monitor(api_key: str = Depends(get_api_key)):
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "user_id": usage_data["user_id"],
             "api_key": f"{api_key[:10]}...",
             "current_credits": usage_data["current_credits"],
@@ -166,11 +164,13 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
                 },
                 "current_usage": {"allowed": True, "reason": "No rate limits configured"},
                 "reset_times": {
-                    "minute": datetime.now(timezone.utc).replace(second=0, microsecond=0)
+                    "minute": datetime.now(UTC).replace(second=0, microsecond=0)
                     + timedelta(minutes=1),
-                    "hour": datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+                    "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
                     + timedelta(hours=1),
-                    "day": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                    "day": datetime.now(UTC).replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
                     + timedelta(days=1),
                 },
             }
@@ -190,10 +190,11 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
             },
             "current_usage": current_usage,
             "reset_times": {
-                "minute": datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1),
-                "hour": datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+                "minute": datetime.now(UTC).replace(second=0, microsecond=0)
+                + timedelta(minutes=1),
+                "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
                 + timedelta(hours=1),
-                "day": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 + timedelta(days=1),
             },
         }
@@ -318,7 +319,7 @@ async def delete_user_account_endpoint(
             "status": "success",
             "message": "User account deleted successfully",
             "user_id": str(user["id"]),
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(UTC),
         }
 
     except HTTPException:

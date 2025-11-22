@@ -7,13 +7,12 @@ This module provides validation functions to prevent common security issues:
 - Webhook authenticity verification
 """
 
-import hmac
 import hashlib
+import hmac
+import ipaddress
 import logging
 from urllib.parse import urlparse
-import ipaddress
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +32,7 @@ def is_private_ip(ip: str) -> bool:
         return False
 
 
-def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bool:
+def validate_webhook_url(url: str, allowed_domains: list | None = None) -> bool:
     """Validate webhook URL to prevent SSRF attacks.
 
     Security checks:
@@ -92,7 +91,7 @@ def validate_webhook_url(url: str, allowed_domains: Optional[list] = None) -> bo
         return False
 
 
-def validate_redirect_url(url: str, allowed_origins: Optional[list] = None) -> bool:
+def validate_redirect_url(url: str, allowed_origins: list | None = None) -> bool:
     """Validate redirect URL to prevent open redirect attacks.
 
     Security checks:
@@ -210,7 +209,7 @@ def sanitize_for_logging(value: str) -> str:
     return value.replace("\n", " ").replace("\r", " ").replace("\x00", "")
 
 
-def sanitize_pii_for_logging(data: dict, pii_fields: Optional[list] = None) -> dict:
+def sanitize_pii_for_logging(data: dict, pii_fields: list | None = None) -> dict:
     """Remove or mask personally identifiable information from logging data.
 
     Args:

@@ -9,11 +9,10 @@ from datetime import datetime
 
 from src.config.supabase_config import get_supabase_client
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def increment_ping_count() -> Optional[int]:
+def increment_ping_count() -> int | None:
     """
     Increment the ping counter in Supabase database
 
@@ -60,7 +59,7 @@ def increment_ping_count() -> Optional[int]:
         return None
 
 
-def get_ping_count() -> Optional[int]:
+def get_ping_count() -> int | None:
     """
     Get the current ping counter value from database
 
@@ -83,7 +82,7 @@ def get_ping_count() -> Optional[int]:
         return None
 
 
-def get_ping_stats() -> Optional[dict]:
+def get_ping_stats() -> dict | None:
     """
     Get detailed ping statistics from database
 

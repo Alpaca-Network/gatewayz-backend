@@ -1,15 +1,14 @@
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Dict, List
+from datetime import datetime, timedelta, UTC
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.users import get_user
 
-from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def get_user_rate_limits(api_key: str) -> Optional[Dict[str, Any]]:
+def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
     """Get rate limits for a user"""
     try:
         client = get_supabase_client()
@@ -64,7 +63,7 @@ def get_user_rate_limits(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def set_user_rate_limits(api_key: str, rate_limits: Dict[str, int]) -> None:
+def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> None:
     try:
         client = get_supabase_client()
 
@@ -81,8 +80,8 @@ def set_user_rate_limits(api_key: str, rate_limits: Dict[str, int]) -> None:
             "tokens_per_minute": rate_limits.get("tokens_per_minute", 10000),
             "tokens_per_hour": rate_limits.get("tokens_per_hour", 100000),
             "tokens_per_day": rate_limits.get("tokens_per_day", 1000000),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         existing = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
@@ -97,7 +96,7 @@ def set_user_rate_limits(api_key: str, rate_limits: Dict[str, int]) -> None:
         raise RuntimeError(f"Failed to set user rate limits: {e}") from e
 
 
-def check_rate_limit(api_key: str, tokens_used: int = 0) -> Dict[str, Any]:
+def check_rate_limit(api_key: str, tokens_used: int = 0) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
@@ -107,18 +106,25 @@ def check_rate_limit(api_key: str, tokens_used: int = 0) -> Dict[str, Any]:
 
         # Check if rate_limit_usage table exists
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             minute_start = now.replace(second=0, microsecond=0)
             hour_start = now.replace(minute=0, second=0, microsecond=0)
             day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
             # Get current usage for all windows
-            usage_result = client.table("rate_limit_usage").select("*").eq("api_key", api_key).execute()
+            usage_result = (
+                client.table("rate_limit_usage").select("*").eq("api_key", api_key).execute()
+            )
             usage_records = usage_result.data
         except Exception as table_error:
             # If table doesn't exist, allow the request but log the issue
-            logger.warning(f"rate_limit_usage table not accessible during rate limit check: {table_error}")
-            return {"allowed": True, "reason": "Rate limit check unavailable - table migration pending"}
+            logger.warning(
+                f"rate_limit_usage table not accessible during rate limit check: {table_error}"
+            )
+            return {
+                "allowed": True,
+                "reason": "Rate limit check unavailable - table migration pending",
+            }
 
         # Find current window records
         minute_usage = next(
@@ -208,16 +214,20 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
             return
 
         user_id = user["id"]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Timestamp is already timezone-aware
         timestamp = now.isoformat()
 
         # Calculate window starts
-        minute_start = now.replace(second=0, microsecond=0).replace(tzinfo=timezone.utc).isoformat()
-        hour_start = now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=timezone.utc).isoformat()
+        minute_start = now.replace(second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
+        hour_start = (
+            now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
+        )
         day_start = (
-            now.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=timezone.utc).isoformat()
+            now.replace(hour=0, minute=0, second=0, microsecond=0)
+            .replace(tzinfo=UTC)
+            .isoformat()
         )
 
         # Check if this is a new API key (gw_ prefix)
@@ -301,7 +311,9 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
                         f"Failed to update rate limit usage for {window_data['window_type']}: {e}"
                     )
         else:
-            logger.info("Skipping rate limit usage update - table not available. Migration may be pending.")
+            logger.info(
+                "Skipping rate limit usage update - table not available. Migration may be pending."
+            )
 
         # If this is a new key, also update the api_keys_new table
         if is_new_key:
@@ -317,7 +329,7 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         logger.error(f"Failed to update rate limit usage: {e}")
 
 
-def get_environment_usage_summary(user_id: int) -> Dict[str, Any]:
+def get_environment_usage_summary(user_id: int) -> dict[str, Any]:
     """Get usage breakdown by environment"""
     try:
         client = get_supabase_client()
@@ -357,7 +369,7 @@ def get_environment_usage_summary(user_id: int) -> Dict[str, Any]:
 # =============================================================================
 
 
-def get_rate_limit_config(api_key: str) -> Optional[Dict[str, Any]]:
+def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
     """Get rate limit configuration for a specific API key"""
     try:
         client = get_supabase_client()
@@ -421,7 +433,7 @@ def get_rate_limit_config(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def update_rate_limit_config(api_key: str, config: Dict[str, Any]) -> bool:
+def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
     """Update rate limit configuration for a specific API key"""
     try:
         client = get_supabase_client()
@@ -433,7 +445,7 @@ def update_rate_limit_config(api_key: str, config: Dict[str, Any]) -> bool:
                 .update(
                     {
                         "rate_limit_config": config,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 )
                 .eq("api_key", api_key)
@@ -467,7 +479,7 @@ def update_rate_limit_config(api_key: str, config: Dict[str, Any]) -> bool:
                             "burst_limit": config.get("burst_limit", 10),
                             "concurrency_limit": config.get("concurrency_limit", 50),
                             "window_size": config.get("window_size_seconds", 60),
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                            "updated_at": datetime.now(UTC).isoformat(),
                         }
                     ).eq("api_key_id", api_key_id).execute()
                 else:
@@ -492,7 +504,7 @@ def update_rate_limit_config(api_key: str, config: Dict[str, Any]) -> bool:
         return False
 
 
-def get_user_rate_limit_configs(user_id: int) -> List[Dict[str, Any]]:
+def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
     """Get all rate limit configurations for a user's API keys"""
     try:
         client = get_supabase_client()
@@ -523,7 +535,7 @@ def get_user_rate_limit_configs(user_id: int) -> List[Dict[str, Any]]:
         return []
 
 
-def bulk_update_rate_limit_configs(user_id: int, config: Dict[str, Any]) -> int:
+def bulk_update_rate_limit_configs(user_id: int, config: dict[str, Any]) -> int:
     """Bulk update rate limit configurations for all user's API keys"""
     try:
         client = get_supabase_client()
@@ -533,7 +545,7 @@ def bulk_update_rate_limit_configs(user_id: int, config: Dict[str, Any]) -> int:
             .update(
                 {
                     "rate_limit_config": config,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             )
             .eq("user_id", user_id)
@@ -547,12 +559,12 @@ def bulk_update_rate_limit_configs(user_id: int, config: Dict[str, Any]) -> int:
         return 0
 
 
-def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> Dict[str, Any]:
+def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> dict[str, Any]:
     """Get current rate limit usage statistics for an API key"""
     try:
         client = get_supabase_client()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if time_window == "minute":
             start_time = now.replace(second=0, microsecond=0)
@@ -602,12 +614,12 @@ def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> Dic
         }
 
 
-def get_system_rate_limit_stats() -> Dict[str, Any]:
+def get_system_rate_limit_stats() -> dict[str, Any]:
     """Get system-wide rate limiting statistics"""
     try:
         client = get_supabase_client()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         minute_ago = now - timedelta(minutes=1)
         hour_ago = now - timedelta(hours=1)
         day_ago = now - timedelta(days=1)
@@ -672,14 +684,14 @@ def get_system_rate_limit_stats() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting system rate limit stats: {e}")
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "minute": {"requests": 0, "tokens": 0, "active_keys": 0, "requests_per_second": 0},
             "hour": {"requests": 0, "tokens": 0, "active_keys": 0, "requests_per_minute": 0},
             "day": {"requests": 0, "tokens": 0, "active_keys": 0, "requests_per_hour": 0},
         }
 
 
-def create_rate_limit_alert(api_key: str, alert_type: str, details: Dict[str, Any]) -> bool:
+def create_rate_limit_alert(api_key: str, alert_type: str, details: dict[str, Any]) -> bool:
     """Create a rate limit alert for monitoring (optional - table may not exist)"""
     try:
         client = get_supabase_client()
@@ -697,7 +709,7 @@ def create_rate_limit_alert(api_key: str, alert_type: str, details: Dict[str, An
             "api_key": api_key,
             "alert_type": alert_type,
             "details": details,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "resolved": False,
         }
 
@@ -710,8 +722,8 @@ def create_rate_limit_alert(api_key: str, alert_type: str, details: Dict[str, An
 
 
 def get_rate_limit_alerts(
-    api_key: Optional[str] = None, resolved: bool = False, limit: int = 100
-) -> List[Dict[str, Any]]:
+    api_key: str | None = None, resolved: bool = False, limit: int = 100
+) -> list[dict[str, Any]]:
     """Get rate limit alerts with optional filtering"""
     try:
         client = get_supabase_client()
