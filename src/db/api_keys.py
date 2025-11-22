@@ -3,6 +3,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from postgrest import APIError
+
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
@@ -10,12 +12,76 @@ from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
+SCHEMA_CACHE_ERROR_CODE = "PGRST204"
+ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
+
 
 # near the top of the module
 def _pct(used: int, limit: Optional[int]) -> Optional[float]:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
+
+
+def _is_schema_cache_error(error: Exception) -> bool:
+    """Return True if Supabase/PostgREST reported a schema cache miss."""
+    return isinstance(error, APIError) and getattr(error, "code", None) == SCHEMA_CACHE_ERROR_CODE
+
+
+def _refresh_postgrest_schema_cache(client) -> bool:
+    """Trigger PostgREST to reload its schema cache via RPC."""
+    try:
+        client.rpc("refresh_postgrest_schema_cache", {}).execute()
+        logger.info("Triggered PostgREST schema cache refresh after API key insert failure")
+        return True
+    except Exception as refresh_error:
+        logger.warning(
+            "Failed to refresh PostgREST schema cache: %s",
+            sanitize_for_logging(str(refresh_error)),
+        )
+        return False
+
+
+def _insert_api_key_row(
+    client, api_key_payload: Dict[str, Any], include_encrypted_fields: bool = True
+):
+    """Insert API key data, optionally dropping encrypted columns for legacy schemas."""
+    payload = dict(api_key_payload)
+    if not include_encrypted_fields:
+        for column in ENCRYPTED_COLUMNS:
+            payload.pop(column, None)
+    return client.table("api_keys_new").insert(payload).execute()
+
+
+def _handle_schema_cache_insert_error(
+    client, api_key_payload: Dict[str, Any], original_error: APIError
+):
+    """Retry API key insert after schema refresh or by omitting encrypted columns."""
+    if not _is_schema_cache_error(original_error):
+        raise original_error
+
+    logger.warning(
+        "API key insert failed due to PostgREST schema cache miss (%s); attempting refresh",
+        sanitize_for_logging(str(original_error)),
+    )
+
+    if _refresh_postgrest_schema_cache(client):
+        try:
+            return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=True)
+        except APIError as retry_error:
+            if not _is_schema_cache_error(retry_error):
+                raise
+            logger.warning(
+                "Schema cache refresh did not resolve API key insert error (%s); "
+                "retrying without encrypted columns",
+                sanitize_for_logging(str(retry_error)),
+            )
+    else:
+        logger.warning(
+            "Unable to refresh schema cache automatically; falling back to insert without encrypted columns"
+        )
+
+    return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=False)
 
 
 def check_key_name_uniqueness(
@@ -188,7 +254,10 @@ def create_api_key(
         # Add trial data if this is a primary key
         api_key_data.update(trial_data)
 
-        result = client.table("api_keys_new").insert(api_key_data).execute()
+        try:
+            result = _insert_api_key_row(client, api_key_data, include_encrypted_fields=True)
+        except APIError as api_error:
+            result = _handle_schema_cache_insert_error(client, api_key_data, api_error)
 
         if not result.data:
             raise ValueError("Failed to create API key")
