@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def alibaba_status():
     """Check Alibaba Cloud integration status"""
     try:
-        client = get_alibaba_cloud_client()
+        get_alibaba_cloud_client()
         return {
             "status": "ok",
             "message": "Alibaba Cloud client initialized successfully",
@@ -62,7 +62,7 @@ async def test_alibaba_chat(api_key: str = Depends(get_api_key)):
             model="qwen-flash",
         )
         processed = process_alibaba_cloud_response(response)
-        logger.info(f"Non-streaming test successful")
+        logger.info("Non-streaming test successful")
         return {
             "status": "ok",
             "model": "qwen-flash",

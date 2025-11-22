@@ -5,7 +5,7 @@ Handles storage and retrieval of processed Stripe webhook events for idempotency
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -100,7 +100,7 @@ def record_processed_event(
                     "event_type": event_type,
                     "user_id": user_id,
                     "metadata": metadata or {},
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "processed_at": datetime.now(UTC).isoformat(),
                 }
             )
             .execute()
@@ -160,8 +160,8 @@ def cleanup_old_events(days: int = 90) -> int:
         client = get_supabase_client()
 
         # Calculate cutoff timestamp
-        cutoff = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
+        cutoff = datetime.now(UTC).timestamp() - (days * 24 * 60 * 60)
+        cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC).isoformat()
 
         # Delete old events
         result = (

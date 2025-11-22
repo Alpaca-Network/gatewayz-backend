@@ -14,7 +14,7 @@ import asyncio
 import logging
 import socket
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 from prometheus_client import REGISTRY, generate_latest
@@ -58,7 +58,7 @@ class PrometheusRemoteWriter:
         self._push_count = 0
         self._push_errors = 0
 
-        logger.info(f"Prometheus Remote Writer initialized")
+        logger.info("Prometheus Remote Writer initialized")
         logger.info(f"  URL: {self.remote_write_url}")
         logger.info(f"  Push interval: {self.push_interval}s")
         logger.info(f"  Enabled: {self.enabled}")
@@ -155,7 +155,7 @@ class PrometheusRemoteWriter:
             self._push_errors += 1
             return False
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get remote write statistics."""
         return {
             "enabled": self.enabled,
@@ -173,7 +173,7 @@ class PrometheusRemoteWriter:
 
 
 # Global instance
-prometheus_writer: Optional[PrometheusRemoteWriter] = None
+prometheus_writer: PrometheusRemoteWriter | None = None
 
 
 async def init_prometheus_remote_write():
@@ -204,6 +204,6 @@ async def shutdown_prometheus_remote_write():
         logger.info(f"Prometheus remote write stats: {stats}")
 
 
-def get_prometheus_writer() -> Optional[PrometheusRemoteWriter]:
+def get_prometheus_writer() -> PrometheusRemoteWriter | None:
     """Get the global Prometheus remote writer instance."""
     return prometheus_writer

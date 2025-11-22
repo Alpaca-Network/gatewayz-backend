@@ -8,13 +8,12 @@ import json
 import logging
 import os
 from contextlib import redirect_stdout
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from html import escape
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 from src.cache import (
@@ -31,7 +30,6 @@ from src.services.models import (
     fetch_models_from_aimo,
     fetch_models_from_anannas,
     fetch_models_from_chutes,
-    fetch_models_from_deepinfra,
     fetch_models_from_fal,
     fetch_models_from_featherless,
     fetch_models_from_fireworks,
@@ -66,7 +64,7 @@ except Exception as e:  # pragma: no cover - optional dependency for dashboard
 router = APIRouter()
 
 
-def get_all_gateway_names() -> List[str]:
+def get_all_gateway_names() -> list[str]:
     """
     Get all gateway names from GATEWAY_CONFIG.
 
@@ -98,7 +96,7 @@ def get_all_gateway_names() -> List[str]:
     ]
 
 
-def get_cacheable_gateways() -> List[str]:
+def get_cacheable_gateways() -> list[str]:
     """
     Get list of gateways that support cache refresh.
 
@@ -162,21 +160,21 @@ def get_fetch_function(gateway: str):
     return fetch_functions.get(gateway)
 
 
-def _normalize_timestamp(value: Any) -> Optional[datetime]:
+def _normalize_timestamp(value: Any) -> datetime | None:
     """Convert a cached timestamp into an aware ``datetime`` in UTC."""
 
     if not value:
         return None
 
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
 
     if isinstance(value, date):
-        return datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
+        return datetime.combine(value, datetime.min.time(), tzinfo=UTC)
 
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         try:
-            return datetime.fromtimestamp(value, tz=timezone.utc)
+            return datetime.fromtimestamp(value, tz=UTC)
         except (OSError, OverflowError, ValueError):
             return None
 
@@ -184,14 +182,14 @@ def _normalize_timestamp(value: Any) -> Optional[datetime]:
         try:
             cleaned = value.replace("Z", "+00:00") if value.endswith("Z") else value
             parsed = datetime.fromisoformat(cleaned)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
             return None
 
     return None
 
 
-def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix: bool) -> str:
+def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix: bool) -> str:
     """Generate a minimal HTML dashboard for gateway health results."""
 
     timestamp = escape(results.get("timestamp", ""))
@@ -203,7 +201,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         "fixed": results.get("fixed", 0),
     }
 
-    def format_price_value(value: Any) -> Optional[str]:
+    def format_price_value(value: Any) -> str | None:
         if value is None:
             return None
         value_str = str(value).strip()
@@ -225,7 +223,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         except ValueError:
             return value_str
 
-    def format_pricing_display(pricing: Optional[Dict[str, Any]]) -> str:
+    def format_pricing_display(pricing: dict[str, Any] | None) -> str:
         if not isinstance(pricing, dict):
             return ""
         label_map = {
@@ -256,7 +254,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
             "training": " /hr",
             "fine_tune": " /hr",
         }
-        parts: List[str] = []
+        parts: list[str] = []
         for key, raw_value in pricing.items():
             normalized = format_price_value(raw_value)
             if not normalized:
@@ -279,7 +277,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         return f'<span class="{cls}">{escape(status.title())}</span>'
 
     rows = []
-    gateways: Dict[str, Any] = results.get("gateways", {}) or {}
+    gateways: dict[str, Any] = results.get("gateways", {}) or {}
     for gateway_id in sorted(gateways.keys()):
         data = gateways[gateway_id] or {}
         name = data.get("name") or gateway_id.title()
@@ -358,8 +356,8 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         if has_models:
             model_items = []
             for model in models:
-                pricing_info: Optional[Dict[str, Any]] = None
-                pricing_source: Optional[str] = None
+                pricing_info: dict[str, Any] | None = None
+                pricing_source: str | None = None
 
                 if isinstance(model, dict):
                     model_id = model.get("id") or model.get("model") or str(model)
@@ -1041,7 +1039,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
     """
 
 
-async def _run_gateway_check(auto_fix: bool) -> tuple[Dict[str, Any], str]:
+async def _run_gateway_check(auto_fix: bool) -> tuple[dict[str, Any], str]:
     """Execute the comprehensive check and capture stdout."""
 
     if run_comprehensive_check is None:
@@ -1057,7 +1055,7 @@ async def _run_gateway_check(auto_fix: bool) -> tuple[Dict[str, Any], str]:
     return results, buffer.getvalue()
 
 
-async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> tuple[Dict[str, Any], str]:
+async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> tuple[dict[str, Any], str]:
     """Execute the check for a single gateway and capture stdout."""
 
     if run_comprehensive_check is None:
@@ -1181,7 +1179,7 @@ async def get_cache_status():
                 if timestamp:
                     normalized_timestamp = _normalize_timestamp(timestamp)
                     if normalized_timestamp:
-                        age = (datetime.now(timezone.utc) - normalized_timestamp).total_seconds()
+                        age = (datetime.now(UTC) - normalized_timestamp).total_seconds()
                         cache_age_seconds = int(age)
                         is_stale = age > ttl
 
@@ -1219,7 +1217,7 @@ async def get_cache_status():
             if timestamp:
                 normalized_timestamp = _normalize_timestamp(timestamp)
                 if normalized_timestamp:
-                    age = (datetime.now(timezone.utc) - normalized_timestamp).total_seconds()
+                    age = (datetime.now(UTC) - normalized_timestamp).total_seconds()
                     cache_age_seconds = int(age)
                     is_stale = age > ttl
 
@@ -1248,7 +1246,7 @@ async def get_cache_status():
         return {
             "success": True,
             "data": cache_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -1299,7 +1297,7 @@ async def refresh_gateway_cache(
             if timestamp:
                 normalized_timestamp = _normalize_timestamp(timestamp)
                 if normalized_timestamp:
-                    age = (datetime.now(timezone.utc) - normalized_timestamp).total_seconds()
+                    age = (datetime.now(UTC) - normalized_timestamp).total_seconds()
                     needs_refresh = age > ttl
 
         if not needs_refresh:
@@ -1308,7 +1306,7 @@ async def refresh_gateway_cache(
                 "message": f"Cache for {gateway} is still valid. Use force=true to refresh anyway.",
                 "gateway": gateway,
                 "action": "skipped",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Clear existing cache
@@ -1338,7 +1336,7 @@ async def refresh_gateway_cache(
                 "message": "DeepInfra does not support bulk cache refresh. Models are fetched on-demand.",
                 "gateway": gateway,
                 "action": "not_supported",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             raise HTTPException(status_code=400, detail=f"Unknown gateway: {gateway}")
@@ -1356,7 +1354,7 @@ async def refresh_gateway_cache(
             "gateway": gateway,
             "models_cached": models_count,
             "action": "refreshed",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1368,7 +1366,7 @@ async def refresh_gateway_cache(
 
 @router.post("/cache/clear", tags=["cache"])
 async def clear_all_caches(
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None, description="Specific gateway to clear, or all if not specified"
     )
 ):
@@ -1385,7 +1383,7 @@ async def clear_all_caches(
                 "success": True,
                 "message": f"Cache cleared for {gateway}",
                 "gateway": gateway,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             # Clear all gateways dynamically
@@ -1398,7 +1396,7 @@ async def clear_all_caches(
                 "success": True,
                 "message": "All caches cleared",
                 "gateways_cleared": gateways + ["providers"],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
@@ -1513,7 +1511,7 @@ async def check_all_gateways():
         # Check each gateway
         async with httpx.AsyncClient(timeout=10.0) as client:
             for gateway_name, config in gateway_endpoints.items():
-                check_time = datetime.now(timezone.utc)
+                check_time = datetime.now(UTC)
 
                 if not config["api_key"]:
                     health_status[gateway_name] = {
@@ -1526,11 +1524,11 @@ async def check_all_gateways():
                     continue
 
                 try:
-                    start_time = datetime.now(timezone.utc)
+                    start_time = datetime.now(UTC)
                     response = await client.get(
                         config["url"], headers=config["headers"], timeout=5.0
                     )
-                    end_time = datetime.now(timezone.utc)
+                    end_time = datetime.now(UTC)
                     latency_ms = int((end_time - start_time).total_seconds() * 1000)
 
                     if response.status_code == 200:
@@ -1589,7 +1587,7 @@ async def check_all_gateways():
                     (healthy_count / total_configured * 100) if total_configured > 0 else 0
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -1662,7 +1660,7 @@ async def gateway_health_dashboard_data(
                 "error": str(e),
             }
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "success": True,
         "timestamp": results.get("timestamp"),
         "auto_fix": auto_fix,
@@ -1724,7 +1722,7 @@ async def check_single_gateway(gateway: str):
             "success": True,
             "gateway": gateway.lower(),
             "data": gateway_health,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1770,7 +1768,7 @@ async def get_modelz_cache_status():
         return {
             "success": True,
             "data": cache_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get Modelz cache status: {e}")
@@ -1811,7 +1809,7 @@ async def refresh_modelz_cache_endpoint():
         return {
             "success": True,
             "data": refresh_result,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to refresh Modelz cache: {e}")
@@ -1846,7 +1844,7 @@ async def clear_modelz_cache_endpoint():
         return {
             "success": True,
             "message": "Modelz cache cleared successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to clear Modelz cache: {e}")
@@ -1886,7 +1884,7 @@ async def refresh_pricing_cache_endpoint():
             "success": True,
             "message": "Pricing cache refreshed successfully",
             "providers_loaded": provider_count,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to refresh pricing cache: {e}")

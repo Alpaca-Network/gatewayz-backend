@@ -1,6 +1,5 @@
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -30,7 +29,7 @@ router = APIRouter()
 
 
 # Plan Management Endpoints
-@router.get("/plans", response_model=List[PlanResponse], tags=["plans"])
+@router.get("/plans", response_model=list[PlanResponse], tags=["plans"])
 async def get_plans():
     """Get all available subscription plans"""
     try:
@@ -156,7 +155,7 @@ async def get_user_plan_usage(api_key: str = Depends(get_api_key)):
     "/user/plan/entitlements", response_model=PlanEntitlementsResponse, tags=["authentication"]
 )
 async def get_user_plan_entitlements(
-    api_key: str = Depends(get_api_key), feature: Optional[str] = Query(None)
+    api_key: str = Depends(get_api_key), feature: str | None = Query(None)
 ):
     """Check user's plan entitlements"""
     try:
@@ -191,7 +190,7 @@ async def assign_plan_to_user(
             "user_id": request.user_id,
             "plan_id": request.plan_id,
             "duration_months": request.duration_months,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except ValueError as e:
@@ -215,7 +214,7 @@ async def get_user_environment_usage(api_key: str = Depends(get_api_key)):
             "status": "success",
             "user_id": user["id"],
             "environment_usage": env_usage,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
