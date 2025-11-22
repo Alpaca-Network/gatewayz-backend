@@ -37,6 +37,16 @@ router = APIRouter()
 # Constants for query parameter descriptions (to avoid duplication)
 DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
+<<<<<<< HEAD
+    "Gateway to use: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', "
+    "'groq', 'fireworks', 'together', 'google', 'cerebras', 'nebius', 'xai', 'novita', "
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'aihubmix', 'anannas', or auto-detect if not specified"
+)
+DESC_GATEWAY_WITH_ALL = (
+    "Gateway to use: 'openrouter', 'portkey', 'featherless', 'deepinfra', 'chutes', "
+    "'groq', 'fireworks', 'together', 'google', 'cerebras', 'nebius', 'xai', 'novita', "
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'aihubmix', 'anannas', or 'all'"
+=======
     "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or auto-detect if not specified"
@@ -45,6 +55,7 @@ DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or 'all'"
+>>>>>>> main
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -228,7 +239,10 @@ async def get_providers(
             "fal",
             "aihubmix",
             "anannas",
+<<<<<<< HEAD
+=======
             "vercel-ai-gateway",
+>>>>>>> main
         ]
         all_models = {}  # Track models for each gateway
 
@@ -342,10 +356,14 @@ async def get_models(
         aimo_models: list[dict] = []
         near_models: list[dict] = []
         fal_models: list[dict] = []
+<<<<<<< HEAD
+        anannas_models: list[dict] = []
+=======
         helicone_models: list[dict] = []
         anannas_models: list[dict] = []
         aihubmix_models: list[dict] = []
         vercel_ai_gateway_models: list[dict] = []
+>>>>>>> main
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -438,18 +456,23 @@ async def get_models(
                 logger.error("No Fal models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
+<<<<<<< HEAD
+=======
         if gateway_value in ("helicone", "all"):
             helicone_models = get_cached_models("helicone") or []
             if gateway_value == "helicone" and not helicone_models:
                 logger.error("No Helicone models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
+>>>>>>> main
         if gateway_value in ("anannas", "all"):
             anannas_models = get_cached_models("anannas") or []
             if gateway_value == "anannas" and not anannas_models:
                 logger.error("No Anannas models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
+<<<<<<< HEAD
+=======
         if gateway_value in ("aihubmix", "all"):
             aihubmix_models = get_cached_models("aihubmix") or []
             if gateway_value == "aihubmix" and not aihubmix_models:
@@ -462,6 +485,7 @@ async def get_models(
                 logger.error("No Vercel AI Gateway models data available from cache")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
+>>>>>>> main
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "featherless":
@@ -492,6 +516,10 @@ async def get_models(
             models = near_models
         elif gateway_value == "fal":
             models = fal_models
+<<<<<<< HEAD
+        elif gateway_value == "anannas":
+            models = anannas_models
+=======
         elif gateway_value == "helicone":
             models = helicone_models
         elif gateway_value == "anannas":
@@ -500,6 +528,7 @@ async def get_models(
             models = aihubmix_models
         elif gateway_value == "vercel-ai-gateway":
             models = vercel_ai_gateway_models
+>>>>>>> main
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -513,10 +542,14 @@ async def get_models(
                 aimo_models,
                 near_models,
                 fal_models,
+<<<<<<< HEAD
+                anannas_models,
+=======
                 helicone_models,
                 anannas_models,
                 aihubmix_models,
                 vercel_ai_gateway_models,
+>>>>>>> main
             )
 
         if not models:

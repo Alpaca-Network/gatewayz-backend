@@ -426,6 +426,8 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Pass-through format - any model ID is supported
             # Minimal mappings to avoid conflicts with other providers during auto-detection
         },
+<<<<<<< HEAD
+=======
         "near": {
             # Near AI uses HuggingFace-style model naming with proper case
             # Maps lowercase input variants to actual NEAR model IDs
@@ -583,6 +585,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "xai/grok-2-1212": "grok-2-1212",
             "xai/grok-vision-beta": "grok-vision-beta",
         },
+>>>>>>> main
     }
 
     return mappings.get(provider, {})

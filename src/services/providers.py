@@ -80,7 +80,10 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             "helicone": "https://www.helicone.ai/favicon.ico",
             "aihubmix": "https://aihubmix.com/favicon.ico",
             "anannas": "https://api.anannas.ai/favicon.ico",
+<<<<<<< HEAD
+=======
             "alpaca-network": "https://console.anyscale.com/favicon.ico",
+>>>>>>> main
         }
 
         # Try manual mapping first

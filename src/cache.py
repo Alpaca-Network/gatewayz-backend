@@ -169,6 +169,8 @@ _anannas_models_cache = {
     "stale_ttl": 7200,
 }
 
+<<<<<<< HEAD
+=======
 _alibaba_models_cache = {
     "data": None,
     "timestamp": None,
@@ -176,6 +178,7 @@ _alibaba_models_cache = {
     "stale_ttl": 7200,
 }
 
+>>>>>>> main
 # BACKWARD COMPATIBILITY: Alias for old cache name
 # Some deployed modules may still reference the old name
 _hug_models_cache = _huggingface_models_cache
@@ -206,7 +209,10 @@ def get_models_cache(gateway: str):
         "helicone": _helicone_models_cache,
         "aihubmix": _aihubmix_models_cache,
         "anannas": _anannas_models_cache,
+<<<<<<< HEAD
+=======
         "alibaba": _alibaba_models_cache,
+>>>>>>> main
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -241,7 +247,10 @@ def clear_models_cache(gateway: str):
         "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
         "aihubmix": _aihubmix_models_cache,
         "anannas": _anannas_models_cache,
+<<<<<<< HEAD
+=======
         "alibaba": _alibaba_models_cache,
+>>>>>>> main
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())

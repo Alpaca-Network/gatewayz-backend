@@ -247,6 +247,13 @@ _vercel_ai_gateway = _safe_import_provider(
         "make_vercel_ai_gateway_request_openai_stream",
     ],
 )
+<<<<<<< HEAD
+from src.services.anannas_client import (
+    make_anannas_request_openai,
+    process_anannas_response,
+    make_anannas_request_openai_stream,
+)
+=======
 make_vercel_ai_gateway_request_openai = _vercel_ai_gateway.get(
     "make_vercel_ai_gateway_request_openai"
 )
@@ -333,6 +340,7 @@ make_clarifai_request_openai_stream = _clarifai.get("make_clarifai_request_opena
 
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
+>>>>>>> main
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
@@ -1163,6 +1171,8 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+<<<<<<< HEAD
+=======
                     elif attempt_provider == "alpaca-network":
                         stream = await _to_thread(
                             make_alpaca_network_request_openai_stream,
@@ -1184,6 +1194,7 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+>>>>>>> main
                     else:
                         stream = await _to_thread(
                             make_openrouter_request_openai_stream,
@@ -1383,6 +1394,8 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_anannas_response, resp_raw)
+<<<<<<< HEAD
+=======
                 elif attempt_provider == "alpaca-network":
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -1416,6 +1429,7 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_clarifai_response, resp_raw)
+>>>>>>> main
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
