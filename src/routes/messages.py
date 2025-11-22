@@ -77,6 +77,7 @@ from src.services.together_client import make_together_request_openai, process_t
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.token_estimator import estimate_message_tokens
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -315,6 +316,14 @@ async def anthropic_messages(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # === 2.2) Plan limit pre-check with estimated tokens ===
+        estimated_tokens = estimate_message_tokens(openai_messages, req.max_tokens)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         original_model = req.model
 
