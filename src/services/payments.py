@@ -66,6 +66,37 @@ class StripeService:
 
         logger.info("Stripe service initialized")
 
+    @staticmethod
+    def _get_session_value(session_obj: Any, field: str):
+        """Safely extract a field from a Stripe session object or dict."""
+        if isinstance(session_obj, dict):
+            return session_obj.get(field)
+        return getattr(session_obj, field, None)
+
+    @staticmethod
+    def _metadata_to_dict(metadata: Any) -> Dict[str, Any]:
+        """Convert Stripe metadata object into a plain dictionary."""
+        if metadata is None:
+            return {}
+        if isinstance(metadata, dict):
+            return metadata
+        to_dict = getattr(metadata, "to_dict", None)
+        if callable(to_dict):
+            try:
+                return to_dict()
+            except Exception:
+                pass
+        to_dict_recursive = getattr(metadata, "to_dict_recursive", None)
+        if callable(to_dict_recursive):
+            try:
+                return to_dict_recursive()
+            except Exception:
+                pass
+        try:
+            return dict(metadata)
+        except Exception:
+            return {}
+
     # ==================== Checkout Sessions ====================
 
     def create_checkout_session(
@@ -382,10 +413,40 @@ class StripeService:
     def _handle_checkout_completed(self, session):
         """Handle completed checkout session"""
         try:
-            user_id = int(session.metadata.get("user_id"))
-            credits = float(session.metadata.get("credits"))
-            payment_id = int(session.metadata.get("payment_id"))
+            session_obj = session
+            metadata = self._metadata_to_dict(self._get_session_value(session_obj, "metadata"))
+            required_keys = ("user_id", "credits", "payment_id")
+            missing_keys = [key for key in required_keys if metadata.get(key) in (None, "")]
+
+            if missing_keys:
+                session_id = self._get_session_value(session_obj, "id")
+                if not session_id:
+                    raise ValueError(
+                        "Checkout session payload is missing metadata and session id; cannot process payment"
+                    )
+
+                logger.warning(
+                    "Checkout session %s missing metadata (%s) in webhook payload. Refetching session from Stripe.",
+                    session_id,
+                    ", ".join(missing_keys),
+                )
+                # Retrieve the full session to get metadata that may be omitted in webhook payloads
+                session_obj = stripe.checkout.Session.retrieve(session_id, expand=["metadata"])
+                metadata = self._metadata_to_dict(self._get_session_value(session_obj, "metadata"))
+                missing_keys = [key for key in required_keys if metadata.get(key) in (None, "")]
+
+                if missing_keys:
+                    raise ValueError(
+                        f"Checkout session {session_id} metadata missing required keys: {', '.join(missing_keys)}"
+                    )
+
+            user_id = int(metadata["user_id"])
+            credits = float(metadata["credits"])
+            payment_id = int(metadata["payment_id"])
             amount_dollars = credits / 100  # Convert cents to dollars
+
+            session_id = self._get_session_value(session_obj, "id")
+            payment_intent_id = self._get_session_value(session_obj, "payment_intent")
 
             # Add credits and log transaction
             add_credits_to_user(
@@ -395,8 +456,8 @@ class StripeService:
                 description=f"Stripe checkout - ${amount_dollars}",
                 payment_id=payment_id,
                 metadata={
-                    "stripe_session_id": session.id,
-                    "stripe_payment_intent_id": session.payment_intent,
+                    "stripe_session_id": session_id,
+                    "stripe_payment_intent_id": payment_intent_id,
                 },
             )
 
@@ -404,7 +465,7 @@ class StripeService:
             update_payment_status(
                 payment_id=payment_id,
                 status="completed",
-                stripe_payment_intent_id=session.payment_intent,
+                stripe_payment_intent_id=payment_intent_id,
             )
 
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
