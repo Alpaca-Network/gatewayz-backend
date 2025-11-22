@@ -6,6 +6,7 @@ Compatible with Claude API: https://docs.claude.com/en/api/messages
 import asyncio
 import importlib
 import logging
+import os
 import time
 from typing import Any, Optional
 
@@ -280,6 +281,7 @@ async def anthropic_messages(
 
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
+        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
 
         # Pre-check plan limits before making upstream calls
         pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
@@ -291,7 +293,7 @@ async def anthropic_messages(
 
         # Rate limit pre-check (non-trial users only)
         rl_final = None
-        if not trial.get("is_trial", False):
+        if rate_limit_mgr and not disable_rate_limiting and not trial.get("is_trial", False):
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
                 await _to_thread(
@@ -305,42 +307,14 @@ async def anthropic_messages(
                         "remaining_tokens": rl_pre.remaining_tokens,
                     },
                 )
+                headers = get_rate_limit_headers(rl_pre)
+                if rl_pre.retry_after:
+                    headers["Retry-After"] = str(rl_pre.retry_after)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_pre.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
-                    ),
+                    headers=headers or None,
                 )
-
-        if rate_limit_mgr and not trial.get("is_trial", False):
-            try:
-                rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
-            except Exception as exc:
-                logger.debug(
-                    "Pre-check rate limit failed for %s: %s", mask_key(api_key), sanitize_for_logging(str(exc))
-                )
-                rl_pre = None
-            else:
-                if not rl_pre.allowed:
-                    await _to_thread(
-                        create_rate_limit_alert,
-                        api_key,
-                        "rate_limit_exceeded",
-                        {
-                            "reason": rl_pre.reason,
-                            "retry_after": rl_pre.retry_after,
-                            "remaining_requests": rl_pre.remaining_requests,
-                            "remaining_tokens": rl_pre.remaining_tokens,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=429,
-                        detail=f"Rate limit exceeded: {rl_pre.reason}",
-                        headers=(
-                            {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
-                        ),
-                    )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
