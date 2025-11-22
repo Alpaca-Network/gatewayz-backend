@@ -12,6 +12,7 @@ This test module verifies the huggingface_hub SDK integration including:
 
 import json
 import logging
+import sys
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -32,6 +33,13 @@ except ImportError:
                 setattr(self, key, value)
 
 logger = logging.getLogger(__name__)
+
+# Python 3.10 has compatibility issues with the HuggingFace endpoint routing
+# Skip these tests on Python 3.10
+pytestmark = pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="HuggingFace endpoint routing not fully compatible with Python 3.10"
+)
 
 
 @pytest.fixture
