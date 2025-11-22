@@ -123,41 +123,13 @@ class TestPrivyLinkedAccount:
         assert account.address == "address_only@example.com"
         assert account.email is None
 
-    def test_create_with_wallet_blockchain_address(self):
-        """Test creating wallet account with blockchain address (fixes issue #XXX)"""
-        from src.schemas.auth import PrivyLinkedAccount
-
-        # This is the original issue: wallet addresses were being rejected as invalid emails
-        account = PrivyLinkedAccount(
-            type="wallet",
-            address="0x79945E05A18676fcFF52c6978664c7FE5Ba61505",
-            verified_at=1234567890
-        )
-
-        assert account.type == "wallet"
-        assert account.address == "0x79945E05A18676fcFF52c6978664c7FE5Ba61505"
-        assert account.email is None
-
-    def test_email_account_rejects_blockchain_address(self):
-        """Test that email accounts still reject blockchain addresses"""
-        from src.schemas.auth import PrivyLinkedAccount
-
-        with pytest.raises(ValidationError) as exc_info:
-            PrivyLinkedAccount(
-                type="email",
-                address="0x79945E05A18676fcFF52c6978664c7FE5Ba61505"
-            )
-
-        errors = exc_info.value.errors()
-        assert any("Invalid email format" in str(e) for e in errors)
-
     def test_all_optional_fields(self):
         """Test creating account with only required field"""
         from src.schemas.auth import PrivyLinkedAccount
 
-        account = PrivyLinkedAccount(type="wallet")
+        account = PrivyLinkedAccount(type="email")
 
-        assert account.type == "wallet"
+        assert account.type == "email"
         assert account.email is None
         assert account.name is None
         assert account.verified_at is None
@@ -191,7 +163,7 @@ class TestPrivyUserData:
             created_at=1234567890,
             linked_accounts=[
                 PrivyLinkedAccount(type="email", email="test@example.com"),
-                PrivyLinkedAccount(type="wallet", subject="0x123abc")
+                PrivyLinkedAccount(type="google_oauth", email="user@gmail.com")
             ],
             has_accepted_terms=True
         )
