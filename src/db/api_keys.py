@@ -1,11 +1,14 @@
 import logging
 import secrets
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
+from src.db.postgrest_schema import (
+    is_schema_cache_error,
+    refresh_postgrest_schema_cache,
+)
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
@@ -14,12 +17,18 @@ logger = logging.getLogger(__name__)
 _ENCRYPTION_METADATA_FIELDS = ("encrypted_key", "key_version", "key_hash", "last4")
 
 
-def _is_schema_cache_miss(error: Exception) -> bool:
-    """True when Supabase/PostgREST is missing freshly added columns."""
-    error_str = str(error)
-    if "PGRST204" not in error_str and "PGRST205" not in error_str:
-        return False
-    return any(field in error_str for field in ("key_version", "encrypted_key", "key_hash", "last4"))
+# near the top of the module
+def _pct(used: int, limit: Optional[int]) -> Optional[float]:
+    if not limit:
+        return None
+    return round(min(100.0, (used / float(limit)) * 100.0), 6)
+
+
+def _strip_encryption_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    stripped_payload = payload.copy()
+    for field in _ENCRYPTION_METADATA_FIELDS:
+        stripped_payload.pop(field, None)
+    return stripped_payload
 
 
 def _insert_api_key_row(client, payload: Dict[str, Any], fallback_payload: Optional[Dict[str, Any]] = None):
@@ -27,37 +36,43 @@ def _insert_api_key_row(client, payload: Dict[str, Any], fallback_payload: Optio
     try:
         return client.table("api_keys_new").insert(payload).execute()
     except Exception as insert_error:
-        if not _is_schema_cache_miss(insert_error):
+        if not is_schema_cache_error(insert_error):
             raise
 
+        sanitized_error = sanitize_for_logging(str(insert_error))
         logger.warning(
             "api_keys_new insert failed because PostgREST schema cache is stale (%s). "
-            "Retrying without optional encryption metadata. Run the encryption migrations "
-            "or refresh the schema cache to restore encrypted storage.",
-            sanitize_for_logging(str(insert_error)),
+            "Retrying without optional encryption metadata so user onboarding can continue.",
+            sanitized_error,
         )
 
-        if fallback_payload is not None:
-            stripped_payload = deepcopy(fallback_payload)
+        stripped_payload = (
+            fallback_payload.copy()
+            if fallback_payload is not None
+            else _strip_encryption_metadata(payload)
+        )
+
+        try:
+            result = client.table("api_keys_new").insert(stripped_payload).execute()
+        except Exception as fallback_error:
+            sanitized_fallback = sanitize_for_logging(str(fallback_error))
+            logger.error(
+                "Fallback api_keys_new insert without encryption metadata also failed: %s",
+                sanitized_fallback,
+            )
+            if refresh_postgrest_schema_cache():
+                logger.info("Retrying api_keys_new insert after refreshing PostgREST schema cache.")
+                return client.table("api_keys_new").insert(stripped_payload).execute()
+            raise
+
+        if refresh_postgrest_schema_cache():
+            logger.info("PostgREST schema cache refresh requested after fallback insert.")
         else:
-            stripped_payload = deepcopy(payload)
-            for field in _ENCRYPTION_METADATA_FIELDS:
-                stripped_payload.pop(field, None)
+            logger.warning(
+                "Could not refresh PostgREST schema cache; encrypted columns will stay disabled until cache reloads."
+            )
 
-        result = client.table("api_keys_new").insert(stripped_payload).execute()
-
-        logger.info(
-            "api_keys_new insert succeeded after removing encryption metadata. "
-            "Encrypted columns will be re-enabled automatically once the schema cache is refreshed."
-        )
         return result
-
-
-# near the top of the module
-def _pct(used: int, limit: Optional[int]) -> Optional[float]:
-    if not limit:
-        return None
-    return round(min(100.0, (used / float(limit)) * 100.0), 6)
 
 
 def check_key_name_uniqueness(
@@ -238,19 +253,7 @@ def create_api_key(
 
         api_key_data = {**base_api_key_data, **optional_encrypted_fields}
 
-        try:
-            result = client.table("api_keys_new").insert(api_key_data).execute()
-        except Exception as insert_error:
-            error_message = str(insert_error)
-            optional_field_names = {"encrypted_key", "key_version", "key_hash", "last4"}
-            if any(field in error_message for field in optional_field_names):
-                logger.warning(
-                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
-                    sanitize_for_logging(error_message),
-                )
-                result = client.table("api_keys_new").insert(base_api_key_data).execute()
-            else:
-                raise
+        result = _insert_api_key_row(client, api_key_data, base_api_key_data)
 
         if not result.data:
             raise ValueError("Failed to create API key")
