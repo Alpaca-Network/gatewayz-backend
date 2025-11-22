@@ -38,7 +38,7 @@ async def lifespan(app):
         logger.error("Application cannot start without these variables")
         raise RuntimeError(f"Missing required environment variables: {missing_vars}")
     else:
-        logger.info(f"✅ All critical environment variables validated")
+        logger.info("✅ All critical environment variables validated")
 
     try:
         # Initialize Fal.ai model cache from static catalog
@@ -51,7 +51,7 @@ async def lifespan(app):
         # Initialize Tempo/OpenTelemetry OTLP tracing
         try:
             init_tempo_otlp()
-            init_tempo_otlp_fastapi()
+            init_tempo_otlp_fastapi(app)
             logger.info("Tempo/OTLP tracing initialized")
         except Exception as e:
             logger.warning(f"Tempo/OTLP initialization warning: {e}")

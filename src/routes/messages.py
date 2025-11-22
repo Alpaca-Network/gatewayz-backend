@@ -6,11 +6,12 @@ Compatible with Claude API: https://docs.claude.com/en/api/messages
 import asyncio
 import importlib
 import logging
+import os
 import time
-from typing import Optional
+from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 import src.db.activity as activity_module
@@ -77,6 +78,7 @@ from src.services.together_client import make_together_request_openai, process_t
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.token_estimator import estimate_message_tokens
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -178,11 +180,23 @@ async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
+async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
+    """Ensure plan limits allow another request before contacting providers."""
+    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
+
+
 @router.post("/v1/messages", tags=["chat"])
 async def anthropic_messages(
     req: MessagesRequest,
+    background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -223,7 +237,7 @@ async def anthropic_messages(
     ```
     """
     # Initialize performance tracker
-    tracker = PerformanceTracker(endpoint="/v1/messages")
+    PerformanceTracker(endpoint="/v1/messages")
 
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
@@ -243,12 +257,6 @@ async def anthropic_messages(
             raise HTTPException(status_code=401, detail="Invalid API key")
 
         environment_tag = user.get("environment_tag", "live")
-
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-        if not pre_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
-            )
 
         trial = await _to_thread(validate_trial_access, api_key)
         if not trial.get("is_valid", False):
@@ -270,14 +278,23 @@ async def anthropic_messages(
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
+        await _ensure_plan_capacity(user["id"], environment_tag)
+
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
+        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
 
-        # Initialize rate limit variables
-        rl_pre = None
+        # Pre-check plan limits before making upstream calls
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+            )
+
+        # Rate limit pre-check (non-trial users only)
         rl_final = None
-
-        if should_release_concurrency:
+        if rate_limit_mgr and not disable_rate_limiting and not trial.get("is_trial", False):
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
                 await _to_thread(
@@ -291,16 +308,36 @@ async def anthropic_messages(
                         "remaining_tokens": rl_pre.remaining_tokens,
                     },
                 )
+                headers = get_rate_limit_headers(rl_pre)
+                if rl_pre.retry_after:
+                    headers["Retry-After"] = str(rl_pre.retry_after)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_pre.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
-                    ),
+                    headers=headers or None,
                 )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
+
+        # Pre-check plan limits before processing (fail fast)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
+        # Rate limit precheck (before making upstream request)
+        rl_pre = None
+        if rate_limit_mgr:
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers={"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                )
 
         # === 2) Transform Anthropic format to OpenAI format ===
         messages_data = [msg.model_dump() for msg in req.messages]
@@ -343,6 +380,14 @@ async def anthropic_messages(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # === 2.2) Plan limit pre-check with estimated tokens ===
+        estimated_tokens = estimate_message_tokens(openai_messages, req.max_tokens)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         original_model = req.model
 
@@ -559,7 +604,7 @@ async def anthropic_messages(
                 model = request_model
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -701,11 +746,12 @@ async def anthropic_messages(
 
         await _to_thread(increment_api_key_usage, api_key)
 
-        # === 4.5) Log activity ===
+        # === 4.5) Log activity (moved to background for better latency) ===
         try:
             provider_name = get_provider_from_model(model)
             speed = total_tokens / elapsed if elapsed > 0 else 0
-            await _to_thread(
+            # Run in background to reduce user-perceived latency
+            background_tasks.add_task(
                 log_activity,
                 user_id=user["id"],
                 model=model,
@@ -725,52 +771,55 @@ async def anthropic_messages(
             )
         except Exception as e:
             logger.error(
-                f"Failed to log activity for user {user['id']}, model {model}: {e}", exc_info=True
+                f"Failed to schedule activity logging for user {user['id']}, model {model}: {e}", exc_info=True
             )
 
-        # === 5) Save chat history ===
+        # === 5) Save chat history (moved to background for better latency) ===
         if session_id:
-            try:
-                session = await _to_thread(get_chat_session, session_id, user["id"])
-                if session:
-                    # Save last user message
-                    last_user = None
-                    for m in reversed(openai_messages):
-                        if m.get("role") == "user":
-                            last_user = m
-                            break
+            def save_chat_history_task():
+                """Background task to save chat history without blocking response."""
+                try:
+                    session = get_chat_session(session_id, user["id"])
+                    if session:
+                        # Save last user message
+                        last_user = None
+                        for m in reversed(openai_messages):
+                            if m.get("role") == "user":
+                                last_user = m
+                                break
 
-                    if last_user:
-                        user_content = extract_text_from_content(last_user.get("content", ""))
-                        await _to_thread(
-                            save_chat_message,
-                            session_id,
-                            "user",
-                            user_content,
-                            model,
-                            0,
-                            user["id"],
+                        if last_user:
+                            user_content = extract_text_from_content(last_user.get("content", ""))
+                            save_chat_message(
+                                session_id,
+                                "user",
+                                user_content,
+                                model,
+                                0,
+                                user["id"],
+                            )
+
+                        # Save assistant response
+                        assistant_content = (
+                            processed.get("choices", [{}])[0].get("message", {}).get("content", "")
                         )
-
-                    # Save assistant response
-                    assistant_content = (
-                        processed.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if assistant_content:
+                            save_chat_message(
+                                session_id,
+                                "assistant",
+                                assistant_content,
+                                model,
+                                total_tokens,
+                                user["id"],
+                            )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
+                        exc_info=True,
                     )
-                    if assistant_content:
-                        await _to_thread(
-                            save_chat_message,
-                            session_id,
-                            "assistant",
-                            assistant_content,
-                            model,
-                            total_tokens,
-                            user["id"],
-                        )
-            except Exception as e:
-                logger.error(
-                    f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
-                    exc_info=True,
-                )
+
+            # Run chat history saving in background
+            background_tasks.add_task(save_chat_history_task)
 
         # === 6) Transform response to Anthropic format ===
         anthropic_response = transform_openai_to_anthropic(processed, model)
@@ -787,6 +836,8 @@ async def anthropic_messages(
         headers = {}
         if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
+        elif rl_pre is not None:
+            headers.update(get_rate_limit_headers(rl_pre))
 
         return JSONResponse(content=anthropic_response, headers=headers)
 

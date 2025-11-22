@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -17,10 +16,10 @@ router = APIRouter()
 
 @router.get("/user/api-keys/audit-logs", tags=["authentication"])
 async def get_user_audit_logs(
-    key_id: Optional[int] = None,
-    action: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    key_id: int | None = None,
+    action: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 100,
     api_key: str = Depends(get_api_key),
 ):

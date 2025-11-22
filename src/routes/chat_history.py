@@ -23,7 +23,6 @@ from src.schemas.chat import (
     SearchChatSessionsRequest,
     UpdateChatSessionRequest,
 )
-from typing import List
 from pydantic import BaseModel
 from src.security.deps import get_api_key
 
@@ -283,7 +282,7 @@ async def save_message(
 # OPTIMIZATION: Batch message save endpoint
 class BatchMessageRequest(BaseModel):
     """Request model for batch message save"""
-    messages: List[SaveChatMessageRequest]
+    messages: list[SaveChatMessageRequest]
 
 
 @router.post("/sessions/{session_id}/messages/batch")

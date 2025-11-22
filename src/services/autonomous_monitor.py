@@ -7,9 +7,9 @@ Monitors errors continuously and generates fixes without manual intervention.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
+from src.config import Config
 from src.services.bug_fix_generator import BugFixGenerator, get_bug_fix_generator
 from src.services.error_monitor import ErrorMonitor, get_error_monitor
 
@@ -42,12 +42,12 @@ class AutonomousMonitor:
         self.auto_fix_enabled = auto_fix_enabled
         self.critical_error_threshold = critical_error_threshold
         self.lookback_hours = lookback_hours
-        self.error_monitor: Optional[ErrorMonitor] = None
-        self.bug_fix_generator: Optional[BugFixGenerator] = None
+        self.error_monitor: ErrorMonitor | None = None
+        self.bug_fix_generator: BugFixGenerator | None = None
         self.is_running = False
-        self.last_scan: Optional[datetime] = None
+        self.last_scan: datetime | None = None
         self.errors_since_last_fix: int = 0
-        self.task: Optional[asyncio.Task] = None
+        self.task: asyncio.Task | None = None
 
     async def initialize(self):
         """Initialize the monitor services."""
@@ -59,7 +59,14 @@ class AutonomousMonitor:
             logger.info("Initializing autonomous monitor...")
             self.error_monitor = await get_error_monitor()
             if self.auto_fix_enabled:
-                self.bug_fix_generator = await get_bug_fix_generator()
+                anthropic_key = getattr(Config, "ANTHROPIC_API_KEY", None)
+                if anthropic_key:
+                    self.bug_fix_generator = await get_bug_fix_generator()
+                else:
+                    logger.warning(
+                        "ANTHROPIC_API_KEY not configured; disabling autonomous auto-fix generation"
+                    )
+                    self.auto_fix_enabled = False
             logger.info("✓ Autonomous monitor initialized")
         except Exception as e:
             logger.error(f"Failed to initialize autonomous monitor: {e}")
@@ -215,7 +222,7 @@ class AutonomousMonitor:
 
 
 # Singleton instance
-_autonomous_monitor: Optional[AutonomousMonitor] = None
+_autonomous_monitor: AutonomousMonitor | None = None
 
 
 def get_autonomous_monitor() -> AutonomousMonitor:
