@@ -27,7 +27,6 @@ class PrivyLinkedAccount(BaseModel):
             "apple_oauth",
             "discord",
             "farcaster",
-            "wallet",
         }
         if v not in valid_types:
             raise ValueError(f"Account type must be one of {valid_types}, got {v}")
