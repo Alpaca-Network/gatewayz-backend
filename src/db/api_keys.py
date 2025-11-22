@@ -31,6 +31,11 @@ def _is_schema_cache_error(error: Exception) -> bool:
 def _refresh_postgrest_schema_cache(client) -> bool:
     """Trigger PostgREST to reload its schema cache via RPC."""
     try:
+        if not hasattr(client, "rpc"):
+            logger.debug(
+                "Supabase client does not expose rpc(); skipping schema cache refresh attempt"
+            )
+            return False
         client.rpc("refresh_postgrest_schema_cache", {}).execute()
         logger.info("Triggered PostgREST schema cache refresh after API key insert failure")
         return True
