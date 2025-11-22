@@ -15,7 +15,9 @@ Note: OpenTelemetry is optional. If not installed, tracing will be gracefully di
 
 import logging
 import os
+import socket
 from typing import Optional
+from urllib.parse import urlparse
 
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
 try:
@@ -42,6 +44,62 @@ except ImportError:
 from src.config.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+    """
+    Check if the OTLP endpoint is reachable.
+    
+    Args:
+        endpoint: The OTLP endpoint URL
+        timeout: Connection timeout in seconds
+    
+    Returns:
+        bool: True if endpoint is reachable, False otherwise
+    """
+    try:
+        # Parse the endpoint URL
+        parsed = urlparse(endpoint)
+        host = parsed.hostname
+        port = parsed.port
+        
+        if not host:
+            logger.warning(f"Invalid endpoint URL: {endpoint}")
+            return False
+        
+        # Default port if not specified
+        if not port:
+            port = 4318 if parsed.scheme == "http" else 4317
+        
+        # Try to resolve the hostname (DNS check)
+        try:
+            socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            logger.warning(
+                f"Cannot resolve hostname '{host}': {e}. "
+                f"Tracing will be disabled."
+            )
+            return False
+        
+        # Try to establish a TCP connection
+        sock = None
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            logger.debug(f"Successfully connected to {host}:{port}")
+            return True
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            logger.warning(
+                f"Endpoint {host}:{port} is not accepting connections: {e}. "
+                f"Tracing will be disabled."
+            )
+            return False
+        finally:
+            if sock:
+                sock.close()
+    
+    except Exception as e:
+        logger.warning(f"Unexpected error checking endpoint: {e}")
+        return False
 
 
 class OpenTelemetryConfig:
@@ -81,6 +139,19 @@ class OpenTelemetryConfig:
         try:
             logger.info("🔭 Initializing OpenTelemetry tracing...")
 
+            # Configure OTLP exporter to Tempo
+            tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
+            logger.info(f"   Tempo endpoint: {tempo_endpoint}")
+
+            # Check if Tempo endpoint is reachable before attempting to create exporter
+            if not _check_endpoint_reachable(tempo_endpoint):
+                logger.warning(
+                    f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
+                    f"Ensure the Tempo service is deployed and accessible. "
+                    f"The application will continue without distributed tracing."
+                )
+                return False
+
             # Create resource with service metadata
             resource = Resource.create(
                 {
@@ -95,14 +166,19 @@ class OpenTelemetryConfig:
             # Create tracer provider
             cls._tracer_provider = TracerProvider(resource=resource)
 
-            # Configure OTLP exporter to Tempo
-            tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
-            logger.info(f"   Tempo endpoint: {tempo_endpoint}")
-
-            otlp_exporter = OTLPSpanExporter(
-                endpoint=f"{tempo_endpoint}/v1/traces",
-                headers={},  # Add authentication headers if needed
-            )
+            # Create OTLP exporter with error handling for connection issues
+            try:
+                otlp_exporter = OTLPSpanExporter(
+                    endpoint=f"{tempo_endpoint}/v1/traces",
+                    headers={},  # Add authentication headers if needed
+                )
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
+                    f"Tracing will be disabled.",
+                    exc_info=True
+                )
+                return False
 
             # Add span processor for exporting traces
             cls._tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
@@ -151,8 +227,11 @@ class OpenTelemetryConfig:
             return
 
         try:
-            FastAPIInstrumentor.instrument_app(app)
-            logger.info("✅ FastAPI application instrumented with OpenTelemetry")
+            instrumented = instrument_fastapi_application(app)
+            if instrumented:
+                logger.info("✅ FastAPI application instrumented with OpenTelemetry")
+            else:
+                logger.debug("FastAPI instrumentation skipped (already instrumented or unavailable)")
         except Exception as e:
             logger.error(f"❌ Failed to instrument FastAPI: {e}", exc_info=True)
 
@@ -192,6 +271,43 @@ class OpenTelemetryConfig:
         if not OPENTELEMETRY_AVAILABLE:
             return None
         return trace.get_tracer(name)
+
+
+def instrument_fastapi_application(app) -> bool:
+    """
+    Instrument a FastAPI application while remaining compatible with different
+    opentelemetry-instrumentation-fastapi versions.
+
+    Returns:
+        bool: True if instrumentation was applied, False if it was skipped.
+    """
+    if not OPENTELEMETRY_AVAILABLE:
+        logger.debug("OpenTelemetry not available; skipping FastAPI instrumentation")
+        return False
+
+    if app is None:
+        logger.debug("FastAPI app instance not provided; skipping instrumentation")
+        return False
+
+    instrumentor = FastAPIInstrumentor()
+
+    try:
+        instrumentor.instrument_app(app=app)
+        return True
+    except TypeError as exc:
+        message = str(exc)
+        if "instrument()" in message and "app" in message:
+            logger.debug(
+                "FastAPIInstrumentor.instrument_app requires explicit app argument; retrying with instrument(app=app)"
+            )
+            instrumentor.instrument(app=app)
+            return True
+        raise
+    except RuntimeError as exc:
+        if "already instrumented" in str(exc).lower():
+            logger.debug("FastAPI already instrumented; skipping re-instrumentation")
+            return False
+        raise
 
 
 # Helper function to get current trace context

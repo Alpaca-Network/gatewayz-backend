@@ -22,6 +22,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _resolve_account_email(account) -> str | None:
+    """Return the first valid email value exposed by a Privy linked account."""
+    possible_values = [
+        getattr(account, "email", None),
+        getattr(account, "address", None),
+    ]
+    for value in possible_values:
+        if value and "@" in value:
+            return value
+    return None
+
+
 # Background task functions for non-blocking operations
 # ISSUE FIX #6: Improved background task error handling with better logging
 
@@ -190,13 +202,14 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
         if not email and request.user.linked_accounts:
             for account in request.user.linked_accounts:
                 try:
-                    if account.type == "email" and account.email:
-                        email = account.email
+                    account_email = _resolve_account_email(account)
+                    if account.type == "email" and account_email:
+                        email = account_email
                         auth_method = AuthMethod.EMAIL
                         logger.debug(f"Extracted email from email account: {email}")
                         break
-                    elif account.type == "google_oauth" and account.email:
-                        email = account.email
+                    elif account.type == "google_oauth" and account_email:
+                        email = account_email
                         display_name = account.name
                         auth_method = AuthMethod.GOOGLE
                         logger.debug(

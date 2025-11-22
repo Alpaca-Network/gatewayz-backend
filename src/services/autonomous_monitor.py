@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
+from src.config import Config
 from src.services.bug_fix_generator import BugFixGenerator, get_bug_fix_generator
 from src.services.error_monitor import ErrorMonitor, get_error_monitor
 
@@ -59,7 +60,14 @@ class AutonomousMonitor:
             logger.info("Initializing autonomous monitor...")
             self.error_monitor = await get_error_monitor()
             if self.auto_fix_enabled:
-                self.bug_fix_generator = await get_bug_fix_generator()
+                anthropic_key = getattr(Config, "ANTHROPIC_API_KEY", None)
+                if anthropic_key:
+                    self.bug_fix_generator = await get_bug_fix_generator()
+                else:
+                    logger.warning(
+                        "ANTHROPIC_API_KEY not configured; disabling autonomous auto-fix generation"
+                    )
+                    self.auto_fix_enabled = False
             logger.info("✓ Autonomous monitor initialized")
         except Exception as e:
             logger.error(f"Failed to initialize autonomous monitor: {e}")
