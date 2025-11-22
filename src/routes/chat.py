@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -430,6 +430,17 @@ async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
+async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
+    """Run a lightweight plan-limit precheck before making upstream calls."""
+    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
+
+
 def _fallback_get_user(api_key: str):
     try:
         supabase_module = importlib.import_module("src.config.supabase_config")
@@ -853,6 +864,9 @@ async def chat_completions(
                 raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+
+        # Fast-fail requests that would exceed plan limits before hitting any upstream provider
+        await _ensure_plan_capacity(user["id"], environment_tag)
 
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
