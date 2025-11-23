@@ -134,6 +134,8 @@ class TestCheckoutSession:
         assert call_kwargs['customer_email'] == 'test@example.com'
         assert call_kwargs['metadata']['user_id'] == '1'
         assert call_kwargs['metadata']['credits'] == '1000'
+        assert 'payment_intent_data' in call_kwargs
+        assert call_kwargs['payment_intent_data']['metadata'] == call_kwargs['metadata']
 
         mock_update_payment.assert_called_once_with(
             payment_id=1,
@@ -455,6 +457,61 @@ class TestWebhooks:
             payment_id=42,
             status='completed',
             stripe_payment_intent_id='pi_full'
+        )
+
+    @patch('stripe.PaymentIntent.retrieve')
+    @patch('stripe.checkout.Session.retrieve')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_hydrates_metadata_from_payment_intent(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_session_retrieve,
+        mock_payment_intent_retrieve,
+        stripe_service
+    ):
+        """Ensure metadata can be recovered from the PaymentIntent when absent on the session."""
+
+        webhook_session = {
+            'id': 'cs_missing_everything',
+            'payment_intent': 'pi_metadata_source',
+            'metadata': None,
+            'client_reference_id': '9',
+        }
+
+        refreshed_session = {
+            'id': 'cs_missing_everything',
+            'payment_intent': 'pi_metadata_source',
+            'metadata': None,
+        }
+        mock_session_retrieve.return_value = refreshed_session
+
+        intent = Mock()
+        intent.metadata = {
+            'user_id': '9',
+            'payment_id': '321',
+            'credits': '4200',
+        }
+        mock_payment_intent_retrieve.return_value = intent
+
+        stripe_service._handle_checkout_completed(webhook_session)
+
+        mock_session_retrieve.assert_called_once_with('cs_missing_everything', expand=['metadata'])
+        mock_payment_intent_retrieve.assert_called_once_with(
+            'pi_metadata_source', expand=['metadata']
+        )
+
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 9
+        assert add_kwargs['payment_id'] == 321
+        assert add_kwargs['credits'] == 42.0
+
+        mock_update_payment.assert_called_once_with(
+            payment_id=321,
+            status='completed',
+            stripe_payment_intent_id='pi_metadata_source'
         )
 
     def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
