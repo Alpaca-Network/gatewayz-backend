@@ -6,6 +6,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _get_env_var(name: str, default: str | None = None, *, strip: bool = True) -> str | None:
+    """
+    Fetch an environment variable with optional whitespace trimming.
+
+    Args:
+        name: Environment variable to look up.
+        default: Value to return when the env var is unset or empty.
+        strip: Whether to strip leading/trailing whitespace (default: True).
+
+    Returns:
+        The normalized string value or the provided default when empty.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+
+    if strip:
+        value = value.strip()
+
+    return value or default
+
+
 def _derive_loki_query_url(push_url: str | None) -> str:
     """
     Build a Loki query endpoint from the configured push endpoint.
@@ -54,9 +76,9 @@ class Config:
     SUPABASE_DB_DSN = os.environ.get("SUPABASE_DB_DSN")
 
     # OpenRouter Configuration
-    OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-    OPENROUTER_SITE_URL = os.environ.get("OPENROUTER_SITE_URL", "https://your-site.com")
-    OPENROUTER_SITE_NAME = os.environ.get("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
+    OPENROUTER_API_KEY = _get_env_var("OPENROUTER_API_KEY")
+    OPENROUTER_SITE_URL = _get_env_var("OPENROUTER_SITE_URL", "https://your-site.com")
+    OPENROUTER_SITE_NAME = _get_env_var("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
 
     # DeepInfra Configuration (for direct API access)
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
