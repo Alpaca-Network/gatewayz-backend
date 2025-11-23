@@ -22,6 +22,13 @@ MODEL_PROVIDER_OVERRIDES = {
     "cerebras/llama-3.1-70b-instruct": "openrouter",
 }
 
+# Certain model IDs are tightly coupled to a single provider and should never be
+# routed elsewhere (even via failover). Keep these normalized to lowercase for
+# consistent lookups.
+PROVIDER_LOCKED_MODELS = {
+    "openrouter/auto": "openrouter",
+}
+
 # Gemini model name constants to reduce duplication
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
@@ -177,6 +184,22 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     # If no transformation needed or found, return original
     logger.debug(f"No transformation for '{model_id}' with provider {provider}")
     return model_id
+
+
+def get_provider_lock_for_model(model_id: str | None) -> str | None:
+    """
+    Return the provider that a model is hard-locked to, if applicable.
+
+    Some meta models (e.g., OpenRouter auto-router) cannot be executed by other
+    providers—attempting failover just produces upstream 4xx errors. This helper
+    lets callers short-circuit failover logic and produce clearer errors.
+    """
+
+    if not model_id:
+        return None
+
+    normalized = model_id.lower()
+    return PROVIDER_LOCKED_MODELS.get(normalized)
 
 
 def get_model_id_mapping(provider: str) -> dict[str, str]:
