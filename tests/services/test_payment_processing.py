@@ -504,6 +504,53 @@ class TestWebhooks:
             stripe_session_id='cs_missing_meta',
         )
 
+    @patch('stripe.PaymentIntent.retrieve')
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_recovers_metadata_from_payment_intent(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        mock_intent_retrieve,
+        stripe_service,
+    ):
+        """Verify fallback metadata retrieval pulls from the related payment intent."""
+
+        session = Mock()
+        session.id = 'cs_pi_meta'
+        session.payment_intent = 'pi_meta_only'
+        session.metadata = None
+        session.client_reference_id = None
+        session.amount_total = 3000
+        session.amount_subtotal = None
+
+        mock_get_payment.side_effect = [None, None]
+
+        mock_intent = Mock()
+        mock_intent.metadata = {
+            'user_id': '77',
+            'payment_id': '555',
+            'credits': '3000',
+        }
+        mock_intent_retrieve.return_value = mock_intent
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_intent_retrieve.assert_called_once_with('pi_meta_only')
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 77
+        assert add_kwargs['payment_id'] == 555
+        assert add_kwargs['credits'] == 30.0
+
+        mock_update_payment.assert_called_once_with(
+            payment_id=555,
+            status='completed',
+            stripe_payment_intent_id='pi_meta_only',
+        )
+
     def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
         """Ensure handler fails fast when both metadata and session id are missing"""
         session_without_data = Mock()
