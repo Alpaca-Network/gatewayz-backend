@@ -33,6 +33,8 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         enable_logs=True,
         # Set environment (development, staging, production)
         environment=Config.SENTRY_ENVIRONMENT,
+        # Release tracking for Sentry release management
+        release=Config.SENTRY_RELEASE,
         # Set traces_sample_rate to capture transactions for tracing
         traces_sample_rate=Config.SENTRY_TRACES_SAMPLE_RATE,
         # Set profiles_sample_rate to capture profiling data
@@ -40,7 +42,10 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         # Set profile_lifecycle to "trace" to run profiler during transactions
         profile_lifecycle="trace",
     )
-    logger.info(f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT})")
+    logger.info(
+        f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT}, "
+        f"release: {Config.SENTRY_RELEASE})"
+    )
 else:
     logger.info("⏭️  Sentry disabled (SENTRY_ENABLED=false or SENTRY_DSN not set)")
 
