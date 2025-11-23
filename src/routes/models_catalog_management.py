@@ -5,7 +5,7 @@ Handles CRUD operations for AI models with provider relationships
 
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from src.schemas.models_catalog import (
     ModelCreate,
@@ -148,7 +148,7 @@ async def search_models_endpoint(
 
 @router.get("/health/{health_status}", response_model=List[ModelWithProvider])
 async def get_models_by_health(
-    health_status: str = Query(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
+    health_status: str = Path(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
 ):
     """
     Get models by health status
