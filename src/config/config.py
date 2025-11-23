@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -52,6 +53,40 @@ _default_loki_push_url = os.environ.get(
 )
 _default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query_url(
     _default_loki_push_url
+)
+
+_project_root = Path(__file__).resolve().parents[2]
+_src_root = Path(__file__).resolve().parents[1]
+_default_data_dir = _src_root / "data"
+
+
+def _resolve_path_env(var_name: str, default: Path) -> Path:
+    """Resolve a filesystem path from environment variables with fallback."""
+    value = os.environ.get(var_name)
+    if not value:
+        return default
+    return Path(value).expanduser().resolve()
+
+
+def _ensure_directory(path: Path) -> Path:
+    """Ensure a directory exists and return the path."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+_data_dir = _ensure_directory(_resolve_path_env("GATEWAYZ_DATA_DIR", _default_data_dir))
+_pricing_history_dir = _ensure_directory(
+    _resolve_path_env("PRICING_HISTORY_DIR", _data_dir / "pricing_history")
+)
+_pricing_backup_dir = _ensure_directory(
+    _resolve_path_env("PRICING_BACKUP_DIR", _data_dir / "pricing_backups")
+)
+_pricing_sync_log_file = _resolve_path_env(
+    "PRICING_SYNC_LOG_FILE", _data_dir / "pricing_sync.log"
+)
+_pricing_sync_log_file.parent.mkdir(parents=True, exist_ok=True)
+_manual_pricing_file = _resolve_path_env(
+    "MANUAL_PRICING_FILE", _data_dir / "manual_pricing.json"
 )
 
 
@@ -210,6 +245,15 @@ class Config:
     }
     LOKI_PUSH_URL = _default_loki_push_url
     LOKI_QUERY_URL = _default_loki_query_url
+
+    # ==================== Filesystem Paths ====================
+    PROJECT_ROOT = _project_root
+    SRC_ROOT = _src_root
+    DATA_DIR = _data_dir
+    PRICING_HISTORY_DIR = _pricing_history_dir
+    PRICING_BACKUP_DIR = _pricing_backup_dir
+    PRICING_SYNC_LOG_FILE = _pricing_sync_log_file
+    MANUAL_PRICING_FILE = _manual_pricing_file
 
     @classmethod
     def validate(cls):
