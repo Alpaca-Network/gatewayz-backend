@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import shutil
 
+from src.config.config import Config
 from src.services.pricing_provider_auditor import PricingProviderAuditor
 from src.services.pricing_lookup import load_manual_pricing
 from src.services.pricing_audit_service import get_pricing_audit_service
@@ -28,9 +29,9 @@ from src.services.pricing_audit_service import get_pricing_audit_service
 logger = logging.getLogger(__name__)
 
 # Paths
-PRICING_FILE = Path("/root/repo/src/data/manual_pricing.json")
-BACKUP_DIR = Path("/root/repo/src/data/pricing_backups")
-SYNC_LOG_FILE = Path("/root/repo/src/data/pricing_sync.log")
+PRICING_FILE = Config.MANUAL_PRICING_FILE
+BACKUP_DIR = Config.PRICING_BACKUP_DIR
+SYNC_LOG_FILE = Config.PRICING_SYNC_LOG_FILE
 
 BACKUP_DIR.mkdir(exist_ok=True)
 
