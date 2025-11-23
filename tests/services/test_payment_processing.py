@@ -861,3 +861,55 @@ class TestPaymentIntegration:
             status='completed',
             stripe_payment_intent_id='pi_missing_ids'
         )
+
+    @patch('src.services.payments.create_payment')
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_creates_fallback_payment_when_missing_metadata(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        mock_create_payment,
+        stripe_service
+    ):
+        """Ensure handler creates a fallback payment record when payment_id cannot be recovered."""
+
+        session = Mock()
+        session.metadata = {
+            'user_id': '7',
+            'credits': '5000',
+        }
+        session.id = 'cs_missing_payment'
+        session.payment_intent = 'pi_missing_payment'
+        session.currency = 'usd'
+        session.amount_total = None
+        session.amount_subtotal = None
+
+        mock_get_payment.return_value = None
+        mock_create_payment.return_value = {
+            'id': 555,
+            'user_id': 7,
+            'amount_usd': 50.0,
+        }
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_create_payment.assert_called_once()
+        create_kwargs = mock_create_payment.call_args.kwargs
+        assert create_kwargs['user_id'] == 7
+        assert create_kwargs['amount'] == 50.0
+        assert create_kwargs['stripe_session_id'] == 'cs_missing_payment'
+        assert create_kwargs['metadata']['created_via'] == 'stripe_webhook_fallback'
+
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['payment_id'] == 555
+        assert add_kwargs['user_id'] == 7
+        assert add_kwargs['credits'] == 50.0
+        mock_update_payment.assert_called_once_with(
+            payment_id=555,
+            status='completed',
+            stripe_payment_intent_id='pi_missing_payment'
+        )
