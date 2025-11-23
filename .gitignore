@@ -43,6 +43,7 @@ __pycache__
 !AGENTS.md
 !docs/**/*.md
 !docs/README.md
+!SECURITY_INCIDENT_RESPONSE.md
 
 # Temp and output files
 temp*.json
@@ -96,3 +97,11 @@ test_results.txt
 .user_test_user_*.txt
 .test_api_key
 
+.venv.old/
+
+# Performance and load test files
+performance_test*.py
+performance_results*.json
+performance_summary*.txt
+comprehensive_performance_test*.py
+rate_limit_monitor.py
