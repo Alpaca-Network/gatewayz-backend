@@ -337,6 +337,7 @@ from src.services.model_transformations import detect_provider_from_model_id, tr
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
+    enforce_model_failover_rules,
     map_provider_error,
     should_failover,
 )
@@ -1059,6 +1060,7 @@ async def chat_completions(
                     # Otherwise default to openrouter (already set)
 
             provider_chain = build_provider_failover_chain(provider)
+            provider_chain = enforce_model_failover_rules(original_model, provider_chain)
             model = original_model
 
         # Diagnostic logging for tools parameter
@@ -1968,6 +1970,7 @@ async def unified_responses(
                         break
 
         provider_chain = build_provider_failover_chain(provider)
+        provider_chain = enforce_model_failover_rules(original_model, provider_chain)
         model = original_model
 
         # Diagnostic logging for tools parameter
