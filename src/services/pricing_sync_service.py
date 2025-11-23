@@ -27,11 +27,13 @@ from src.services.pricing_audit_service import get_pricing_audit_service
 
 logger = logging.getLogger(__name__)
 
-# Paths
-PRICING_FILE = Path("/root/repo/src/data/manual_pricing.json")
-BACKUP_DIR = Path("/root/repo/src/data/pricing_backups")
-SYNC_LOG_FILE = Path("/root/repo/src/data/pricing_sync.log")
+# Paths (relative to repository root)
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+PRICING_FILE = DATA_DIR / "manual_pricing.json"
+BACKUP_DIR = DATA_DIR / "pricing_backups"
+SYNC_LOG_FILE = DATA_DIR / "pricing_sync.log"
 
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 BACKUP_DIR.mkdir(exist_ok=True)
 
 
