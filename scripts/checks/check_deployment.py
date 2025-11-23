@@ -6,8 +6,9 @@ Check if backend deployment is live and accepting requests
 import requests
 import time
 import sys
+import os
 
-API_KEY = "gw_live_01eQv2HGWkjo0ApxoC4-G3yaOv6ilbzJwL9t6QpjQ5c"
+API_KEY = os.environ.get("GATEWAYZ_API_KEY", "")
 API_URL = "https://api.gatewayz.ai/v1/chat/completions"
 
 def check_backend():
