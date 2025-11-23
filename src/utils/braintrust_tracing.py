@@ -5,7 +5,60 @@ This module provides utilities for tracing LLM calls using Braintrust.
 Learn more at https://www.braintrust.dev/docs
 """
 
-from braintrust import current_span, init_logger, start_span, traced
+import functools
+import logging
+import inspect
+
+try:
+    from braintrust import current_span, init_logger, start_span, traced
+except ModuleNotFoundError:
+    # Provide graceful degradation when Braintrust SDK isn't installed.
+    class _NoopSpan:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def log(self, *args, **kwargs):
+            return None
+
+    def current_span():
+        return _NoopSpan()
+
+    def init_logger(project="Gatewayz Backend"):
+        stub_logger = logging.getLogger(f"braintrust_stub:{project}")
+        if not stub_logger.handlers:
+            handler = logging.StreamHandler()
+            stub_logger.addHandler(handler)
+        stub_logger.setLevel(logging.INFO)
+        stub_logger.info("Braintrust SDK not installed - no-op tracing enabled.")
+        return stub_logger
+
+    def start_span(*args, **kwargs):
+        return _NoopSpan()
+
+    def traced(*decorator_args, **decorator_kwargs):
+        def decorator(func):
+            if inspect.iscoroutinefunction(func):
+
+                @functools.wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return sync_wrapper
+
+        # Support bare decorator usage: @traced without parentheses
+        if decorator_args and callable(decorator_args[0]) and not decorator_kwargs:
+            return decorator(decorator_args[0])
+
+        return decorator
 
 # Initialize logger with your project name
 logger = init_logger(project="Gatewayz Backend")

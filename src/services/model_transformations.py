@@ -9,7 +9,6 @@ This module handles transformations between user-friendly model IDs
 
 import logging
 
-from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
@@ -180,7 +179,7 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     return model_id
 
 
-def get_model_id_mapping(provider: str) -> Dict[str, str]:
+def get_model_id_mapping(provider: str) -> dict[str, str]:
     """
     Get simplified -> native format mapping for a specific provider.
     This maps user-friendly input to what the provider API expects.
@@ -571,6 +570,19 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "mistral-7b": "mistral-7b-instruct",
             "mixtral-8x7b": "mixtral-8x7b-instruct",
         },
+        "xai": {
+            # XAI Grok models - pass-through format
+            # Models are referenced by their simple names (e.g., "grok-2", "grok-beta")
+            # Can also use xai/grok-* format
+            "grok-beta": "grok-beta",
+            "grok-2": "grok-2",
+            "grok-2-1212": "grok-2-1212",
+            "grok-vision-beta": "grok-vision-beta",
+            "xai/grok-beta": "grok-beta",
+            "xai/grok-2": "grok-2",
+            "xai/grok-2-1212": "grok-2-1212",
+            "xai/grok-vision-beta": "grok-vision-beta",
+        },
     }
 
     return mappings.get(provider, {})
@@ -652,7 +664,7 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[str] = None) -> Optional[str]:
+def detect_provider_from_model_id(model_id: str, preferred_provider: str | None = None) -> str | None:
     """
     Try to detect which provider a model belongs to based on its ID.
 
@@ -787,6 +799,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "alpaca-network",
         "alibaba-cloud",
         "fal",
+        "xai",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -854,6 +867,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
             "tripo3d",
         ]:
             return "fal"
+
+        # XAI models (e.g., "xai/grok-2")
+        if org == "xai":
+            return "xai"
+
+    # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")
+    if model_id.startswith("grok-"):
+        logger.info(f"Detected XAI provider for Grok model '{model_id}'")
+        return "xai"
 
     logger.debug(f"Could not detect provider for model '{model_id}'")
     return None

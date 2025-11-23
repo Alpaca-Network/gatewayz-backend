@@ -11,13 +11,11 @@ Endpoint: POST /api/chat/ai-sdk
 import asyncio
 import json
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.config import Config
 from src.services.ai_sdk_client import (
     make_ai_sdk_request_openai,
     make_ai_sdk_request_openai_stream,
@@ -44,20 +42,20 @@ class AISDKChatRequest(BaseModel):
     """AI SDK chat completion request"""
 
     model: str = Field(..., description="Model to use for completion")
-    messages: List[Message] = Field(..., description="List of messages in the conversation")
-    max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate")
-    temperature: Optional[float] = Field(None, description="Sampling temperature (0.0 to 2.0)")
-    top_p: Optional[float] = Field(None, description="Top-p sampling parameter")
-    frequency_penalty: Optional[float] = Field(None, description="Frequency penalty")
-    presence_penalty: Optional[float] = Field(None, description="Presence penalty")
-    stream: Optional[bool] = Field(False, description="Whether to stream the response")
+    messages: list[Message] = Field(..., description="List of messages in the conversation")
+    max_tokens: int | None = Field(None, description="Maximum tokens to generate")
+    temperature: float | None = Field(None, description="Sampling temperature (0.0 to 2.0)")
+    top_p: float | None = Field(None, description="Top-p sampling parameter")
+    frequency_penalty: float | None = Field(None, description="Frequency penalty")
+    presence_penalty: float | None = Field(None, description="Presence penalty")
+    stream: bool | None = Field(False, description="Whether to stream the response")
 
 
 class Choice(BaseModel):
     """Choice in completion response"""
 
     message: dict
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
 
 
 class Usage(BaseModel):
@@ -71,7 +69,7 @@ class Usage(BaseModel):
 class AISDKChatResponse(BaseModel):
     """AI SDK chat completion response"""
 
-    choices: List[Choice]
+    choices: list[Choice]
     usage: Usage
 
 

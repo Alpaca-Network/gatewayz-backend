@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +28,12 @@ except ImportError:
 class CachedResponse:
     """Container for cached responses"""
 
-    response: Dict[str, Any]
+    response: dict[str, Any]
     model: str
     created_at: float
     ttl: int  # Time to live in seconds
     hit_count: int = 0
-    metadata: Dict[str, Any] = None
+    metadata: dict[str, Any] = None
 
     def is_expired(self) -> bool:
         """Check if cache entry has expired"""
@@ -54,7 +54,7 @@ class ResponseCache:
 
     def __init__(
         self,
-        redis_url: Optional[str] = None,
+        redis_url: str | None = None,
         default_ttl: int = 3600,  # OPTIMIZED: 60 minutes (was 30)
         max_cache_size: int = 20000,  # OPTIMIZED: 20k entries (was 10k)
     ):
@@ -70,11 +70,11 @@ class ResponseCache:
         self.max_cache_size = max_cache_size
 
         # In-memory cache as fallback
-        self._memory_cache: Dict[str, CachedResponse] = {}
-        self._cache_order: List[str] = []  # For LRU eviction
+        self._memory_cache: dict[str, CachedResponse] = {}
+        self._cache_order: list[str] = []  # For LRU eviction
 
         # Redis client (if available)
-        self._redis_client: Optional[redis.Redis] = None
+        self._redis_client: redis.Redis | None = None
         if REDIS_AVAILABLE and redis_url:
             try:
                 self._redis_client = redis.from_url(
@@ -100,10 +100,10 @@ class ResponseCache:
 
     def _generate_cache_key(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs,
     ) -> str:
         """
@@ -147,10 +147,10 @@ class ResponseCache:
 
     def get(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str,
         **kwargs,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get cached response if available.
 
@@ -205,10 +205,10 @@ class ResponseCache:
 
     def set(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str,
-        response: Dict[str, Any],
-        ttl: Optional[int] = None,
+        response: dict[str, Any],
+        ttl: int | None = None,
         **kwargs,
     ):
         """
@@ -266,7 +266,7 @@ class ResponseCache:
 
     def should_cache(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         stream: bool = False,
     ) -> bool:
@@ -327,7 +327,7 @@ class ResponseCache:
 
         logger.info("Memory cache cleared")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get cache statistics"""
         total_requests = self._stats["hits"] + self._stats["misses"]
         hit_rate = (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0
@@ -356,11 +356,11 @@ class ResponseCache:
 
 
 # Global cache instance
-_cache: Optional[ResponseCache] = None
+_cache: ResponseCache | None = None
 
 
 def get_cache(
-    redis_url: Optional[str] = None,
+    redis_url: str | None = None,
     default_ttl: int = 3600,  # OPTIMIZED: 60 minutes (was 30)
 ) -> ResponseCache:
     """
@@ -383,19 +383,19 @@ def get_cache(
 
 
 def get_cached_response(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     model: str,
     **kwargs,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Get cached response if available"""
     cache = get_cache()
     return cache.get(messages, model, **kwargs)
 
 
 def cache_response(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     model: str,
-    response: Dict[str, Any],
+    response: dict[str, Any],
     **kwargs,
 ):
     """Cache a response"""
@@ -412,7 +412,7 @@ def cache_response(
     cache.set(messages, model, response, **kwargs)
 
 
-def get_cache_stats() -> Dict[str, Any]:
+def get_cache_stats() -> dict[str, Any]:
     """Get cache statistics"""
     cache = get_cache()
     return cache.get_stats()

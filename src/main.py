@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import secrets
@@ -7,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
+from prometheus_client import REGISTRY
 
 from src.config import Config
 
@@ -243,6 +244,8 @@ def create_app() -> FastAPI:
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
+        ("providers_management", "Providers Management"),  # Provider CRUD operations
+        ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("system", "System & Health"),  # Cache management and health monitoring
         (
             "optimization_monitor",

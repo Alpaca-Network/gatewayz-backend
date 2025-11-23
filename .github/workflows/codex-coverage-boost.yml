@@ -121,8 +121,27 @@ jobs:
           print(f"Found {len(low_coverage)} files below 75% coverage")
           EOF
 
+      - name: Debug - Pre-action diagnostics
+        run: |
+          echo "=== Pre-Codex Diagnostics ==="
+          echo "Coverage analysis file:"
+          [ -f coverage_analysis.md ] && wc -l coverage_analysis.md || echo "File not found"
+          echo ""
+          echo "Available disk space:"
+          df -h / | tail -1
+          echo ""
+          echo "System memory:"
+          free -h | grep Mem
+          echo ""
+          echo "Python and pip status:"
+          python --version
+          pip --version
+          echo ""
+          echo "Test environment check:"
+          [ -f requirements.txt ] && echo "requirements.txt exists ($(wc -l < requirements.txt) lines)" || echo "requirements.txt not found"
+
       - name: Generate tests with Codex
-        timeout-minutes: 50
+        timeout-minutes: 100
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -251,6 +270,24 @@ jobs:
             - Added X test cases covering Y lines of code
             - Increased coverage from Z% to Z+X%
             - Focus on [error cases/edge cases/integration]"
+
+      - name: Debug - Post-action verification
+        if: always()
+        run: |
+          echo "=== Post-Codex Status ==="
+          echo "Time: $(date)"
+          echo ""
+          echo "Recent commits:"
+          git log --oneline -5
+          echo ""
+          echo "Uncommitted changes count:"
+          git status --short | wc -l
+          echo ""
+          echo "New test files created:"
+          find tests/ -type f -mmin -5 2>/dev/null | wc -l
+          echo ""
+          echo "Coverage analysis files:"
+          [ -f coverage_analysis.md ] && echo "coverage_analysis.md: $(wc -l < coverage_analysis.md) lines" || echo "coverage_analysis.md: not found"
 
       - name: Verify coverage improvement
         id: verify
