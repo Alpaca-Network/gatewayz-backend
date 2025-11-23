@@ -12,6 +12,7 @@ from typing import Any
 import stripe
 
 from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
+from src.utils.sentry_context import capture_payment_error
 from src.db.subscription_products import get_credits_from_tier, get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.db.webhook_events import is_event_processed, record_processed_event
@@ -306,10 +307,24 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating checkout session: {e}")
+            capture_payment_error(
+                e,
+                operation='checkout_session',
+                user_id=str(user_id),
+                amount=request.amount / 100,
+                details={'currency': request.currency.value}
+            )
             raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
             logger.error(f"Error creating checkout session: {e}")
+            capture_payment_error(
+                e,
+                operation='checkout_session',
+                user_id=str(user_id),
+                amount=request.amount / 100,
+                details={'currency': request.currency.value}
+            )
             raise
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
@@ -328,6 +343,11 @@ class StripeService:
             }
         except stripe.StripeError as e:
             logger.error(f"Error retrieving checkout session: {e}")
+            capture_payment_error(
+                e,
+                operation='retrieve_session',
+                details={'session_id': session_id}
+            )
             raise Exception(f"Failed to retrieve session: {str(e)}") from e
 
     # ==================== Payment Intents ====================
@@ -722,6 +742,12 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating refund: {e}")
+            capture_payment_error(
+                e,
+                operation='refund',
+                amount=request.amount,
+                details={'payment_intent_id': request.payment_intent_id, 'reason': request.reason}
+            )
             raise Exception(f"Refund failed: {str(e)}") from e
 
     # ==================== Subscription Checkout ====================
