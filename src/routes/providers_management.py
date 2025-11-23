@@ -109,10 +109,7 @@ async def search_providers_endpoint(
 
 @router.get("/health/{health_status}", response_model=List[ProviderResponse])
 async def get_providers_by_health(
-    health_status: str = Path(
-        ...,
-        description="Health status: 'healthy', 'degraded', 'down', 'unknown'",
-    ),
+    health_status: str = Path(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
 ):
     """
     Get providers by health status
