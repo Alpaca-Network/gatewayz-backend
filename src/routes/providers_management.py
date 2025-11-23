@@ -5,7 +5,7 @@ Handles CRUD operations for AI model providers
 
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from src.schemas.providers import (
     ProviderCreate,
@@ -109,7 +109,10 @@ async def search_providers_endpoint(
 
 @router.get("/health/{health_status}", response_model=List[ProviderResponse])
 async def get_providers_by_health(
-    health_status: str = Query(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
+    health_status: str = Path(
+        ...,
+        description="Health status: 'healthy', 'degraded', 'down', 'unknown'",
+    ),
 ):
     """
     Get providers by health status
