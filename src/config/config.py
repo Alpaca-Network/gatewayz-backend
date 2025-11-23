@@ -169,6 +169,10 @@ class Config:
     SENTRY_ENVIRONMENT = os.environ.get("SENTRY_ENVIRONMENT", APP_ENV)
     SENTRY_TRACES_SAMPLE_RATE = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "1.0"))
     SENTRY_PROFILES_SAMPLE_RATE = float(os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "1.0"))
+    # Release tracking - automatically inferred from version or environment variable
+    SENTRY_RELEASE = os.environ.get("SENTRY_RELEASE", "2.0.3")
+    # Version string for release tracking
+    APP_VERSION = os.environ.get("APP_VERSION", "2.0.3")
 
     # Prometheus Configuration
     PROMETHEUS_ENABLED = os.environ.get("PROMETHEUS_ENABLED", "true").lower() in {
