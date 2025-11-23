@@ -22,6 +22,23 @@ MODEL_PROVIDER_OVERRIDES = {
     "cerebras/llama-3.1-70b-instruct": "openrouter",
 }
 
+# Provider-specific fallbacks for the OpenRouter auto model.
+# When failover routes an OpenRouter-only model to another provider, we remap it
+# to a widely available general-purpose chat model for that provider.
+OPENROUTER_AUTO_FALLBACKS = {
+    "cerebras": "llama-3.3-70b",
+    "huggingface": "meta-llama/llama-3.3-70b",
+    "hug": "meta-llama/llama-3.3-70b",
+    "featherless": "meta-llama/llama-3.3-70b",
+    "fireworks": "meta-llama/llama-3.3-70b",
+    "together": "meta-llama/llama-3.3-70b",
+    "google-vertex": "gemini-1.5-pro",
+    "vercel-ai-gateway": "openai/gpt-4o-mini",
+    "aihubmix": "openai/gpt-4o-mini",
+    "anannas": "openai/gpt-4o-mini",
+    "alibaba-cloud": "qwen/qwen-plus",
+}
+
 # Gemini model name constants to reduce duplication
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
@@ -66,6 +83,8 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         Output: "openai/gpt-4"
     """
 
+    provider_lower = (provider or "").lower()
+
     # Check multi-provider registry first (if enabled)
     if use_multi_provider:
         try:
@@ -89,6 +108,26 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         except Exception as e:
             logger.warning(f"Error checking multi-provider registry for transform: {e}")
 
+    requested_model_id = model_id
+
+    # Remap OpenRouter auto selections when routed through other providers.
+    if requested_model_id and requested_model_id.lower() == "openrouter/auto":
+        if provider_lower != "openrouter":
+            fallback_model = OPENROUTER_AUTO_FALLBACKS.get(provider_lower)
+            if fallback_model:
+                logger.info(
+                    "Mapping 'openrouter/auto' to provider fallback '%s' for %s",
+                    fallback_model,
+                    provider_lower or "unknown",
+                )
+                model_id = fallback_model
+            else:
+                logger.warning(
+                    "Provider '%s' does not support 'openrouter/auto' and lacks a fallback; "
+                    "continuing with original ID",
+                    provider_lower or "unknown",
+                )
+
     # Normalize input to lowercase for case-insensitive matching
     # Store original for logging
     original_model_id = model_id
@@ -107,8 +146,6 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     if model_id.startswith("@") and not model_id.startswith("@google/models/"):
         logger.debug(f"Model ID with @ prefix (non-Google): {model_id}")
         return model_id
-
-    provider_lower = provider.lower()
 
     # Special handling for OpenRouter: strip 'openrouter/' prefix if present
     # EXCEPT for openrouter/auto which needs to keep the prefix
