@@ -177,15 +177,74 @@ class StripeService:
         Look up the local payment record using payment_intent or checkout session id.
         """
         payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
-        lookup_id = payment_intent_id or self._get_stripe_object_value(session, "id")
-        if not lookup_id:
-            return None
+        session_id = self._get_stripe_object_value(session, "id")
 
-        payment = get_payment_by_stripe_intent(lookup_id)
-        if payment:
-            logger.info(
-                "Resolved payment context via Supabase for checkout session %s", lookup_id
+        lookup_attempts: list[tuple[str, str]] = []
+        if payment_intent_id:
+            lookup_attempts.append(("payment_intent", payment_intent_id))
+        if session_id and session_id != payment_intent_id:
+            lookup_attempts.append(("checkout_session", session_id))
+
+        for lookup_type, lookup_value in lookup_attempts:
+            payment = get_payment_by_stripe_intent(lookup_value)
+            if payment:
+                logger.info(
+                    "Resolved payment context via Supabase using %s lookup (value=%s)",
+                    lookup_type,
+                    lookup_value,
+                )
+                return payment
+
+        return None
+
+    def _create_fallback_payment_record(
+        self,
+        *,
+        user_id: int,
+        credits_cents: int,
+        session_id: str | None,
+        payment_intent_id: str | None,
+        currency: str | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """
+        Create a synthetic payment record when the original checkout metadata is missing.
+        """
+        amount_dollars = credits_cents / 100
+        payment_currency = (currency or self.default_currency.value).lower()
+        fallback_metadata = {
+            "created_via": "stripe_webhook_fallback",
+            "stripe_session_id": session_id,
+            "stripe_payment_intent_id": payment_intent_id,
+            "webhook_metadata_snapshot": metadata or {},
+        }
+
+        logger.warning(
+            "Creating fallback payment record for checkout session %s (user_id=%s, amount=%s %s)",
+            session_id,
+            user_id,
+            amount_dollars,
+            payment_currency,
+        )
+
+        payment = create_payment(
+            user_id=user_id,
+            amount=amount_dollars,
+            currency=payment_currency,
+            payment_method="stripe",
+            status="pending",
+            stripe_payment_intent_id=payment_intent_id,
+            stripe_session_id=session_id,
+            metadata=fallback_metadata,
+        )
+
+        if not payment:
+            logger.error(
+                "Unable to create fallback payment record for session %s (user_id=%s)",
+                session_id,
+                user_id,
             )
+
         return payment
 
     def create_checkout_session(
@@ -288,14 +347,17 @@ class StripeService:
                 expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             )
 
-            # Persist identifiers so we can recover context even if metadata fails to round-trip
+            # Update payment with identifiers known at session creation
+            payment_update_kwargs: dict[str, Any] = {
+                "payment_id": payment["id"],
+                "status": "pending",
+                "stripe_session_id": session.id,
+            }
             session_payment_intent = self._get_stripe_object_value(session, "payment_intent")
-            update_payment_status(
-                payment_id=payment["id"],
-                status="pending",
-                stripe_payment_intent_id=session_payment_intent,
-                stripe_session_id=session.id,
-            )
+            if session_payment_intent:
+                payment_update_kwargs["stripe_payment_intent_id"] = session_payment_intent
+
+            update_payment_status(**payment_update_kwargs)
 
             logger.info(f"Checkout session created: {session.id} for user {user_id}")
 
@@ -586,6 +648,24 @@ class StripeService:
                             session_id,
                         )
                         break
+
+            if (
+                payment_id is None
+                and payment_record is None
+                and user_id is not None
+                and credits_cents is not None
+            ):
+                currency = self._get_stripe_object_value(session, "currency")
+                payment_record = self._create_fallback_payment_record(
+                    user_id=user_id,
+                    credits_cents=credits_cents,
+                    session_id=session_id,
+                    payment_intent_id=payment_intent_id,
+                    currency=currency,
+                    metadata=metadata,
+                )
+                if payment_record:
+                    payment_id = payment_record.get("id")
 
             if user_id is None or payment_id is None or credits_cents is None:
                 raise ValueError(
