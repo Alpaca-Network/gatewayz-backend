@@ -9,11 +9,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
-# Python 3.10 compatibility: UTC was added in Python 3.11
-try:
-    from datetime import UTC
-except ImportError:
-    UTC = UTC
+from datetime import timezone
 
 from src.cache import _novita_models_cache
 
@@ -64,7 +60,7 @@ def fetch_models_from_novita():
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _novita_models_cache["data"] = models
-        _novita_models_cache["timestamp"] = datetime.now(UTC)
+        _novita_models_cache["timestamp"] = datetime.now(timezone.utc)
         return models
 
     try:

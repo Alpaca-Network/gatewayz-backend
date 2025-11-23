@@ -311,7 +311,7 @@ The {self.app_name} Team
                         </div>
                         <div class="info-item">
                             <div class="label">Created</div>
-                            <div class="value">{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</div>
+                            <div class="value">{datetime.utcnow().strftime('%Y-%m-%d %H:%M timezone.utc')}</div>
                         </div>
                     </div>
                     <p style="margin-bottom: 12px; margin-top: 16px;">Your new API key:</p>
@@ -348,7 +348,7 @@ Hi {username},
 A new API key has been created for your account.
 
 Key Name: {key_name}
-Created: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+Created: {datetime.utcnow().strftime('%Y-%m-%d %H:%M timezone.utc')}
 
 API Key: {api_key}
 
