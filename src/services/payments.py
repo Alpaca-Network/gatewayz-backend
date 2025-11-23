@@ -177,16 +177,25 @@ class StripeService:
         Look up the local payment record using payment_intent or checkout session id.
         """
         payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
-        lookup_id = payment_intent_id or self._get_stripe_object_value(session, "id")
-        if not lookup_id:
-            return None
+        session_id = self._get_stripe_object_value(session, "id")
 
-        payment = get_payment_by_stripe_intent(lookup_id)
-        if payment:
-            logger.info(
-                "Resolved payment context via Supabase for checkout session %s", lookup_id
-            )
-        return payment
+        lookup_attempts: list[tuple[str, str]] = []
+        if payment_intent_id:
+            lookup_attempts.append(("payment_intent", payment_intent_id))
+        if session_id and session_id != payment_intent_id:
+            lookup_attempts.append(("checkout_session", session_id))
+
+        for lookup_type, lookup_value in lookup_attempts:
+            payment = get_payment_by_stripe_intent(lookup_value)
+            if payment:
+                logger.info(
+                    "Resolved payment context via Supabase using %s lookup (value=%s)",
+                    lookup_type,
+                    lookup_value,
+                )
+                return payment
+
+        return None
 
     def create_checkout_session(
         self, user_id: int, request: CreateCheckoutSessionRequest
@@ -288,10 +297,17 @@ class StripeService:
                 expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             )
 
-            # Update payment with session ID
-            update_payment_status(
-                payment_id=payment["id"], status="pending", stripe_payment_intent_id=session.id
-            )
+            # Update payment with identifiers known at session creation
+            payment_update_kwargs: dict[str, Any] = {
+                "payment_id": payment["id"],
+                "status": "pending",
+                "stripe_session_id": session.id,
+            }
+            initial_payment_intent = getattr(session, "payment_intent", None)
+            if initial_payment_intent:
+                payment_update_kwargs["stripe_payment_intent_id"] = initial_payment_intent
+
+            update_payment_status(**payment_update_kwargs)
 
             logger.info(f"Checkout session created: {session.id} for user {user_id}")
 
