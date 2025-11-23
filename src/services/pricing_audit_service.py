@@ -20,8 +20,6 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
-from src.config.supabase_config import supabase_client
-
 logger = logging.getLogger(__name__)
 
 # Path to store pricing history
