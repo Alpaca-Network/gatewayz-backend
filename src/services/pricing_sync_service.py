@@ -16,23 +16,32 @@ Features:
 import asyncio
 import json
 import logging
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-import shutil
 
 from src.services.pricing_provider_auditor import PricingProviderAuditor
 from src.services.pricing_lookup import load_manual_pricing
 from src.services.pricing_audit_service import get_pricing_audit_service
+from src.utils.path_utils import get_data_dir, resolve_path
 
 logger = logging.getLogger(__name__)
 
 # Paths
-PRICING_FILE = Path("/root/repo/src/data/manual_pricing.json")
-BACKUP_DIR = Path("/root/repo/src/data/pricing_backups")
-SYNC_LOG_FILE = Path("/root/repo/src/data/pricing_sync.log")
+PRICING_FILE = resolve_path(
+    "MANUAL_PRICING_FILE", get_data_dir("manual_pricing.json")
+)
+BACKUP_DIR = resolve_path(
+    "PRICING_BACKUP_DIR", get_data_dir("pricing_backups")
+)
+SYNC_LOG_FILE = resolve_path(
+    "PRICING_SYNC_LOG_FILE", get_data_dir("pricing_sync.log")
+)
 
-BACKUP_DIR.mkdir(exist_ok=True)
+PRICING_FILE.parent.mkdir(parents=True, exist_ok=True)
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+SYNC_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
 @dict
