@@ -1,82 +1,102 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, UTC
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from postgrest import APIError
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
-from src.db.postgrest_schema import (
-    is_schema_cache_error,
-    refresh_postgrest_schema_cache,
-)
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
-_ENCRYPTION_METADATA_FIELDS = ("encrypted_key", "key_version", "key_hash", "last4")
+SCHEMA_CACHE_ERROR_CODE = "PGRST204"
+ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
 
 
 # near the top of the module
-def _pct(used: int, limit: int | None) -> float | None:
+def _pct(used: int, limit: Optional[int]) -> Optional[float]:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
 
 
-def _strip_encryption_metadata(payload: dict[str, Any]) -> dict[str, Any]:
-    stripped_payload = payload.copy()
-    for field in _ENCRYPTION_METADATA_FIELDS:
-        stripped_payload.pop(field, None)
-    return stripped_payload
+def _is_schema_cache_error(error: Exception) -> bool:
+    """Return True if Supabase/PostgREST reported a schema cache miss."""
+    return isinstance(error, APIError) and getattr(error, "code", None) == SCHEMA_CACHE_ERROR_CODE
 
 
-def _insert_api_key_row(client, payload: dict[str, Any], fallback_payload: dict[str, Any] | None = None):
-    """Insert API key row, retrying without optional encryption columns if schema cache is stale."""
+def _refresh_postgrest_schema_cache(client) -> bool:
+    """Trigger PostgREST to reload its schema cache via RPC."""
     try:
-        return client.table("api_keys_new").insert(payload).execute()
-    except Exception as insert_error:
-        if not is_schema_cache_error(insert_error):
-            raise
-
-        sanitized_error = sanitize_for_logging(str(insert_error))
+        if not hasattr(client, "rpc"):
+            logger.debug(
+                "Supabase client does not expose rpc(); skipping schema cache refresh attempt"
+            )
+            return False
+        client.rpc("refresh_postgrest_schema_cache", {}).execute()
+        logger.info("Triggered PostgREST schema cache refresh after API key insert failure")
+        return True
+    except Exception as refresh_error:
         logger.warning(
-            "api_keys_new insert failed because PostgREST schema cache is stale (%s). "
-            "Retrying without optional encryption metadata so user onboarding can continue.",
-            sanitized_error,
+            "Failed to refresh PostgREST schema cache: %s",
+            sanitize_for_logging(str(refresh_error)),
         )
+        return False
 
-        stripped_payload = (
-            fallback_payload.copy()
-            if fallback_payload is not None
-            else _strip_encryption_metadata(payload)
-        )
 
+def _insert_api_key_row(
+    client, api_key_payload: Dict[str, Any], include_encrypted_fields: bool = True
+):
+    """Insert API key data, optionally dropping encrypted columns for legacy schemas."""
+    payload = dict(api_key_payload)
+    if not include_encrypted_fields:
+        for column in ENCRYPTED_COLUMNS:
+            payload.pop(column, None)
+    return client.table("api_keys_new").insert(payload).execute()
+
+
+def _is_optional_column_error(error: Exception) -> bool:
+    """Detect whether an insert failure references optional encrypted columns."""
+    message = str(error)
+    return any(column in message for column in ENCRYPTED_COLUMNS)
+
+
+def _handle_schema_cache_insert_error(
+    client, api_key_payload: Dict[str, Any], original_error: APIError
+):
+    """Retry API key insert after schema refresh or by omitting encrypted columns."""
+    if not _is_schema_cache_error(original_error):
+        raise original_error
+
+    logger.warning(
+        "API key insert failed due to PostgREST schema cache miss (%s); attempting refresh",
+        sanitize_for_logging(str(original_error)),
+    )
+
+    if _refresh_postgrest_schema_cache(client):
         try:
-            result = client.table("api_keys_new").insert(stripped_payload).execute()
-        except Exception as fallback_error:
-            sanitized_fallback = sanitize_for_logging(str(fallback_error))
-            logger.error(
-                "Fallback api_keys_new insert without encryption metadata also failed: %s",
-                sanitized_fallback,
-            )
-            if refresh_postgrest_schema_cache():
-                logger.info("Retrying api_keys_new insert after refreshing PostgREST schema cache.")
-                return client.table("api_keys_new").insert(stripped_payload).execute()
-            raise
-
-        if refresh_postgrest_schema_cache():
-            logger.info("PostgREST schema cache refresh requested after fallback insert.")
-        else:
+            return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=True)
+        except APIError as retry_error:
+            if not _is_schema_cache_error(retry_error):
+                raise
             logger.warning(
-                "Could not refresh PostgREST schema cache; encrypted columns will stay disabled until cache reloads."
+                "Schema cache refresh did not resolve API key insert error (%s); "
+                "retrying without encrypted columns",
+                sanitize_for_logging(str(retry_error)),
             )
+    else:
+        logger.warning(
+            "Unable to refresh schema cache automatically; falling back to insert without encrypted columns"
+        )
 
-        return result
+    return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=False)
 
 
 def check_key_name_uniqueness(
-    user_id: int, key_name: str, exclude_key_id: int | None = None
+    user_id: int, key_name: str, exclude_key_id: Optional[int] = None
 ) -> bool:
     """Check if a key name is unique within the user's scope"""
     try:
@@ -109,11 +129,11 @@ def create_api_key(
     user_id: int,
     key_name: str,
     environment_tag: str = "live",
-    scope_permissions: dict[str, Any] | None = None,
-    expiration_days: int | None = None,
-    max_requests: int | None = None,
-    ip_allowlist: list[str] | None = None,
-    domain_referrers: list[str] | None = None,
+    scope_permissions: Optional[Dict[str, Any]] = None,
+    expiration_days: Optional[int] = None,
+    max_requests: Optional[int] = None,
+    ip_allowlist: Optional[List[str]] = None,
+    domain_referrers: Optional[List[str]] = None,
     is_primary: bool = False,
 ) -> tuple[str, int]:
     """Create a new API key for a user"""
@@ -153,7 +173,7 @@ def create_api_key(
         expiration_date = None
         if expiration_days:
             expiration_date = (
-                datetime.now(UTC) + timedelta(days=expiration_days)
+                datetime.now(timezone.utc) + timedelta(days=expiration_days)
             ).isoformat()
 
         # Set default permissions if none provided
@@ -164,7 +184,7 @@ def create_api_key(
         # Set up trial for new users (if this is their first key)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(UTC)
+            trial_start = datetime.now(timezone.utc)
             trial_end = trial_start + timedelta(days=3)
             trial_data = {
                 "is_trial": True,
@@ -234,14 +254,14 @@ def create_api_key(
             "scope_permissions": scope_permissions,
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
-            "last_used_at": datetime.now(UTC).isoformat(),
+            "last_used_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Add trial data if this is a primary key
         base_api_key_data.update(trial_data)
 
-        # Optional encrypted fields should only be sent if we have values
-        optional_encrypted_fields: dict[str, Any] = {}
+        # Optional encrypted fields should only be sent if we have values populated
+        optional_encrypted_fields = {}
         if encrypted_token is not None:
             optional_encrypted_fields["encrypted_key"] = encrypted_token
         if key_version is not None:
@@ -253,7 +273,21 @@ def create_api_key(
 
         api_key_data = {**base_api_key_data, **optional_encrypted_fields}
 
-        result = _insert_api_key_row(client, api_key_data, base_api_key_data)
+        try:
+            result = _insert_api_key_row(client, api_key_data, include_encrypted_fields=True)
+        except APIError as api_error:
+            result = _handle_schema_cache_insert_error(client, api_key_data, api_error)
+        except Exception as insert_error:
+            if _is_optional_column_error(insert_error):
+                logger.warning(
+                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
+                    sanitize_for_logging(str(insert_error)),
+                )
+                result = _insert_api_key_row(
+                    client, base_api_key_data, include_encrypted_fields=False
+                )
+            else:
+                raise
 
         if not result.data:
             raise ValueError("Failed to create API key")
@@ -295,7 +329,7 @@ def create_api_key(
                         "max_requests": max_requests,
                         "is_primary": is_primary,
                     },
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:
@@ -312,7 +346,7 @@ def create_api_key(
         raise RuntimeError(f"Failed to create API key: {e}") from e
 
 
-def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
+def get_user_api_keys(user_id: int) -> List[Dict[str, Any]]:
     """Get all API keys for a user"""
     try:
         client = get_supabase_client()
@@ -348,7 +382,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
                             days_remaining = max(0, (expiration - now).days)
                     except Exception as date_error:
                         logger.warning(
@@ -439,11 +473,11 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                         "action": "delete",
                         "api_key_id": result.data[0]["id"],
                         "details": {
-                            "deleted_at": datetime.now(UTC).isoformat(),
+                            "deleted_at": datetime.now(timezone.utc).isoformat(),
                             "key_name": result.data[0].get("key_name", "Unknown"),
                             "environment_tag": result.data[0].get("environment_tag", "unknown"),
                         },
-                        "timestamp": datetime.now(UTC).isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                 ).execute()
             except Exception as e:
@@ -461,7 +495,7 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
         return False
 
 
-def validate_api_key(api_key: str) -> dict[str, Any] | None:
+def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
     """Validate an API key and return user info if valid"""
     # Lazy import to avoid circular dependency
     from src.db.users import get_user
@@ -494,7 +528,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
 
                             if expiration < now:
                                 logger.warning(
@@ -567,6 +601,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 def increment_api_key_usage(api_key: str) -> None:
     """Increment the request count for an API key"""
     # Lazy import to avoid circular dependency
+    from src.db.users import get_user
 
     try:
         client = get_supabase_client()
@@ -582,8 +617,8 @@ def increment_api_key_usage(api_key: str) -> None:
                 client.table("api_keys_new").update(
                     {
                         "requests_used": current_usage + 1,
-                        "last_used_at": datetime.now(UTC).isoformat(),
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "last_used_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("api_key", api_key).execute()
                 return
@@ -597,7 +632,7 @@ def increment_api_key_usage(api_key: str) -> None:
         logger.error("Failed to increment API key usage: %s", sanitize_for_logging(str(e)))
 
 
-def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
+def get_api_key_usage_stats(api_key: str) -> Dict[str, Any]:
     """Get usage statistics for a specific API key"""
     try:
         client = get_supabase_client()
@@ -666,7 +701,7 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
         }
 
 
-def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
+def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
     """Update an API key's details"""
     try:
         client = get_supabase_client()
@@ -715,7 +750,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         if "expiration_days" in update_data:
             if update_data["expiration_days"] is not None:
                 update_data["expiration_date"] = (
-                    datetime.now(UTC) + timedelta(days=update_data["expiration_days"])
+                    datetime.now(timezone.utc) + timedelta(days=update_data["expiration_days"])
                 ).isoformat()
             else:
                 update_data["expiration_date"] = None
@@ -723,7 +758,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             del update_data["expiration_days"]
 
         # Add timestamp
-        update_data["updated_at"] = datetime.now(UTC).isoformat()
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         # Update the API key
         result = client.table("api_keys_new").update(update_data).eq("id", key_id).execute()
@@ -737,7 +772,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                 client.table("rate_limit_configs").update(
                     {
                         "max_requests": updates["max_requests"],
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("api_key_id", key_id).execute()
             except Exception as e:
@@ -756,9 +791,9 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                         "updated_fields": list(updates.keys()),
                         "old_values": {k: key_data.get(k) for k in updates.keys() if k in key_data},
                         "new_values": updates,
-                        "update_timestamp": datetime.now(UTC).isoformat(),
+                        "update_timestamp": datetime.now(timezone.utc).isoformat(),
                     },
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             ).execute()
         except Exception as e:
@@ -882,7 +917,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         return False
 
 
-def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
+def get_api_key_by_id(key_id: int, user_id: int) -> Optional[Dict[str, Any]]:
     """Get API key details by ID, ensuring user ownership"""
     try:
         client = get_supabase_client()
@@ -916,7 +951,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
                         expiration_str = expiration_str + "+00:00"
 
                     expiration = datetime.fromisoformat(expiration_str)
-                    now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                    now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
                     days_remaining = max(0, (expiration - now).days)
             except Exception as date_error:
                 logger.warning(
@@ -962,7 +997,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
         return None
 
 
-def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
+def get_user_all_api_keys_usage(user_id: int) -> Dict[str, Any]:
     """Get usage statistics for all API keys of a user"""
     try:
         client = get_supabase_client()
