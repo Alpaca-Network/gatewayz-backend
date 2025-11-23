@@ -244,6 +244,8 @@ def create_app() -> FastAPI:
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
+        ("providers_management", "Providers Management"),  # Provider CRUD operations
+        ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("system", "System & Health"),  # Cache management and health monitoring
         (
             "optimization_monitor",
