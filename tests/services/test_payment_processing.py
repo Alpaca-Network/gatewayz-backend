@@ -104,6 +104,7 @@ class TestCheckoutSession:
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
         mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.payment_intent = 'pi_cs_test_123'
         mock_stripe_create.return_value = mock_session
 
         # Create request
@@ -210,6 +211,7 @@ class TestCheckoutSession:
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
         mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.payment_intent = 'pi_cs_test_123'
         mock_stripe_create.return_value = mock_session
 
         request = CreateCheckoutSessionRequest(
@@ -406,7 +408,8 @@ class TestWebhooks:
         mock_update_payment.assert_called_once_with(
             payment_id=1,
             status='completed',
-            stripe_payment_intent_id='pi_test_123'
+            stripe_payment_intent_id='pi_test_123',
+            stripe_session_id='cs_test_123',
         )
 
     @patch('stripe.checkout.Session.retrieve')
@@ -446,7 +449,8 @@ class TestWebhooks:
         mock_update_payment.assert_called_once_with(
             payment_id=42,
             status='completed',
-            stripe_payment_intent_id='pi_full'
+            stripe_payment_intent_id='pi_full',
+            stripe_session_id='cs_missing_meta',
         )
 
     def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
@@ -518,6 +522,7 @@ class TestWebhooks:
             payment_id=42,
             status='completed',
             stripe_payment_intent_id='pi_missing_meta',
+            stripe_session_id='cs_missing_meta',
         )
 
     @patch('stripe.Webhook.construct_event')
@@ -820,7 +825,8 @@ class TestPaymentIntegration:
         mock_update_payment.assert_called_once_with(
             payment_id=1,
             status='completed',
-            stripe_payment_intent_id='pi_test_fallback'
+            stripe_payment_intent_id='pi_test_fallback',
+            stripe_session_id='cs_test_fallback',
         )
 
     @patch('src.services.payments.get_payment_by_stripe_intent')
@@ -859,5 +865,6 @@ class TestPaymentIntegration:
         mock_update_payment.assert_called_once_with(
             payment_id=42,
             status='completed',
-            stripe_payment_intent_id='pi_missing_ids'
+            stripe_payment_intent_id='pi_missing_ids',
+            stripe_session_id='cs_missing_ids',
         )
