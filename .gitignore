@@ -97,3 +97,10 @@ test_results.txt
 .test_api_key
 
 .venv.old/
+
+# Performance and load test files
+performance_test*.py
+performance_results*.json
+performance_summary*.txt
+comprehensive_performance_test*.py
+rate_limit_monitor.py
