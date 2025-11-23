@@ -71,6 +71,7 @@ from src.services.openrouter_client import (
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
+    enforce_model_failover_rules,
     map_provider_error,
     should_failover,
 )
@@ -454,6 +455,7 @@ async def anthropic_messages(
                     # Otherwise default to openrouter (already set)
 
         provider_chain = build_provider_failover_chain(provider)
+        provider_chain = enforce_model_failover_rules(original_model, provider_chain)
         model = original_model
 
         # === 3) Call upstream with failover ===
