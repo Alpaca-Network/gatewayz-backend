@@ -43,6 +43,7 @@ __pycache__
 !AGENTS.md
 !docs/**/*.md
 !docs/README.md
+!SECURITY_INCIDENT_RESPONSE.md
 
 # Temp and output files
 temp*.json
