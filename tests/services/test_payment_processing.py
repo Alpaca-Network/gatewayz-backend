@@ -982,3 +982,50 @@ class TestPaymentIntegration:
             status='completed',
             stripe_payment_intent_id='pi_missing_payment'
         )
+
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.stripe.PaymentIntent.retrieve')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_hydrates_metadata_from_payment_intent(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_payment_intent_retrieve,
+        mock_get_payment,
+        stripe_service
+    ):
+        """Ensure handler can hydrate missing metadata from the PaymentIntent before falling back."""
+
+        session = Mock()
+        session.metadata = {}
+        session.id = 'cs_pi_metadata'
+        session.payment_intent = 'pi_pi_metadata'
+        session.amount_total = 1000
+        session.currency = 'usd'
+
+        mock_payment_intent = Mock()
+        mock_payment_intent.metadata = {
+            'user_id': '88',
+            'payment_id': '901',
+            'credits': '1000',
+        }
+        mock_payment_intent_retrieve.return_value = mock_payment_intent
+        mock_get_payment.return_value = None
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_payment_intent_retrieve.assert_called_once_with(
+            'pi_pi_metadata', expand=['metadata']
+        )
+        mock_get_payment.assert_not_called()
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 88
+        assert add_kwargs['payment_id'] == 901
+        assert add_kwargs['credits'] == 10.0
+        mock_update_payment.assert_called_once_with(
+            payment_id=901,
+            status='completed',
+            stripe_payment_intent_id='pi_pi_metadata'
+        )
