@@ -157,6 +157,7 @@ class StripeService:
         if not session_id:
             return session, {}
 
+        refreshed_session: Any | None = None
         try:
             refreshed_session = stripe.checkout.Session.retrieve(session_id, expand=["metadata"])
             refreshed_metadata = self._metadata_to_dict(
@@ -167,12 +168,43 @@ class StripeService:
                     "Hydrated checkout session metadata from Stripe (session_id=%s)", session_id
                 )
                 return refreshed_session, refreshed_metadata
-            return refreshed_session, {}
         except stripe.StripeError as exc:
             logger.warning(
                 "Unable to hydrate checkout session metadata for %s: %s", session_id, exc
             )
-            return session, {}
+
+        # Final fallback: attempt to read metadata from the underlying PaymentIntent
+        session_for_intent = refreshed_session or session
+        intent_metadata = self._hydrate_payment_intent_metadata(session_for_intent)
+        if intent_metadata:
+            return session_for_intent, intent_metadata
+
+        return session_for_intent, {}
+
+    def _hydrate_payment_intent_metadata(self, session: Any) -> dict[str, Any]:
+        """
+        Fetch metadata from the PaymentIntent when it is not present on the checkout session.
+        """
+        payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
+        if not payment_intent_id:
+            return {}
+
+        try:
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["metadata"])
+        except stripe.StripeError as exc:
+            logger.warning(
+                "Unable to hydrate metadata from payment intent %s: %s", payment_intent_id, exc
+            )
+            return {}
+
+        metadata = self._metadata_to_dict(self._get_stripe_object_value(intent, "metadata"))
+        if metadata:
+            logger.info(
+                "Hydrated checkout metadata from PaymentIntent %s (session_id=%s)",
+                payment_intent_id,
+                self._get_stripe_object_value(session, "id"),
+            )
+        return metadata
 
     def _hydrate_payment_intent_metadata(self, payment_intent_id: str | None) -> dict[str, Any]:
         """
@@ -341,6 +373,13 @@ class StripeService:
             # Calculate credits
             credits = request.amount
 
+            checkout_metadata = {
+                "user_id": str(user_id),
+                "payment_id": str(payment["id"]),
+                "credits": str(credits),
+                **(request.metadata or {}),
+            }
+
             # Create Stripe checkout session
             session = stripe.checkout.Session.create(
                 payment_method_types=["card"],
@@ -362,12 +401,8 @@ class StripeService:
                 cancel_url=cancel_url,
                 customer_email=request.customer_email or user_email,
                 client_reference_id=str(user_id),
-                metadata={
-                    "user_id": str(user_id),
-                    "payment_id": str(payment["id"]),
-                    "credits": str(credits),
-                    **(request.metadata or {}),
-                },
+                metadata=checkout_metadata,
+                payment_intent_data={"metadata": checkout_metadata.copy()},
                 expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             )
 
