@@ -353,9 +353,9 @@ class StripeService:
                 "status": "pending",
                 "stripe_session_id": session.id,
             }
-            initial_payment_intent = getattr(session, "payment_intent", None)
-            if initial_payment_intent:
-                payment_update_kwargs["stripe_payment_intent_id"] = initial_payment_intent
+            session_payment_intent = self._get_stripe_object_value(session, "payment_intent")
+            if session_payment_intent:
+                payment_update_kwargs["stripe_payment_intent_id"] = session_payment_intent
 
             update_payment_status(**payment_update_kwargs)
 
@@ -694,6 +694,7 @@ class StripeService:
                 payment_id=payment_id,
                 status="completed",
                 stripe_payment_intent_id=payment_intent_id,
+                stripe_session_id=session_id,
             )
 
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
