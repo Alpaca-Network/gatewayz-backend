@@ -155,7 +155,7 @@ jobs:
           echo "✅ GitHub token is available"
 
       - name: Run Claude Code (fix CI failures and push)
-        timeout-minutes: 50
+        timeout-minutes: 120
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
