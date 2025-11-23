@@ -12,6 +12,16 @@ def test_openrouter_auto_preserves_prefix():
     assert result == "openrouter/auto"
 
 
+def test_openrouter_auto_transforms_for_huggingface():
+    result = transform_model_id("openrouter/auto", "huggingface")
+    assert result == "meta-llama/Llama-3.3-70B-Instruct"
+
+
+def test_openrouter_auto_transforms_for_cerebras():
+    result = transform_model_id("openrouter/auto", "cerebras")
+    assert result == "llama-3.3-70b"
+
+
 def test_detect_provider_from_model_id_fal_ai():
     """Test that fal-ai models are detected as 'fal' provider"""
     result = detect_provider_from_model_id("fal-ai/stable-diffusion-v15")
