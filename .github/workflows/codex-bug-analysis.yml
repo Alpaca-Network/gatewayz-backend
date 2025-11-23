@@ -60,6 +60,18 @@ jobs:
 
           echo "Analysis complete"
 
+      - name: Debug - Pre-action system check
+        run: |
+          echo "=== System Check Before Claude Code Action ==="
+          echo "Disk space:"
+          df -h /
+          echo "Memory:"
+          free -h
+          echo "Analysis reports size:"
+          du -sh analysis-reports/ 2>/dev/null || echo "No analysis reports yet"
+          echo "Python version:"
+          python --version
+
       - name: Run Codex Bug Analysis
         timeout-minutes: 90
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
@@ -128,6 +140,23 @@ jobs:
             - Estimated effort to fix
 
             Focus on actionable findings only. Don't report style issues unless they affect security or maintainability.
+
+      - name: Debug - Post-action status
+        if: always()
+        run: |
+          echo "=== Post-Claude-Code Status ==="
+          echo "Time: $(date)"
+          echo "Recent commits:"
+          git log --oneline -5
+          echo ""
+          echo "Uncommitted changes:"
+          git status --short | head -20
+          echo ""
+          echo "Files modified in last 5 minutes:"
+          find . -type f -mmin -5 -not -path './.git/*' | wc -l
+          echo ""
+          echo "Analysis reports content:"
+          ls -lah analysis-reports/ 2>/dev/null || echo "No analysis reports"
 
       - name: Create GitHub issue with findings
         if: always()
