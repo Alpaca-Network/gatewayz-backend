@@ -1,10 +1,36 @@
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 
 # Load environment variables from ..env file
 load_dotenv()
+
+
+def _derive_loki_query_url(push_url: str | None) -> str:
+    """
+    Build a Loki query endpoint from the configured push endpoint.
+
+    The Railway-provided URL typically ends with /loki/api/v1/push. When querying we need
+    /loki/api/v1/query_range instead, but we want to preserve the scheme/host/custom base.
+    """
+    default_query = "http://loki:3100/loki/api/v1/query_range"
+    if not push_url:
+        return default_query
+
+    normalized = push_url.rstrip("/")
+    push_suffix = "/loki/api/v1/push"
+    if normalized.endswith(push_suffix):
+        normalized = normalized[: -len(push_suffix)]
+    return f"{normalized}/loki/api/v1/query_range"
+
+
+_default_loki_push_url = os.environ.get(
+    "LOKI_PUSH_URL",
+    "http://loki:3100/loki/api/v1/push",
+)
+_default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query_url(
+    _default_loki_push_url
+)
 
 
 class Config:
@@ -24,6 +50,8 @@ class Config:
     # Supabase Configuration
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+    # Optional direct Postgres connection string for maintenance tasks
+    SUPABASE_DB_DSN = os.environ.get("SUPABASE_DB_DSN")
 
     # OpenRouter Configuration
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
@@ -92,11 +120,13 @@ class Config:
     CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
     CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
 
-    # Google Vertex AI Configuration (for image generation)
+    # Google Vertex AI Configuration (for image generation & generative APIs)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
     GOOGLE_VERTEX_LOCATION = os.environ.get("GOOGLE_VERTEX_LOCATION", "us-central1")
     GOOGLE_VERTEX_ENDPOINT_ID = os.environ.get("GOOGLE_VERTEX_ENDPOINT_ID", "6072619212881264640")
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    GOOGLE_VERTEX_TRANSPORT = os.environ.get("GOOGLE_VERTEX_TRANSPORT", "rest").lower()
+    GOOGLE_VERTEX_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_TIMEOUT", "60"))
 
     # OpenRouter Analytics Cookie (for transaction analytics API)
     OPENROUTER_COOKIE = os.environ.get("OPENROUTER_COOKIE")
@@ -156,10 +186,8 @@ class Config:
         "true",
         "yes",
     }
-    LOKI_PUSH_URL = os.environ.get(
-        "LOKI_PUSH_URL",
-        "http://loki:3100/loki/api/v1/push",
-    )
+    LOKI_PUSH_URL = _default_loki_push_url
+    LOKI_QUERY_URL = _default_loki_query_url
 
     @classmethod
     def validate(cls):

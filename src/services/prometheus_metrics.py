@@ -15,7 +15,6 @@ import logging
 import os
 import time
 from contextlib import contextmanager
-from typing import Optional
 
 from prometheus_client import Counter, Gauge, Histogram, Summary, Info, REGISTRY
 
@@ -316,7 +315,7 @@ def track_http_request(method: str, endpoint: str):
         http_request_duration.labels(method=method, endpoint=endpoint).observe(duration)
 
 
-def record_http_response(method: str, endpoint: str, status_code: int, app_name: Optional[str] = None):
+def record_http_response(method: str, endpoint: str, status_code: int, app_name: str | None = None):
     """Record HTTP response metrics."""
     # Use provided app_name or fall back to environment variable
     app = app_name or APP_NAME
@@ -339,7 +338,7 @@ def track_model_inference(provider: str, model: str):
     status = "success"
     try:
         yield
-    except (Exception,):  # Intentionally catch all exceptions from yield block
+    except Exception:  # Intentionally catch all exceptions from yield block
         status = "error"
         logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
@@ -486,7 +485,7 @@ def track_frontend_processing(endpoint: str, duration: float):
 
 def track_request_stage(stage: str, endpoint: str, duration: float):
     """Track duration of a specific request processing stage.
-    
+
     Stages:
     - request_parsing: Time to parse and validate request
     - auth_validation: Time to validate authentication
@@ -508,7 +507,6 @@ def get_metrics_summary() -> dict:
     # In production, use the /metrics endpoint which exports all metrics in Prometheus format.
     # This summary is for diagnostic purposes only.
     try:
-        from prometheus_client import REGISTRY
 
         summary = {
             "enabled": True,

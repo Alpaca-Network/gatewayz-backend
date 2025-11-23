@@ -3,9 +3,9 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -94,11 +94,11 @@ MODALITY_TEXT_TO_AUDIO = "text->audio"
 class AggregatedCatalog(list):
     """List-like wrapper that also exposes canonical model metadata."""
 
-    def __init__(self, models: Optional[list], canonical_models: Optional[list]):
+    def __init__(self, models: list | None, canonical_models: list | None):
         super().__init__(models or [])
         self.canonical_models = canonical_models or []
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {"models": list(self), "canonical_models": self.canonical_models}
 
 
@@ -111,7 +111,7 @@ def _normalize_provider_slug(provider_slug: str) -> str:
     return mapping.get(provider_slug.lower(), provider_slug.lower())
 
 
-def _extract_modalities(record: dict) -> List[str]:
+def _extract_modalities(record: dict) -> list[str]:
     modalities = record.get("modalities")
     if isinstance(modalities, list) and modalities:
         return modalities
@@ -135,7 +135,7 @@ def _extract_modalities(record: dict) -> List[str]:
     return ["text"]
 
 
-def _register_canonical_records(provider_slug: str, models: Optional[list]) -> None:
+def _register_canonical_records(provider_slug: str, models: list | None) -> None:
     if not models:
         return
 
@@ -196,7 +196,7 @@ def _register_canonical_records(provider_slug: str, models: Optional[list]) -> N
 
 def _fresh_cached_models(cache: dict, provider_slug: str):
     if cache.get("data") and cache.get("timestamp"):
-        cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+        cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
         if cache_age < cache.get("ttl", 0):
             _register_canonical_records(provider_slug, cache["data"])
             return cache["data"]
@@ -515,7 +515,7 @@ def _build_multi_provider_catalog() -> AggregatedCatalog:
 def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
     catalog = _build_multi_provider_catalog()
     _multi_provider_catalog_cache["data"] = catalog
-    _multi_provider_catalog_cache["timestamp"] = datetime.now(timezone.utc)
+    _multi_provider_catalog_cache["timestamp"] = datetime.now(UTC)
     return catalog
 
 
@@ -617,7 +617,7 @@ def get_cached_models(gateway: str = "openrouter"):
 
             cache = _huggingface_models_cache
             if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     # Validate cache has reasonable number of models (should be 500+, not just 9)
                     cache_size = len(cache["data"])
@@ -655,7 +655,7 @@ def get_cached_models(gateway: str = "openrouter"):
             if result and not cache["data"]:
                 logger.info("Manually updating HuggingFace cache after fetch")
                 _huggingface_models_cache["data"] = result
-                _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
+                _huggingface_models_cache["timestamp"] = datetime.now(UTC)
 
             _register_canonical_records("huggingface", result)
             return result
@@ -728,7 +728,7 @@ def get_cached_models(gateway: str = "openrouter"):
             cache = _multi_provider_catalog_cache
             # Check timestamp only - empty list [] is a valid cached value
             if cache.get("timestamp") is not None:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
                 if cache_age < cache["ttl"]:
                     return cache["data"]
                 if cache_age < cache.get("stale_ttl", cache["ttl"]):
@@ -790,7 +790,7 @@ def fetch_models_from_openrouter():
             if "pricing" in model:
                 model["pricing"] = sanitize_pricing(model["pricing"])
         _models_cache["data"] = models
-        _models_cache["timestamp"] = datetime.now(timezone.utc)
+        _models_cache["timestamp"] = datetime.now(UTC)
 
         return _models_cache["data"]
     except Exception as e:
@@ -840,7 +840,7 @@ def fetch_models_from_deepinfra():
         normalized_models = [normalize_deepinfra_model(model) for model in raw_models if model]
 
         _deepinfra_models_cache["data"] = normalized_models
-        _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _deepinfra_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
         return _deepinfra_models_cache["data"]
@@ -905,7 +905,7 @@ def fetch_models_from_featherless():
                 )
 
         _featherless_models_cache["data"] = normalized_models
-        _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _featherless_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
         return _featherless_models_cache["data"]
@@ -996,7 +996,7 @@ def fetch_models_from_chutes():
             normalized_models = [normalize_chutes_model(model) for model in raw_models if model]
 
             _chutes_models_cache["data"] = normalized_models
-            _chutes_models_cache["timestamp"] = datetime.now(timezone.utc)
+            _chutes_models_cache["timestamp"] = datetime.now(UTC)
 
             logger.info(f"Loaded {len(normalized_models)} models from Chutes static catalog")
             return _chutes_models_cache["data"]
@@ -1055,7 +1055,7 @@ def fetch_models_from_groq():
         normalized_models = [normalize_groq_model(model) for model in raw_models if model]
 
         _groq_models_cache["data"] = normalized_models
-        _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _groq_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Groq models")
         return _groq_models_cache["data"]
@@ -1244,7 +1244,7 @@ def fetch_models_from_fireworks():
         normalized_models = [normalize_fireworks_model(model) for model in raw_models if model]
 
         _fireworks_models_cache["data"] = normalized_models
-        _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fireworks_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
         return _fireworks_models_cache["data"]
@@ -1385,7 +1385,7 @@ def fetch_models_from_together():
         normalized_models = [normalize_together_model(model) for model in raw_models if model]
 
         _together_models_cache["data"] = normalized_models
-        _together_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _together_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Together models")
         return _together_models_cache["data"]
@@ -1528,7 +1528,7 @@ def fetch_models_from_aimo():
         )
 
         _aimo_models_cache["data"] = deduplicated_models
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
 
         return _aimo_models_cache["data"]
     except httpx.HTTPStatusError as e:
@@ -1698,7 +1698,7 @@ def fetch_models_from_near():
                 normalized_models = [normalize_near_model(model) for model in raw_models if model]
 
                 _near_models_cache["data"] = normalized_models
-                _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+                _near_models_cache["timestamp"] = datetime.now(UTC)
 
                 logger.info(f"Fetched {len(normalized_models)} Near AI models from API")
                 return _near_models_cache["data"]
@@ -1750,7 +1750,7 @@ def fetch_models_from_near():
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
 
         _near_models_cache["data"] = normalized_models
-        _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _near_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Using {len(normalized_models)} fallback Near AI models")
         return _near_models_cache["data"]
@@ -1913,7 +1913,7 @@ def fetch_models_from_fal():
         normalized_models = [normalize_fal_model(model) for model in raw_models if model]
 
         _fal_models_cache["data"] = normalized_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fal_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} Fal.ai models from catalog")
         return _fal_models_cache["data"]
@@ -1922,7 +1922,7 @@ def fetch_models_from_fal():
         return []
 
 
-def normalize_fal_model(fal_model: dict) -> Optional[dict]:
+def normalize_fal_model(fal_model: dict) -> dict | None:
     """Normalize Fal.ai catalog entries to resemble OpenRouter model shape
 
     Fal.ai features:
@@ -2032,7 +2032,7 @@ def fetch_models_from_vercel_ai_gateway():
         normalized_models = [normalize_vercel_model(model) for model in response.data if model]
 
         _vercel_ai_gateway_models_cache["data"] = normalized_models
-        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Vercel AI Gateway")
         return _vercel_ai_gateway_models_cache["data"]
@@ -2043,7 +2043,7 @@ def fetch_models_from_vercel_ai_gateway():
         return []
 
 
-def normalize_vercel_model(model) -> Optional[dict]:
+def normalize_vercel_model(model) -> dict | None:
     """Normalize Vercel AI Gateway model to catalog schema
 
     Vercel models can originate from various providers (OpenAI, Google, Anthropic, etc.)
@@ -2661,7 +2661,7 @@ def fetch_huggingface_model(hugging_face_id: str):
 
         # Cache the result
         _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+        _huggingface_cache["timestamp"] = datetime.now(UTC)
 
         return model_data
     except httpx.HTTPStatusError as e:
@@ -2731,7 +2731,7 @@ def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
         return openrouter_model
 
 
-def _extract_model_provider_slug(model: dict) -> Optional[str]:
+def _extract_model_provider_slug(model: dict) -> str | None:
     """Determine provider slug from a model payload."""
     if not model:
         return None
@@ -2757,7 +2757,7 @@ def _extract_model_provider_slug(model: dict) -> Optional[str]:
     return None
 
 
-def _normalize_provider_slug(provider: Any) -> Optional[str]:
+def _normalize_provider_slug(provider: Any) -> str | None:
     """Extract provider slug from a provider record."""
     if provider is None:
         return None
@@ -2779,8 +2779,8 @@ def _normalize_provider_slug(provider: Any) -> Optional[str]:
 
 
 def get_model_count_by_provider(
-    provider_or_models: Any, models_data: Optional[list] = None
-) -> Union[int, Dict[str, int]]:
+    provider_or_models: Any, models_data: list | None = None
+) -> int | dict[str, int]:
     """Return model counts.
 
     Backwards-compatible shim that supports two call styles:
@@ -2806,7 +2806,7 @@ def get_model_count_by_provider(
         models = provider_or_models or []
         providers = models_data or []
 
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         for model in models:
             slug = _extract_model_provider_slug(model)
@@ -2908,7 +2908,7 @@ def fetch_models_from_aihubmix():
         normalized_models = [normalize_aihubmix_model(model) for model in response.data if model]
 
         _aihubmix_models_cache["data"] = normalized_models
-        _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aihubmix_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
         return _aihubmix_models_cache["data"]
@@ -2917,7 +2917,7 @@ def fetch_models_from_aihubmix():
         return []
 
 
-def normalize_aihubmix_model(model) -> Optional[dict]:
+def normalize_aihubmix_model(model) -> dict | None:
     """Normalize AiHubMix model to catalog schema
 
     AiHubMix models use OpenAI-compatible naming conventions.
@@ -2935,7 +2935,7 @@ def normalize_aihubmix_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from AiHubMix"),
+            "description": getattr(model, "description", "Model from AiHubMix"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -2988,7 +2988,7 @@ def fetch_models_from_helicone():
         normalized_models = [normalize_helicone_model(model) for model in response.data if model]
 
         _helicone_models_cache["data"] = normalized_models
-        _helicone_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _helicone_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Helicone AI Gateway")
         return _helicone_models_cache["data"]
@@ -2999,7 +2999,7 @@ def fetch_models_from_helicone():
         return []
 
 
-def normalize_helicone_model(model) -> Optional[dict]:
+def normalize_helicone_model(model) -> dict | None:
     """Normalize Helicone AI Gateway model to catalog schema
 
     Helicone models can originate from various providers (OpenAI, Anthropic, etc.)
@@ -3146,7 +3146,7 @@ def fetch_models_from_anannas():
         normalized_models = [normalize_anannas_model(model) for model in response.data if model]
 
         _anannas_models_cache["data"] = normalized_models
-        _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _anannas_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Anannas")
         return _anannas_models_cache["data"]
@@ -3155,7 +3155,7 @@ def fetch_models_from_anannas():
         return []
 
 
-def normalize_anannas_model(model) -> Optional[dict]:
+def normalize_anannas_model(model) -> dict | None:
     """Normalize Anannas model to catalog schema
 
     Anannas models use OpenAI-compatible naming conventions.
@@ -3173,7 +3173,7 @@ def normalize_anannas_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from Anannas"),
+            "description": getattr(model, "description", "Model from Anannas"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -3225,7 +3225,7 @@ def fetch_models_from_alibaba():
         normalized_models = [normalize_alibaba_model(model) for model in response.data if model]
 
         _alibaba_models_cache["data"] = normalized_models
-        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _alibaba_models_cache["timestamp"] = datetime.now(UTC)
 
         logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
         return _alibaba_models_cache["data"]
@@ -3234,7 +3234,7 @@ def fetch_models_from_alibaba():
         return []
 
 
-def normalize_alibaba_model(model) -> Optional[dict]:
+def normalize_alibaba_model(model) -> dict | None:
     """Normalize Alibaba Cloud model to catalog schema
 
     Alibaba models use OpenAI-compatible naming conventions.
@@ -3252,7 +3252,7 @@ def normalize_alibaba_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from Alibaba Cloud"),
+            "description": getattr(model, "description", "Model from Alibaba Cloud"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,

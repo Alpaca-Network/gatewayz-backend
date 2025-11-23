@@ -38,7 +38,7 @@ async def lifespan(app):
         logger.error("Application cannot start without these variables")
         raise RuntimeError(f"Missing required environment variables: {missing_vars}")
     else:
-        logger.info(f"✅ All critical environment variables validated")
+        logger.info("✅ All critical environment variables validated")
 
     try:
         # Initialize Fal.ai model cache from static catalog

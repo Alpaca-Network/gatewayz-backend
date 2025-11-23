@@ -11,12 +11,9 @@ https://developers.google.com/identity/protocols/oauth2/service-account
 """
 
 import base64
-import hashlib
-import hmac
 import json
 import logging
 import time
-from typing import Dict, Optional
 
 import httpx
 
@@ -33,7 +30,7 @@ def build_jwt_assertion(
     service_account_email: str,
     private_key: str,
     scope: str = "https://www.googleapis.com/auth/cloud-platform",
-    subject: Optional[str] = None,
+    subject: str | None = None,
     audience: str = "https://oauth2.googleapis.com/token",
     expiry_seconds: int = 3600,
 ) -> str:
@@ -80,7 +77,7 @@ def build_jwt_assertion(
         payload_encoded = _base64url_encode(json.dumps(payload).encode("utf-8"))
 
         # Create signing input
-        signing_input = f"{header_encoded}.{payload_encoded}".encode("utf-8")
+        signing_input = f"{header_encoded}.{payload_encoded}".encode()
 
         # Sign with private key using RS256 (RSA SHA-256)
         signature = _sign_with_rsa_sha256(signing_input, private_key)
@@ -102,7 +99,7 @@ def build_jwt_assertion(
         raise ValueError(error_msg) from e
 
 
-def exchange_jwt_for_access_token(jwt_assertion: str) -> Dict[str, str]:
+def exchange_jwt_for_access_token(jwt_assertion: str) -> dict[str, str]:
     """Exchange JWT assertion for Google OAuth2 access token
 
     Posts the JWT assertion to the Google OAuth2 token endpoint and returns

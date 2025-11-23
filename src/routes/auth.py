@@ -1,7 +1,10 @@
 import logging
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, UTC
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from postgrest import APIError
 
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
@@ -20,6 +23,160 @@ from src.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _resolve_account_email(account) -> str | None:
+    """Return the first valid email value exposed by a Privy linked account."""
+    possible_values = [
+        getattr(account, "email", None),
+        getattr(account, "address", None),
+    ]
+    for value in possible_values:
+        if value and "@" in value:
+            return value
+    return None
+
+
+def _generate_unique_username(client, base_username: str) -> str:
+    """Generate a username that does not conflict with existing records."""
+    sanitized = base_username or "user"
+    candidate = sanitized
+    attempts = 0
+
+    while attempts < 5:
+        existing = (
+            client.table("users").select("id").eq("username", candidate).limit(1).execute()
+        )
+        if not existing.data:
+            return candidate
+
+        attempts += 1
+        token = secrets.token_hex(2)
+        candidate = f"{sanitized}_{token}"
+
+    # Last resort: append a longer random suffix
+    return f"{sanitized}_{secrets.token_hex(4)}"
+
+
+def _handle_existing_user(
+    existing_user: dict[str, Any],
+    request: PrivyAuthRequest,
+    background_tasks: BackgroundTasks,
+    auth_method: AuthMethod,
+    display_name: str | None,
+    email: str | None,
+) -> PrivyAuthResponse:
+    """Build a consistent response for existing users."""
+    logger.info(f"Existing Privy user found: {existing_user['id']}")
+    logger.info(
+        f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}"
+    )
+    logger.info(
+        "User credits at login: %s (type: %s)",
+        existing_user.get("credits", "NOT_FOUND"),
+        type(existing_user.get("credits")).__name__,
+    )
+
+    client = supabase_config.get_supabase_client()
+    api_key_to_return = existing_user.get("api_key")
+
+    try:
+        all_keys_result = (
+            client.table("api_keys_new")
+            .select("api_key, is_primary, created_at")
+            .eq("user_id", existing_user["id"])
+            .eq("is_active", True)
+            .order("is_primary", desc=True)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        if all_keys_result.data:
+            sorted_keys = sorted(
+                all_keys_result.data,
+                key=lambda k: (not k.get("is_primary", False), k.get("created_at", "")),
+            )
+            api_key_to_return = sorted_keys[0]["api_key"]
+            key_type = "primary" if sorted_keys[0].get("is_primary") else "active"
+            logger.info(
+                "Returning %s API key for user %s from %s active keys",
+                key_type,
+                existing_user["id"],
+                len(sorted_keys),
+            )
+        else:
+            logger.warning(
+                "No API keys found in api_keys_new for user %s, using legacy key",
+                existing_user["id"],
+            )
+    except Exception as key_error:
+        logger.error(
+            "Error retrieving API keys for user %s: %s, falling back to legacy key",
+            existing_user["id"],
+            key_error,
+        )
+
+    user_credits = existing_user.get("credits")
+    try:
+        if user_credits is None:
+            logger.warning("User %s has None/null credits, defaulting to 0.0", existing_user["id"])
+            user_credits = 0.0
+        else:
+            user_credits = float(user_credits)
+            logger.debug(
+                "Normalized user %s credits to float: %s", existing_user["id"], user_credits
+            )
+    except (ValueError, TypeError) as credits_error:
+        logger.error(
+            "Failed to convert credits for user %s (value: %s, type: %s): %s, defaulting to 0.0",
+            existing_user["id"],
+            user_credits,
+            type(user_credits).__name__,
+            credits_error,
+        )
+        user_credits = 0.0
+
+    user_email = existing_user.get("email") or email
+    logger.info(
+        "Welcome email check - User ID: %s, Welcome sent: %s",
+        existing_user["id"],
+        existing_user.get("welcome_email_sent", "Not set"),
+    )
+
+    if user_email:
+        background_tasks.add_task(
+            _send_welcome_email_background,
+            user_id=existing_user["id"],
+            username=existing_user.get("username") or display_name,
+            email=user_email,
+            credits=user_credits,
+        )
+    else:
+        logger.warning("No email found for user %s, skipping welcome email", existing_user["id"])
+
+    background_tasks.add_task(
+        _log_auth_activity_background,
+        user_id=existing_user["id"],
+        auth_method=auth_method,
+        privy_user_id=request.user.id,
+        is_new_user=False,
+    )
+
+    logger.info("Returning login response with credits: %s", user_credits)
+
+    return PrivyAuthResponse(
+        success=True,
+        message="Login successful",
+        user_id=existing_user["id"],
+        api_key=api_key_to_return,
+        auth_method=auth_method,
+        privy_user_id=request.user.id,
+        is_new_user=False,
+        display_name=existing_user.get("username") or display_name,
+        email=user_email,
+        credits=user_credits,
+        timestamp=datetime.now(UTC),
+    )
 
 
 # Background task functions for non-blocking operations
@@ -190,13 +347,14 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
         if not email and request.user.linked_accounts:
             for account in request.user.linked_accounts:
                 try:
-                    if account.type == "email" and account.email:
-                        email = account.email
+                    account_email = _resolve_account_email(account)
+                    if account.type == "email" and account_email:
+                        email = account_email
                         auth_method = AuthMethod.EMAIL
                         logger.debug(f"Extracted email from email account: {email}")
                         break
-                    elif account.type == "google_oauth" and account.email:
-                        email = account.email
+                    elif account.type == "google_oauth" and account_email:
+                        email = account_email
                         display_name = account.name
                         auth_method = AuthMethod.GOOGLE
                         logger.debug(
@@ -263,128 +421,13 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     logger.error(f"Failed to update privy_user_id: {e}")
 
         if existing_user:
-            # Existing user - return their info
-            logger.info(f"Existing Privy user found: {existing_user['id']}")
-            logger.info(
-                f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}"
-            )
-            logger.info(
-                f"User credits at login: {existing_user.get('credits', 'NOT_FOUND')} (type: {type(existing_user.get('credits')).__name__})"
-            )
-
-            # ISSUE FIX #1: Get API key with a single query and proper sorting
-            # Multiple order() calls should be chained - Supabase applies them in sequence
-            client = supabase_config.get_supabase_client()
-
-            api_key_to_return = existing_user["api_key"]  # Default fallback
-
-            try:
-                # Get all active keys, ordered by: 1) primary first (desc), 2) creation date (asc)
-                all_keys_result = (
-                    client.table("api_keys_new")
-                    .select("api_key, is_primary, created_at")
-                    .eq("user_id", existing_user["id"])
-                    .eq("is_active", True)
-                    .order("is_primary", desc=True)
-                    .order("created_at", desc=False)
-                    .execute()
-                )
-
-                if all_keys_result.data and len(all_keys_result.data) > 0:
-                    # Sort in Python to ensure correct ordering
-                    # Primary keys first, then by creation date ascending
-                    sorted_keys = sorted(
-                        all_keys_result.data,
-                        key=lambda k: (
-                            not k.get(
-                                "is_primary", False
-                            ),  # False sorts before True (primary first)
-                            k.get("created_at", ""),  # Then by creation date
-                        ),
-                    )
-                    api_key_to_return = sorted_keys[0]["api_key"]
-                    key_type = "primary" if sorted_keys[0].get("is_primary") else "active"
-                    logger.info(
-                        f"Returning {key_type} API key for user {existing_user['id']} "
-                        f"from {len(sorted_keys)} active keys"
-                    )
-                else:
-                    logger.warning(
-                        f"No API keys found in api_keys_new for user {existing_user['id']}, "
-                        "using legacy key from users table"
-                    )
-            except Exception as key_error:
-                logger.error(
-                    f"Error retrieving API keys for user {existing_user['id']}: {key_error}, "
-                    "falling back to legacy key"
-                )
-
-            # ISSUE FIX #4: Ensure credits is a float value with error handling
-            # Normalize credits BEFORE passing to background tasks to ensure consistency
-            user_credits = existing_user.get("credits")
-            try:
-                if user_credits is None:
-                    logger.warning(
-                        f"User {existing_user['id']} has None/null credits, defaulting to 0.0"
-                    )
-                    user_credits = 0.0
-                else:
-                    # Try to convert to float
-                    user_credits = float(user_credits)
-                    logger.debug(
-                        f"Normalized user {existing_user['id']} credits to float: {user_credits}"
-                    )
-            except (ValueError, TypeError) as credits_error:
-                logger.error(
-                    f"Failed to convert credits for user {existing_user['id']} "
-                    f"(value: {user_credits}, type: {type(user_credits).__name__}): {credits_error}, "
-                    "defaulting to 0.0"
-                )
-                user_credits = 0.0
-
-            # OPTIMIZATION: Send welcome email in background to avoid blocking the response
-            user_email = existing_user.get("email") or email
-            logger.info(
-                f"Welcome email check - User ID: {existing_user['id']}, Welcome sent: {existing_user.get('welcome_email_sent', 'Not set')}"
-            )
-
-            if user_email:
-                # Send email in background with normalized credits
-                background_tasks.add_task(
-                    _send_welcome_email_background,
-                    user_id=existing_user["id"],
-                    username=existing_user.get("username") or display_name,
-                    email=user_email,
-                    credits=user_credits,
-                )
-            else:
-                logger.warning(
-                    f"No email found for user {existing_user['id']}, skipping welcome email"
-                )
-
-            # OPTIMIZATION: Log authentication activity in background to avoid blocking
-            background_tasks.add_task(
-                _log_auth_activity_background,
-                user_id=existing_user["id"],
+            return _handle_existing_user(
+                existing_user=existing_user,
+                request=request,
+                background_tasks=background_tasks,
                 auth_method=auth_method,
-                privy_user_id=request.user.id,
-                is_new_user=False,
-            )
-
-            logger.info(f"Returning login response with credits: {user_credits}")
-
-            return PrivyAuthResponse(
-                success=True,
-                message="Login successful",
-                user_id=existing_user["id"],
-                api_key=api_key_to_return,
-                auth_method=auth_method,
-                privy_user_id=request.user.id,
-                is_new_user=False,
-                display_name=existing_user.get("username") or display_name,
-                email=existing_user.get("email") or email,
-                credits=user_credits,
-                timestamp=datetime.now(timezone.utc),
+                display_name=display_name,
+                email=email,
             )
         else:
             # New user - create account
@@ -412,7 +455,37 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
                 client = supabase_config.get_supabase_client()
 
+                # Re-check for existing user before attempting manual insert to avoid TOCTOU issues
+                existing_user_after_failure = users_module.get_user_by_privy_id(request.user.id)
+                if not existing_user_after_failure:
+                    existing_user_after_failure = users_module.get_user_by_username(username)
+
+                if existing_user_after_failure:
+                    logger.info(
+                        "Detected an existing user for Privy ID %s after fallback trigger; "
+                        "returning existing record instead of inserting a duplicate",
+                        request.user.id,
+                    )
+                    return _handle_existing_user(
+                        existing_user=existing_user_after_failure,
+                        request=request,
+                        background_tasks=background_tasks,
+                        auth_method=auth_method,
+                        display_name=display_name,
+                        email=email,
+                    )
+
                 fallback_email = email or f"{request.user.id}@privy.user"
+
+                resolved_username = _generate_unique_username(client, username)
+                if resolved_username != username:
+                    logger.info(
+                        "Username collision detected for base '%s'; resolved to '%s'",
+                        username,
+                        resolved_username,
+                    )
+                    username = resolved_username
+
                 user_payload = {
                     "username": username,
                     "email": fallback_email,
@@ -421,49 +494,147 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                     ),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "welcome_email_sent": False,
                 }
 
                 try:
-                    user_insert = client.table("users").insert(user_payload).execute()
-                    if not user_insert.data:
+                    created_user = None
+                    created_new_user = False
+
+                    # Detect partially created user records before attempting an insert
+                    partial_user = None
+                    try:
+                        partial_user = users_module.get_user_by_privy_id(
+                            request.user.id
+                        ) or users_module.get_user_by_username(username)
+                    except Exception as lookup_error:
+                        logger.warning(
+                            "Failed to lookup partially created user prior to fallback insert: %s",
+                            sanitize_for_logging(str(lookup_error)),
+                        )
+
+                    if partial_user:
+                        logger.warning(
+                            "Detected partially created user %s after create_enhanced_user failure; reusing existing record",
+                            partial_user.get("id"),
+                        )
+                        update_fields = {
+                            field: value
+                            for field, value in user_payload.items()
+                            if field != "created_at" and partial_user.get(field) != value
+                        }
+                        if update_fields:
+                            update_fields["updated_at"] = datetime.now(UTC).isoformat()
+                            updated_result = (
+                                client.table("users")
+                                .update(update_fields)
+                                .eq("id", partial_user["id"])
+                                .execute()
+                            )
+                            if updated_result.data:
+                                partial_user = updated_result.data[0]
+                            else:
+                                partial_user.update(update_fields)
+                        created_user = partial_user
+                    else:
+                        try:
+                            user_insert = client.table("users").insert(user_payload).execute()
+                            if not user_insert.data:
+                                raise HTTPException(
+                                    status_code=500, detail="Failed to create user account"
+                                ) from creation_error
+                            created_user = user_insert.data[0]
+                            created_new_user = True
+                        except APIError as insert_error:
+                            if getattr(insert_error, "code", None) == "23505":
+                                logger.warning(
+                                    "Fallback user insert encountered duplicate username/email (%s); retrieving existing record instead",
+                                    insert_error.message
+                                    if hasattr(insert_error, "message")
+                                    else str(insert_error),
+                                )
+                                existing_user = (
+                                    client.table("users")
+                                    .select("*")
+                                    .eq("username", username)
+                                    .limit(1)
+                                    .execute()
+                                )
+                                if not existing_user.data:
+                                    existing_user = (
+                                        client.table("users")
+                                        .select("*")
+                                        .eq("email", fallback_email)
+                                        .limit(1)
+                                        .execute()
+                                    )
+                                if not existing_user.data:
+                                    raise HTTPException(
+                                        status_code=500,
+                                        detail="Failed to fetch existing user after duplicate insert",
+                                    ) from insert_error
+                                created_user = existing_user.data[0]
+                            else:
+                                raise
+
+                    if created_user is None:
                         raise HTTPException(
                             status_code=500, detail="Failed to create user account"
                         ) from creation_error
 
-                    created_user = user_insert.data[0]
-                    api_key_value = f"gw_live_{username}_fallback"
-
                     # ISSUE FIX #5: Ensure environment_tag is valid before using it
-                    env_tag = request.environment_tag or "live"
+                    env_tag = getattr(request, "environment_tag", None) or "live"
                     if env_tag not in {"live", "test", "development"}:
                         logger.warning(
-                            f"Invalid environment_tag '{env_tag}' for user {created_user['id']}, "
-                            "defaulting to 'live'"
+                            f"Invalid environment_tag '{env_tag}' for user {created_user['id']}, defaulting to 'live'"
                         )
                         env_tag = "live"
 
+                    api_key_value = created_user.get("api_key")
                     try:
-                        client.table("api_keys_new").insert(
-                            {
-                                "user_id": created_user["id"],
-                                "api_key": api_key_value,
-                                "key_name": "Primary API Key",
-                                "is_primary": True,
-                                "is_active": True,
-                                "environment_tag": env_tag,
-                            }
-                        ).execute()
-                        logger.info(
-                            f"Created API key for fallback user {created_user['id']} "
-                            f"with environment_tag: {env_tag}"
+                        existing_key_result = (
+                            client.table("api_keys_new")
+                            .select("api_key")
+                            .eq("user_id", created_user["id"])
+                            .eq("is_active", True)
+                            .order("is_primary", desc=True)
+                            .order("created_at", desc=True)
+                            .limit(1)
+                            .execute()
                         )
-                    except Exception as api_key_error:
+                        if existing_key_result.data:
+                            api_key_value = existing_key_result.data[0]["api_key"]
+                            logger.info(
+                                f"Reusing existing API key for fallback user {created_user['id']}"
+                            )
+                    except Exception as api_key_lookup_error:
                         logger.error(
-                            f"Failed to create API key for user {created_user['id']}: "
-                            f"{api_key_error}, proceeding without API key in api_keys_new table"
+                            "Failed to check existing API keys for fallback user %s: %s",
+                            created_user["id"],
+                            api_key_lookup_error,
                         )
+
+                    if not api_key_value:
+                        api_key_value = f"gw_live_{username}_fallback"
+                        try:
+                            client.table("api_keys_new").insert(
+                                {
+                                    "user_id": created_user["id"],
+                                    "api_key": api_key_value,
+                                    "key_name": "Primary API Key",
+                                    "is_primary": True,
+                                    "is_active": True,
+                                    "environment_tag": env_tag,
+                                }
+                            ).execute()
+                            logger.info(
+                                f"Created API key for fallback user {created_user['id']} with environment_tag: {env_tag}"
+                            )
+                        except Exception as api_key_error:
+                            logger.error(
+                                f"Failed to create API key for fallback user {created_user['id']}: {api_key_error}"
+                            )
 
                     user_data = {
                         "user_id": created_user["id"],
@@ -475,9 +646,15 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         "scope_permissions": created_user.get("scope_permissions", {}),
                     }
                     logger.info(
-                        f"Successfully created fallback user {created_user['id']} "
-                        f"with username {username}"
+                        (
+                            "Successfully created fallback user %s with username %s"
+                            if created_new_user
+                            else "Successfully reused existing user %s for fallback signup (username=%s)"
+                        ),
+                        created_user["id"],
+                        username,
                     )
+
                 except Exception as fallback_error:
                     logger.error(f"Fallback user creation failed: {fallback_error}", exc_info=True)
                     raise HTTPException(
@@ -594,7 +771,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=display_name or user_data["username"],
                 email=email,
                 credits=new_user_credits,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
             )
 
     except Exception as e:
@@ -654,7 +831,7 @@ async def register_user(request: UserRegistrationRequest):
                     if hasattr(request.auth_method, "value")
                     else str(request.auth_method)
                 ),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "welcome_email_sent": False,
             }
 
@@ -790,7 +967,7 @@ async def register_user(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     except HTTPException:
@@ -856,7 +1033,7 @@ async def reset_password(token: str):
         token_data = token_result.data[0]
         expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
 
-        if datetime.now(timezone.utc).replace(tzinfo=expires_at.tzinfo) > expires_at:
+        if datetime.now(UTC).replace(tzinfo=expires_at.tzinfo) > expires_at:
             raise HTTPException(status_code=400, detail="Reset token has expired")
 
         # Update password (in a real app, you'd hash this)

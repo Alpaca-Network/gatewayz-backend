@@ -5,7 +5,7 @@ Server-side PostHog integration to avoid ad-blocker issues
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from posthog import Posthog
 
@@ -25,7 +25,7 @@ class PostHogService:
 
     def __init__(self):
         if not self._initialized:
-            self.client: Optional[Posthog] = None
+            self.client: Posthog | None = None
             self._initialized = True
 
     def initialize(self):
@@ -68,8 +68,8 @@ class PostHogService:
         self,
         distinct_id: str,
         event: str,
-        properties: Optional[Dict[str, Any]] = None,
-        groups: Optional[Dict[str, str]] = None,
+        properties: dict[str, Any] | None = None,
+        groups: dict[str, str] | None = None,
     ):
         """
         Capture an analytics event in PostHog
@@ -93,7 +93,7 @@ class PostHogService:
         except Exception as e:
             logger.error(f"Failed to capture PostHog event '{event}': {e}")
 
-    def identify(self, distinct_id: str, properties: Optional[Dict[str, Any]] = None):
+    def identify(self, distinct_id: str, properties: dict[str, Any] | None = None):
         """
         Identify a user and set their properties in PostHog
 
@@ -115,8 +115,8 @@ class PostHogService:
     def capture_exception(
         self,
         exception: Exception,
-        distinct_id: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None,
+        distinct_id: str | None = None,
+        properties: dict[str, Any] | None = None,
     ):
         """
         Manually capture an exception in PostHog

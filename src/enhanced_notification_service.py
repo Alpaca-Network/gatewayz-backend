@@ -9,9 +9,12 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any
 
-import resend
+try:
+    import resend  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - handled in send_email_notification
+    resend = None
 
 import src.config.supabase_config as supabase_config
 from src.schemas.notification import (
@@ -40,9 +43,15 @@ class EnhancedNotificationService:
         self.app_name = os.environ.get("APP_NAME", "AI Gateway")
         self.app_url = os.environ.get("APP_URL", "https://gatewayz.ai")
 
-        # Initialize Resend client
-        if self.resend_api_key:
-            resend.api_key = self.resend_api_key
+        # Initialize Resend client if dependency is available
+        self.email_client_available = bool(self.resend_api_key and resend is not None)
+        if self.email_client_available:
+            resend.api_key = self.resend_api_key  # type: ignore[union-attr]
+        elif self.resend_api_key:
+            logger.warning(
+                "RESEND_API_KEY configured but 'resend' package is not installed. "
+                "Email notifications will be disabled."
+            )
 
     def send_welcome_email(self, user_id: int, username: str, email: str, credits: int) -> bool:
         """Send welcome email to new users (API key not included for security)"""
@@ -126,7 +135,7 @@ class EnhancedNotificationService:
             logger.error(f"Error checking/sending welcome email: {e}")
             return False
 
-    def send_password_reset_email(self, user_id: int, username: str, email: str) -> Optional[str]:
+    def send_password_reset_email(self, user_id: int, username: str, email: str) -> str | None:
         """Send password reset email and return reset token"""
         try:
             # Generate reset token
@@ -165,7 +174,7 @@ class EnhancedNotificationService:
             return None
 
     def send_monthly_usage_report(
-        self, user_id: int, username: str, email: str, month: str, usage_stats: Dict[str, Any]
+        self, user_id: int, username: str, email: str, month: str, usage_stats: dict[str, Any]
     ) -> bool:
         """Send monthly usage report email"""
         try:
@@ -363,19 +372,22 @@ The {self.app_name} Team
     def send_email_notification(
         self, to_email: str, subject: str, html_content: str, text_content: str = None
     ) -> bool:
-        """Send email notification using Resend SDK"""
+        """Send email notification using Resend SDK (if available)"""
         try:
             logger.info(f"Attempting to send email to: {to_email}")
             logger.info(f"Subject: {subject}")
-            logger.info(f"Resend API key configured: {bool(self.resend_api_key)}")
+            logger.info(f"Email client available: {self.email_client_available}")
             logger.info(f"From email: {self.from_email}")
 
-            if not self.resend_api_key:
-                logger.warning("❌ Resend API key not configured, skipping email notification")
+            if not self.email_client_available:
+                logger.warning(
+                    "❌ Email client is unavailable (missing dependency or API key). "
+                    "Skipping email notification."
+                )
                 return False
 
             # Ensure API key is set before each send (in case it changed)
-            resend.api_key = self.resend_api_key
+            resend.api_key = self.resend_api_key  # type: ignore[union-attr]
 
             # Use Resend SDK
             logger.info("Sending email via Resend SDK...")
@@ -423,7 +435,7 @@ The {self.app_name} Team
             logger.error(f"Error creating notification: {e}")
             return False
 
-    def get_user_preferences(self, user_id: int) -> Optional[NotificationPreferences]:
+    def get_user_preferences(self, user_id: int) -> NotificationPreferences | None:
         """Get user notification preferences"""
         try:
             client = self.supabase or supabase_config.get_supabase_client()

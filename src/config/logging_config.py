@@ -13,7 +13,6 @@ Features:
 
 import logging
 import sys
-from typing import Any, Optional
 
 from src.config.config import Config
 
@@ -60,7 +59,7 @@ class LokiLogHandler(logging.Handler):
 
             # Get trace context if available
             trace_id = getattr(record, "trace_id", None)
-            span_id = getattr(record, "span_id", None)
+            getattr(record, "span_id", None)
 
             # Build Loki labels
             labels = {**self.tags}
