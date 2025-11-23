@@ -101,6 +101,21 @@ jobs:
 
           echo "checklist_created=true" >> $GITHUB_OUTPUT
 
+      - name: Debug - Pre-performance analysis check
+        run: |
+          echo "=== Pre-Analysis System Check ==="
+          echo "Disk available:"
+          df -h / | tail -1
+          echo ""
+          echo "Memory:"
+          free -h | grep Mem
+          echo ""
+          echo "Performance analysis checklist:"
+          [ -f perf-analysis/checklist.md ] && echo "Found ($(wc -l < perf-analysis/checklist.md) lines)" || echo "Not found"
+          echo ""
+          echo "Repository size:"
+          du -sh src/ 2>/dev/null | awk '{print $1}'
+
       - name: Run Codex Performance Analysis
         timeout-minutes: 90
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
@@ -288,6 +303,25 @@ jobs:
             } catch (error) {
               console.error('Failed to post PR comment:', error);
             }
+
+      - name: Debug - Post-analysis status
+        if: always()
+        run: |
+          echo "=== Post-Codex Performance Analysis ==="
+          echo "Timestamp: $(date)"
+          echo ""
+          echo "Recent commits:"
+          git log --oneline -5
+          echo ""
+          echo "Git status:"
+          git status --short | head -10 || echo "No changes"
+          echo ""
+          echo "Perf analysis directory:"
+          ls -lah perf-analysis/ 2>/dev/null | head -5 || echo "Directory not found"
+          echo ""
+          echo "Codebase integrity check:"
+          find src/ -name "*.py" | wc -l
+          echo "Python files in src/"
 
       - name: Generate performance metrics report
         if: always()
