@@ -23,19 +23,22 @@ import shutil
 
 from src.services.pricing_provider_auditor import PricingProviderAuditor
 from src.services.pricing_lookup import load_manual_pricing
-from src.services.pricing_audit_service import get_pricing_audit_service
+from src.services.pricing_audit_service import (
+    PRICING_DATA_DIR,
+    get_pricing_audit_service,
+)
 
 logger = logging.getLogger(__name__)
 
-# Paths
-PRICING_FILE = Path("/root/repo/src/data/manual_pricing.json")
-BACKUP_DIR = Path("/root/repo/src/data/pricing_backups")
-SYNC_LOG_FILE = Path("/root/repo/src/data/pricing_sync.log")
+# Paths (repo-relative with env override via pricing_audit_service)
+PRICING_FILE = Path(PRICING_DATA_DIR / "manual_pricing.json")
+BACKUP_DIR = Path(PRICING_DATA_DIR / "pricing_backups")
+SYNC_LOG_FILE = Path(PRICING_DATA_DIR / "pricing_sync.log")
 
-BACKUP_DIR.mkdir(exist_ok=True)
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+SYNC_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
-@dict
 class PricingSyncConfig:
     """Configuration for pricing sync"""
 

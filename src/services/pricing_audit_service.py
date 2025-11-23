@@ -14,6 +14,7 @@ Features:
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -22,9 +23,11 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-# Path to store pricing history
-PRICING_HISTORY_DIR = Path("/root/repo/src/data/pricing_history")
-PRICING_HISTORY_DIR.mkdir(exist_ok=True)
+# Path to store pricing history (repo-relative with env override)
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "src" / "data"
+PRICING_DATA_DIR = Path(os.getenv("PRICING_DATA_DIR", DEFAULT_DATA_DIR))
+PRICING_HISTORY_DIR = PRICING_DATA_DIR / "pricing_history"
+PRICING_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
