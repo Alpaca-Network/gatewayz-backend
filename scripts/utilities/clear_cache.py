@@ -5,10 +5,11 @@ Clear rate limit cache on the backend
 
 import requests
 import sys
+import os
 
 API_URL = "https://api.gatewayz.ai/admin/clear-rate-limit-cache"
 # You'll need an admin API key for this endpoint
-ADMIN_API_KEY = "gw_live_01eQv2HGWkjo0ApxoC4-G3yaOv6ilbzJwL9t6QpjQ5c"  # Try with your key
+ADMIN_API_KEY = os.environ.get("GATEWAYZ_ADMIN_API_KEY", "")
 
 def clear_cache():
     headers = {
