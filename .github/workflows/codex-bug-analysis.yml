@@ -61,7 +61,7 @@ jobs:
           echo "Analysis complete"
 
       - name: Run Codex Bug Analysis
-        timeout-minutes: 45
+        timeout-minutes: 90
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
