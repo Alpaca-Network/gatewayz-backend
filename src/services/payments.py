@@ -188,6 +188,56 @@ class StripeService:
             )
         return payment
 
+    def _create_fallback_payment_record(
+        self,
+        *,
+        user_id: int,
+        credits_cents: int,
+        session_id: str | None,
+        payment_intent_id: str | None,
+        currency: str | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """
+        Create a synthetic payment record when the original checkout metadata is missing.
+        """
+        amount_dollars = credits_cents / 100
+        payment_currency = (currency or self.default_currency.value).lower()
+        fallback_metadata = {
+            "created_via": "stripe_webhook_fallback",
+            "stripe_session_id": session_id,
+            "stripe_payment_intent_id": payment_intent_id,
+            "webhook_metadata_snapshot": metadata or {},
+        }
+
+        logger.warning(
+            "Creating fallback payment record for checkout session %s (user_id=%s, amount=%s %s)",
+            session_id,
+            user_id,
+            amount_dollars,
+            payment_currency,
+        )
+
+        payment = create_payment(
+            user_id=user_id,
+            amount=amount_dollars,
+            currency=payment_currency,
+            payment_method="stripe",
+            status="pending",
+            stripe_payment_intent_id=payment_intent_id,
+            stripe_session_id=session_id,
+            metadata=fallback_metadata,
+        )
+
+        if not payment:
+            logger.error(
+                "Unable to create fallback payment record for session %s (user_id=%s)",
+                session_id,
+                user_id,
+            )
+
+        return payment
+
     def create_checkout_session(
         self, user_id: int, request: CreateCheckoutSessionRequest
     ) -> CheckoutSessionResponse:
@@ -582,6 +632,24 @@ class StripeService:
                             session_id,
                         )
                         break
+
+            if (
+                payment_id is None
+                and payment_record is None
+                and user_id is not None
+                and credits_cents is not None
+            ):
+                currency = self._get_stripe_object_value(session, "currency")
+                payment_record = self._create_fallback_payment_record(
+                    user_id=user_id,
+                    credits_cents=credits_cents,
+                    session_id=session_id,
+                    payment_intent_id=payment_intent_id,
+                    currency=currency,
+                    metadata=metadata,
+                )
+                if payment_record:
+                    payment_id = payment_record.get("id")
 
             if user_id is None or payment_id is None or credits_cents is None:
                 raise ValueError(
