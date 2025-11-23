@@ -120,10 +120,26 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3001",
         ] + base_origins
 
+    # Explicitly allow modern tracing/debug headers to prevent CORS failures on mobile
+    allowed_headers = [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "X-Client-Version",
+        "X-CSRF-Token",
+        "X-Supabase-Key",
+        "X-Supabase-Project",
+        "sentry-trace",
+        "baggage",
+    ]
+
     # Log CORS configuration for debugging
     logger.info("🌐 CORS Configuration:")
     logger.info(f"   Environment: {Config.APP_ENV}")
     logger.info(f"   Allowed Origins: {allowed_origins}")
+    logger.info(f"   Allowed Headers: {allowed_headers}")
 
     # OPTIMIZED: Add trace context middleware first (for distributed tracing)
     # Middleware order matters! Last added = first executed
@@ -138,7 +154,7 @@ def create_app() -> FastAPI:
         allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "Accept", "Origin"],
+        allow_headers=allowed_headers,
     )
 
     # Add observability middleware for automatic metrics collection
