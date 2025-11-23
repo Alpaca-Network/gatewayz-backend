@@ -149,7 +149,8 @@ class StripeService:
         """
         Ensure we have metadata for a checkout session by re-fetching it from Stripe when needed.
         """
-        metadata = self._get_stripe_object_value(session, "metadata") or {}
+        metadata_obj = self._get_stripe_object_value(session, "metadata")
+        metadata = self._metadata_to_dict(metadata_obj)
         if metadata:
             return session, metadata
 
@@ -159,7 +160,8 @@ class StripeService:
 
         try:
             refreshed_session = stripe.checkout.Session.retrieve(session_id, expand=["metadata"])
-            refreshed_metadata = self._get_stripe_object_value(refreshed_session, "metadata") or {}
+            refreshed_metadata_obj = self._get_stripe_object_value(refreshed_session, "metadata")
+            refreshed_metadata = self._metadata_to_dict(refreshed_metadata_obj)
             if refreshed_metadata:
                 logger.info(
                     "Hydrated checkout session metadata from Stripe (session_id=%s)", session_id
@@ -171,6 +173,31 @@ class StripeService:
                 "Unable to hydrate checkout session metadata for %s: %s", session_id, exc
             )
             return session, {}
+
+    def _hydrate_payment_intent_metadata(self, payment_intent_id: str | None) -> dict[str, Any]:
+        """
+        Fetch metadata from the underlying PaymentIntent when the checkout session payload is missing
+        critical identifiers.
+        """
+        if not payment_intent_id:
+            return {}
+
+        try:
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["metadata"])
+        except stripe.StripeError as exc:
+            logger.warning(
+                "Unable to hydrate payment intent metadata for %s: %s", payment_intent_id, exc
+            )
+            return {}
+
+        metadata_obj = self._get_stripe_object_value(intent, "metadata")
+        metadata = self._metadata_to_dict(metadata_obj)
+        if metadata:
+            logger.info(
+                "Hydrated checkout metadata from payment intent (payment_intent_id=%s)",
+                payment_intent_id,
+            )
+        return metadata
 
     def _lookup_payment_record(self, session: Any) -> dict[str, Any] | None:
         """
@@ -314,8 +341,16 @@ class StripeService:
             logger.info(f"Final cancel_url being sent to Stripe: {cancel_url}")
             logger.info("=== END URL DEBUG ===")
 
-            # Calculate credits
+            # Calculate credits (1 credit = 1 cent)
             credits = request.amount
+
+            metadata_payload = {
+                "user_id": str(user_id),
+                "payment_id": str(payment["id"]),
+                "credits": str(credits),
+            }
+            if request.metadata:
+                metadata_payload.update(request.metadata)
 
             # Create Stripe checkout session
             session = stripe.checkout.Session.create(
@@ -338,12 +373,8 @@ class StripeService:
                 cancel_url=cancel_url,
                 customer_email=request.customer_email or user_email,
                 client_reference_id=str(user_id),
-                metadata={
-                    "user_id": str(user_id),
-                    "payment_id": str(payment["id"]),
-                    "credits": str(credits),
-                    **(request.metadata or {}),
-                },
+                metadata=metadata_payload,
+                payment_intent_data={"metadata": metadata_payload},
                 expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             )
 
@@ -576,8 +607,12 @@ class StripeService:
                 processed_at=datetime.now(UTC),
             )
 
-        except ValueError as e:
+        except stripe.error.SignatureVerificationError as e:
             logger.error(f"Invalid webhook signature: {e}")
+            raise
+
+        except ValueError as e:
+            logger.error(f"Webhook payload validation error: {e}")
             raise
 
         except Exception as e:
@@ -595,6 +630,15 @@ class StripeService:
                     "Checkout session payload is missing metadata and session id; cannot process payment"
                 )
             payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
+
+            metadata_missing_keys = any(
+                not metadata.get(key) for key in ("user_id", "payment_id", "credits")
+            )
+            if metadata_missing_keys and payment_intent_id:
+                intent_metadata = self._hydrate_payment_intent_metadata(payment_intent_id)
+                if intent_metadata:
+                    metadata = {**intent_metadata, **metadata}
+
             user_id = self._coerce_to_int(metadata.get("user_id"))
             payment_id = self._coerce_to_int(metadata.get("payment_id"))
             credits_cents = self._coerce_to_int(metadata.get("credits"))
