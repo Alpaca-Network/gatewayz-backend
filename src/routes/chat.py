@@ -333,7 +333,11 @@ make_clarifai_request_openai_stream = _clarifai.get("make_clarifai_request_opena
 
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
-from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
+from src.services.model_transformations import (
+    detect_provider_from_model_id,
+    get_provider_lock_for_model,
+    transform_model_id,
+)
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
@@ -1058,7 +1062,38 @@ async def chat_completions(
                             break
                     # Otherwise default to openrouter (already set)
 
-            provider_chain = build_provider_failover_chain(provider)
+            locked_provider = get_provider_lock_for_model(original_model)
+            if locked_provider:
+                locked_provider = locked_provider.lower()
+                if locked_provider == "hug":
+                    locked_provider = "huggingface"
+                locked_model = sanitize_for_logging(original_model)
+                locked_provider_log = sanitize_for_logging(locked_provider)
+                if provider != locked_provider:
+                    if provider_locked:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"Model '{locked_model}' is only available via provider "
+                                f"'{locked_provider_log}'. Please remove the provider override "
+                                "or select a compatible model."
+                            ),
+                        )
+                    logger.info(
+                        "Overriding provider '%s' with locked provider '%s' for model %s",
+                        sanitize_for_logging(provider),
+                        locked_provider_log,
+                        locked_model,
+                    )
+                    provider = locked_provider
+                provider_chain = [locked_provider]
+                logger.info(
+                    "Failover disabled for provider-locked model %s (provider=%s)",
+                    locked_model,
+                    locked_provider_log,
+                )
+            else:
+                provider_chain = build_provider_failover_chain(provider)
             model = original_model
 
         # Diagnostic logging for tools parameter
@@ -1967,7 +2002,38 @@ async def unified_responses(
                         )
                         break
 
-        provider_chain = build_provider_failover_chain(provider)
+        locked_provider = get_provider_lock_for_model(original_model)
+        if locked_provider:
+            locked_provider = locked_provider.lower()
+            if locked_provider == "hug":
+                locked_provider = "huggingface"
+            locked_model = sanitize_for_logging(original_model)
+            locked_provider_log = sanitize_for_logging(locked_provider)
+            if provider != locked_provider:
+                if provider_locked:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Model '{locked_model}' is only available via provider "
+                            f"'{locked_provider_log}'. Please remove the provider override "
+                            "or select a compatible model."
+                        ),
+                    )
+                logger.info(
+                    "Overriding provider '%s' with locked provider '%s' for model %s",
+                    sanitize_for_logging(provider),
+                    locked_provider_log,
+                    locked_model,
+                )
+                provider = locked_provider
+            provider_chain = [locked_provider]
+            logger.info(
+                "Failover disabled for provider-locked model %s (provider=%s)",
+                locked_model,
+                locked_provider_log,
+            )
+        else:
+            provider_chain = build_provider_failover_chain(provider)
         model = original_model
 
         # Diagnostic logging for tools parameter
