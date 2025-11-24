@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.security.security import audit_logger, validate_api_key_security
 
 logger = logging.getLogger(__name__)
