@@ -46,6 +46,39 @@ _TOKEN_LOCK = threading.Lock()
 _TEMP_CREDENTIALS_FILE: str | None = None
 _TEMP_CREDENTIALS_LOCK = threading.Lock()
 _DEFAULT_TRANSPORT = "rest"
+_REQUIRED_SERVICE_ACCOUNT_FIELDS = ("private_key", "client_email", "token_uri")
+
+
+def _load_vertex_service_account_info() -> dict[str, Any] | None:
+    """Parse and validate GOOGLE_VERTEX_CREDENTIALS_JSON when set."""
+    raw_credentials = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
+    if not raw_credentials:
+        return None
+
+    try:
+        creds_info = json.loads(raw_credentials)
+    except json.JSONDecodeError as decode_error:
+        raise ValueError(
+            "GOOGLE_VERTEX_CREDENTIALS_JSON is not valid JSON. "
+            "Ensure the environment variable contains the raw service account JSON."
+        ) from decode_error
+
+    missing_fields = [field for field in _REQUIRED_SERVICE_ACCOUNT_FIELDS if not creds_info.get(field)]
+    if missing_fields:
+        raise ValueError(
+            "GOOGLE_VERTEX_CREDENTIALS_JSON is missing required service account fields: "
+            f"{', '.join(missing_fields)}. Provide the full service account JSON (including private_key) "
+            "or unset GOOGLE_VERTEX_CREDENTIALS_JSON to fall back to ADC discovery."
+        )
+
+    private_key = str(creds_info.get("private_key", "")).strip()
+    if not private_key.startswith("-----BEGIN"):
+        raise ValueError(
+            "GOOGLE_VERTEX_CREDENTIALS_JSON.private_key appears invalid. "
+            "Provide the full PEM-encoded private key as exported from Google Cloud IAM."
+        )
+
+    return creds_info
 
 
 def _ensure_vertex_imports():
@@ -93,11 +126,11 @@ def _prepare_vertex_environment():
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _TEMP_CREDENTIALS_FILE
                 return
 
+            creds_info = _load_vertex_service_account_info()
             logger.info("GOOGLE_VERTEX_CREDENTIALS_JSON detected - writing to temp file for ADC")
-            creds_json = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
 
             temp_creds_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            temp_creds_file.write(creds_json or "")
+            temp_creds_file.write(json.dumps(creds_info))
             temp_creds_file.close()
 
             _TEMP_CREDENTIALS_FILE = temp_creds_file.name
@@ -148,13 +181,7 @@ def _get_google_vertex_access_token(force_refresh: bool = False) -> str:
 
     # Prefer raw JSON credentials if provided
     if os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON"):
-        try:
-            creds_info = json.loads(os.environ["GOOGLE_VERTEX_CREDENTIALS_JSON"])
-        except json.JSONDecodeError as decode_error:
-            raise ValueError(
-                "GOOGLE_VERTEX_CREDENTIALS_JSON is not valid JSON. "
-                "Ensure the environment variable contains the raw service account JSON."
-            ) from decode_error
+        creds_info = _load_vertex_service_account_info()
         credentials = service_account.Credentials.from_service_account_info(
             creds_info, scopes=[_VERTEX_API_SCOPE]
         )
