@@ -12,7 +12,7 @@ from src.db.plans import (
     get_user_usage_within_plan_limits,
 )
 from src.db.rate_limits import get_environment_usage_summary
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.schemas import (
     AssignPlanRequest,
     PlanEntitlementsResponse,
