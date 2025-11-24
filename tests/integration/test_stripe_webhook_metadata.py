@@ -204,7 +204,7 @@ class TestWebhookMetadataHandling:
 
             mock_is_processed.return_value = False
             mock_get_payment.return_value = None  # Simulate payment not found
-            mock_add_credits_to_user.side_effect = Exception("Database error")
+            mock_add_credits.side_effect = Exception("Database error")
 
             event = {
                 "id": "evt_test_error",
