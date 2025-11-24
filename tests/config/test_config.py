@@ -128,15 +128,15 @@ class TestConfigProviderKeys:
         assert config.Config.OPENROUTER_SITE_URL == "https://your-site.com"
         assert config.Config.OPENROUTER_SITE_NAME == "Openrouter AI Gateway"
 
-      def test_openrouter_key_strips_whitespace(self, monkeypatch):
-          """Ensure OpenRouter API key trimming removes accidental whitespace"""
-          from src.config import config
+    def test_openrouter_key_strips_whitespace(self, monkeypatch):
+        """Ensure OpenRouter API key trimming removes accidental whitespace"""
+        from src.config import config
 
-          monkeypatch.setenv("OPENROUTER_API_KEY", "  sk-or-abc123  \n")
-          import importlib
-          importlib.reload(config)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "  sk-or-abc123  \n")
+        import importlib
+        importlib.reload(config)
 
-          assert config.Config.OPENROUTER_API_KEY == "sk-or-abc123"
+        assert config.Config.OPENROUTER_API_KEY == "sk-or-abc123"
 
     def test_all_provider_keys(self, monkeypatch):
         """Test all provider API keys are loaded"""
