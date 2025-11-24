@@ -9,13 +9,14 @@ These tests verify:
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 class TestStreamingE2E:
     """E2E tests for streaming functionality."""
 
     def test_streaming_chat_completions(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test streaming on chat completions endpoint."""
         payload = {
@@ -36,7 +37,7 @@ class TestStreamingE2E:
         assert "[DONE]" in response.text
 
     def test_streaming_messages(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test streaming on messages endpoint."""
         payload = {
@@ -57,7 +58,7 @@ class TestStreamingE2E:
         assert "data:" in response.text
 
     def test_streaming_responses(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test streaming on responses endpoint."""
         payload = {
@@ -77,7 +78,7 @@ class TestStreamingE2E:
         assert "data:" in response.text
 
     def test_streaming_with_custom_parameters(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test streaming with custom temperature and tokens."""
         payload = {
@@ -98,7 +99,7 @@ class TestStreamingE2E:
         assert "[DONE]" in response.text
 
     def test_non_streaming_chat_completions(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test non-streaming chat completions."""
         payload = {
@@ -119,7 +120,7 @@ class TestStreamingE2E:
         assert data["choices"][0]["message"]["content"]
 
     def test_non_streaming_messages(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test non-streaming messages endpoint."""
         payload = {
@@ -144,7 +145,7 @@ class TestProviderParameterE2E:
     """E2E tests for provider parameter across endpoints."""
 
     def test_provider_openrouter_chat(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit OpenRouter provider on chat endpoint."""
         payload = {
@@ -162,7 +163,7 @@ class TestProviderParameterE2E:
         assert response.status_code == 200
 
     def test_provider_featherless_chat(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit Featherless provider on chat endpoint."""
         payload = {
@@ -180,7 +181,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 503]
 
     def test_provider_fireworks_chat(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit Fireworks provider on chat endpoint."""
         payload = {
@@ -198,7 +199,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 503]
 
     def test_provider_together_chat(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit Together provider on chat endpoint."""
         payload = {
@@ -216,7 +217,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 503]
 
     def test_provider_huggingface_chat(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit HuggingFace provider on chat endpoint."""
         payload = {
@@ -234,7 +235,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 503]
 
     def test_provider_openrouter_messages(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit OpenRouter provider on messages endpoint."""
         payload = {
@@ -253,7 +254,7 @@ class TestProviderParameterE2E:
         assert response.status_code == 200
 
     def test_provider_openrouter_responses(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit OpenRouter provider on responses endpoint."""
         payload = {
@@ -271,7 +272,7 @@ class TestProviderParameterE2E:
         assert response.status_code == 200
 
     def test_provider_deepinfra_images(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test explicit DeepInfra provider on images endpoint."""
         payload = {
@@ -290,7 +291,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 402, 503]
 
     def test_provider_default_fallback(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test default provider fallback when not specified."""
         payload = {
@@ -308,7 +309,7 @@ class TestProviderParameterE2E:
         assert response.status_code == 200
 
     def test_provider_auto_detection_from_model_id(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test provider auto-detection from model ID."""
         payload = {
@@ -327,7 +328,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 503]
 
     def test_provider_alias_hug_to_huggingface(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test provider alias normalization (hug -> huggingface)."""
         payload = {
@@ -345,7 +346,7 @@ class TestProviderParameterE2E:
         assert response.status_code in [200, 503]
 
     def test_provider_with_streaming(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test provider parameter works with streaming."""
         payload = {
@@ -365,7 +366,7 @@ class TestProviderParameterE2E:
         assert "[DONE]" in response.text
 
     def test_multiple_providers_in_sequence(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test using different providers in sequence."""
         providers = ["openrouter", "featherless", "fireworks"]

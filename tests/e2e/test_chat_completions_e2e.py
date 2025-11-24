@@ -10,16 +10,17 @@ These tests verify:
 """
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 class TestChatCompletionsE2E:
     """E2E tests for chat completions endpoint."""
 
     def test_chat_completions_basic_request(
-        self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
+        self, client: TestClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test basic chat completion request and response."""
         response = client.post(
@@ -39,7 +40,7 @@ class TestChatCompletionsE2E:
         assert data["choices"][0]["message"]["role"] == "assistant"
 
     def test_chat_completions_with_system_prompt(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with system prompt."""
         payload = {
@@ -64,7 +65,7 @@ class TestChatCompletionsE2E:
         assert data["choices"][0]["message"]["role"] == "assistant"
 
     def test_chat_completions_with_all_parameters(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with all optional parameters."""
         payload = {
@@ -92,7 +93,7 @@ class TestChatCompletionsE2E:
             assert data["usage"]["completion_tokens"] <= 100
 
     def test_chat_completions_streaming(
-        self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
+        self, client: TestClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test streaming chat completion."""
         payload = {**base_chat_payload, "stream": True}
@@ -113,7 +114,7 @@ class TestChatCompletionsE2E:
         assert "[DONE]" in content
 
     def test_chat_completions_with_provider_openrouter(
-        self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
+        self, client: TestClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test chat completion with explicit OpenRouter provider."""
         payload = {**base_chat_payload, "provider": "openrouter"}
@@ -129,7 +130,7 @@ class TestChatCompletionsE2E:
         assert "choices" in data
 
     def test_chat_completions_with_provider_featherless(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with Featherless provider."""
         payload = {
@@ -148,7 +149,7 @@ class TestChatCompletionsE2E:
         assert response.status_code in [200, 503]
 
     def test_chat_completions_with_provider_fireworks(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with Fireworks provider."""
         payload = {
@@ -166,7 +167,7 @@ class TestChatCompletionsE2E:
         assert response.status_code in [200, 503]
 
     def test_chat_completions_missing_api_key(
-        self, client: AsyncClient, base_chat_payload: dict
+        self, client: TestClient, base_chat_payload: dict
     ):
         """Test chat completion without API key."""
         response = client.post(
@@ -179,7 +180,7 @@ class TestChatCompletionsE2E:
         assert "detail" in data
 
     def test_chat_completions_empty_messages(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with empty messages array."""
         payload = {
@@ -198,7 +199,7 @@ class TestChatCompletionsE2E:
         assert "detail" in data
 
     def test_chat_completions_invalid_role(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with invalid message role."""
         payload = {
@@ -215,7 +216,7 @@ class TestChatCompletionsE2E:
         assert response.status_code == 422  # Validation error
 
     def test_chat_completions_empty_content(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with empty message content."""
         payload = {
@@ -232,7 +233,7 @@ class TestChatCompletionsE2E:
         assert response.status_code == 422  # Validation error
 
     def test_chat_completions_multiple_messages(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with conversation history."""
         payload = {
@@ -256,7 +257,7 @@ class TestChatCompletionsE2E:
         assert "choices" in data
 
     def test_chat_completions_with_tools(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with function calling tools."""
         payload = {
@@ -293,7 +294,7 @@ class TestChatCompletionsE2E:
         assert response.status_code == 200
 
     def test_chat_completions_response_format_json(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with JSON response format."""
         payload = {
@@ -317,7 +318,7 @@ class TestChatCompletionsE2E:
         assert response.status_code in [200, 400, 422]
 
     def test_chat_completions_very_long_message(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test chat completion with very long message."""
         long_content = "This is a test. " * 1000  # ~16KB message
@@ -337,7 +338,7 @@ class TestChatCompletionsE2E:
         assert response.status_code in [200, 413, 400, 429]
 
     def test_chat_completions_session_id_parameter(
-        self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
+        self, client: TestClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test chat completion with session_id query parameter."""
         response = client.post(
@@ -350,7 +351,7 @@ class TestChatCompletionsE2E:
         assert response.status_code in [200, 404]  # 404 if session doesn't exist
 
     def test_chat_completions_default_max_tokens(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test that max_tokens defaults to 950."""
         payload = {
@@ -372,7 +373,7 @@ class TestChatCompletionsE2E:
             assert data["usage"]["completion_tokens"] <= 950
 
     def test_chat_completions_default_temperature(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: TestClient, auth_headers: dict
     ):
         """Test that temperature defaults to 1.0."""
         payload = {
