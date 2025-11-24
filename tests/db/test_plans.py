@@ -463,3 +463,71 @@ def test_get_all_plans_error_returns_empty(monkeypatch):
 
     out = m.get_all_plans()
     assert out == []
+
+
+def test_get_plan_id_by_tier_finds_matching_plan(mod, fake_supabase):
+    # Ensure database is clean
+    fake_supabase.clear_all()
+
+    fake_supabase.table("plans").insert([
+        {"id": 1, "name": "Basic", "is_active": True},
+        {"id": 2, "name": "Pro", "is_active": True},
+        {"id": 3, "name": "Max", "is_active": True},
+        {"id": 4, "name": "Legacy Pro", "is_active": False},
+    ]).execute()
+
+    # Test exact match
+    plan_id = mod.get_plan_id_by_tier("pro")
+    assert plan_id == 2
+
+    # Test case-insensitive (ilike)
+    plan_id = mod.get_plan_id_by_tier("PRO")
+    assert plan_id == 2
+
+    # Test partial match
+    plan_id = mod.get_plan_id_by_tier("max")
+    assert plan_id == 3
+
+    plan_id = mod.get_plan_id_by_tier("basic")
+    assert plan_id == 1
+
+
+def test_get_plan_id_by_tier_returns_none_when_not_found(mod, fake_supabase):
+    # Ensure database is clean
+    fake_supabase.clear_all()
+
+    fake_supabase.table("plans").insert([
+        {"id": 1, "name": "Basic", "is_active": True},
+        {"id": 2, "name": "Pro", "is_active": True},
+    ]).execute()
+
+    plan_id = mod.get_plan_id_by_tier("nonexistent")
+    assert plan_id is None
+
+
+def test_get_plan_id_by_tier_only_returns_active_plans(mod, fake_supabase):
+    # Ensure database is clean
+    fake_supabase.clear_all()
+
+    fake_supabase.table("plans").insert([
+        {"id": 1, "name": "Pro", "is_active": False},
+        {"id": 2, "name": "Pro Plus", "is_active": True},
+    ]).execute()
+
+    # Should only find the active Pro Plus, not the inactive Pro
+    plan_id = mod.get_plan_id_by_tier("pro")
+    assert plan_id == 2
+
+
+def test_get_plan_id_by_tier_error_returns_none(monkeypatch):
+    # Force get_supabase_client to raise
+    def raise_error():
+        raise RuntimeError("boom")
+    bad_supabase_mod = types.SimpleNamespace(get_supabase_client=raise_error)
+    monkeypatch.setitem(sys.modules, "src.config.supabase_config", bad_supabase_mod)
+
+    m = importlib.import_module(MODULE_PATH)
+    importlib.reload(m)
+
+    plan_id = m.get_plan_id_by_tier("pro")
+    assert plan_id is None
