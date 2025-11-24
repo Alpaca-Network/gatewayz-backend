@@ -551,6 +551,7 @@ class TestWebhooks:
             payment_id=555,
             status='completed',
             stripe_payment_intent_id='pi_meta_only',
+            stripe_session_id='cs_pi_meta',
         )
 
     @patch('stripe.PaymentIntent.retrieve')
@@ -605,7 +606,8 @@ class TestWebhooks:
         mock_update_payment.assert_called_once_with(
             payment_id=321,
             status='completed',
-            stripe_payment_intent_id='pi_metadata_source'
+            stripe_payment_intent_id='pi_metadata_source',
+            stripe_session_id='cs_missing_everything'
         )
 
     def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
@@ -724,6 +726,7 @@ class TestWebhooks:
             payment_id=99,
             status='completed',
             stripe_payment_intent_id='pi_lookup_missing',
+            stripe_session_id='cs_lookup_only',
         )
 
     @patch('stripe.Webhook.construct_event')
@@ -1134,5 +1137,6 @@ class TestPaymentIntegration:
         mock_update_payment.assert_called_once_with(
             payment_id=555,
             status='completed',
-            stripe_payment_intent_id='pi_missing_payment'
+            stripe_payment_intent_id='pi_missing_payment',
+            stripe_session_id='cs_missing_payment'
         )
