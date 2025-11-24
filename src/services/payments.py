@@ -370,13 +370,14 @@ class StripeService:
             logger.info(f"Final cancel_url being sent to Stripe: {cancel_url}")
             logger.info("=== END URL DEBUG ===")
 
-            # Calculate credits
-            credits = request.amount
+            # Calculate credits (in cents, matching amount)
+            credits_cents = request.amount
 
             checkout_metadata = {
                 "user_id": str(user_id),
                 "payment_id": str(payment["id"]),
-                "credits": str(credits),
+                "credits_cents": str(credits_cents),
+                "credits": str(credits_cents),  # Keep for backward compatibility
                 **(request.metadata or {}),
             }
 
@@ -390,7 +391,7 @@ class StripeService:
                             "unit_amount": request.amount,
                             "product_data": {
                                 "name": "Gatewayz Credits",
-                                "description": f"{credits:,} credits for your account",
+                                "description": f"{credits_cents:,} credits for your account",
                             },
                         },
                         "quantity": 1,
@@ -656,19 +657,32 @@ class StripeService:
                 )
             payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
 
+            # Log metadata for debugging
+            logger.info(
+                f"Checkout completed: session_id={session_id}, metadata_keys={list(metadata.keys())}"
+            )
+            logger.debug(f"Full metadata: {metadata}")
+
             # Backfill metadata from the related payment intent if session metadata is absent/incomplete
-            required_metadata_keys = ("user_id", "payment_id", "credits")
-            if payment_intent_id and any(
-                not metadata.get(key) for key in required_metadata_keys
-            ):
+            required_metadata_keys = ("user_id", "payment_id", "credits_cents")
+            missing_keys = [key for key in required_metadata_keys if not metadata.get(key)]
+            if payment_intent_id and missing_keys:
+                logger.info(
+                    f"Checkout session {session_id} missing metadata keys: {missing_keys}. "
+                    f"Attempting to hydrate from payment intent {payment_intent_id}"
+                )
                 intent_metadata = self._hydrate_payment_intent_metadata_from_id(payment_intent_id)
                 if intent_metadata:
+                    logger.info(f"Recovered metadata from payment intent: {list(intent_metadata.keys())}")
                     for key, value in intent_metadata.items():
                         metadata.setdefault(key, value)
 
             user_id = self._coerce_to_int(metadata.get("user_id"))
             payment_id = self._coerce_to_int(metadata.get("payment_id"))
-            credits_cents = self._coerce_to_int(metadata.get("credits"))
+            # Try both "credits_cents" and "credits" for backward compatibility
+            credits_cents = self._coerce_to_int(metadata.get("credits_cents"))
+            if credits_cents is None:
+                credits_cents = self._coerce_to_int(metadata.get("credits"))
 
             if user_id is None:
                 client_reference_id = self._get_stripe_object_value(session, "client_reference_id")
@@ -739,6 +753,28 @@ class StripeService:
                     payment_id = payment_record.get("id")
 
             if user_id is None or payment_id is None or credits_cents is None:
+                # Provide detailed diagnostics for missing fields
+                missing_fields = []
+                if user_id is None:
+                    missing_fields.append(
+                        f"user_id (metadata.get('user_id')={metadata.get('user_id')})"
+                    )
+                if payment_id is None:
+                    missing_fields.append(
+                        f"payment_id (metadata.get('payment_id')={metadata.get('payment_id')})"
+                    )
+                if credits_cents is None:
+                    missing_fields.append(
+                        f"credits_cents (credits_cents={metadata.get('credits_cents')}, "
+                        f"credits={metadata.get('credits')})"
+                    )
+
+                logger.error(
+                    f"Checkout session {session_id} missing required metadata fields: {missing_fields}. "
+                    f"Metadata keys available: {list(metadata.keys())}. "
+                    f"Full metadata: {metadata}"
+                )
+
                 raise ValueError(
                     "Checkout session missing required metadata "
                     f"(session_id={session_id}, user_id={user_id}, "
