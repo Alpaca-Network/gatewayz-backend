@@ -12,12 +12,14 @@ Authentication uses Google Application Default Credentials (ADC):
 
 The library will automatically find credentials from:
 1. GOOGLE_APPLICATION_CREDENTIALS environment variable (path to JSON file)
-2. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (raw JSON, written to temp file)
+2. GOOGLE_VERTEX_CREDENTIALS_JSON environment variable (raw or base64-encoded JSON, written to temp file)
 3. Application Default Credentials (gcloud auth, GCE metadata server, etc.)
 
 Deployment Note: This implementation was updated to use ADC in PR #252.
 """
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -46,6 +48,9 @@ _TOKEN_LOCK = threading.Lock()
 _TEMP_CREDENTIALS_FILE: str | None = None
 _TEMP_CREDENTIALS_LOCK = threading.Lock()
 _DEFAULT_TRANSPORT = "rest"
+_VERTEX_CREDENTIALS_CACHE: dict[str, Any] | None = None
+_VERTEX_CREDENTIALS_CACHE_RAW: str | None = None
+_VERTEX_CREDENTIALS_CACHE_JSON: str | None = None
 
 
 def _ensure_vertex_imports():
@@ -82,7 +87,7 @@ def _prepare_vertex_environment():
             "For example: GOOGLE_VERTEX_LOCATION=us-central1"
         )
 
-    # If raw credentials JSON is provided but GOOGLE_APPLICATION_CREDENTIALS is not set,
+    # If credentials JSON (raw or base64) is provided but GOOGLE_APPLICATION_CREDENTIALS is not set,
     # write the JSON to a temp file (once) and reuse it for the process lifetime.
     if os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON") and not os.environ.get(
         "GOOGLE_APPLICATION_CREDENTIALS"
@@ -94,15 +99,79 @@ def _prepare_vertex_environment():
                 return
 
             logger.info("GOOGLE_VERTEX_CREDENTIALS_JSON detected - writing to temp file for ADC")
-            creds_json = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
+            _, normalized_creds_json = _load_env_credentials_json()
 
             temp_creds_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            temp_creds_file.write(creds_json or "")
+            temp_creds_file.write(normalized_creds_json)
             temp_creds_file.close()
 
             _TEMP_CREDENTIALS_FILE = temp_creds_file.name
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_file.name
             logger.info(f"Wrote credentials to temp file: {temp_creds_file.name}")
+
+
+def _attempt_base64_decode(value: str) -> str | None:
+    """Best-effort base64 decode helper that tolerates missing padding."""
+    cleaned_value = value.strip()
+    if not cleaned_value:
+        return None
+
+    padded_value = cleaned_value + "=" * (-len(cleaned_value) % 4)
+    try:
+        decoded_bytes = base64.b64decode(padded_value, validate=False)
+        decoded_text = decoded_bytes.decode("utf-8")
+        return decoded_text
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+
+
+def _normalize_vertex_credentials_json(raw_value: str) -> tuple[dict[str, Any], str]:
+    """Return (dict, json_str) for GOOGLE_VERTEX_CREDENTIALS_JSON supporting base64."""
+    stripped_value = raw_value.strip()
+    if not stripped_value:
+        raise ValueError("GOOGLE_VERTEX_CREDENTIALS_JSON is empty.")
+
+    try:
+        creds_info = json.loads(stripped_value)
+        return creds_info, stripped_value
+    except json.JSONDecodeError as json_error:
+        decoded_text = _attempt_base64_decode(stripped_value)
+        if decoded_text is None:
+            raise ValueError(
+                "GOOGLE_VERTEX_CREDENTIALS_JSON must contain valid JSON or base64-encoded JSON."
+            ) from json_error
+
+        try:
+            creds_info = json.loads(decoded_text)
+            logger.info(
+                "Detected base64-encoded GOOGLE_VERTEX_CREDENTIALS_JSON; decoded credentials successfully."
+            )
+            return creds_info, decoded_text
+        except json.JSONDecodeError as decode_error:
+            raise ValueError(
+                "GOOGLE_VERTEX_CREDENTIALS_JSON must contain valid JSON or base64-encoded JSON."
+            ) from decode_error
+
+
+def _load_env_credentials_json() -> tuple[dict[str, Any], str]:
+    """Load (dict, normalized_json) from GOOGLE_VERTEX_CREDENTIALS_JSON with caching."""
+    raw_value = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
+    if raw_value is None:
+        raise ValueError("GOOGLE_VERTEX_CREDENTIALS_JSON is not set.")
+
+    global _VERTEX_CREDENTIALS_CACHE, _VERTEX_CREDENTIALS_CACHE_RAW, _VERTEX_CREDENTIALS_CACHE_JSON
+    if (
+        _VERTEX_CREDENTIALS_CACHE is not None
+        and _VERTEX_CREDENTIALS_CACHE_RAW == raw_value
+        and _VERTEX_CREDENTIALS_CACHE_JSON is not None
+    ):
+        return _VERTEX_CREDENTIALS_CACHE, _VERTEX_CREDENTIALS_CACHE_JSON
+
+    creds_info, normalized_json = _normalize_vertex_credentials_json(raw_value)
+    _VERTEX_CREDENTIALS_CACHE = creds_info
+    _VERTEX_CREDENTIALS_CACHE_RAW = raw_value
+    _VERTEX_CREDENTIALS_CACHE_JSON = normalized_json
+    return creds_info, normalized_json
 
 
 def _ensure_protobuf_imports():
@@ -146,15 +215,9 @@ def _get_google_vertex_access_token(force_refresh: bool = False) -> str:
 
     credentials = None
 
-    # Prefer raw JSON credentials if provided
+    # Prefer JSON credentials (raw or base64) if provided
     if os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON"):
-        try:
-            creds_info = json.loads(os.environ["GOOGLE_VERTEX_CREDENTIALS_JSON"])
-        except json.JSONDecodeError as decode_error:
-            raise ValueError(
-                "GOOGLE_VERTEX_CREDENTIALS_JSON is not valid JSON. "
-                "Ensure the environment variable contains the raw service account JSON."
-            ) from decode_error
+        creds_info, _ = _load_env_credentials_json()
         credentials = service_account.Credentials.from_service_account_info(
             creds_info, scopes=[_VERTEX_API_SCOPE]
         )
@@ -226,7 +289,7 @@ def initialize_vertex_ai():
     The library finds credentials in this order:
     1. GOOGLE_APPLICATION_CREDENTIALS environment variable (path to JSON)
     2. Application Default Credentials (ADC) from gcloud, metadata server, etc.
-    3. If GOOGLE_VERTEX_CREDENTIALS_JSON is set (raw JSON), we'll write it to a temp file
+    3. If GOOGLE_VERTEX_CREDENTIALS_JSON is set (raw or base64 JSON), we'll write it to a temp file
        and set GOOGLE_APPLICATION_CREDENTIALS to point to it
 
     Raises:
@@ -1008,7 +1071,7 @@ def diagnose_google_vertex_credentials() -> dict:
             creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
             step2["details"] = f"Credentials file path: {creds_path}"
 
-        # Check GOOGLE_VERTEX_CREDENTIALS_JSON (raw JSON)
+        # Check GOOGLE_VERTEX_CREDENTIALS_JSON (raw/base64 JSON)
         elif os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON"):
             result["credentials_available"] = True
             step2["passed"] = True
@@ -1017,12 +1080,13 @@ def diagnose_google_vertex_credentials() -> dict:
 
             # Parse to get service account email for logging
             try:
-                creds_json = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
-                creds_dict = json.loads(creds_json)
+                creds_dict, _ = _load_env_credentials_json()
                 service_email = creds_dict.get("client_email", "unknown")
-                step2["details"] = f"Raw JSON credentials (service account: {service_email})"
+                step2["details"] = (
+                    f"JSON credentials from env (service account: {service_email})"
+                )
             except Exception:
-                step2["details"] = "Raw JSON credentials detected"
+                step2["details"] = "Credentials detected in GOOGLE_VERTEX_CREDENTIALS_JSON"
         else:
             step2["details"] = (
                 "No credentials found in GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_VERTEX_CREDENTIALS_JSON. Will try ADC."
