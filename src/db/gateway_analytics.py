@@ -92,7 +92,7 @@ def get_gateway_stats(
     Get comprehensive statistics for a specific gateway
 
     Args:
-        gateway: Gateway name (e.g., 'openrouter', 'portkey', 'deepinfra')
+        gateway: Gateway name (e.g., 'openrouter', 'featherless', 'deepinfra')
         time_range: Time range: '1h', '24h', '7d', '30d', 'all'
         user_id: Optional user filter
 
@@ -143,7 +143,10 @@ def get_gateway_stats(
 
 
 def get_trending_models(
-    gateway: str | None = "all", time_range: str = "24h", limit: int = 10, sort_by: str = "requests"
+    gateway: str | None = "all",
+    time_range: str = "24h",
+    limit: int = 10,
+    sort_by: str = "requests",
 ) -> list[dict[str, Any]]:
     """
     Get trending models based on usage
@@ -238,7 +241,9 @@ def get_trending_models(
         return []
 
 
-def get_all_gateways_summary(time_range: str = "24h", user_id: int | None = None) -> dict[str, Any]:
+def get_all_gateways_summary(
+    time_range: str = "24h", user_id: int | None = None
+) -> dict[str, Any]:
     """
     Get summary statistics for all gateways
 
@@ -250,7 +255,7 @@ def get_all_gateways_summary(time_range: str = "24h", user_id: int | None = None
         Dictionary with statistics for each gateway
     """
     try:
-        gateways = ["openrouter", "portkey", "featherless", "deepinfra", "chutes"]
+        gateways = ["openrouter", "featherless", "deepinfra", "chutes"]
 
         summary = {
             "time_range": time_range,

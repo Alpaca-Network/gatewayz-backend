@@ -179,7 +179,9 @@ async def check_model_exists_on_modelz(
     return model_id in model_ids
 
 
-async def get_modelz_model_details(model_id: str, use_cache: bool = True) -> dict[str, Any] | None:
+async def get_modelz_model_details(
+    model_id: str, use_cache: bool = True
+) -> dict[str, Any] | None:
     """
     Get detailed information about a specific model from Modelz.
 

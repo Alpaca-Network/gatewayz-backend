@@ -273,6 +273,118 @@ class TestAnthropicTransformer:
             result = transform_openai_to_anthropic(openai_response, 'claude')
             assert result['stop_reason'] == expected_anthropic
 
+    def test_transform_openai_to_anthropic_tool_calls(self):
+        """Test OpenAI to Anthropic transformation with tool_calls"""
+        # Test case 1: tool_calls with null content (typical OpenAI response)
+        openai_response_with_tools = {
+            'id': 'chatcmpl-456',
+            'choices': [{
+                'message': {
+                    'content': None,  # Typically None when tool_calls are present
+                    'tool_calls': [
+                        {
+                            'id': 'call_abc123',
+                            'type': 'function',
+                            'function': {
+                                'name': 'get_weather',
+                                'arguments': '{"location": "San Francisco"}'
+                            }
+                        }
+                    ]
+                },
+                'finish_reason': 'tool_calls'
+            }],
+            'usage': {
+                'prompt_tokens': 20,
+                'completion_tokens': 15
+            }
+        }
+
+        anthropic_response = transform_openai_to_anthropic(
+            openai_response_with_tools,
+            model='claude-sonnet-4-5-20250929'
+        )
+
+        # Should have tool_use blocks, not empty text blocks
+        assert len(anthropic_response['content']) == 1
+        assert anthropic_response['content'][0]['type'] == 'tool_use'
+        assert anthropic_response['content'][0]['id'] == 'call_abc123'
+        assert anthropic_response['content'][0]['name'] == 'get_weather'
+        assert anthropic_response['content'][0]['input'] == {'location': 'San Francisco'}
+        assert anthropic_response['stop_reason'] == 'tool_use'
+
+        # Test case 2: tool_calls with empty string content
+        openai_response_empty_content = {
+            'id': 'chatcmpl-789',
+            'choices': [{
+                'message': {
+                    'content': '',  # Empty string
+                    'tool_calls': [
+                        {
+                            'id': 'call_def456',
+                            'type': 'function',
+                            'function': {
+                                'name': 'calculate',
+                                'arguments': '{"x": 5, "y": 3}'
+                            }
+                        }
+                    ]
+                },
+                'finish_reason': 'tool_calls'
+            }],
+            'usage': {
+                'prompt_tokens': 10,
+                'completion_tokens': 8
+            }
+        }
+
+        anthropic_response2 = transform_openai_to_anthropic(
+            openai_response_empty_content,
+            model='claude-sonnet-4-5-20250929'
+        )
+
+        # Should only have tool_use block, no empty text block
+        assert len(anthropic_response2['content']) == 1
+        assert anthropic_response2['content'][0]['type'] == 'tool_use'
+        assert anthropic_response2['content'][0]['name'] == 'calculate'
+
+        # Test case 3: tool_calls with both text content and tool_calls (rare but possible)
+        openai_response_with_both = {
+            'id': 'chatcmpl-101',
+            'choices': [{
+                'message': {
+                    'content': 'Let me check that for you.',
+                    'tool_calls': [
+                        {
+                            'id': 'call_ghi789',
+                            'type': 'function',
+                            'function': {
+                                'name': 'search',
+                                'arguments': '{"query": "test"}'
+                            }
+                        }
+                    ]
+                },
+                'finish_reason': 'tool_calls'
+            }],
+            'usage': {
+                'prompt_tokens': 15,
+                'completion_tokens': 12
+            }
+        }
+
+        anthropic_response3 = transform_openai_to_anthropic(
+            openai_response_with_both,
+            model='claude-sonnet-4-5-20250929'
+        )
+
+        # Should have both tool_use and text blocks
+        assert len(anthropic_response3['content']) == 2
+        # Tool_use should come first (we process it first)
+        assert anthropic_response3['content'][0]['type'] == 'tool_use'
+        assert anthropic_response3['content'][1]['type'] == 'text'
+        assert anthropic_response3['content'][1]['text'] == 'Let me check that for you.'
+
     def test_extract_text_from_string_content(self):
         """Test extracting text from string content"""
         text = extract_text_from_content("Hello, world!")
@@ -348,6 +460,13 @@ class TestMessagesEndpointSuccess:
 
         rate_limit_result = Mock()
         rate_limit_result.allowed = True
+        rate_limit_result.remaining_requests = 249
+        rate_limit_result.remaining_tokens = 9900
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
         rate_limit_mgr_instance.release_concurrency = AsyncMock()
@@ -449,6 +568,13 @@ class TestMessagesEndpointCredits:
 
         rate_limit_result = Mock()
         rate_limit_result.allowed = True
+        rate_limit_result.remaining_requests = 249
+        rate_limit_result.remaining_tokens = 9900
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
         mock_rate_limit_mgr.return_value = rate_limit_mgr_instance
@@ -474,8 +600,12 @@ class TestMessagesEndpointRateLimiting:
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
     @patch('src.routes.messages.get_rate_limit_manager')
+    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
     def test_messages_endpoint_rate_limit_exceeded(
         self,
+        mock_process_or,
+        mock_make_or,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
@@ -488,6 +618,11 @@ class TestMessagesEndpointRateLimiting:
         mock_get_user.return_value = mock_user
         mock_enforce_plan.return_value = {'allowed': True}
         mock_validate_trial.return_value = {'is_valid': True, 'is_trial': False}
+        mock_make_or.return_value = {"_raw": True}
+        mock_process_or.return_value = {
+            "content": [{"type": "text", "text": "test"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
         # Rate limit exceeded
         rate_limit_result = Mock()
@@ -496,6 +631,11 @@ class TestMessagesEndpointRateLimiting:
         rate_limit_result.retry_after = 60
         rate_limit_result.remaining_requests = 0
         rate_limit_result.remaining_tokens = 0
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
 
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
@@ -521,8 +661,12 @@ class TestMessagesEndpointPlanLimits:
     @patch('src.routes.messages.get_user')
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
+    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
     def test_messages_endpoint_plan_limit_exceeded(
         self,
+        mock_process_or,
+        mock_make_or,
         mock_validate_trial,
         mock_enforce_plan,
         mock_get_user,
@@ -537,6 +681,11 @@ class TestMessagesEndpointPlanLimits:
             'reason': 'Monthly token limit exceeded'
         }
         mock_validate_trial.return_value = {'is_valid': True, 'is_trial': False}
+        mock_make_or.return_value = {"_raw": True}
+        mock_process_or.return_value = {
+            "content": [{"type": "text", "text": "test"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
         response = client.post(
             '/v1/messages',
@@ -656,8 +805,10 @@ class TestMessagesEndpointFailover:
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
     @patch('src.routes.messages.get_rate_limit_manager')
-    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_featherless_response')
+    @patch('src.routes.messages.make_featherless_request_openai')
     @patch('src.routes.messages.process_openrouter_response')
+    @patch('src.routes.messages.make_openrouter_request_openai')
     @patch('src.routes.messages.build_provider_failover_chain')
     @patch('src.routes.messages.calculate_cost')
     @patch('src.routes.messages.deduct_credits')
@@ -674,8 +825,10 @@ class TestMessagesEndpointFailover:
         mock_deduct_credits,
         mock_calculate_cost,
         mock_build_chain,
-        mock_process_response,
-        mock_make_request,
+        mock_make_openrouter_request,
+        mock_process_openrouter_response,
+        mock_make_featherless_request,
+        mock_process_featherless_response,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
@@ -693,18 +846,24 @@ class TestMessagesEndpointFailover:
 
         rate_limit_result = Mock()
         rate_limit_result.allowed = True
+        rate_limit_result.remaining_requests = 249
+        rate_limit_result.remaining_tokens = 9900
+        rate_limit_result.ratelimit_limit_requests = 250
+        rate_limit_result.ratelimit_limit_tokens = 10000
+        rate_limit_result.ratelimit_reset_requests = 1700000000
+        rate_limit_result.ratelimit_reset_tokens = 1700000000
+        rate_limit_result.burst_window_description = "100 per 60 seconds"
         rate_limit_mgr_instance = Mock()
         rate_limit_mgr_instance.check_rate_limit = AsyncMock(return_value=rate_limit_result)
         rate_limit_mgr_instance.release_concurrency = AsyncMock()
         mock_rate_limit_mgr.return_value = rate_limit_mgr_instance
 
         # First provider fails, second succeeds
-        mock_build_chain.return_value = ['openrouter', 'portkey']
-        mock_make_request.side_effect = [
-            Exception("Provider error"),  # First attempt fails
-            mock_openai_response  # Second attempt succeeds
-        ]
-        mock_process_response.return_value = mock_openai_response
+        mock_build_chain.return_value = ['openrouter', 'featherless']
+        mock_make_openrouter_request.side_effect = Exception("Provider error")
+        mock_make_featherless_request.return_value = mock_openai_response
+        mock_process_openrouter_response.return_value = mock_openai_response
+        mock_process_featherless_response.return_value = mock_openai_response
         mock_calculate_cost.return_value = 0.01
 
         # Execute

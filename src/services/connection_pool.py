@@ -5,6 +5,7 @@ This module provides persistent HTTP client connections with connection pooling,
 keepalive, and optimized timeout settings to improve chat streaming performance.
 """
 
+import hashlib
 import logging
 from threading import Lock
 
@@ -42,6 +43,48 @@ HUGGINGFACE_TIMEOUT = httpx.Timeout(
 )
 
 
+def _normalize_base_url(base_url: str) -> str:
+    """Normalize base URLs to avoid duplicate cache keys due to trailing slashes."""
+    stripped = base_url.strip()
+    return stripped[:-1] if stripped.endswith("/") else stripped
+
+
+def _pool_prefix(provider: str, base_url: str) -> str:
+    """Build a stable prefix for all clients of a provider/base_url combination."""
+    return f"{provider.lower()}::{_normalize_base_url(base_url)}"
+
+
+def _api_key_hash(api_key: str | None) -> str:
+    """Hash API keys so rotations create distinct clients without storing secrets."""
+    if not api_key:
+        return "no-key"
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
+def _cache_key(provider: str, base_url: str, api_key: str | None) -> str:
+    """Generate the full cache key including the hashed API key."""
+    return f"{_pool_prefix(provider, base_url)}::{_api_key_hash(api_key)}"
+
+
+def _evict_sync_clients(prefix: str):
+    """Remove (and close) cached sync clients that match the prefix."""
+    stale_keys = [key for key in _client_pool if key.startswith(prefix)]
+    for stale_key in stale_keys:
+        client = _client_pool.pop(stale_key, None)
+        if client:
+            try:
+                client.close()
+            except Exception as exc:
+                logger.warning(f"Error closing client for {prefix}: {exc}")
+
+
+def _evict_async_clients(prefix: str):
+    """Remove cached async clients that match the prefix (no close call)."""
+    stale_keys = [key for key in _async_client_pool if key.startswith(prefix)]
+    for stale_key in stale_keys:
+        _async_client_pool.pop(stale_key, None)
+
+
 def _get_http_client(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     limits: httpx.Limits = DEFAULT_LIMITS,
@@ -53,6 +96,14 @@ def _get_http_client(
         http2=True,  # Enable HTTP/2 for multiplexing
         follow_redirects=True,
     )
+
+
+def get_http_client(
+    timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+    limits: httpx.Limits = DEFAULT_LIMITS,
+) -> httpx.Client:
+    """Get a pooled HTTP client with connection pooling and keepalive (public API)."""
+    return _get_http_client(timeout=timeout, limits=limits)
 
 
 def _get_async_http_client(
@@ -79,7 +130,7 @@ def get_pooled_client(
     Get or create a pooled OpenAI client for a specific provider.
 
     Args:
-        provider: Provider name (e.g., 'openrouter', 'portkey')
+        provider: Provider name (e.g., 'openrouter', 'featherless')
         base_url: API base URL
         api_key: API key for authentication
         default_headers: Optional headers to include in all requests
@@ -88,27 +139,34 @@ def get_pooled_client(
     Returns:
         OpenAI client with connection pooling enabled
     """
-    cache_key = f"{provider}_{base_url}"
+    prefix = _pool_prefix(provider, base_url)
+    cache_key = _cache_key(provider, base_url, api_key)
 
     with _pool_lock:
-        if cache_key not in _client_pool:
-            http_client = _get_http_client(
-                timeout=timeout or DEFAULT_TIMEOUT,
-                limits=DEFAULT_LIMITS,
-            )
+        cached = _client_pool.get(cache_key)
+        if cached:
+            return cached
 
-            client = OpenAI(
-                base_url=base_url,
-                api_key=api_key,
-                default_headers=default_headers or {},
-                http_client=http_client,
-                max_retries=2,  # Enable automatic retries
-            )
+        # API key rotated: evict any stale clients for this provider/base pair
+        _evict_sync_clients(prefix)
 
-            _client_pool[cache_key] = client
-            logger.info(f"Created pooled client for {provider}")
+        http_client = _get_http_client(
+            timeout=timeout or DEFAULT_TIMEOUT,
+            limits=DEFAULT_LIMITS,
+        )
 
-        return _client_pool[cache_key]
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers=default_headers or {},
+            http_client=http_client,
+            max_retries=2,  # Enable automatic retries
+        )
+
+        _client_pool[cache_key] = client
+        logger.info(f"Created pooled client for {provider}")
+
+        return client
 
 
 def get_pooled_async_client(
@@ -122,7 +180,7 @@ def get_pooled_async_client(
     Get or create a pooled AsyncOpenAI client for a specific provider.
 
     Args:
-        provider: Provider name (e.g., 'openrouter', 'portkey')
+        provider: Provider name (e.g., 'openrouter', 'featherless')
         base_url: API base URL
         api_key: API key for authentication
         default_headers: Optional headers to include in all requests
@@ -131,27 +189,33 @@ def get_pooled_async_client(
     Returns:
         AsyncOpenAI client with connection pooling enabled
     """
-    cache_key = f"{provider}_{base_url}_async"
+    prefix = _pool_prefix(provider, base_url)
+    cache_key = _cache_key(provider, base_url, api_key) + "_async"
 
     with _pool_lock:
-        if cache_key not in _async_client_pool:
-            http_client = _get_async_http_client(
-                timeout=timeout or DEFAULT_TIMEOUT,
-                limits=DEFAULT_LIMITS,
-            )
+        cached = _async_client_pool.get(cache_key)
+        if cached:
+            return cached
 
-            client = AsyncOpenAI(
-                base_url=base_url,
-                api_key=api_key,
-                default_headers=default_headers or {},
-                http_client=http_client,
-                max_retries=2,
-            )
+        _evict_async_clients(prefix)
 
-            _async_client_pool[cache_key] = client
-            logger.info(f"Created pooled async client for {provider}")
+        http_client = _get_async_http_client(
+            timeout=timeout or DEFAULT_TIMEOUT,
+            limits=DEFAULT_LIMITS,
+        )
 
-        return _async_client_pool[cache_key]
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers=default_headers or {},
+            http_client=http_client,
+            max_retries=2,
+        )
+
+        _async_client_pool[cache_key] = client
+        logger.info(f"Created pooled async client for {provider}")
+
+        return client
 
 
 def clear_connection_pools():
@@ -202,36 +266,6 @@ def get_openrouter_pooled_client() -> OpenAI:
             "HTTP-Referer": Config.OPENROUTER_SITE_URL,
             "X-TitleSection": Config.OPENROUTER_SITE_NAME,
         },
-    )
-
-
-def get_portkey_pooled_client(
-    provider: str | None = None,
-    virtual_key: str | None = None,
-) -> OpenAI:
-    """Get pooled client for Portkey."""
-    if not Config.PORTKEY_API_KEY:
-        raise ValueError("Portkey API key not configured")
-
-    headers = {
-        "x-portkey-api-key": Config.PORTKEY_API_KEY,
-    }
-
-    resolved_virtual_key = virtual_key or Config.get_portkey_virtual_key(provider)
-    if resolved_virtual_key:
-        headers["x-portkey-virtual-key"] = resolved_virtual_key
-
-    if provider:
-        headers["x-portkey-provider"] = provider
-
-    # Create unique cache key based on provider/virtual_key combination
-    cache_suffix = f"_{provider}_{virtual_key}" if provider or virtual_key else ""
-
-    return get_pooled_client(
-        provider=f"portkey{cache_suffix}",
-        base_url="https://api.portkey.ai/v1",
-        api_key=Config.PORTKEY_API_KEY,
-        default_headers=headers,
     )
 
 
@@ -317,4 +351,17 @@ def get_chutes_pooled_client() -> OpenAI:
         provider="chutes",
         base_url="https://llm.chutes.ai/v1",
         api_key=Config.CHUTES_API_KEY,
+    )
+
+
+def get_clarifai_pooled_client() -> OpenAI:
+    """Get pooled client for Clarifai."""
+    if not Config.CLARIFAI_API_KEY:
+        raise ValueError("Clarifai API key not configured")
+
+    return get_pooled_client(
+        provider="clarifai",
+        base_url="https://api.clarifai.com/v1",
+        api_key=Config.CLARIFAI_API_KEY,
+        default_headers={"X-Clarifai-PAT": Config.CLARIFAI_API_KEY},
     )

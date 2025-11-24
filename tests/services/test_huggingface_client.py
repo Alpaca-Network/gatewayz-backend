@@ -1,11 +1,13 @@
 """Tests for Hugging Face Inference API client"""
 import pytest
 from unittest.mock import Mock, patch
+from fastapi import HTTPException
+
 from src.services.huggingface_client import (
     get_huggingface_client,
     make_huggingface_request_openai,
     make_huggingface_request_openai_stream,
-    process_huggingface_response
+    process_huggingface_response,
 )
 
 
@@ -57,6 +59,8 @@ class TestHuggingFaceClient:
 
         assert response["id"] == "test_id"
         mock_client.post.assert_called_once()
+        sent_payload = mock_client.post.call_args.kwargs["json"]
+        assert sent_payload["model"] == "meta-llama/Llama-2-7b-chat-hf:hf-inference"
         mock_client.close.assert_called_once()
 
     @patch('src.services.huggingface_client.get_huggingface_client')
@@ -87,6 +91,39 @@ class TestHuggingFaceClient:
         assert chunk.model == "meta-llama/Llama-2-7b-chat-hf:hf-inference"
         assert chunk.choices[0].delta.content == "Hello"
         mock_client.stream.assert_called_once()
+        stream_payload = mock_client.stream.call_args.kwargs["json"]
+        assert stream_payload["model"] == "meta-llama/Llama-2-7b-chat-hf:hf-inference"
+        mock_client.close.assert_called_once()
+
+    @patch('src.services.huggingface_client.get_huggingface_client')
+    def test_make_huggingface_request_openai_foreign_namespace(self, mock_get_client):
+        """Models scoped to other providers should not be routed through Hugging Face"""
+        mock_client = Mock()
+        mock_get_client.return_value = mock_client
+
+        messages = [{"role": "user", "content": "Hello"}]
+        with pytest.raises(HTTPException) as excinfo:
+            make_huggingface_request_openai(messages, "openrouter/auto")
+
+        assert excinfo.value.status_code == 404
+        mock_client.post.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    @patch('src.services.huggingface_client.get_huggingface_client')
+    def test_make_huggingface_request_openai_stream_foreign_namespace(self, mock_get_client):
+        """Streaming helper should also reject foreign provider models"""
+        mock_client = Mock()
+        mock_get_client.return_value = mock_client
+
+        stream = make_huggingface_request_openai_stream(
+            [{"role": "user", "content": "Hello"}], "openrouter/auto"
+        )
+
+        with pytest.raises(HTTPException) as excinfo:
+            next(stream)
+
+        assert excinfo.value.status_code == 404
+        mock_client.stream.assert_not_called()
         mock_client.close.assert_called_once()
 
     def test_process_huggingface_response(self):

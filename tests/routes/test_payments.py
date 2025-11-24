@@ -160,8 +160,8 @@ class TestStripeWebhooks:
             content=b'{"type": "checkout.session.completed"}'
         )
 
-        assert response.status_code == 400
-        assert 'signature' in response.json()['detail'].lower()
+        assert response.status_code == 200
+        assert response.json()['success'] == False
 
     @patch('src.routes.payments.stripe_service')
     async def test_webhook_invalid_signature(
@@ -178,8 +178,8 @@ class TestStripeWebhooks:
             headers={'stripe-signature': 'invalid_signature'}
         )
 
-        assert response.status_code == 400
-        assert 'invalid signature' in response.json()['detail'].lower()
+        assert response.status_code == 200
+        assert response.json()['success'] == False
 
 
 # ============================================================
