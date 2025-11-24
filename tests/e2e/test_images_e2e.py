@@ -14,12 +14,15 @@ are not properly configured.
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 class TestImagesE2E:
     """E2E tests for image generation endpoint."""
 
-    def test_images_basic_request(self, client, auth_headers: dict, base_image_payload: dict):
+    def test_images_basic_request(
+        self, client: TestClient, auth_headers: dict, base_image_payload: dict
+    ):
         """Test basic image generation request and response."""
         response = client.post(
             "/v1/images/generations",
@@ -35,7 +38,7 @@ class TestImagesE2E:
             assert "data" in data
             assert len(data["data"]) > 0
 
-    def test_images_with_single_image(self, client, auth_headers: dict):
+    def test_images_with_single_image(self, client: TestClient, auth_headers: dict):
         """Test image generation with single image."""
         payload = {"prompt": "A beautiful sunset", "n": 1, "size": "1024x1024"}
 
@@ -50,7 +53,7 @@ class TestImagesE2E:
             data = response.json()
             assert len(data["data"]) == 1
 
-    def test_images_with_multiple_images(self, client, auth_headers: dict):
+    def test_images_with_multiple_images(self, client: TestClient, auth_headers: dict):
         """Test image generation with multiple images."""
         payload = {"prompt": "A forest landscape", "n": 3, "size": "1024x1024"}
 
@@ -65,7 +68,7 @@ class TestImagesE2E:
             data = response.json()
             assert len(data["data"]) == 3
 
-    def test_images_different_sizes(self, client, auth_headers: dict):
+    def test_images_different_sizes(self, client: TestClient, auth_headers: dict):
         """Test image generation with different sizes."""
         sizes = ["256x256", "512x512", "1024x1024"]
 
@@ -80,7 +83,7 @@ class TestImagesE2E:
 
             assert response.status_code in [200, 402, 503, 400, 500]
 
-    def test_images_with_deepinfra_provider(self, client, auth_headers: dict):
+    def test_images_with_deepinfra_provider(self, client: TestClient, auth_headers: dict):
         """Test image generation with DeepInfra provider."""
         payload = {
             "prompt": "A beautiful landscape",
@@ -98,7 +101,7 @@ class TestImagesE2E:
 
         assert response.status_code in [200, 402, 503, 500]
 
-    def test_images_with_google_vertex_provider(self, client, auth_headers: dict):
+    def test_images_with_google_vertex_provider(self, client: TestClient, auth_headers: dict):
         """Test image generation with Google Vertex AI provider."""
         payload = {
             "prompt": "A futuristic city",
@@ -117,7 +120,7 @@ class TestImagesE2E:
         # Google Vertex requires additional setup
         assert response.status_code in [200, 402, 503, 400, 500]
 
-    def test_images_with_fal_provider(self, client, auth_headers: dict):
+    def test_images_with_fal_provider(self, client: TestClient, auth_headers: dict):
         """Test image generation with Fal.ai provider."""
         payload = {
             "prompt": "A serene ocean view",
@@ -135,7 +138,7 @@ class TestImagesE2E:
 
         assert response.status_code in [200, 402, 503, 500]
 
-    def test_images_invalid_provider(self, client, auth_headers: dict):
+    def test_images_invalid_provider(self, client: TestClient, auth_headers: dict):
         """Test image generation with unsupported provider."""
         payload = {
             "prompt": "Test",
@@ -155,7 +158,7 @@ class TestImagesE2E:
         data = response.json()
         assert "not supported" in data.get("detail", "").lower()
 
-    def test_images_missing_prompt(self, client, auth_headers: dict):
+    def test_images_missing_prompt(self, client: TestClient, auth_headers: dict):
         """Test image generation without prompt."""
         payload = {"n": 1, "size": "1024x1024"}
 
@@ -167,7 +170,7 @@ class TestImagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_images_empty_prompt(self, client, auth_headers: dict):
+    def test_images_empty_prompt(self, client: TestClient, auth_headers: dict):
         """Test image generation with empty prompt."""
         payload = {"prompt": "", "n": 1, "size": "1024x1024"}
 
@@ -179,7 +182,7 @@ class TestImagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_images_missing_api_key(self, client, base_image_payload: dict):
+    def test_images_missing_api_key(self, client: TestClient, base_image_payload: dict):
         """Test image generation without API key."""
         response = client.post(
             "/v1/images/generations",
@@ -188,7 +191,7 @@ class TestImagesE2E:
 
         assert response.status_code == 401
 
-    def test_images_very_long_prompt(self, client, auth_headers: dict):
+    def test_images_very_long_prompt(self, client: TestClient, auth_headers: dict):
         """Test image generation with very long prompt."""
         long_prompt = "A beautiful image. " * 500  # Very long prompt
 
@@ -203,7 +206,7 @@ class TestImagesE2E:
         # Should either succeed or fail with appropriate error
         assert response.status_code in [200, 402, 503, 400, 413, 500]
 
-    def test_images_special_characters_in_prompt(self, client, auth_headers: dict):
+    def test_images_special_characters_in_prompt(self, client: TestClient, auth_headers: dict):
         """Test image generation with special characters in prompt."""
         payload = {
             "prompt": "A beautiful image with émojis 🎨 and special chars: @#$%^&*()",
@@ -219,7 +222,7 @@ class TestImagesE2E:
 
         assert response.status_code in [200, 402, 503, 500]
 
-    def test_images_invalid_size(self, client, auth_headers: dict):
+    def test_images_invalid_size(self, client: TestClient, auth_headers: dict):
         """Test image generation with invalid size."""
         payload = {"prompt": "Test", "n": 1, "size": "invalid-size"}
 
@@ -232,7 +235,7 @@ class TestImagesE2E:
         # May fail validation or silently fall back to default
         assert response.status_code in [200, 400, 422, 402, 503, 500]
 
-    def test_images_invalid_number_of_images(self, client, auth_headers: dict):
+    def test_images_invalid_number_of_images(self, client: TestClient, auth_headers: dict):
         """Test image generation with invalid n parameter."""
         payload = {"prompt": "Test", "n": 0, "size": "1024x1024"}  # Invalid: must be at least 1
 
@@ -244,7 +247,7 @@ class TestImagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_images_default_size(self, client, auth_headers: dict):
+    def test_images_default_size(self, client: TestClient, auth_headers: dict):
         """Test image generation without size (should use default)."""
         payload = {"prompt": "A default sized image", "n": 1}
 
@@ -256,7 +259,7 @@ class TestImagesE2E:
 
         assert response.status_code in [200, 402, 503, 500]
 
-    def test_images_default_provider(self, client, auth_headers: dict):
+    def test_images_default_provider(self, client: TestClient, auth_headers: dict):
         """Test image generation without provider (should default to deepinfra)."""
         payload = {"prompt": "Test with default provider", "n": 1, "size": "1024x1024"}
 
