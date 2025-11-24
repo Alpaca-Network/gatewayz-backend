@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -13,7 +12,7 @@ from src.db.plans import (
     get_user_usage_within_plan_limits,
 )
 from src.db.rate_limits import get_environment_usage_summary
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.schemas import (
     AssignPlanRequest,
     PlanEntitlementsResponse,
@@ -30,7 +29,7 @@ router = APIRouter()
 
 
 # Plan Management Endpoints
-@router.get("/plans", response_model=List[PlanResponse], tags=["plans"])
+@router.get("/plans", response_model=list[PlanResponse], tags=["plans"])
 async def get_plans():
     """Get all available subscription plans"""
     try:
@@ -156,7 +155,7 @@ async def get_user_plan_usage(api_key: str = Depends(get_api_key)):
     "/user/plan/entitlements", response_model=PlanEntitlementsResponse, tags=["authentication"]
 )
 async def get_user_plan_entitlements(
-    api_key: str = Depends(get_api_key), feature: Optional[str] = Query(None)
+    api_key: str = Depends(get_api_key), feature: str | None = Query(None)
 ):
     """Check user's plan entitlements"""
     try:

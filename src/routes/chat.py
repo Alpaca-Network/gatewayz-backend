@@ -4,13 +4,25 @@ import logging
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.utils.performance_tracker import PerformanceTracker
+import importlib
+
+import src.db.activity as activity_module
+import src.db.api_keys as api_keys_module
+import src.db.chat_history as chat_history_module
+import src.db.plans as plans_module
+import src.db.rate_limits as rate_limits_module
+import src.db.users as users_module
+from src.config import Config
+from src.schemas import ProxyRequest, ResponseRequest
+from src.security.deps import get_api_key
+from src.utils.rate_limit_headers import get_rate_limit_headers
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -43,19 +55,6 @@ except ImportError:
         return MockSpan()
 
 
-import importlib
-
-import src.db.activity as activity_module
-import src.db.api_keys as api_keys_module
-import src.db.chat_history as chat_history_module
-import src.db.model_health as model_health_module
-import src.db.plans as plans_module
-import src.db.rate_limits as rate_limits_module
-import src.db.users as users_module
-from src.config import Config
-from src.schemas import ProxyRequest, ResponseRequest
-from src.security.deps import get_api_key
-from src.utils.rate_limit_headers import get_rate_limit_headers
 
 # Import provider clients with graceful error handling
 # This prevents a single provider's import failure from breaking the entire chat endpoint
@@ -338,10 +337,12 @@ from src.services.model_transformations import detect_provider_from_model_id, tr
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
+    enforce_model_failover_rules,
     map_provider_error,
     should_failover,
 )
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.token_estimator import estimate_message_tokens
 
 
 # Backwards compatibility wrappers for test patches
@@ -409,10 +410,6 @@ def track_trial_usage(*args, **kwargs):
     return trial_module.track_trial_usage(*args, **kwargs)
 
 
-def record_model_call(*args, **kwargs):
-    return model_health_module.record_model_call(*args, **kwargs)
-
-
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -433,6 +430,17 @@ def mask_key(k: str) -> str:
 
 async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
+    """Run a lightweight plan-limit precheck before making upstream calls."""
+    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
 
 
 def _fallback_get_user(api_key: str):
@@ -612,18 +620,6 @@ async def _process_stream_completion_background(
                     f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
                     exc_info=True,
                 )
-
-        # Record successful streaming model call
-        try:
-            await record_model_call(
-                provider=provider,
-                model=model,
-                response_time_ms=elapsed * 1000,
-                status="success",
-            )
-        except Exception as e:
-            logger.debug(f"Failed to record model health for streaming: {e}")
-
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
@@ -806,7 +802,7 @@ async def chat_completions(
     req: ProxyRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     # === 0) Setup / sanity ===
@@ -871,8 +867,19 @@ async def chat_completions(
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
+        # Fast-fail requests that would exceed plan limits before hitting any upstream provider
+        await _ensure_plan_capacity(user["id"], environment_tag)
+
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
+
+        # Pre-check plan limits before making any upstream calls
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+            )
 
         # Allow disabling rate limiting for testing (DEV ONLY)
         import os
@@ -883,10 +890,42 @@ async def chat_completions(
         rl_pre = None
         rl_final = None
 
-        # Rate limiting will be checked after we know actual token usage (more accurate)
+        if (
+            not trial.get("is_trial", False)
+            and rate_limit_mgr
+            and not disable_rate_limiting
+        ):
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                await _to_thread(
+                    create_rate_limit_alert,
+                    api_key,
+                    "rate_limit_exceeded",
+                    {
+                        "reason": rl_pre.reason,
+                        "retry_after": rl_pre.retry_after,
+                        "remaining_requests": rl_pre.remaining_requests,
+                        "remaining_tokens": rl_pre.remaining_tokens,
+                    },
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers=(
+                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                    ),
+                )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
+
+        # Pre-check plan limits before streaming (fail fast)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
@@ -927,6 +966,14 @@ async def chat_completions(
                     sanitize_for_logging(str(e)),
                 )
 
+        # === 2.2) Plan limit pre-check with estimated tokens ===
+        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
         # Store original model for response
         original_model = req.model
 
@@ -954,19 +1001,28 @@ async def chat_completions(
             if provider == "hug":
                 provider = "huggingface"
 
+            provider_locked = not req_provider_missing
+
             override_provider = detect_provider_from_model_id(original_model)
             if override_provider:
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
                     override_provider = "huggingface"
-                if override_provider != provider:
+                if provider_locked and override_provider != provider:
                     logger.info(
-                        f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                        "Skipping provider override for model %s: request locked provider to '%s'",
+                        sanitize_for_logging(original_model),
+                        sanitize_for_logging(provider),
                     )
-                    provider = override_provider
-                # Mark provider as determined even if it matches the default
-                # This prevents the fallback logic from incorrectly routing to wrong providers
-                req_provider_missing = False
+                else:
+                    if override_provider != provider:
+                        logger.info(
+                            f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                        )
+                        provider = override_provider
+                    # Mark provider as determined even if it matches the default
+                    # This prevents the fallback logic from incorrectly routing to wrong providers
+                    req_provider_missing = False
 
             if req_provider_missing:
                 # Try to detect provider from model ID using the transformation module
@@ -1004,6 +1060,7 @@ async def chat_completions(
                     # Otherwise default to openrouter (already set)
 
             provider_chain = build_provider_failover_chain(provider)
+            provider_chain = enforce_model_failover_rules(original_model, provider_chain)
             model = original_model
 
         # Diagnostic logging for tools parameter
@@ -1019,7 +1076,6 @@ async def chat_completions(
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
             last_http_exc = None
-            request_start_time = None  # Track individual request start time
             for idx, attempt_provider in enumerate(provider_chain):
                 attempt_model = transform_model_id(original_model, attempt_provider)
                 if attempt_model != original_model:
@@ -1028,7 +1084,6 @@ async def chat_completions(
                     )
 
                 request_model = attempt_model
-                request_start_time = time.monotonic()  # Start timing this specific provider attempt
                 try:
                     if attempt_provider == "featherless":
                         stream = await _to_thread(
@@ -1164,7 +1219,7 @@ async def chat_completions(
                         headers=stream_headers,
                     )
                 except Exception as exc:
-                    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -1177,27 +1232,6 @@ async def chat_completions(
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
-
-                    # Determine error status for health tracking
-                    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-                        error_status = "timeout"
-                    elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-                        error_status = "rate_limited"
-                    elif isinstance(exc, httpx.RequestError):
-                        error_status = "network_error"
-                    else:
-                        error_status = "error"
-
-                    # Record failed model call (streaming)
-                    request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
-                    background_tasks.add_task(
-                        record_model_call,
-                        provider=attempt_provider,
-                        model=request_model,
-                        response_time_ms=request_elapsed,
-                        status=error_status,
-                        error_message=str(exc)[:500],  # Limit error message length
-                    )
 
                     last_http_exc = http_exc
                     if idx < len(provider_chain) - 1 and should_failover(http_exc):
@@ -1219,7 +1253,6 @@ async def chat_completions(
         start = time.monotonic()
         processed = None
         last_http_exc = None
-        request_start_time = None  # Track individual request start time
 
         for idx, attempt_provider in enumerate(provider_chain):
             attempt_model = transform_model_id(original_model, attempt_provider)
@@ -1235,7 +1268,6 @@ async def chat_completions(
                     "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                 )
 
-            request_start_time = time.monotonic()  # Start timing this specific provider attempt
             try:
                 if attempt_provider == "featherless":
                     resp_raw = await asyncio.wait_for(
@@ -1397,19 +1429,9 @@ async def chat_completions(
 
                 provider = attempt_provider
                 model = request_model
-
-                # Record successful model call
-                request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
-                background_tasks.add_task(
-                    record_model_call,
-                    provider=attempt_provider,
-                    model=request_model,
-                    response_time_ms=request_elapsed,
-                    status="success",
-                )
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -1420,27 +1442,6 @@ async def chat_completions(
                 else:
                     logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
                 http_exc = map_provider_error(attempt_provider, request_model, exc)
-
-                # Determine error status for health tracking
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-                    error_status = "timeout"
-                elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-                    error_status = "rate_limited"
-                elif isinstance(exc, httpx.RequestError):
-                    error_status = "network_error"
-                else:
-                    error_status = "error"
-
-                # Record failed model call
-                request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
-                background_tasks.add_task(
-                    record_model_call,
-                    provider=attempt_provider,
-                    model=request_model,
-                    response_time_ms=request_elapsed,
-                    status=error_status,
-                    error_message=str(exc)[:500],  # Limit error message length
-                )
 
                 last_http_exc = http_exc
                 if idx < len(provider_chain) - 1 and should_failover(http_exc):
@@ -1704,7 +1705,7 @@ async def unified_responses(
     req: ResponseRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -1743,7 +1744,6 @@ async def unified_responses(
 
         environment_tag = user.get("environment_tag", "live")
 
-        # Only validate trial access (plan limits checked after token usage known)
         trial = await _to_thread(validate_trial_access, api_key)
         if not trial.get("is_valid", False):
             if trial.get("is_trial") and trial.get("is_expired"):
@@ -1765,6 +1765,22 @@ async def unified_responses(
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
         rate_limit_mgr = get_rate_limit_manager()
+
+        # Pre-check plan limits before making any provider calls to avoid unnecessary work
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+            )
+        else:
+            logger.debug(
+                "Plan pre-check passed for user %s (env=%s): %s",
+                sanitize_for_logging(str(user.get("id"))),
+                environment_tag,
+                pre_plan,
+            )
+
         if not trial.get("is_trial", False):
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
@@ -1852,6 +1868,14 @@ async def unified_responses(
                     sanitize_for_logging(str(e)),
                 )
 
+        # Plan limit pre-check for unified responses
+        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
         # Store original model for response
         original_model = req.model
 
@@ -1888,19 +1912,28 @@ async def unified_responses(
         if provider == "hug":
             provider = "huggingface"
 
+        provider_locked = not req_provider_missing
+
         override_provider = detect_provider_from_model_id(original_model)
         if override_provider:
             override_provider = override_provider.lower()
             if override_provider == "hug":
                 override_provider = "huggingface"
-            if override_provider != provider:
+            if provider_locked and override_provider != provider:
                 logger.info(
-                    f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                    "Skipping provider override for model %s: request locked provider to '%s'",
+                    sanitize_for_logging(original_model),
+                    sanitize_for_logging(provider),
                 )
-                provider = override_provider
-            # Mark provider as determined even if it matches the default
-            # This prevents the fallback logic from incorrectly routing to wrong providers
-            req_provider_missing = False
+            else:
+                if override_provider != provider:
+                    logger.info(
+                        f"Provider override applied for model {original_model}: '{provider}' -> '{override_provider}'"
+                    )
+                    provider = override_provider
+                # Mark provider as determined even if it matches the default
+                # This prevents the fallback logic from incorrectly routing to wrong providers
+                req_provider_missing = False
 
         if req_provider_missing:
             # Try to detect provider from model ID using the transformation module
@@ -1937,6 +1970,7 @@ async def unified_responses(
                         break
 
         provider_chain = build_provider_failover_chain(provider)
+        provider_chain = enforce_model_failover_rules(original_model, provider_chain)
         model = original_model
 
         # Diagnostic logging for tools parameter
@@ -2011,7 +2045,7 @@ async def unified_responses(
                             **optional,
                         )
 
-                    async def response_stream_generator():
+                    async def response_stream_generator(stream=stream, request_model=request_model):
                         """Transform chat/completions stream to responses format with usage tracking"""
                         async for chunk_data in stream_generator(
                             stream,

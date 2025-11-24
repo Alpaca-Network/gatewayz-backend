@@ -6,11 +6,13 @@ CRUD operations for payment records in Supabase
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
+STRIPE_CHECKOUT_SESSION_COLUMN = "stripe_checkout_session_id"
 
 
 # ==================== Create ====================
@@ -22,11 +24,11 @@ def create_payment(
     currency: str = "usd",
     payment_method: str = "stripe",
     status: str = "pending",
-    stripe_payment_intent_id: Optional[str] = None,
-    stripe_session_id: Optional[str] = None,
-    stripe_customer_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    stripe_payment_intent_id: str | None = None,
+    stripe_session_id: str | None = None,
+    stripe_customer_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """
     Create a new payment record
 
@@ -37,7 +39,7 @@ def create_payment(
         payment_method: Payment method used (default: stripe)
         status: Payment status (pending, completed, failed, refunded, canceled)
         stripe_payment_intent_id: Stripe payment intent ID
-        stripe_session_id: Stripe checkout session ID
+        stripe_session_id: Stripe checkout session ID (stored as stripe_checkout_session_id)
         stripe_customer_id: Stripe customer ID
         metadata: Additional metadata as JSON
 
@@ -69,7 +71,7 @@ def create_payment(
             payment_data["stripe_payment_intent_id"] = stripe_payment_intent_id
 
         if stripe_session_id:
-            payment_data["stripe_checkout_session_id"] = stripe_session_id
+            payment_data[STRIPE_CHECKOUT_SESSION_COLUMN] = stripe_session_id
 
         if stripe_customer_id:
             payment_data["stripe_customer_id"] = stripe_customer_id
@@ -94,7 +96,7 @@ def create_payment(
 # ==================== Read ====================
 
 
-def get_payment(payment_id: int) -> Optional[Dict[str, Any]]:
+def get_payment(payment_id: int) -> dict[str, Any] | None:
     """
     Get a payment record by ID
 
@@ -120,7 +122,7 @@ def get_payment(payment_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> Optional[Dict[str, Any]]:
+def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> dict[str, Any] | None:
     """
     Get a payment record by Stripe payment intent ID
 
@@ -144,11 +146,11 @@ def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> Optional[Dict
         if result.data:
             return result.data[0]
 
-        # Try session ID
+        # Try checkout session ID (legacy column stripe_session_id no longer exists)
         result = (
             client.table("payments")
             .select("*")
-            .eq("stripe_session_id", stripe_payment_intent_id)
+            .eq(STRIPE_CHECKOUT_SESSION_COLUMN, stripe_payment_intent_id)
             .execute()
         )
 
@@ -164,8 +166,8 @@ def get_payment_by_stripe_intent(stripe_payment_intent_id: str) -> Optional[Dict
 
 
 def get_user_payments(
-    user_id: int, limit: int = 50, offset: int = 0, status: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    user_id: int, limit: int = 50, offset: int = 0, status: str | None = None
+) -> list[dict[str, Any]]:
     """
     Get all payment records for a user
 
@@ -195,7 +197,7 @@ def get_user_payments(
         return []
 
 
-def get_recent_payments(limit: int = 20) -> List[Dict[str, Any]]:
+def get_recent_payments(limit: int = 20) -> list[dict[str, Any]]:
     """
     Get recent payments across all users (admin function)
 
@@ -229,10 +231,10 @@ def get_recent_payments(limit: int = 20) -> List[Dict[str, Any]]:
 def update_payment_status(
     payment_id: int,
     status: str,
-    stripe_payment_intent_id: Optional[str] = None,
-    stripe_session_id: Optional[str] = None,
-    error_message: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
+    stripe_payment_intent_id: str | None = None,
+    stripe_session_id: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any] | None:
     """
     Update payment status and related fields
 
@@ -255,7 +257,7 @@ def update_payment_status(
             update_data["stripe_payment_intent_id"] = stripe_payment_intent_id
 
         if stripe_session_id:
-            update_data["stripe_session_id"] = stripe_session_id
+            update_data[STRIPE_CHECKOUT_SESSION_COLUMN] = stripe_session_id
 
         # Add completion timestamp for completed payments
         if status == "completed":
@@ -286,7 +288,7 @@ def update_payment_status(
         return None
 
 
-def update_payment_metadata(payment_id: int, metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_payment_metadata(payment_id: int, metadata: dict[str, Any]) -> dict[str, Any] | None:
     """
     Update payment metadata
 
@@ -361,7 +363,7 @@ def delete_payment(payment_id: int) -> bool:
 # ==================== Statistics & Analytics ====================
 
 
-def get_payment_statistics(user_id: Optional[int] = None) -> Dict[str, Any]:
+def get_payment_statistics(user_id: int | None = None) -> dict[str, Any]:
     """
     Get payment statistics for a user or overall system
 
@@ -423,8 +425,8 @@ def get_payment_statistics(user_id: Optional[int] = None) -> Dict[str, Any]:
 
 
 def get_total_revenue(
-    start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
-) -> Dict[str, Any]:
+    start_date: datetime | None = None, end_date: datetime | None = None
+) -> dict[str, Any]:
     """
     Get total revenue statistics
 
@@ -475,7 +477,7 @@ def get_total_revenue(
         return {"total_transactions": 0, "revenue_by_currency": {}, "error": str(e)}
 
 
-def get_payment_trends(days: int = 30) -> Dict[str, Any]:
+def get_payment_trends(days: int = 30) -> dict[str, Any]:
     """
     Get payment trends over specified days
 

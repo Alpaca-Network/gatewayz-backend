@@ -1,11 +1,10 @@
 import logging
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.api_keys import validate_api_key_permissions
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.db_security import get_audit_logs
 from src.security.deps import get_api_key
 
@@ -17,10 +16,10 @@ router = APIRouter()
 
 @router.get("/user/api-keys/audit-logs", tags=["authentication"])
 async def get_user_audit_logs(
-    key_id: Optional[int] = None,
-    action: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    key_id: int | None = None,
+    action: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 100,
     api_key: str = Depends(get_api_key),
 ):

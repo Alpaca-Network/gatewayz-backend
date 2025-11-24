@@ -4,6 +4,8 @@ Tests for subscription products database module
 """
 
 import pytest
+from postgrest import APIError
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.db.subscription_products import (
@@ -54,6 +56,43 @@ class TestSubscriptionProducts:
         tier = get_tier_from_product_id("prod_unknown_123")
 
         assert tier == "basic"  # Should default to basic
+
+    def test_get_tier_from_product_id_recovers_from_schema_cache_miss(self, mock_supabase_client):
+        """Ensure schema cache refresh is attempted when PostgREST cannot find the table."""
+        execute_mock = (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute
+        )
+        execute_mock.side_effect = [
+            APIError({"code": "PGRST205", "message": "Could not find the table"}),
+            SimpleNamespace(data=[{"tier": "pro"}]),
+        ]
+
+        with patch(
+            "src.db.subscription_products.refresh_postgrest_schema_cache", return_value=True
+        ) as refresh_mock:
+            tier = get_tier_from_product_id("prod_schema_cache")
+
+        assert tier == "pro"
+        refresh_mock.assert_called_once()
+        assert execute_mock.call_count == 2
+
+    def test_get_tier_from_product_id_schema_cache_refresh_failure(self, mock_supabase_client):
+        """Ensure we fall back to basic tier when schema cache refresh cannot run."""
+        execute_mock = (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute
+        )
+        execute_mock.side_effect = [
+            APIError({"code": "PGRST205", "message": "Could not find the table"}),
+        ]
+
+        with patch(
+            "src.db.subscription_products.refresh_postgrest_schema_cache", return_value=False
+        ) as refresh_mock:
+            tier = get_tier_from_product_id("prod_schema_cache_fail")
+
+        assert tier == "basic"
+        refresh_mock.assert_called_once()
+        assert execute_mock.call_count == 1
 
     def test_get_credits_from_tier_pro(self, mock_supabase_client):
         """Test getting credits for PRO tier"""

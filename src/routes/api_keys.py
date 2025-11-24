@@ -12,7 +12,7 @@ from src.db.api_keys import (
     update_api_key,
     validate_api_key_permissions,
 )
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.schemas import (
     ApiKeyResponse,
     CreateApiKeyRequest,

@@ -7,11 +7,12 @@ Handles all Stripe payment operations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any
 
 import stripe
 
 from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
+from src.utils.sentry_context import capture_payment_error
 from src.db.subscription_products import get_credits_from_tier, get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.db.webhook_events import is_event_processed, record_processed_event
@@ -66,7 +67,223 @@ class StripeService:
 
         logger.info("Stripe service initialized")
 
+    @staticmethod
+    def _get_session_value(session_obj: Any, field: str):
+        """Safely extract a field from a Stripe session object or dict."""
+        if isinstance(session_obj, dict):
+            return session_obj.get(field)
+        return getattr(session_obj, field, None)
+
+    @staticmethod
+    def _metadata_to_dict(metadata: Any) -> dict[str, Any]:
+        """Convert Stripe metadata object into a plain dictionary."""
+        if metadata is None:
+            return {}
+        if isinstance(metadata, dict):
+            return metadata
+        to_dict = getattr(metadata, "to_dict", None)
+        if callable(to_dict):
+            try:
+                return to_dict()
+            except Exception:
+                pass
+        to_dict_recursive = getattr(metadata, "to_dict_recursive", None)
+        if callable(to_dict_recursive):
+            try:
+                return to_dict_recursive()
+            except Exception:
+                pass
+        try:
+            return dict(metadata)
+        except Exception:
+            return {}
+
     # ==================== Checkout Sessions ====================
+
+    @staticmethod
+    def _get_stripe_object_value(obj: Any, attr: str) -> Any:
+        """
+        Safely extract a field from a Stripe object (dict-like or attribute-based).
+        """
+        if obj is None:
+            return None
+
+        if hasattr(obj, attr):
+            return getattr(obj, attr)
+
+        if isinstance(obj, dict):
+            return obj.get(attr)
+
+        try:
+            return obj[attr]
+        except (KeyError, TypeError, IndexError):
+            return None
+
+    @staticmethod
+    def _coerce_to_int(value: Any) -> int | None:
+        """
+        Convert Stripe values (str, Decimal, float) into an int representation.
+        Returns None when conversion is not possible.
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, bool):
+            return int(value)
+
+        if isinstance(value, int | float):
+            return int(round(value))
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                return int(round(float(stripped)))
+            except (ValueError, TypeError):
+                return None
+
+        return None
+
+    def _hydrate_checkout_session_metadata(self, session: Any) -> tuple[Any, dict[str, Any]]:
+        """
+        Ensure we have metadata for a checkout session by re-fetching it from Stripe when needed.
+        """
+        metadata = self._metadata_to_dict(self._get_stripe_object_value(session, "metadata"))
+        if metadata:
+            return session, metadata
+
+        session_id = self._get_stripe_object_value(session, "id")
+        if not session_id:
+            return session, {}
+
+        refreshed_session: Any | None = None
+        try:
+            refreshed_session = stripe.checkout.Session.retrieve(session_id, expand=["metadata"])
+            refreshed_metadata = self._metadata_to_dict(
+                self._get_stripe_object_value(refreshed_session, "metadata")
+            )
+            if refreshed_metadata:
+                logger.info(
+                    "Hydrated checkout session metadata from Stripe (session_id=%s)", session_id
+                )
+                return refreshed_session, refreshed_metadata
+        except stripe.StripeError as exc:
+            logger.warning(
+                "Unable to hydrate checkout session metadata for %s: %s", session_id, exc
+            )
+
+        # Final fallback: attempt to read metadata from the underlying PaymentIntent
+        session_for_intent = refreshed_session or session
+        intent_metadata = self._hydrate_payment_intent_metadata(session_for_intent)
+        if intent_metadata:
+            return session_for_intent, intent_metadata
+
+        return session_for_intent, {}
+
+    def _hydrate_payment_intent_metadata(self, session: Any) -> dict[str, Any]:
+        """
+        Fetch metadata from the PaymentIntent when it is not present on the checkout session.
+        """
+        payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
+        return self._hydrate_payment_intent_metadata_from_id(payment_intent_id)
+
+    def _hydrate_payment_intent_metadata_from_id(self, payment_intent_id: str | None) -> dict[str, Any]:
+        """
+        Fetch metadata from the payment intent ID when checkout session metadata is missing.
+        """
+        if not payment_intent_id:
+            return {}
+
+        try:
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["metadata"])
+            metadata = self._metadata_to_dict(self._get_stripe_object_value(intent, "metadata"))
+            if metadata:
+                logger.info(
+                    "Recovered metadata from payment intent %s for checkout session fallback",
+                    payment_intent_id,
+                )
+            return metadata
+        except stripe.StripeError as exc:
+            logger.warning(
+                "Unable to hydrate payment intent metadata for %s: %s", payment_intent_id, exc
+            )
+            return {}
+
+    def _lookup_payment_record(self, session: Any) -> dict[str, Any] | None:
+        """
+        Look up the local payment record using payment_intent or checkout session id.
+        """
+        payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
+        session_id = self._get_stripe_object_value(session, "id")
+
+        lookup_attempts: list[tuple[str, str]] = []
+        if payment_intent_id:
+            lookup_attempts.append(("payment_intent", payment_intent_id))
+        if session_id and session_id != payment_intent_id:
+            lookup_attempts.append(("checkout_session", session_id))
+
+        for lookup_type, lookup_value in lookup_attempts:
+            payment = get_payment_by_stripe_intent(lookup_value)
+            if payment:
+                logger.info(
+                    "Resolved payment context via Supabase using %s lookup (value=%s)",
+                    lookup_type,
+                    lookup_value,
+                )
+                return payment
+
+        return None
+
+    def _create_fallback_payment_record(
+        self,
+        *,
+        user_id: int,
+        credits_cents: int,
+        session_id: str | None,
+        payment_intent_id: str | None,
+        currency: str | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """
+        Create a synthetic payment record when the original checkout metadata is missing.
+        """
+        amount_dollars = credits_cents / 100
+        payment_currency = (currency or self.default_currency.value).lower()
+        fallback_metadata = {
+            "created_via": "stripe_webhook_fallback",
+            "stripe_session_id": session_id,
+            "stripe_payment_intent_id": payment_intent_id,
+            "webhook_metadata_snapshot": metadata or {},
+        }
+
+        logger.warning(
+            "Creating fallback payment record for checkout session %s (user_id=%s, amount=%s %s)",
+            session_id,
+            user_id,
+            amount_dollars,
+            payment_currency,
+        )
+
+        payment = create_payment(
+            user_id=user_id,
+            amount=amount_dollars,
+            currency=payment_currency,
+            payment_method="stripe",
+            status="pending",
+            stripe_payment_intent_id=payment_intent_id,
+            stripe_session_id=session_id,
+            metadata=fallback_metadata,
+        )
+
+        if not payment:
+            logger.error(
+                "Unable to create fallback payment record for session %s (user_id=%s)",
+                session_id,
+                user_id,
+            )
+
+        return payment
 
     def create_checkout_session(
         self, user_id: int, request: CreateCheckoutSessionRequest
@@ -135,8 +352,16 @@ class StripeService:
             logger.info(f"Final cancel_url being sent to Stripe: {cancel_url}")
             logger.info("=== END URL DEBUG ===")
 
-            # Calculate credits
-            credits = request.amount
+            # Calculate credits (in cents, matching amount)
+            credits_cents = request.amount
+
+            checkout_metadata = {
+                "user_id": str(user_id),
+                "payment_id": str(payment["id"]),
+                "credits_cents": str(credits_cents),
+                "credits": str(credits_cents),  # Keep for backward compatibility
+                **(request.metadata or {}),
+            }
 
             # Create Stripe checkout session
             session = stripe.checkout.Session.create(
@@ -148,7 +373,7 @@ class StripeService:
                             "unit_amount": request.amount,
                             "product_data": {
                                 "name": "Gatewayz Credits",
-                                "description": f"{credits:,} credits for your account",
+                                "description": f"{credits_cents:,} credits for your account",
                             },
                         },
                         "quantity": 1,
@@ -159,19 +384,22 @@ class StripeService:
                 cancel_url=cancel_url,
                 customer_email=request.customer_email or user_email,
                 client_reference_id=str(user_id),
-                metadata={
-                    "user_id": str(user_id),
-                    "payment_id": str(payment["id"]),
-                    "credits": str(credits),
-                    **(request.metadata or {}),
-                },
+                metadata=checkout_metadata,
+                payment_intent_data={"metadata": checkout_metadata.copy()},
                 expires_at=int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp()),
             )
 
-            # Update payment with session ID
-            update_payment_status(
-                payment_id=payment["id"], status="pending", stripe_payment_intent_id=session.id
-            )
+            # Update payment with identifiers known at session creation
+            payment_update_kwargs: dict[str, Any] = {
+                "payment_id": payment["id"],
+                "status": "pending",
+                "stripe_session_id": session.id,
+            }
+            session_payment_intent = self._get_stripe_object_value(session, "payment_intent")
+            if session_payment_intent:
+                payment_update_kwargs["stripe_payment_intent_id"] = session_payment_intent
+
+            update_payment_status(**payment_update_kwargs)
 
             logger.info(f"Checkout session created: {session.id} for user {user_id}")
 
@@ -187,13 +415,27 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating checkout session: {e}")
+            capture_payment_error(
+                e,
+                operation='checkout_session',
+                user_id=str(user_id),
+                amount=request.amount / 100,
+                details={'currency': request.currency.value}
+            )
             raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
             logger.error(f"Error creating checkout session: {e}")
+            capture_payment_error(
+                e,
+                operation='checkout_session',
+                user_id=str(user_id),
+                amount=request.amount / 100,
+                details={'currency': request.currency.value}
+            )
             raise
 
-    def retrieve_checkout_session(self, session_id: str) -> Dict[str, Any]:
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         """Retrieve checkout session details"""
         try:
             session = stripe.checkout.Session.retrieve(session_id)
@@ -209,6 +451,11 @@ class StripeService:
             }
         except stripe.StripeError as e:
             logger.error(f"Error retrieving checkout session: {e}")
+            capture_payment_error(
+                e,
+                operation='retrieve_session',
+                details={'session_id': session_id}
+            )
             raise Exception(f"Failed to retrieve session: {str(e)}") from e
 
     # ==================== Payment Intents ====================
@@ -276,7 +523,7 @@ class StripeService:
             logger.error(f"Error creating payment intent: {e}")
             raise
 
-    def retrieve_payment_intent(self, payment_intent_id: str) -> Dict[str, Any]:
+    def retrieve_payment_intent(self, payment_intent_id: str) -> dict[str, Any]:
         """Retrieve payment intent details"""
         try:
             intent = stripe.PaymentIntent.retrieve(payment_intent_id)
@@ -382,10 +629,141 @@ class StripeService:
     def _handle_checkout_completed(self, session):
         """Handle completed checkout session"""
         try:
-            user_id = int(session.metadata.get("user_id"))
-            credits = float(session.metadata.get("credits"))
-            payment_id = int(session.metadata.get("payment_id"))
-            amount_dollars = credits / 100  # Convert cents to dollars
+            session, metadata = self._hydrate_checkout_session_metadata(session)
+            metadata = metadata or {}
+
+            session_id = self._get_stripe_object_value(session, "id")
+            if session_id is None and not metadata:
+                raise ValueError(
+                    "Checkout session payload is missing metadata and session id; cannot process payment"
+                )
+            payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
+
+            # Log metadata for debugging
+            logger.info(
+                f"Checkout completed: session_id={session_id}, metadata_keys={list(metadata.keys())}"
+            )
+            logger.debug(f"Full metadata: {metadata}")
+
+            # Backfill metadata from the related payment intent if session metadata is absent/incomplete
+            required_metadata_keys = ("user_id", "payment_id", "credits_cents")
+            missing_keys = [key for key in required_metadata_keys if not metadata.get(key)]
+            if payment_intent_id and missing_keys:
+                logger.info(
+                    f"Checkout session {session_id} missing metadata keys: {missing_keys}. "
+                    f"Attempting to hydrate from payment intent {payment_intent_id}"
+                )
+                intent_metadata = self._hydrate_payment_intent_metadata_from_id(payment_intent_id)
+                if intent_metadata:
+                    logger.info(f"Recovered metadata from payment intent: {list(intent_metadata.keys())}")
+                    for key, value in intent_metadata.items():
+                        metadata.setdefault(key, value)
+
+            user_id = self._coerce_to_int(metadata.get("user_id"))
+            payment_id = self._coerce_to_int(metadata.get("payment_id"))
+            # Try both "credits_cents" and "credits" for backward compatibility
+            credits_cents = self._coerce_to_int(metadata.get("credits_cents"))
+            if credits_cents is None:
+                credits_cents = self._coerce_to_int(metadata.get("credits"))
+
+            if user_id is None:
+                client_reference_id = self._get_stripe_object_value(session, "client_reference_id")
+                user_id = self._coerce_to_int(client_reference_id)
+
+            payment_record = None
+            if user_id is None or payment_id is None or credits_cents is None:
+                payment_record = self._lookup_payment_record(session)
+                if payment_record:
+                    logger.warning(
+                        "Checkout session %s missing metadata. Fallback payment context recovered (payment_id=%s).",
+                        session_id,
+                        payment_record.get("id"),
+                    )
+                    if payment_id is None:
+                        payment_id = payment_record.get("id")
+                    if user_id is None:
+                        user_id = payment_record.get("user_id")
+                    if credits_cents is None:
+                        fallback_fields = (
+                            payment_record.get("credits_purchased"),
+                            payment_record.get("amount_cents"),
+                        )
+                        for field_value in fallback_fields:
+                            credits_cents = self._coerce_to_int(field_value)
+                            if credits_cents is not None:
+                                break
+                        if credits_cents is None:
+                            amount_usd = payment_record.get("amount_usd", payment_record.get("amount"))
+                            if amount_usd is not None:
+                                try:
+                                    credits_cents = int(round(float(amount_usd) * 100))
+                                except (TypeError, ValueError):
+                                    credits_cents = None
+
+            if credits_cents is None:
+                amount_total = self._coerce_to_int(
+                    self._get_stripe_object_value(session, "amount_total")
+                )
+                amount_subtotal = self._coerce_to_int(
+                    self._get_stripe_object_value(session, "amount_subtotal")
+                )
+                for fallback_amount in (amount_total, amount_subtotal):
+                    if fallback_amount is not None:
+                        credits_cents = fallback_amount
+                        logger.info(
+                            "Using checkout session amount fallback for credits (session_id=%s)",
+                            session_id,
+                        )
+                        break
+
+            if (
+                payment_id is None
+                and payment_record is None
+                and user_id is not None
+                and credits_cents is not None
+            ):
+                currency = self._get_stripe_object_value(session, "currency")
+                payment_record = self._create_fallback_payment_record(
+                    user_id=user_id,
+                    credits_cents=credits_cents,
+                    session_id=session_id,
+                    payment_intent_id=payment_intent_id,
+                    currency=currency,
+                    metadata=metadata,
+                )
+                if payment_record:
+                    payment_id = payment_record.get("id")
+
+            if user_id is None or payment_id is None or credits_cents is None:
+                # Provide detailed diagnostics for missing fields
+                missing_fields = []
+                if user_id is None:
+                    missing_fields.append(
+                        f"user_id (metadata.get('user_id')={metadata.get('user_id')})"
+                    )
+                if payment_id is None:
+                    missing_fields.append(
+                        f"payment_id (metadata.get('payment_id')={metadata.get('payment_id')})"
+                    )
+                if credits_cents is None:
+                    missing_fields.append(
+                        f"credits_cents (credits_cents={metadata.get('credits_cents')}, "
+                        f"credits={metadata.get('credits')})"
+                    )
+
+                logger.error(
+                    f"Checkout session {session_id} missing required metadata fields: {missing_fields}. "
+                    f"Metadata keys available: {list(metadata.keys())}. "
+                    f"Full metadata: {metadata}"
+                )
+
+                raise ValueError(
+                    "Checkout session missing required metadata "
+                    f"(session_id={session_id}, user_id={user_id}, "
+                    f"payment_id={payment_id}, credits_cents={credits_cents})"
+                )
+
+            amount_dollars = credits_cents / 100  # Convert cents to dollars
 
             # Add credits and log transaction
             add_credits_to_user(
@@ -395,8 +773,8 @@ class StripeService:
                 description=f"Stripe checkout - ${amount_dollars}",
                 payment_id=payment_id,
                 metadata={
-                    "stripe_session_id": session.id,
-                    "stripe_payment_intent_id": session.payment_intent,
+                    "stripe_session_id": session_id,
+                    "stripe_payment_intent_id": payment_intent_id,
                 },
             )
 
@@ -404,7 +782,8 @@ class StripeService:
             update_payment_status(
                 payment_id=payment_id,
                 status="completed",
-                stripe_payment_intent_id=session.payment_intent,
+                stripe_payment_intent_id=payment_intent_id,
+                stripe_session_id=session_id,
             )
 
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
@@ -537,6 +916,12 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating refund: {e}")
+            capture_payment_error(
+                e,
+                operation='refund',
+                amount=request.amount,
+                details={'payment_intent_id': request.payment_intent_id, 'reason': request.reason}
+            )
             raise Exception(f"Refund failed: {str(e)}") from e
 
     # ==================== Subscription Checkout ====================
@@ -671,6 +1056,7 @@ class StripeService:
 
             # Update user's subscription status and tier
             from src.config.supabase_config import get_supabase_client
+            from src.db.plans import get_plan_id_by_tier
 
             client = get_supabase_client()
 
@@ -688,6 +1074,38 @@ class StripeService:
                 update_data["subscription_end_date"] = subscription.current_period_end
 
             client.table("users").update(update_data).eq("id", user_id).execute()
+
+            # Create/assign user_plans entry for the new tier
+            plan_id = get_plan_id_by_tier(tier)
+            if plan_id:
+                # Deactivate any existing plans
+                client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
+
+                # Create new plan assignment for the subscription period
+                start_date = datetime.now(timezone.utc)
+                # Use subscription period end if available, otherwise 1 month
+                if subscription.current_period_end:
+                    end_date = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                else:
+                    end_date = start_date + timedelta(days=30)
+
+                user_plan_data = {
+                    "user_id": user_id,
+                    "plan_id": plan_id,
+                    "started_at": start_date.isoformat(),
+                    "expires_at": end_date.isoformat(),
+                    "is_active": True,
+                }
+
+                result = client.table("user_plans").insert(user_plan_data).execute()
+                if result.data:
+                    logger.info(
+                        f"User {user_id} assigned to plan {plan_id} (tier={tier}) for subscription {subscription.id}"
+                    )
+                else:
+                    logger.error(f"Failed to create user_plans entry for user {user_id}, plan {plan_id}")
+            else:
+                logger.warning(f"Could not find plan ID for tier: {tier}, user plan entry not created")
 
             # Clear trial status for all user's API keys
             client.table("api_keys_new").update(
@@ -720,6 +1138,7 @@ class StripeService:
 
             # Update user's subscription status
             from src.config.supabase_config import get_supabase_client
+            from src.db.plans import get_plan_id_by_tier
 
             client = get_supabase_client()
 
@@ -741,8 +1160,40 @@ class StripeService:
 
             client.table("users").update(update_data).eq("id", user_id).execute()
 
-            # Clear trial status for all user's API keys when subscription becomes active
+            # Update user_plans entry when subscription is active
             if status == "active":
+                plan_id = get_plan_id_by_tier(tier)
+                if plan_id:
+                    # Deactivate any existing plans
+                    client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
+
+                    # Create new plan assignment for the updated subscription period
+                    start_date = datetime.now(timezone.utc)
+                    # Use subscription period end if available, otherwise 1 month
+                    if subscription.current_period_end:
+                        end_date = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                    else:
+                        end_date = start_date + timedelta(days=30)
+
+                    user_plan_data = {
+                        "user_id": user_id,
+                        "plan_id": plan_id,
+                        "started_at": start_date.isoformat(),
+                        "expires_at": end_date.isoformat(),
+                        "is_active": True,
+                    }
+
+                    result = client.table("user_plans").insert(user_plan_data).execute()
+                    if result.data:
+                        logger.info(
+                            f"User {user_id} assigned to plan {plan_id} (tier={tier}) on subscription update"
+                        )
+                    else:
+                        logger.error(f"Failed to create user_plans entry for user {user_id}, plan {plan_id}")
+                else:
+                    logger.warning(f"Could not find plan ID for tier: {tier} on subscription update")
+
+                # Clear trial status for all user's API keys when subscription becomes active
                 client.table("api_keys_new").update(
                     {
                         "is_trial": False,

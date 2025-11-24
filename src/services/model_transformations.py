@@ -9,7 +9,6 @@ This module handles transformations between user-friendly model IDs
 
 import logging
 
-from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 MODEL_PROVIDER_OVERRIDES = {
@@ -21,6 +20,23 @@ MODEL_PROVIDER_OVERRIDES = {
     "cerebras/llama-3.3-70b-instruct": "openrouter",
     "cerebras/llama-3.1-70b": "openrouter",
     "cerebras/llama-3.1-70b-instruct": "openrouter",
+}
+
+# Provider-specific fallbacks for the OpenRouter auto model.
+# When failover routes an OpenRouter-only model to another provider, we remap it
+# to a widely available general-purpose chat model for that provider.
+OPENROUTER_AUTO_FALLBACKS = {
+    "cerebras": "llama-3.3-70b",
+    "huggingface": "meta-llama/llama-3.3-70b",
+    "hug": "meta-llama/llama-3.3-70b",
+    "featherless": "meta-llama/llama-3.3-70b",
+    "fireworks": "meta-llama/llama-3.3-70b",
+    "together": "meta-llama/llama-3.3-70b",
+    "google-vertex": "gemini-1.5-pro",
+    "vercel-ai-gateway": "openai/gpt-4o-mini",
+    "aihubmix": "openai/gpt-4o-mini",
+    "anannas": "openai/gpt-4o-mini",
+    "alibaba-cloud": "qwen/qwen-plus",
 }
 
 # Gemini model name constants to reduce duplication
@@ -67,6 +83,8 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         Output: "openai/gpt-4"
     """
 
+    provider_lower = (provider or "").lower()
+
     # Check multi-provider registry first (if enabled)
     if use_multi_provider:
         try:
@@ -90,6 +108,26 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         except Exception as e:
             logger.warning(f"Error checking multi-provider registry for transform: {e}")
 
+    requested_model_id = model_id
+
+    # Remap OpenRouter auto selections when routed through other providers.
+    if requested_model_id and requested_model_id.lower() == "openrouter/auto":
+        if provider_lower != "openrouter":
+            fallback_model = OPENROUTER_AUTO_FALLBACKS.get(provider_lower)
+            if fallback_model:
+                logger.info(
+                    "Mapping 'openrouter/auto' to provider fallback '%s' for %s",
+                    fallback_model,
+                    provider_lower or "unknown",
+                )
+                model_id = fallback_model
+            else:
+                logger.warning(
+                    "Provider '%s' does not support 'openrouter/auto' and lacks a fallback; "
+                    "continuing with original ID",
+                    provider_lower or "unknown",
+                )
+
     # Normalize input to lowercase for case-insensitive matching
     # Store original for logging
     original_model_id = model_id
@@ -108,8 +146,6 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     if model_id.startswith("@") and not model_id.startswith("@google/models/"):
         logger.debug(f"Model ID with @ prefix (non-Google): {model_id}")
         return model_id
-
-    provider_lower = provider.lower()
 
     # Special handling for OpenRouter: strip 'openrouter/' prefix if present
     # EXCEPT for openrouter/auto which needs to keep the prefix
@@ -180,7 +216,7 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     return model_id
 
 
-def get_model_id_mapping(provider: str) -> Dict[str, str]:
+def get_model_id_mapping(provider: str) -> dict[str, str]:
     """
     Get simplified -> native format mapping for a specific provider.
     This maps user-friendly input to what the provider API expects.
@@ -571,6 +607,19 @@ def get_model_id_mapping(provider: str) -> Dict[str, str]:
             "mistral-7b": "mistral-7b-instruct",
             "mixtral-8x7b": "mixtral-8x7b-instruct",
         },
+        "xai": {
+            # XAI Grok models - pass-through format
+            # Models are referenced by their simple names (e.g., "grok-2", "grok-beta")
+            # Can also use xai/grok-* format
+            "grok-beta": "grok-beta",
+            "grok-2": "grok-2",
+            "grok-2-1212": "grok-2-1212",
+            "grok-vision-beta": "grok-vision-beta",
+            "xai/grok-beta": "grok-beta",
+            "xai/grok-2": "grok-2",
+            "xai/grok-2-1212": "grok-2-1212",
+            "xai/grok-vision-beta": "grok-vision-beta",
+        },
     }
 
     return mappings.get(provider, {})
@@ -652,7 +701,7 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[str] = None) -> Optional[str]:
+def detect_provider_from_model_id(model_id: str, preferred_provider: str | None = None) -> str | None:
     """
     Try to detect which provider a model belongs to based on its ID.
 
@@ -787,6 +836,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
         "alpaca-network",
         "alibaba-cloud",
         "fal",
+        "xai",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -854,6 +904,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: Optional[st
             "tripo3d",
         ]:
             return "fal"
+
+        # XAI models (e.g., "xai/grok-2")
+        if org == "xai":
+            return "xai"
+
+    # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")
+    if model_id.startswith("grok-"):
+        logger.info(f"Detected XAI provider for Grok model '{model_id}'")
+        return "xai"
 
     logger.debug(f"Could not detect provider for model '{model_id}'")
     return None

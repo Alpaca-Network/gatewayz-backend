@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 import httpx
 

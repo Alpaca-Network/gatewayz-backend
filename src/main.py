@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import secrets
@@ -7,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
+from prometheus_client import REGISTRY
 
 from src.config import Config
 
@@ -32,6 +33,8 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         enable_logs=True,
         # Set environment (development, staging, production)
         environment=Config.SENTRY_ENVIRONMENT,
+        # Release tracking for Sentry release management
+        release=Config.SENTRY_RELEASE,
         # Set traces_sample_rate to capture transactions for tracing
         traces_sample_rate=Config.SENTRY_TRACES_SAMPLE_RATE,
         # Set profiles_sample_rate to capture profiling data
@@ -39,7 +42,10 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         # Set profile_lifecycle to "trace" to run profiler during transactions
         profile_lifecycle="trace",
     )
-    logger.info(f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT})")
+    logger.info(
+        f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT}, "
+        f"release: {Config.SENTRY_RELEASE})"
+    )
 else:
     logger.info("⏭️  Sentry disabled (SENTRY_ENABLED=false or SENTRY_DSN not set)")
 
@@ -119,10 +125,26 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3001",
         ] + base_origins
 
+    # Explicitly allow modern tracing/debug headers to prevent CORS failures on mobile
+    allowed_headers = [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "X-Client-Version",
+        "X-CSRF-Token",
+        "X-Supabase-Key",
+        "X-Supabase-Project",
+        "sentry-trace",
+        "baggage",
+    ]
+
     # Log CORS configuration for debugging
     logger.info("🌐 CORS Configuration:")
     logger.info(f"   Environment: {Config.APP_ENV}")
     logger.info(f"   Allowed Origins: {allowed_origins}")
+    logger.info(f"   Allowed Headers: {allowed_headers}")
 
     # OPTIMIZED: Add trace context middleware first (for distributed tracing)
     # Middleware order matters! Last added = first executed
@@ -137,7 +159,7 @@ def create_app() -> FastAPI:
         allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "Accept", "Origin"],
+        allow_headers=allowed_headers,
     )
 
     # Add observability middleware for automatic metrics collection
@@ -187,10 +209,11 @@ def create_app() -> FastAPI:
     # ==================== Sentry Debug Endpoint ====================
     if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         @app.get("/sentry-debug", tags=["monitoring"], include_in_schema=False)
-        async def trigger_sentry_error():
+        async def trigger_sentry_error(raise_exception: bool = False):
             """
             Test endpoint to verify Sentry error tracking is working.
-            This will intentionally trigger a division by zero error.
+            When raise_exception is False (default) it will capture the error with Sentry but return HTTP 200.
+            Pass raise_exception=true to surface the exception for full end-to-end testing.
             """
             import sentry_sdk
 
@@ -199,9 +222,24 @@ def create_app() -> FastAPI:
             sentry_sdk.logger.warning("This is a test warning message")
             sentry_sdk.logger.error("This is a test error message")
 
-            # Trigger an error to test error tracking
-            division_by_zero = 1 / 0  # This will raise ZeroDivisionError
-            return {"status": "This line will never execute"}
+            def _trigger_zero_division() -> None:
+                # Helper to ensure we get a real stack trace for Sentry
+                _ = 1 / 0
+
+            if raise_exception:
+                # Preserve legacy behaviour for explicit testing
+                _trigger_zero_division()
+
+            try:
+                _trigger_zero_division()
+            except ZeroDivisionError as exc:
+                sentry_sdk.capture_exception(exc)
+                event_id = sentry_sdk.last_event_id()
+                return {
+                    "status": "Sentry exception captured",
+                    "event_id": event_id,
+                    "raised_exception": False,
+                }
 
         logger.info("  [OK] Sentry debug endpoint at /sentry-debug")
 
@@ -254,6 +292,8 @@ def create_app() -> FastAPI:
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
+        ("pricing_audit", "Pricing Audit Dashboard"),
+        ("pricing_sync", "Pricing Sync Service"),
     ]
 
     loaded_count = 0

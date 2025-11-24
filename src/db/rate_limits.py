@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.users import get_user
@@ -8,7 +8,7 @@ from src.db.users import get_user
 logger = logging.getLogger(__name__)
 
 
-def get_user_rate_limits(api_key: str) -> Optional[Dict[str, Any]]:
+def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
     """Get rate limits for a user"""
     try:
         client = get_supabase_client()
@@ -63,7 +63,7 @@ def get_user_rate_limits(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def set_user_rate_limits(api_key: str, rate_limits: Dict[str, int]) -> None:
+def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> None:
     try:
         client = get_supabase_client()
 
@@ -96,7 +96,7 @@ def set_user_rate_limits(api_key: str, rate_limits: Dict[str, int]) -> None:
         raise RuntimeError(f"Failed to set user rate limits: {e}") from e
 
 
-def check_rate_limit(api_key: str, tokens_used: int = 0) -> Dict[str, Any]:
+def check_rate_limit(api_key: str, tokens_used: int = 0) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
@@ -329,7 +329,7 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         logger.error(f"Failed to update rate limit usage: {e}")
 
 
-def get_environment_usage_summary(user_id: int) -> Dict[str, Any]:
+def get_environment_usage_summary(user_id: int) -> dict[str, Any]:
     """Get usage breakdown by environment"""
     try:
         client = get_supabase_client()
@@ -369,7 +369,7 @@ def get_environment_usage_summary(user_id: int) -> Dict[str, Any]:
 # =============================================================================
 
 
-def get_rate_limit_config(api_key: str) -> Optional[Dict[str, Any]]:
+def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
     """Get rate limit configuration for a specific API key"""
     try:
         client = get_supabase_client()
@@ -433,7 +433,7 @@ def get_rate_limit_config(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def update_rate_limit_config(api_key: str, config: Dict[str, Any]) -> bool:
+def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
     """Update rate limit configuration for a specific API key"""
     try:
         client = get_supabase_client()
@@ -504,7 +504,7 @@ def update_rate_limit_config(api_key: str, config: Dict[str, Any]) -> bool:
         return False
 
 
-def get_user_rate_limit_configs(user_id: int) -> List[Dict[str, Any]]:
+def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
     """Get all rate limit configurations for a user's API keys"""
     try:
         client = get_supabase_client()
@@ -535,7 +535,7 @@ def get_user_rate_limit_configs(user_id: int) -> List[Dict[str, Any]]:
         return []
 
 
-def bulk_update_rate_limit_configs(user_id: int, config: Dict[str, Any]) -> int:
+def bulk_update_rate_limit_configs(user_id: int, config: dict[str, Any]) -> int:
     """Bulk update rate limit configurations for all user's API keys"""
     try:
         client = get_supabase_client()
@@ -559,7 +559,7 @@ def bulk_update_rate_limit_configs(user_id: int, config: Dict[str, Any]) -> int:
         return 0
 
 
-def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> Dict[str, Any]:
+def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> dict[str, Any]:
     """Get current rate limit usage statistics for an API key"""
     try:
         client = get_supabase_client()
@@ -614,7 +614,7 @@ def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> Dic
         }
 
 
-def get_system_rate_limit_stats() -> Dict[str, Any]:
+def get_system_rate_limit_stats() -> dict[str, Any]:
     """Get system-wide rate limiting statistics"""
     try:
         client = get_supabase_client()
@@ -691,7 +691,7 @@ def get_system_rate_limit_stats() -> Dict[str, Any]:
         }
 
 
-def create_rate_limit_alert(api_key: str, alert_type: str, details: Dict[str, Any]) -> bool:
+def create_rate_limit_alert(api_key: str, alert_type: str, details: dict[str, Any]) -> bool:
     """Create a rate limit alert for monitoring (optional - table may not exist)"""
     try:
         client = get_supabase_client()
@@ -722,8 +722,8 @@ def create_rate_limit_alert(api_key: str, alert_type: str, details: Dict[str, An
 
 
 def get_rate_limit_alerts(
-    api_key: Optional[str] = None, resolved: bool = False, limit: int = 100
-) -> List[Dict[str, Any]]:
+    api_key: str | None = None, resolved: bool = False, limit: int = 100
+) -> list[dict[str, Any]]:
     """Get rate limit alerts with optional filtering"""
     try:
         client = get_supabase_client()

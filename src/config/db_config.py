@@ -7,7 +7,6 @@ PostgreSQL connection management for Docker-based database
 import logging
 import os
 from contextlib import contextmanager
-from typing import Optional
 
 # Conditional imports
 try:
@@ -96,7 +95,7 @@ class DatabaseConfig:
                     password=self.db_password,
                     # Connection options
                     connect_timeout=10,
-                    options="-c timezone=UTC",
+                    options="-c timezone=timezone.utc",
                 )
                 logger.info(
                     f"Database connection pool created: "

@@ -2,9 +2,10 @@ import json
 import logging
 from collections.abc import Generator
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import httpx
+from fastapi import HTTPException
 
 from src.config import Config
 
@@ -13,6 +14,29 @@ logger = logging.getLogger(__name__)
 
 # Hugging Face Inference Router base URL
 HF_INFERENCE_BASE_URL = "https://router.huggingface.co/v1"
+HF_INFERENCE_SUFFIX = ":hf-inference"
+
+FOREIGN_PROVIDER_NAMESPACES = {
+    "openrouter",
+    "cerebras",
+    "featherless",
+    "vercel-ai-gateway",
+    "aihubmix",
+    "anannas",
+    "alibaba-cloud",
+    "fireworks",
+    "together",
+    "google-vertex",
+    "near",
+    "aimo",
+    "xai",
+    "chutes",
+    "alpaca-network",
+    "clarifai",
+    "helicone",
+    "portkey",
+    "gatewayz",
+}
 
 ALLOWED_PARAMS = {
     "max_tokens",
@@ -29,7 +53,7 @@ ALLOWED_PARAMS = {
 class HFStreamChoice:
     """Lightweight structure that mimics OpenAI stream choice objects."""
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: dict[str, Any]):
         self.index = data.get("index", 0)
         self.delta = SimpleNamespace(**(data.get("delta") or {}))
         self.message = SimpleNamespace(**data["message"]) if data.get("message") else None
@@ -39,7 +63,7 @@ class HFStreamChoice:
 class HFStreamChunk:
     """Stream chunk compatible with OpenAI client chunks."""
 
-    def __init__(self, payload: Dict[str, Any]):
+    def __init__(self, payload: dict[str, Any]):
         self.id = payload.get("id")
         self.object = payload.get("object")
         self.created = payload.get("created")
@@ -57,7 +81,7 @@ class HFStreamChunk:
             self.usage = None
 
 
-def _build_timeout_config(timeout: Union[float, Optional[httpx.Timeout]]) -> httpx.Timeout:
+def _build_timeout_config(timeout: float | httpx.Timeout | None) -> httpx.Timeout:
     if isinstance(timeout, httpx.Timeout):
         return timeout
 
@@ -71,7 +95,7 @@ def _build_timeout_config(timeout: Union[float, Optional[httpx.Timeout]]) -> htt
     )
 
 
-def get_huggingface_client(timeout: Union[float, Optional[httpx.Timeout]] = None) -> httpx.Client:
+def get_huggingface_client(timeout: float | httpx.Timeout | None = None) -> httpx.Client:
     """Create an HTTPX client for the Hugging Face Router API."""
     if not Config.HUG_API_KEY:
         raise ValueError("Hugging Face API key (HUG_API_KEY) not configured")
@@ -86,13 +110,46 @@ def get_huggingface_client(timeout: Union[float, Optional[httpx.Timeout]] = None
     return httpx.Client(base_url=HF_INFERENCE_BASE_URL, headers=headers, timeout=timeout_config)
 
 
+def _normalize_namespace(namespace: str) -> str:
+    """Normalize provider namespace for comparison."""
+    clean = namespace.strip().lower()
+    if clean.startswith("@"):
+        clean = clean[1:]
+    return clean.replace("_", "-")
+
+
+def _extract_namespace(model: str) -> str | None:
+    """Return the provider namespace portion of a model ID."""
+    if not model or "/" not in model:
+        return None
+    namespace, _ = model.split("/", 1)
+    return namespace
+
+
+def _is_foreign_provider_model(model: str) -> tuple[bool, str | None]:
+    """
+    Determine if a model ID is scoped to another provider namespace,
+    meaning it should not be routed through Hugging Face.
+    """
+    namespace = _extract_namespace(model)
+    if not namespace:
+        return False, None
+    if namespace.startswith("@"):
+        return True, namespace
+    normalized = _normalize_namespace(namespace)
+    return (normalized in FOREIGN_PROVIDER_NAMESPACES, namespace)
+
+
 def _prepare_model(model: str) -> str:
-    if model.endswith(":hf-inference"):
+    if model.endswith(HF_INFERENCE_SUFFIX):
         return model
-    return f"{model}:hf-inference"
+    is_foreign, _ = _is_foreign_provider_model(model)
+    if is_foreign:
+        return model
+    return f"{model}{HF_INFERENCE_SUFFIX}"
 
 
-def _build_payload(messages: List[Dict[str, Any]], model: str, **kwargs) -> Dict[str, Any]:
+def _build_payload(messages: list[dict[str, Any]], model: str, **kwargs) -> dict[str, Any]:
     # Validate messages format
     if not isinstance(messages, list):
         logger.error(f"Messages must be a list, got {type(messages).__name__}")
@@ -105,6 +162,21 @@ def _build_payload(messages: List[Dict[str, Any]], model: str, **kwargs) -> Dict
         if "role" not in msg or "content" not in msg:
             logger.error(f"Message {i} missing required fields (role, content): {msg}")
             raise ValueError(f"Message {i} missing required fields (role, content): {msg}")
+
+    is_foreign, namespace = _is_foreign_provider_model(model)
+    if is_foreign:
+        logger.info(
+            "Model '%s' is scoped to provider namespace '%s'; skipping Hugging Face routing.",
+            model,
+            namespace,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Model '{model}' is namespaced to provider '{namespace}' and "
+                "is not available on Hugging Face Router."
+            ),
+        )
 
     payload = {
         "messages": messages,

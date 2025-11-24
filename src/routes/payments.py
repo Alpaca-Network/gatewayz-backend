@@ -6,7 +6,8 @@ Endpoints for handling Stripe webhooks and payment operations
 
 import inspect
 import logging
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -93,28 +94,38 @@ async def stripe_webhook(
     3. Select events to listen for (listed above)
     4. Copy webhook signing secret to STRIPE_WEBHOOK_SECRET env variable
 
+    IMPORTANT: This endpoint ALWAYS returns HTTP 200 status code to Stripe, even when
+    processing fails. Errors are logged for investigation but do not cause HTTP errors,
+    as this prevents Stripe from retrying the webhook. Stripe expects webhooks to be
+    delivered asynchronously and will handle retries automatically.
+
     Args:
         request: FastAPI request object containing raw webhook payload
         stripe_signature: Stripe signature header for verification
 
     Returns:
-        JSONResponse with processing result
-
-    Raises:
-        HTTPException: If signature verification fails or processing error
+        JSONResponse with HTTP 200 and processing result (always)
     """
-    try:
-        # Get raw request body
-        payload = await request.body()
+    payload = await request.body()
+    event_type = "unknown"
+    event_id = "unknown"
+    success = False
+    message = "Webhook received"
 
+    try:
         if not stripe_signature:
             logger.error("Missing Stripe signature header")
-            raise HTTPException(status_code=400, detail="Missing stripe-signature header")
+            raise ValueError("Missing stripe-signature header")
 
         # Process webhook through Stripe service
         result: WebhookProcessingResult = stripe_service.handle_webhook(
             payload=payload, signature=stripe_signature
         )
+
+        event_type = result.event_type
+        event_id = result.event_id
+        success = result.success
+        message = result.message
 
         logger.info(f"Webhook processed: {result.event_type} - {result.message}")
 
@@ -129,25 +140,41 @@ async def stripe_webhook(
             },
         )
 
-    except HTTPException:
-        raise
-
     except ValueError as e:
-        # Signature verification failed
-        logger.error(f"Webhook signature verification failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid signature: {str(e)}")
+        # Signature verification failed or missing header
+        logger.error(f"Webhook validation failed: {e}", exc_info=True)
+        message = f"Validation failed: {str(e)}"
+        success = False
 
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}")
-        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+        # Log the error with full context for investigation
+        logger.error(
+            f"Webhook processing error for event_type={event_type}, event_id={event_id}: {e}",
+            exc_info=True,
+        )
+        message = f"Processing error: {str(e)}"
+        success = False
+
+    # Always return 200 OK to Stripe, even on errors
+    # Stripe will retry failed webhooks automatically
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": success,
+            "event_type": event_type,
+            "event_id": event_id,
+            "message": message,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
 # ==================== Checkout Sessions ====================
 
 
-@router.post("/checkout-session", response_model=Dict[str, Any])
+@router.post("/checkout-session", response_model=dict[str, Any])
 async def create_checkout_session(
-    request: CreateCheckoutSessionRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: CreateCheckoutSessionRequest, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe checkout session for hosted payment page
@@ -209,7 +236,7 @@ async def create_checkout_session(
 
 @router.get("/checkout-session/{session_id}")
 async def get_checkout_session(
-    session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+    session_id: str, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retrieve checkout session details
@@ -241,9 +268,9 @@ async def get_checkout_session(
 # ==================== Payment Intents ====================
 
 
-@router.post("/payment-intent", response_model=Dict[str, Any])
+@router.post("/payment-intent", response_model=dict[str, Any])
 async def create_payment_intent(
-    request: CreatePaymentIntentRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: CreatePaymentIntentRequest, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a Stripe payment intent for custom payment flows
@@ -294,7 +321,7 @@ async def create_payment_intent(
 
 @router.get("/payment-intent/{payment_intent_id}")
 async def get_payment_intent(
-    payment_intent_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+    payment_intent_id: str, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retrieve payment intent details
@@ -376,9 +403,9 @@ async def get_credit_packages():
 # ==================== Refunds ====================
 
 
-@router.post("/refund", response_model=Dict[str, Any])
+@router.post("/refund", response_model=dict[str, Any])
 async def create_refund(
-    request: CreateRefundRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: CreateRefundRequest, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a refund for a payment (admin only)
@@ -421,7 +448,7 @@ async def create_refund(
 
 @router.get("/payments")
 async def get_payment_history(
-    limit: int = 50, offset: int = 0, current_user: Dict[str, Any] = Depends(get_current_user)
+    limit: int = 50, offset: int = 0, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get payment history for the authenticated user
@@ -465,7 +492,7 @@ async def get_payment_history(
 
 @router.get("/payments/{payment_id}")
 async def get_payment_details(
-    payment_id: int, current_user: Dict[str, Any] = Depends(get_current_user)
+    payment_id: int, current_user: dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get details of a specific payment
@@ -496,7 +523,8 @@ async def get_payment_details(
             "status": payment["status"],
             "payment_method": payment["payment_method"],
             "stripe_payment_intent_id": payment.get("stripe_payment_intent_id"),
-            "stripe_session_id": payment.get("stripe_session_id"),
+            "stripe_session_id": payment.get("stripe_checkout_session_id")
+            or payment.get("stripe_session_id"),
             "stripe_customer_id": payment.get("stripe_customer_id"),
             "created_at": payment["created_at"],
             "updated_at": payment.get("updated_at"),
@@ -515,10 +543,10 @@ async def get_payment_details(
 # ==================== Subscription Checkout ====================
 
 
-@router.post("/subscription-checkout", response_model=Dict[str, Any])
+@router.post("/subscription-checkout", response_model=dict[str, Any])
 async def create_subscription_checkout(
     request: CreateSubscriptionCheckoutRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Create a Stripe checkout session for subscription

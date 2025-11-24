@@ -11,7 +11,6 @@ stages identified in profiling:
 import logging
 import time
 from contextlib import contextmanager
-from typing import Optional
 
 from src.services.prometheus_metrics import (
     record_stage_percentage,
@@ -43,12 +42,12 @@ class PerformanceTracker:
         self.endpoint = endpoint
         self.stage_times: dict[str, float] = {}
         self.total_start_time = time.time()
-        self.backend_ttfb_start: Optional[float] = None
-        self.backend_ttfb_duration: Optional[float] = None
-        self.streaming_start: Optional[float] = None
-        self.streaming_duration: Optional[float] = None
-        self.provider: Optional[str] = None
-        self.model: Optional[str] = None
+        self.backend_ttfb_start: float | None = None
+        self.backend_ttfb_duration: float | None = None
+        self.streaming_start: float | None = None
+        self.streaming_duration: float | None = None
+        self.provider: str | None = None
+        self.model: str | None = None
 
     @contextmanager
     def stage(self, stage_name: str):

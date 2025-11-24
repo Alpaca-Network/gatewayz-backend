@@ -5,7 +5,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -38,6 +38,10 @@ from src.cache import (
     _xai_models_cache,
     is_cache_fresh,
     should_revalidate_in_background,
+    set_gateway_error,
+    is_gateway_in_error_state,
+    clear_gateway_error,
+    get_gateway_error_message,
 )
 from src.config import Config
 from src.services.google_models_config import register_google_models_in_canonical_registry
@@ -94,11 +98,11 @@ MODALITY_TEXT_TO_AUDIO = "text->audio"
 class AggregatedCatalog(list):
     """List-like wrapper that also exposes canonical model metadata."""
 
-    def __init__(self, models: Optional[list], canonical_models: Optional[list]):
+    def __init__(self, models: list | None, canonical_models: list | None):
         super().__init__(models or [])
         self.canonical_models = canonical_models or []
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {"models": list(self), "canonical_models": self.canonical_models}
 
 
@@ -111,7 +115,7 @@ def _normalize_provider_slug(provider_slug: str) -> str:
     return mapping.get(provider_slug.lower(), provider_slug.lower())
 
 
-def _extract_modalities(record: dict) -> List[str]:
+def _extract_modalities(record: dict) -> list[str]:
     modalities = record.get("modalities")
     if isinstance(modalities, list) and modalities:
         return modalities
@@ -135,7 +139,7 @@ def _extract_modalities(record: dict) -> List[str]:
     return ["text"]
 
 
-def _register_canonical_records(provider_slug: str, models: Optional[list]) -> None:
+def _register_canonical_records(provider_slug: str, models: list | None) -> None:
     if not models:
         return
 
@@ -414,13 +418,33 @@ def get_all_models_parallel():
             "aihubmix",
             "alibaba",
         ]
+        
+        # Filter out gateways that are currently in error state (circuit breaker pattern)
+        active_gateways = []
+        for gw in gateways:
+            if is_gateway_in_error_state(gw):
+                error_msg = get_gateway_error_message(gw)
+                logger.info(
+                    "Skipping %s in parallel fetch - gateway in error state: %s",
+                    sanitize_for_logging(gw),
+                    sanitize_for_logging(error_msg or "unknown error")[:100]
+                )
+            else:
+                active_gateways.append(gw)
+        
+        logger.info(
+            "Fetching from %d/%d active gateways (%d in error state)",
+            len(active_gateways),
+            len(gateways),
+            len(gateways) - len(active_gateways)
+        )
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
         # Since get_cached_models uses synchronous httpx, we use threads
         # Reduced max_workers from 16 to 8 to prevent thread exhaustion
         # in case of recursive calls or errors
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {executor.submit(get_cached_models, gw): gw for gw in gateways}
+            futures = {executor.submit(get_cached_models, gw): gw for gw in active_gateways}
             all_models = []
 
             for future in futures:
@@ -552,6 +576,16 @@ def get_cached_models(gateway: str = "openrouter"):
             cached = _fresh_cached_models(_fireworks_models_cache, "fireworks")
             if cached is not None:
                 return cached
+            
+            # Check if gateway is in error state (exponential backoff)
+            if is_gateway_in_error_state("fireworks"):
+                error_msg = get_gateway_error_message("fireworks")
+                logger.warning(
+                    "Skipping Fireworks fetch - gateway in error state: %s",
+                    sanitize_for_logging(error_msg or "unknown error")
+                )
+                return None
+            
             result = fetch_models_from_fireworks()
             _register_canonical_records("fireworks", result)
             return result
@@ -791,10 +825,20 @@ def fetch_models_from_openrouter():
                 model["pricing"] = sanitize_pricing(model["pricing"])
         _models_cache["data"] = models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("openrouter")
 
         return _models_cache["data"]
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("OpenRouter HTTP error: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
+        return None
     except Exception as e:
-        logger.error("Failed to fetch models from OpenRouter: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from OpenRouter: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
         return None
 
 
@@ -841,20 +885,21 @@ def fetch_models_from_deepinfra():
 
         _deepinfra_models_cache["data"] = normalized_models
         _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("deepinfra")
 
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
         return _deepinfra_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "DeepInfra HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("DeepInfra HTTP error: %s", error_msg)
+        set_gateway_error("deepinfra", error_msg)
         return None
     except Exception as e:
-        logger.error(
-            "Failed to fetch models from DeepInfra: %s", sanitize_for_logging(str(e)), exc_info=True
-        )
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from DeepInfra: %s", error_msg, exc_info=True)
+        set_gateway_error("deepinfra", error_msg)
         return None
 
 
@@ -906,18 +951,21 @@ def fetch_models_from_featherless():
 
         _featherless_models_cache["data"] = normalized_models
         _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("featherless")
 
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
         return _featherless_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Featherless HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Featherless HTTP error: %s", error_msg)
+        set_gateway_error("featherless", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Featherless: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Featherless: %s", error_msg)
+        set_gateway_error("featherless", error_msg)
         return None
 
 
@@ -1056,18 +1104,21 @@ def fetch_models_from_groq():
 
         _groq_models_cache["data"] = normalized_models
         _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("groq")
 
         logger.info(f"Fetched {len(normalized_models)} Groq models")
         return _groq_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Groq HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Groq HTTP error: %s", error_msg)
+        set_gateway_error("groq", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Groq: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Groq: %s", error_msg)
+        set_gateway_error("groq", error_msg)
         return None
 
 
@@ -1245,18 +1296,25 @@ def fetch_models_from_fireworks():
 
         _fireworks_models_cache["data"] = normalized_models
         _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("fireworks")
 
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
         return _fireworks_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Fireworks HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Fireworks HTTP error: %s", error_msg)
+        
+        # Cache error state to prevent continuous retries
+        set_gateway_error("fireworks", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Fireworks: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Fireworks: %s", error_msg)
+        
+        # Cache error state to prevent continuous retries
+        set_gateway_error("fireworks", error_msg)
         return None
 
 
@@ -1386,18 +1444,21 @@ def fetch_models_from_together():
 
         _together_models_cache["data"] = normalized_models
         _together_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("together")
 
         logger.info(f"Fetched {len(normalized_models)} Together models")
         return _together_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Together HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Together HTTP error: %s", error_msg)
+        set_gateway_error("together", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Together: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Together: %s", error_msg)
+        set_gateway_error("together", error_msg)
         return None
 
 
@@ -1529,17 +1590,20 @@ def fetch_models_from_aimo():
 
         _aimo_models_cache["data"] = deduplicated_models
         _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("aimo")
 
         return _aimo_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "AIMO HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("AIMO HTTP error: %s", error_msg)
+        set_gateway_error("aimo", error_msg)
         return []
     except Exception as e:
-        logger.error("Failed to fetch models from AIMO: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from AIMO: %s", error_msg)
+        set_gateway_error("aimo", error_msg)
         return []
 
 
@@ -1922,7 +1986,7 @@ def fetch_models_from_fal():
         return []
 
 
-def normalize_fal_model(fal_model: dict) -> Optional[dict]:
+def normalize_fal_model(fal_model: dict) -> dict | None:
     """Normalize Fal.ai catalog entries to resemble OpenRouter model shape
 
     Fal.ai features:
@@ -2043,7 +2107,7 @@ def fetch_models_from_vercel_ai_gateway():
         return []
 
 
-def normalize_vercel_model(model) -> Optional[dict]:
+def normalize_vercel_model(model) -> dict | None:
     """Normalize Vercel AI Gateway model to catalog schema
 
     Vercel models can originate from various providers (OpenAI, Google, Anthropic, etc.)
@@ -2731,7 +2795,7 @@ def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
         return openrouter_model
 
 
-def _extract_model_provider_slug(model: dict) -> Optional[str]:
+def _extract_model_provider_slug(model: dict) -> str | None:
     """Determine provider slug from a model payload."""
     if not model:
         return None
@@ -2757,7 +2821,7 @@ def _extract_model_provider_slug(model: dict) -> Optional[str]:
     return None
 
 
-def _normalize_provider_slug(provider: Any) -> Optional[str]:
+def _normalize_provider_slug(provider: Any) -> str | None:
     """Extract provider slug from a provider record."""
     if provider is None:
         return None
@@ -2779,8 +2843,8 @@ def _normalize_provider_slug(provider: Any) -> Optional[str]:
 
 
 def get_model_count_by_provider(
-    provider_or_models: Any, models_data: Optional[list] = None
-) -> Union[int, Dict[str, int]]:
+    provider_or_models: Any, models_data: list | None = None
+) -> int | dict[str, int]:
     """Return model counts.
 
     Backwards-compatible shim that supports two call styles:
@@ -2806,7 +2870,7 @@ def get_model_count_by_provider(
         models = provider_or_models or []
         providers = models_data or []
 
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         for model in models:
             slug = _extract_model_provider_slug(model)
@@ -2917,7 +2981,7 @@ def fetch_models_from_aihubmix():
         return []
 
 
-def normalize_aihubmix_model(model) -> Optional[dict]:
+def normalize_aihubmix_model(model) -> dict | None:
     """Normalize AiHubMix model to catalog schema
 
     AiHubMix models use OpenAI-compatible naming conventions.
@@ -2935,7 +2999,7 @@ def normalize_aihubmix_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from AiHubMix"),
+            "description": getattr(model, "description", "Model from AiHubMix"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -2999,7 +3063,7 @@ def fetch_models_from_helicone():
         return []
 
 
-def normalize_helicone_model(model) -> Optional[dict]:
+def normalize_helicone_model(model) -> dict | None:
     """Normalize Helicone AI Gateway model to catalog schema
 
     Helicone models can originate from various providers (OpenAI, Anthropic, etc.)
@@ -3155,7 +3219,7 @@ def fetch_models_from_anannas():
         return []
 
 
-def normalize_anannas_model(model) -> Optional[dict]:
+def normalize_anannas_model(model) -> dict | None:
     """Normalize Anannas model to catalog schema
 
     Anannas models use OpenAI-compatible naming conventions.
@@ -3173,7 +3237,7 @@ def normalize_anannas_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from Anannas"),
+            "description": getattr(model, "description", "Model from Anannas"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
@@ -3234,7 +3298,7 @@ def fetch_models_from_alibaba():
         return []
 
 
-def normalize_alibaba_model(model) -> Optional[dict]:
+def normalize_alibaba_model(model) -> dict | None:
     """Normalize Alibaba Cloud model to catalog schema
 
     Alibaba models use OpenAI-compatible naming conventions.
@@ -3252,7 +3316,7 @@ def normalize_alibaba_model(model) -> Optional[dict]:
             "hugging_face_id": None,
             "name": getattr(model, "name", model_id),
             "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", f"Model from Alibaba Cloud"),
+            "description": getattr(model, "description", "Model from Alibaba Cloud"),
             "context_length": getattr(model, "context_length", 4096),
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
