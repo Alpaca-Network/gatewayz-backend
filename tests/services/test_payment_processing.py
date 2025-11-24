@@ -653,7 +653,6 @@ class TestWebhooks:
             status='completed',
             stripe_payment_intent_id='pi_metadata_source',
             stripe_session_id='cs_missing_everything'
->>>>>>> origin/main
         )
 
     def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):
