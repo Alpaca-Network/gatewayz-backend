@@ -22,9 +22,11 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-# Path to store pricing history
-PRICING_HISTORY_DIR = Path("/root/repo/src/data/pricing_history")
-PRICING_HISTORY_DIR.mkdir(exist_ok=True)
+# Path to store pricing history (relative to repository root)
+PRICING_HISTORY_DIR = (
+    Path(__file__).resolve().parent.parent / "data" / "pricing_history"
+)
+PRICING_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
