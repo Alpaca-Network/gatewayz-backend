@@ -540,7 +540,7 @@ class TestWebhooks:
 
         stripe_service._handle_checkout_completed(session)
 
-        mock_intent_retrieve.assert_called_once_with('pi_meta_only')
+        mock_intent_retrieve.assert_called_once_with('pi_meta_only', expand=['metadata'])
         mock_add_credits.assert_called_once()
         add_kwargs = mock_add_credits.call_args[1]
         assert add_kwargs['user_id'] == 77
@@ -1012,7 +1012,8 @@ class TestPaymentIntegration:
         assert completion_call == {
             'payment_id': 1,
             'status': 'completed',
-            'stripe_payment_intent_id': 'pi_test_123'
+            'stripe_payment_intent_id': 'pi_test_123',
+            'stripe_session_id': 'cs_test_123'
         }
 
     @patch('src.services.payments.add_credits_to_user')

@@ -218,10 +218,7 @@ def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fak
     from postgrest import APIError
     # Simulate PostgREST schema cache error
     error = APIError(
-        {'code': 'PGRST204', 'message': 'Could not find column in schema cache'},
-        status_code=400,
-        request=None,
-        response=None,
+        {'code': 'PGRST204', 'message': 'Could not find column in schema cache'}
     )
     fake_supabase.fail_next_insert("api_keys_new", error)
 
@@ -246,10 +243,7 @@ def test_create_api_key_schema_cache_error_fallback(monkeypatch, mod, fake_supab
     monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
 
     error = APIError(
-        {'code': 'PGRST204', 'message': "Could not find the 'key_version' column of 'api_keys_new' in the schema cache"},
-        status_code=400,
-        request=None,
-        response=None,
+        {'code': 'PGRST204', 'message': "Could not find the 'key_version' column of 'api_keys_new' in the schema cache"}
     )
     fake_supabase.fail_next_insert("api_keys_new", error)
 
