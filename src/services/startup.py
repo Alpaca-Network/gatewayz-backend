@@ -63,9 +63,10 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Prometheus remote write initialization warning: {e}")
 
-        # Start health monitoring
-        await health_monitor.start_monitoring()
-        logger.info("Health monitoring service started")
+        # Start health monitoring (DISABLED: using passive monitoring from real API calls instead)
+        # Passive health monitoring captures metrics from actual user requests in chat.py and messages.py
+        # await health_monitor.start_monitoring()
+        logger.info("Health monitoring: using passive monitoring from real API calls")
 
         # Start availability monitoring
         await availability_service.start_monitoring()
@@ -121,9 +122,9 @@ async def lifespan(app):
         await availability_service.stop_monitoring()
         logger.info("Availability monitoring service stopped")
 
-        # Stop health monitoring
-        await health_monitor.stop_monitoring()
-        logger.info("Health monitoring service stopped")
+        # Stop health monitoring (DISABLED: using passive monitoring instead)
+        # await health_monitor.stop_monitoring()
+        logger.info("Health monitoring: passive monitoring (no shutdown needed)")
 
         # Shutdown Prometheus remote write
         try:

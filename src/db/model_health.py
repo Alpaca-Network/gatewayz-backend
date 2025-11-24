@@ -17,6 +17,9 @@ def record_model_call(
     response_time_ms: float,
     status: str,
     error_message: Optional[str] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    total_tokens: Optional[int] = None,
 ) -> Dict:
     """
     Record a model call and update health tracking metrics.
@@ -30,6 +33,9 @@ def record_model_call(
         response_time_ms: Response time in milliseconds
         status: Call status ('success', 'error', 'timeout', 'rate_limited', etc.)
         error_message: Optional error message if status is 'error'
+        input_tokens: Optional number of input tokens used
+        output_tokens: Optional number of output tokens generated
+        total_tokens: Optional total tokens (input + output)
 
     Returns:
         Dictionary with the updated/created record
@@ -73,6 +79,13 @@ def record_model_call(
         if error_message:
             update_data["last_error_message"] = error_message
 
+        if input_tokens is not None:
+            update_data["input_tokens"] = input_tokens
+        if output_tokens is not None:
+            update_data["output_tokens"] = output_tokens
+        if total_tokens is not None:
+            update_data["total_tokens"] = total_tokens
+
         result = (
             supabase.table("model_health_tracking")
             .update(update_data)
@@ -96,6 +109,13 @@ def record_model_call(
 
         if error_message:
             insert_data["last_error_message"] = error_message
+
+        if input_tokens is not None:
+            insert_data["input_tokens"] = input_tokens
+        if output_tokens is not None:
+            insert_data["output_tokens"] = output_tokens
+        if total_tokens is not None:
+            insert_data["total_tokens"] = total_tokens
 
         result = supabase.table("model_health_tracking").insert(insert_data).execute()
 
