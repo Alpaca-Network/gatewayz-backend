@@ -95,7 +95,7 @@ class DatabaseConfig:
                     password=self.db_password,
                     # Connection options
                     connect_timeout=10,
-                    options="-c timezone=UTC",
+                    options="-c timezone=timezone.utc",
                 )
                 logger.info(
                     f"Database connection pool created: "

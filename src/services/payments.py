@@ -636,6 +636,7 @@ class StripeService:
         """Handle completed checkout session"""
         try:
             session, metadata = self._hydrate_checkout_session_metadata(session)
+            metadata = metadata or {}
 
             session_id = self._get_stripe_object_value(session, "id")
             if session_id is None and not metadata:
@@ -644,6 +645,7 @@ class StripeService:
                 )
             payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
 
+<<<<<<< HEAD
             metadata_missing_keys = any(
                 not metadata.get(key) for key in ("user_id", "payment_id", "credits")
             )
@@ -651,6 +653,17 @@ class StripeService:
                 intent_metadata = self._hydrate_payment_intent_metadata(payment_intent_id)
                 if intent_metadata:
                     metadata = {**intent_metadata, **metadata}
+=======
+            # Backfill metadata from the related payment intent if session metadata is absent/incomplete
+            required_metadata_keys = ("user_id", "payment_id", "credits")
+            if payment_intent_id and any(
+                not metadata.get(key) for key in required_metadata_keys
+            ):
+                intent_metadata = self._hydrate_payment_intent_metadata_from_id(payment_intent_id)
+                if intent_metadata:
+                    for key, value in intent_metadata.items():
+                        metadata.setdefault(key, value)
+>>>>>>> origin/main
 
             user_id = self._coerce_to_int(metadata.get("user_id"))
             payment_id = self._coerce_to_int(metadata.get("payment_id"))
