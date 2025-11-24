@@ -286,7 +286,7 @@ def create_user_referral_code(user_id: int) -> str:
 
 def validate_referral_code(
     referral_code: str, user_id: int
-) -> tuple[bool, str | None, dict[str, Any] | None]:
+) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
     Validate if a referral code can be used by a user.
 
@@ -353,7 +353,7 @@ def validate_referral_code(
 
 def apply_referral_bonus(
     user_id: int, referral_code: str, purchase_amount: float
-) -> tuple[bool, str | None, dict[str, Any] | None]:
+) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
     Apply referral bonus to both user and referrer after a qualifying purchase.
 
@@ -397,7 +397,9 @@ def apply_referral_bonus(
             # Update existing pending referral to completed
             referral_result = (
                 client.table("referrals")
-                .update({"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()})
+                .update(
+                    {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}
+                )
                 .eq("id", existing_referral.data[0]["id"])
                 .execute()
             )
@@ -599,7 +601,7 @@ def get_referral_stats(user_id: int) -> dict[str, Any] | None:
 
 def track_referral_signup(
     referral_code: str, referred_user_id: int
-) -> tuple[bool, str | None, dict[str, Any] | None]:
+) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
     Track when a user signs up with a referral code (creates pending referral record).
 

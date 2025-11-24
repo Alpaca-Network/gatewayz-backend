@@ -1,11 +1,11 @@
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.supabase_config import get_supabase_client
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.enhanced_notification_service import enhanced_notification_service
 from src.schemas.notification import (
     NotificationChannel,
@@ -18,7 +18,6 @@ from src.schemas.notification import (
 from src.security.deps import get_api_key, require_admin
 from src.services.notification import notification_service
 
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -247,7 +246,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
         # Get last 24-hour notifications - use a simpler approach
         logger.info("Fetching recent notifications...")
         try:
-            yesterday = (datetime.now(timezone.utc) - datetime.timedelta(days=1)).isoformat()
+            yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
             recent_result = (
                 client.table("notifications").select("id").gte("created_at", yesterday).execute()
             )
@@ -257,7 +256,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
             # Fallback: get all notifications and filter in Python
             all_notifications = client.table("notifications").select("created_at").execute()
             if all_notifications.data:
-                yesterday_dt = datetime.now(timezone.utc) - datetime.timedelta(days=1)
+                yesterday_dt = datetime.now(timezone.utc) - timedelta(days=1)
                 last_24h_notifications = len(
                     [
                         n

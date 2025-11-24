@@ -6,97 +6,29 @@ from typing import Any
 import httpx
 
 from src.config import Config
+from src.services.connection_pool import get_http_client
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
+# Extended timeout for image generation (images take longer than text)
+IMAGE_TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=120.0,  # Image generation can be slow
+    write=10.0,
+    pool=5.0,
+)
 
-def make_portkey_image_request(
-    prompt: str,
-    model: str = "dall-e-3",
-    provider: str = None,  # Can be "@openai", "@stability-ai", etc.
-    virtual_key: str = None,
-    size: str = "1024x1024",
-    n: int = 1,
-    quality: str = "standard",
-    style: str = "natural",
-    **kwargs,
-) -> dict[str, Any]:
-    """Make image generation request to Portkey
+# Shared HTTP client for image generation
+_image_http_client = None
 
-    Args:
-        prompt: Text description of the image to generate
-        model: Model to use for image generation
-        provider: Provider to route through Portkey (e.g., "stability-ai", "openai")
-        virtual_key: Optional Portkey virtual key ID
-        size: Image dimensions (e.g., "1024x1024")
-        n: Number of images to generate
-        quality: Image quality ("standard" or "hd")
-        style: Image style ("natural" or "vivid")
-        **kwargs: Additional provider-specific parameters
-    """
-    try:
-        if not Config.PORTKEY_API_KEY:
-            raise ValueError("Portkey API key not configured")
 
-        # Portkey image generation endpoint
-        url = "https://api.portkey.ai/v1/images/generations"
-
-        # Build headers
-        headers = {"x-portkey-api-key": Config.PORTKEY_API_KEY, "Content-Type": "application/json"}
-
-        # Method 1: Use virtual key if provided
-        if virtual_key:
-            headers["x-portkey-virtual-key"] = virtual_key
-        # Method 2: Use @provider format (Portkey SDK style)
-        elif provider and provider.startswith("@"):
-            # Use config-based provider format
-            import json
-
-            config = {"provider": provider}  # e.g., "@openai", "@stability-ai"
-            headers["x-portkey-config"] = json.dumps(config)
-        # Method 3: Legacy provider header
-        elif provider:
-            headers["x-portkey-provider"] = provider
-        else:
-            raise ValueError(
-                "Either virtual_key or provider must be specified for Portkey image generation"
-            )
-
-        # Build request payload
-        payload = {
-            "prompt": prompt,
-            "model": model,
-            "n": n,
-            "size": size,
-        }
-
-        # Add optional parameters
-        if quality:
-            payload["quality"] = quality
-        if style:
-            payload["style"] = style
-
-        # Add any additional kwargs
-        payload.update(kwargs)
-
-        logger.info(f"Making image generation request to Portkey with model {model}")
-
-        # Make request
-        response = httpx.post(url, headers=headers, json=payload, timeout=120.0)
-        response.raise_for_status()
-
-        return response.json()
-
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            f"Portkey image generation HTTP error: {e.response.status_code} - {e.response.text}"
-        )
-        raise
-    except Exception as e:
-        logger.error(f"Portkey image generation request failed: {e}")
-        raise
+def get_image_http_client() -> httpx.Client:
+    """Get or create shared HTTP client for image generation."""
+    global _image_http_client
+    if _image_http_client is None:
+        _image_http_client = get_http_client(timeout=IMAGE_TIMEOUT)
+    return _image_http_client
 
 
 def make_deepinfra_image_request(
@@ -131,8 +63,9 @@ def make_deepinfra_image_request(
 
         logger.info(f"Making image generation request to DeepInfra with model {model}")
 
-        # Make request
-        response = httpx.post(url, headers=headers, json=payload, timeout=120.0)
+        # Make request using shared HTTP client
+        client = get_image_http_client()
+        response = client.post(url, headers=headers, json=payload)
         response.raise_for_status()
 
         return response.json()
@@ -175,7 +108,6 @@ def make_google_vertex_image_request(
     try:
         # Import Google Cloud AI Platform SDK
         try:
-            from google.auth import default, impersonated_credentials
             from google.cloud import aiplatform
         except ImportError:
             raise ImportError(
@@ -200,43 +132,23 @@ def make_google_vertex_image_request(
         logger.info(f"Making image generation request to Google Vertex AI endpoint {endpoint_id}")
 
         # Service account to impersonate (if key creation is disabled)
-        target_sa = os.getenv(
+        os.getenv(
             "GOOGLE_VERTEX_SERVICE_ACCOUNT", "vertex-client@gatewayz-468519.iam.gserviceaccount.com"
         )
 
-        # Try to get credentials with impersonation support
-        credentials = None
+        # Initialize Vertex AI using ADC (Application Default Credentials)
+        # The initialize_vertex_ai() function handles GOOGLE_VERTEX_CREDENTIALS_JSON
+        # and other credential sources automatically
         try:
-            # First, try to get default credentials
-            source_credentials, source_project = default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
+            from src.services.google_vertex_client import initialize_vertex_ai
 
-            # If GOOGLE_VERTEX_SERVICE_ACCOUNT is set, use impersonation
-            if os.getenv("GOOGLE_VERTEX_SERVICE_ACCOUNT"):
-                logger.info(f"Using service account impersonation: {target_sa}")
-                credentials = impersonated_credentials.Credentials(
-                    source_credentials=source_credentials,
-                    target_principal=target_sa,
-                    target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                    lifetime=3600,  # 1 hour
-                )
-                logger.info("✓ Successfully created impersonated credentials")
-            else:
-                # Use default credentials (works if GOOGLE_APPLICATION_CREDENTIALS is set)
-                credentials = source_credentials
-                logger.info("Using default credentials from environment")
+            # This will use ADC and handle temp file creation for GOOGLE_VERTEX_CREDENTIALS_JSON
+            initialize_vertex_ai()
+            logger.info("✓ Successfully initialized Vertex AI with ADC")
 
         except Exception as auth_error:
             logger.warning(f"Authentication setup: {auth_error}")
-            # Let Vertex AI SDK handle default authentication
-            credentials = None
-
-        # Initialize Vertex AI
-        if credentials:
-            aiplatform.init(project=project_id, location=location, credentials=credentials)
-        else:
-            # Fall back to default authentication
+            # Fall back to default aiplatform initialization
             aiplatform.init(project=project_id, location=location)
 
         # Get the endpoint

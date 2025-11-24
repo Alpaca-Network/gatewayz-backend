@@ -79,7 +79,10 @@ def log_activity(
 
 
 def get_user_activity_stats(
-    user_id: int, from_date: str | None = None, to_date: str | None = None, days: int | None = None
+    user_id: int,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    days: int | None = None,
 ) -> dict[str, Any]:
     """
     Get aggregated activity statistics for a user
