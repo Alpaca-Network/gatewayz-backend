@@ -1,9 +1,11 @@
 import logging
+
 from openai import OpenAI
+
 from src.config import Config
+from src.services.anthropic_transformer import extract_message_with_tools
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -17,10 +19,7 @@ def get_chutes_client():
         if not Config.CHUTES_API_KEY:
             raise ValueError("Chutes API key not configured")
 
-        return OpenAI(
-            base_url="https://llm.chutes.ai/v1",
-            api_key=Config.CHUTES_API_KEY
-        )
+        return OpenAI(base_url="https://llm.chutes.ai/v1", api_key=Config.CHUTES_API_KEY)
     except Exception as e:
         logger.error(f"Failed to initialize Chutes client: {e}")
         raise
@@ -28,7 +27,7 @@ def get_chutes_client():
 
 def make_chutes_request_openai(messages, model, **kwargs):
     """Make request to Chutes.ai using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use
@@ -36,11 +35,7 @@ def make_chutes_request_openai(messages, model, **kwargs):
     """
     try:
         client = get_chutes_client()
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
-        )
+        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
         return response
     except Exception as e:
         logger.error(f"Chutes request failed: {e}")
@@ -49,7 +44,7 @@ def make_chutes_request_openai(messages, model, **kwargs):
 
 def make_chutes_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to Chutes.ai using OpenAI client
-    
+
     Args:
         messages: List of message objects
         model: Model name to use
@@ -58,10 +53,7 @@ def make_chutes_request_openai_stream(messages, model, **kwargs):
     try:
         client = get_chutes_client()
         stream = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-            **kwargs
+            model=model, messages=messages, stream=True, **kwargs
         )
         return stream
     except Exception as e:
@@ -72,29 +64,34 @@ def make_chutes_request_openai_stream(messages, model, **kwargs):
 def process_chutes_response(response):
     """Process Chutes response to extract relevant data"""
     try:
+        choices = []
+        for choice in response.choices:
+            msg = extract_message_with_tools(choice.message)
+
+            choices.append(
+                {
+                    "index": choice.index,
+                    "message": msg,
+                    "finish_reason": choice.finish_reason,
+                }
+            )
+
         return {
             "id": response.id,
             "object": response.object,
             "created": response.created,
             "model": response.model,
-            "choices": [
+            "choices": choices,
+            "usage": (
                 {
-                    "index": choice.index,
-                    "message": {
-                        "role": choice.message.role,
-                        "content": choice.message.content
-                    },
-                    "finish_reason": choice.finish_reason
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
                 }
-                for choice in response.choices
-            ],
-            "usage": {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
-            } if response.usage else {}
+                if response.usage
+                else {}
+            ),
         }
     except Exception as e:
         logger.error(f"Failed to process Chutes response: {e}")
         raise
-
