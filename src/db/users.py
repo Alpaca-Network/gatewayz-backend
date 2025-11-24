@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -22,7 +22,7 @@ def create_enhanced_user(
         client = get_supabase_client()
 
         # Prepare user data with trial setup
-        trial_start = datetime.now(UTC)
+        trial_start = datetime.now(timezone.utc)
         trial_end = trial_start + timedelta(days=3)
 
         user_data = {
@@ -230,7 +230,7 @@ def add_credits_to_user(
         result = (
             client.table("users")
             .update(
-                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
             )
             .eq("id", user_id)
             .execute()
@@ -375,7 +375,7 @@ def deduct_credits(
         result = (
             client.table("users")
             .update(
-                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
             )
             .eq("id", user_id)
             .execute()
@@ -472,7 +472,7 @@ def record_usage(
         client = get_supabase_client()
 
         # Ensure timestamp is timezone-aware
-        timestamp = datetime.now(UTC).replace(tzinfo=UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat()
 
         # Only include columns that exist in the schema
         usage_data = {
@@ -670,7 +670,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
         len([user for user in users if user.get("credits", 0) > 0])
 
         # Calculate time-based statistics
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
@@ -867,7 +867,7 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         if not update_data:
             raise ValueError("No valid profile fields to update")
 
-        update_data["updated_at"] = datetime.now(UTC).isoformat()
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         # Update user profile
         result = client.table("users").update(update_data).eq("api_key", api_key).execute()
@@ -935,7 +935,7 @@ def mark_welcome_email_sent(user_id: int) -> bool:
         result = (
             client.table("users")
             .update(
-                {"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()}
+                {"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()}
             )
             .eq("id", user_id)
             .execute()

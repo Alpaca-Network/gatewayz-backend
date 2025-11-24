@@ -8,7 +8,7 @@ with auto-fix capabilities for cache refresh.
 import asyncio
 import logging
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -301,7 +301,7 @@ def test_gateway_cache(gateway_name: str, config: dict[str, Any]) -> tuple[bool,
 
         # Check cache age
         if cache_timestamp:
-            cache_age = (datetime.now(UTC) - cache_timestamp).total_seconds()
+            cache_age = (datetime.now(timezone.utc) - cache_timestamp).total_seconds()
             age_hours = cache_age / 3600
             age_str = f"{age_hours:.1f}h old" if age_hours >= 1 else f"{cache_age:.0f}s old"
         else:
@@ -447,7 +447,7 @@ async def run_comprehensive_check(
         gateways_to_check = GATEWAY_CONFIG
 
     results = {
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "total_gateways": len(gateways_to_check),
         "healthy": 0,
         "unhealthy": 0,
