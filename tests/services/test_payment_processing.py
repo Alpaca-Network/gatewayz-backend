@@ -534,6 +534,7 @@ class TestWebhooks:
         mock_intent.metadata = {
             'user_id': '77',
             'payment_id': '555',
+            'credits_cents': '3000',
             'credits': '3000',
         }
         mock_intent_retrieve.return_value = mock_intent
@@ -586,6 +587,7 @@ class TestWebhooks:
         intent.metadata = {
             'user_id': '9',
             'payment_id': '321',
+            'credits_cents': '4200',
             'credits': '4200',
         }
         mock_payment_intent_retrieve.return_value = intent
