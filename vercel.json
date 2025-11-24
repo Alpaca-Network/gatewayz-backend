@@ -13,7 +13,7 @@
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/index"
+      "destination": "/api"
     }
   ],
   "headers": [
@@ -30,7 +30,7 @@
         },
         {
           "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type, Authorization, X-Requested-With"
+          "value": "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-Client-Version, X-CSRF-Token, X-Supabase-Key, X-Supabase-Project, sentry-trace, baggage"
         },
         {
           "key": "Access-Control-Allow-Credentials",

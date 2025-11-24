@@ -6,12 +6,10 @@ Update rate limit configuration for a specific API key
 import os
 from supabase import create_client, Client
 
-# Your API key from the config
-API_KEY = "gw_live_01eQv2HGWkjo0ApxoC4-G3yaOv6ilbzJwL9t6QpjQ5c"
-
-# Supabase configuration
-SUPABASE_URL = "https://ynleroehyrmaafkgjgmr.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlubGVyb2VoeXJtYWFma2dqZ21yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTY4Nzc3OSwiZXhwIjoyMDc1MjYzNzc5fQ.kIehmSJC9EX86rkhCbhzX6ZHiTfQO7k6ZM2wU4e6JNs"
+# Load credentials from environment variables
+API_KEY = os.environ.get("GATEWAYZ_API_KEY", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 # New rate limit configuration with higher concurrency
 NEW_CONFIG = {

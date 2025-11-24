@@ -18,11 +18,20 @@ os.environ['APP_ENV'] = 'testing'
 os.environ['API_GATEWAY_SALT'] = 'test-salt-for-hashing-keys-minimum-16-chars'
 
 from src.security.security import (
+    SecurityManager,
+    AuditLogger,
     hash_api_key,
     generate_secure_api_key,
     validate_ip_allowlist,
     validate_domain_referrers,
+    validate_api_key_security,
+    get_security_manager,
+    get_audit_logger,
 )
+
+# Note: encrypt/decrypt are SecurityManager methods, not tested here
+# All other security functions (hash_api_key, generate_secure_api_key,
+# validate_ip_allowlist, validate_domain_referrers) are module-level and tested below
 
 
 class TestAPIKeyHashing:

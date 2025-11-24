@@ -3,6 +3,7 @@ import sys
 import types
 import importlib
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch, MagicMock
 import pytest
 
 MODULE_PATH = "src.db.plans"  # change if your file lives elsewhere
@@ -34,6 +35,7 @@ class _Table:
         self._filters = []   # list of (field, op, value)
         self._order = None
         self._desc = False
+        self._limit = None
         self._last_update = None
         self._last_delete = None
 
@@ -45,8 +47,16 @@ class _Table:
         self._filters.append((field, "eq", value))
         return self
 
+    def ilike(self, field, value):
+        self._filters.append((field, "ilike", value))
+        return self
+
     def gte(self, field, value):
         self._filters.append((field, "gte", value))
+        return self
+
+    def limit(self, n):
+        self._limit = n
         return self
 
     def order(self, field, desc=False):
@@ -61,6 +71,12 @@ class _Table:
         for field, op, val in self._filters:
             if op == "eq":
                 if row.get(field) != val:
+                    return False
+            elif op == "ilike":
+                # Case-insensitive substring match with wildcards
+                field_val = str(row.get(field, "")).lower()
+                search_val = val.lower().replace("%", "")
+                if search_val not in field_val:
                     return False
             elif op == "gte":
                 rv = row.get(field)
@@ -112,6 +128,8 @@ class _Table:
         rows = [r for r in self._rows() if self._match(r)]
         if self._order:
             rows.sort(key=lambda r: r.get(self._order), reverse=self._desc)
+        if self._limit:
+            rows = rows[:self._limit]
         return _Result(rows)
 
 
@@ -329,7 +347,23 @@ def test_check_plan_entitlements_active_plan_allows_feature(mod, fake_supabase):
     assert out2["can_access_feature"] is False
 
 
-def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
+def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkeypatch):
+    # Create a fixed "now" for testing (day 15 to avoid edge cases)
+    # This ensures the function's datetime.now() matches our test data
+    fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=timezone.utc)
+
+    # Mock datetime.now() in the module to return a fixed value
+    # We need to patch the datetime object in the module's namespace
+    # (not the datetime class itself, which is immutable)
+    mock_datetime_class = MagicMock()
+    mock_datetime_class.now = MagicMock(return_value=fixed_now)
+    mock_datetime_class.fromisoformat = datetime.fromisoformat
+    mock_datetime_class.strptime = datetime.strptime
+    # Make the mock callable to create datetime instances
+    mock_datetime_class.side_effect = datetime
+
+    monkeypatch.setattr(mod, "datetime", mock_datetime_class)
+
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
 
@@ -340,48 +374,37 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase):
         "daily_token_limit": 1000, "monthly_token_limit": 10000,
         "price_per_month": 19, "features": ["basic_models"]
     }).execute()
-
-    now = datetime.now(timezone.utc)
     fake_supabase.table("user_plans").insert({
         "id": 900, "user_id": 9, "plan_id": 9,
-        "started_at": (now - timedelta(days=1)).isoformat(),
-        "expires_at": (now + timedelta(days=5)).isoformat(),
+        "started_at": (fixed_now - timedelta(days=1)).isoformat(),
+        "expires_at": (fixed_now + timedelta(days=5)).isoformat(),
         "is_active": True
     }).execute()
 
-    # usage: today -> 3 records (100 + 200 + 50 tokens)
-    today = now.replace(hour=1, minute=0, second=0, microsecond=0)
+    # usage: today (day 15) -> 3 records (100 + 200 + 50 tokens)
+    today = fixed_now.replace(hour=1, minute=0, second=0, microsecond=0)
     fake_supabase.table("usage_records").insert([
         {"user_id": 9, "timestamp": today.isoformat(), "tokens_used": 100},
         {"user_id": 9, "timestamp": (today + timedelta(hours=1)).isoformat(), "tokens_used": 200},
         {"user_id": 9, "timestamp": (today + timedelta(hours=2)).isoformat(), "tokens_used": 50},
     ]).execute()
 
-    # earlier this month (should count toward monthly but not daily)
-    # Calculate a day that's earlier in the same month
-    if now.day > 5:
-        # Safe to use day 5
-        earlier = now.replace(day=5, hour=2, minute=0, second=0, microsecond=0)
-    elif now.day > 2:
-        # Use day 2 if we're after day 2
-        earlier = now.replace(day=2, hour=2, minute=0, second=0, microsecond=0)
-    else:
-        # We're on day 1 or 2, so skip the earlier record test
-        # Just add one more record for today instead
-        earlier = today.replace(hour=3, minute=0, second=0, microsecond=0)
-
+    # earlier this month (day 1) (should count toward monthly but not daily)
+    earlier = fixed_now.replace(day=1, hour=2, minute=0, second=0, microsecond=0)
     fake_supabase.table("usage_records").insert([
         {"user_id": 9, "timestamp": earlier.isoformat(), "tokens_used": 300},
     ]).execute()
 
     out = mod.get_user_usage_within_plan_limits(9)
-    # We should have at least 3 "today" records
-    assert out["usage"]["daily_requests"] >= 3
-    # And 4 total records
-    assert out["usage"]["daily_requests"] + (1 if earlier.date() < today.date() else 0) == out["usage"]["monthly_requests"]
-    # Token checks
-    assert out["usage"]["daily_tokens"] >= 350
-    assert out["usage"]["monthly_tokens"] >= 650
+    assert out["usage"]["daily_requests"] == 3
+    assert out["usage"]["daily_tokens"] == 350
+    assert out["usage"]["monthly_requests"] == 4
+    assert out["usage"]["monthly_tokens"] == 650
+    # remaining
+    assert out["remaining"]["daily_requests"] == 7
+    assert out["remaining"]["daily_tokens"] == 650
+    assert out["remaining"]["monthly_requests"] == 96
+    assert out["remaining"]["monthly_tokens"] == 9350
 
 
 def test_enforce_plan_limits_checks_and_env_multiplier(mod, fake_supabase):
@@ -447,7 +470,9 @@ def test_get_subscription_plans_active_only(mod, fake_supabase):
 
 def test_get_all_plans_error_returns_empty(monkeypatch):
     # Force get_supabase_client to raise
-    bad_supabase_mod = types.SimpleNamespace(get_supabase_client=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    def raise_error():
+        raise RuntimeError("boom")
+    bad_supabase_mod = types.SimpleNamespace(get_supabase_client=raise_error)
     monkeypatch.setitem(sys.modules, "src.config.supabase_config", bad_supabase_mod)
 
     m = importlib.import_module(MODULE_PATH)
@@ -455,3 +480,71 @@ def test_get_all_plans_error_returns_empty(monkeypatch):
 
     out = m.get_all_plans()
     assert out == []
+
+
+def test_get_plan_id_by_tier_finds_matching_plan(mod, fake_supabase):
+    # Ensure database is clean
+    fake_supabase.clear_all()
+
+    fake_supabase.table("plans").insert([
+        {"id": 1, "name": "Basic", "is_active": True},
+        {"id": 2, "name": "Pro", "is_active": True},
+        {"id": 3, "name": "Max", "is_active": True},
+        {"id": 4, "name": "Legacy Pro", "is_active": False},
+    ]).execute()
+
+    # Test exact match
+    plan_id = mod.get_plan_id_by_tier("pro")
+    assert plan_id == 2
+
+    # Test case-insensitive (ilike)
+    plan_id = mod.get_plan_id_by_tier("PRO")
+    assert plan_id == 2
+
+    # Test partial match
+    plan_id = mod.get_plan_id_by_tier("max")
+    assert plan_id == 3
+
+    plan_id = mod.get_plan_id_by_tier("basic")
+    assert plan_id == 1
+
+
+def test_get_plan_id_by_tier_returns_none_when_not_found(mod, fake_supabase):
+    # Ensure database is clean
+    fake_supabase.clear_all()
+
+    fake_supabase.table("plans").insert([
+        {"id": 1, "name": "Basic", "is_active": True},
+        {"id": 2, "name": "Pro", "is_active": True},
+    ]).execute()
+
+    plan_id = mod.get_plan_id_by_tier("nonexistent")
+    assert plan_id is None
+
+
+def test_get_plan_id_by_tier_only_returns_active_plans(mod, fake_supabase):
+    # Ensure database is clean
+    fake_supabase.clear_all()
+
+    fake_supabase.table("plans").insert([
+        {"id": 1, "name": "Pro", "is_active": False},
+        {"id": 2, "name": "Pro Plus", "is_active": True},
+    ]).execute()
+
+    # Should only find the active Pro Plus, not the inactive Pro
+    plan_id = mod.get_plan_id_by_tier("pro")
+    assert plan_id == 2
+
+
+def test_get_plan_id_by_tier_error_returns_none(monkeypatch):
+    # Force get_supabase_client to raise
+    def raise_error():
+        raise RuntimeError("boom")
+    bad_supabase_mod = types.SimpleNamespace(get_supabase_client=raise_error)
+    monkeypatch.setitem(sys.modules, "src.config.supabase_config", bad_supabase_mod)
+
+    m = importlib.import_module(MODULE_PATH)
+    importlib.reload(m)
+
+    plan_id = m.get_plan_id_by_tier("pro")
+    assert plan_id is None
