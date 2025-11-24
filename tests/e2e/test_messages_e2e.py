@@ -10,18 +10,16 @@ These tests verify:
 """
 
 import pytest
-from httpx import AsyncClient
 
 
-@pytest.mark.asyncio
 class TestMessagesE2E:
     """E2E tests for messages endpoint."""
 
-    async def test_messages_basic_request(
+    def test_messages_basic_request(
         self, client: AsyncClient, auth_headers: dict, base_messages_payload: dict
     ):
         """Test basic messages API request and response."""
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=base_messages_payload,
             headers=auth_headers,
@@ -36,7 +34,7 @@ class TestMessagesE2E:
         assert "text" in data["content"][0]
         assert data["content"][0]["type"] == "text"
 
-    async def test_messages_with_system_prompt(
+    def test_messages_with_system_prompt(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with system prompt (Anthropic style)."""
@@ -49,7 +47,7 @@ class TestMessagesE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -59,7 +57,7 @@ class TestMessagesE2E:
         data = response.json()
         assert data["content"][0]["type"] == "text"
 
-    async def test_messages_with_all_parameters(
+    def test_messages_with_all_parameters(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with all optional parameters."""
@@ -72,7 +70,7 @@ class TestMessagesE2E:
             "messages": [{"role": "user", "content": "Hello"}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -85,13 +83,13 @@ class TestMessagesE2E:
         if "usage" in data:
             assert data["usage"]["output_tokens"] <= 150
 
-    async def test_messages_streaming(
+    def test_messages_streaming(
         self, client: AsyncClient, auth_headers: dict, base_messages_payload: dict
     ):
         """Test streaming messages API."""
         payload = {**base_messages_payload, "stream": True}
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -106,13 +104,13 @@ class TestMessagesE2E:
         assert "data:" in content
         assert "[DONE]" in content
 
-    async def test_messages_with_provider_openrouter(
+    def test_messages_with_provider_openrouter(
         self, client: AsyncClient, auth_headers: dict, base_messages_payload: dict
     ):
         """Test messages API with explicit OpenRouter provider."""
         payload = {**base_messages_payload, "provider": "openrouter"}
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -122,7 +120,7 @@ class TestMessagesE2E:
         data = response.json()
         assert "content" in data
 
-    async def test_messages_with_provider_featherless(
+    def test_messages_with_provider_featherless(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with Featherless provider."""
@@ -133,7 +131,7 @@ class TestMessagesE2E:
             "provider": "featherless",
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -142,11 +140,11 @@ class TestMessagesE2E:
         # Should succeed or fail gracefully with provider error
         assert response.status_code in [200, 503]
 
-    async def test_messages_missing_api_key(
+    def test_messages_missing_api_key(
         self, client: AsyncClient, base_messages_payload: dict
     ):
         """Test messages API without API key."""
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=base_messages_payload,
         )
@@ -155,7 +153,7 @@ class TestMessagesE2E:
         data = response.json()
         assert "detail" in data
 
-    async def test_messages_missing_max_tokens(
+    def test_messages_missing_max_tokens(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API without required max_tokens (Anthropic requirement)."""
@@ -165,7 +163,7 @@ class TestMessagesE2E:
             # max_tokens is REQUIRED for Anthropic
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -174,7 +172,7 @@ class TestMessagesE2E:
         # Should fail validation - max_tokens is required
         assert response.status_code == 422
 
-    async def test_messages_invalid_max_tokens(
+    def test_messages_invalid_max_tokens(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with invalid max_tokens."""
@@ -184,7 +182,7 @@ class TestMessagesE2E:
             "messages": [{"role": "user", "content": "Hello"}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -192,7 +190,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_messages_empty_messages(
+    def test_messages_empty_messages(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with empty messages array."""
@@ -202,7 +200,7 @@ class TestMessagesE2E:
             "messages": [],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -210,7 +208,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_messages_invalid_role(
+    def test_messages_invalid_role(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with invalid message role (Anthropic only allows user/assistant)."""
@@ -220,7 +218,7 @@ class TestMessagesE2E:
             "messages": [{"role": "system", "content": "Hello"}],  # Invalid for Anthropic
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -228,7 +226,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_messages_empty_content(
+    def test_messages_empty_content(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with empty message content."""
@@ -238,7 +236,7 @@ class TestMessagesE2E:
             "messages": [{"role": "user", "content": ""}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -246,7 +244,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_messages_conversation_history(
+    def test_messages_conversation_history(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with conversation history."""
@@ -260,7 +258,7 @@ class TestMessagesE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -270,7 +268,7 @@ class TestMessagesE2E:
         data = response.json()
         assert "content" in data
 
-    async def test_messages_with_tools(
+    def test_messages_with_tools(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with tool definitions (Claude tool use)."""
@@ -296,7 +294,7 @@ class TestMessagesE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -305,7 +303,7 @@ class TestMessagesE2E:
         # Should succeed
         assert response.status_code == 200
 
-    async def test_messages_with_tool_choice(
+    def test_messages_with_tool_choice(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with tool_choice parameter."""
@@ -323,7 +321,7 @@ class TestMessagesE2E:
             "tool_choice": "auto",
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -331,7 +329,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 200
 
-    async def test_messages_with_stop_sequences(
+    def test_messages_with_stop_sequences(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with stop_sequences (Claude feature)."""
@@ -342,7 +340,7 @@ class TestMessagesE2E:
             "stop_sequences": ["5"],  # Stop at 5
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -350,7 +348,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 200
 
-    async def test_messages_with_top_k(
+    def test_messages_with_top_k(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with top_k parameter (Anthropic-specific)."""
@@ -361,7 +359,7 @@ class TestMessagesE2E:
             "top_k": 40,  # Anthropic-specific parameter
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -369,7 +367,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 200
 
-    async def test_messages_very_long_content(
+    def test_messages_very_long_content(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with very long message."""
@@ -381,7 +379,7 @@ class TestMessagesE2E:
             "messages": [{"role": "user", "content": long_content}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,
@@ -390,7 +388,7 @@ class TestMessagesE2E:
         # Should either succeed or fail with appropriate error
         assert response.status_code in [200, 413, 400, 429]
 
-    async def test_messages_metadata(
+    def test_messages_metadata(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test messages API with metadata parameter."""
@@ -401,7 +399,7 @@ class TestMessagesE2E:
             "metadata": {"user_id": "12345", "conversation_id": "conv_123"},
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/messages",
             json=payload,
             headers=auth_headers,

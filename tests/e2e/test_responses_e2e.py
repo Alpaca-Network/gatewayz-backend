@@ -10,18 +10,16 @@ These tests verify:
 """
 
 import pytest
-from httpx import AsyncClient
 
 
-@pytest.mark.asyncio
 class TestResponsesE2E:
     """E2E tests for unified responses endpoint."""
 
-    async def test_responses_basic_request(
+    def test_responses_basic_request(
         self, client: AsyncClient, auth_headers: dict, base_responses_payload: dict
     ):
         """Test basic unified responses endpoint request and response."""
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=base_responses_payload,
             headers=auth_headers,
@@ -34,7 +32,7 @@ class TestResponsesE2E:
         assert len(data["output"]) > 0
         assert "content" in data["output"][0]
 
-    async def test_responses_with_all_parameters(
+    def test_responses_with_all_parameters(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with all optional parameters."""
@@ -49,7 +47,7 @@ class TestResponsesE2E:
             "stream": False,
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -59,13 +57,13 @@ class TestResponsesE2E:
         data = response.json()
         assert "output" in data
 
-    async def test_responses_streaming(
+    def test_responses_streaming(
         self, client: AsyncClient, auth_headers: dict, base_responses_payload: dict
     ):
         """Test streaming responses endpoint."""
         payload = {**base_responses_payload, "stream": True}
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -79,13 +77,13 @@ class TestResponsesE2E:
         content = response.text
         assert "data:" in content
 
-    async def test_responses_with_provider(
+    def test_responses_with_provider(
         self, client: AsyncClient, auth_headers: dict, base_responses_payload: dict
     ):
         """Test responses endpoint with specific provider."""
         payload = {**base_responses_payload, "provider": "openrouter"}
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -95,7 +93,7 @@ class TestResponsesE2E:
         data = response.json()
         assert "output" in data
 
-    async def test_responses_with_json_response_format(
+    def test_responses_with_json_response_format(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with JSON response format."""
@@ -110,7 +108,7 @@ class TestResponsesE2E:
             "response_format": {"type": "json_object"},
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -119,7 +117,7 @@ class TestResponsesE2E:
         # Response format may not be supported by all models
         assert response.status_code in [200, 400, 422]
 
-    async def test_responses_multimodal_input(
+    def test_responses_multimodal_input(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with multimodal input (text + image)."""
@@ -141,7 +139,7 @@ class TestResponsesE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -150,7 +148,7 @@ class TestResponsesE2E:
         # Vision models should handle this
         assert response.status_code in [200, 400, 422]
 
-    async def test_responses_multiple_input_items(
+    def test_responses_multiple_input_items(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with multiple input items."""
@@ -163,7 +161,7 @@ class TestResponsesE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -173,18 +171,18 @@ class TestResponsesE2E:
         data = response.json()
         assert "output" in data
 
-    async def test_responses_missing_api_key(
+    def test_responses_missing_api_key(
         self, client: AsyncClient, base_responses_payload: dict
     ):
         """Test responses endpoint without API key."""
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=base_responses_payload,
         )
 
         assert response.status_code == 401
 
-    async def test_responses_empty_input(
+    def test_responses_empty_input(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with empty input array."""
@@ -193,7 +191,7 @@ class TestResponsesE2E:
             "input": [],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -201,7 +199,7 @@ class TestResponsesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_responses_missing_model(
+    def test_responses_missing_model(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint without model."""
@@ -209,7 +207,7 @@ class TestResponsesE2E:
             "input": [{"role": "user", "content": "Hello"}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -217,7 +215,7 @@ class TestResponsesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_responses_with_tools(
+    def test_responses_with_tools(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with tool definitions."""
@@ -236,7 +234,7 @@ class TestResponsesE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -244,7 +242,7 @@ class TestResponsesE2E:
 
         assert response.status_code == 200
 
-    async def test_responses_very_long_input(
+    def test_responses_very_long_input(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with very long input."""
@@ -255,7 +253,7 @@ class TestResponsesE2E:
             "input": [{"role": "user", "content": long_content}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -263,7 +261,7 @@ class TestResponsesE2E:
 
         assert response.status_code in [200, 413, 400, 429]
 
-    async def test_responses_default_max_tokens(
+    def test_responses_default_max_tokens(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test that max_tokens defaults to 950."""
@@ -273,7 +271,7 @@ class TestResponsesE2E:
             # max_tokens not specified
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -285,7 +283,7 @@ class TestResponsesE2E:
         if "usage" in data:
             assert data["usage"]["output_tokens"] <= 950
 
-    async def test_responses_with_featherless_provider(
+    def test_responses_with_featherless_provider(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with Featherless provider."""
@@ -295,7 +293,7 @@ class TestResponsesE2E:
             "provider": "featherless",
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
@@ -303,7 +301,7 @@ class TestResponsesE2E:
 
         assert response.status_code in [200, 503]
 
-    async def test_responses_with_fireworks_provider(
+    def test_responses_with_fireworks_provider(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test responses endpoint with Fireworks provider."""
@@ -313,7 +311,7 @@ class TestResponsesE2E:
             "provider": "fireworks",
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/responses",
             json=payload,
             headers=auth_headers,
