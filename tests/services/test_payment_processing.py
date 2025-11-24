@@ -134,11 +134,58 @@ class TestCheckoutSession:
         assert call_kwargs['customer_email'] == 'test@example.com'
         assert call_kwargs['metadata']['user_id'] == '1'
         assert call_kwargs['metadata']['credits'] == '1000'
+        assert 'payment_intent_data' in call_kwargs
+        assert call_kwargs['payment_intent_data']['metadata'] == call_kwargs['metadata']
+
+        expected_update_kwargs = {
+            'payment_id': 1,
+            'status': 'pending',
+            'stripe_session_id': 'cs_test_123'
+        }
+        if mock_session.payment_intent:
+            expected_update_kwargs['stripe_payment_intent_id'] = mock_session.payment_intent
+        mock_update_payment.assert_called_once_with(**expected_update_kwargs)
+
+    @patch('src.services.payments.get_user_by_id')
+    @patch('src.services.payments.create_payment')
+    @patch('stripe.checkout.Session.create')
+    @patch('src.services.payments.update_payment_status')
+    def test_create_checkout_session_persists_payment_intent(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment
+    ):
+        """Ensure checkout session stores payment_intent when provided by Stripe."""
+
+        mock_get_user.return_value = mock_user
+        mock_create_payment.return_value = mock_payment
+
+        mock_session = Mock()
+        mock_session.id = 'cs_test_456'
+        mock_session.url = 'https://checkout.stripe.com/pay/cs_test_456'
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.payment_intent = 'pi_cs_test_456'
+        mock_stripe_create.return_value = mock_session
+
+        request = CreateCheckoutSessionRequest(
+            amount=2000,
+            currency=StripeCurrency.USD,
+            description="Another purchase",
+            customer_email="intent@example.com"
+        )
+
+        stripe_service.create_checkout_session(user_id=1, request=request)
 
         mock_update_payment.assert_called_once_with(
             payment_id=1,
             status='pending',
-            stripe_session_id='cs_test_123'
+            stripe_session_id='cs_test_456',
+            stripe_payment_intent_id='pi_cs_test_456'
         )
 
     @patch('src.services.payments.get_user_by_id')
@@ -502,6 +549,111 @@ class TestWebhooks:
             status='completed',
             stripe_payment_intent_id='pi_full',
             stripe_session_id='cs_missing_meta',
+        )
+
+    @patch('stripe.PaymentIntent.retrieve')
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_recovers_metadata_from_payment_intent(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        mock_intent_retrieve,
+        stripe_service,
+    ):
+        """Verify fallback metadata retrieval pulls from the related payment intent."""
+
+        session = Mock()
+        session.id = 'cs_pi_meta'
+        session.payment_intent = 'pi_meta_only'
+        session.metadata = None
+        session.client_reference_id = None
+        session.amount_total = 3000
+        session.amount_subtotal = None
+
+        mock_get_payment.side_effect = [None, None]
+
+        mock_intent = Mock()
+        mock_intent.metadata = {
+            'user_id': '77',
+            'payment_id': '555',
+            'credits': '3000',
+        }
+        mock_intent_retrieve.return_value = mock_intent
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_intent_retrieve.assert_called_once_with('pi_meta_only', expand=['metadata'])
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 77
+        assert add_kwargs['payment_id'] == 555
+        assert add_kwargs['credits'] == 30.0
+
+        mock_update_payment.assert_called_once_with(
+            payment_id=555,
+            status='completed',
+            stripe_payment_intent_id='pi_meta_only',
+            stripe_session_id='cs_pi_meta',
+        )
+
+    @patch('stripe.PaymentIntent.retrieve')
+    @patch('stripe.checkout.Session.retrieve')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_hydrates_metadata_from_payment_intent(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_session_retrieve,
+        mock_payment_intent_retrieve,
+        stripe_service
+    ):
+        """Ensure metadata can be recovered from the PaymentIntent when absent on the session."""
+
+        webhook_session = {
+            'id': 'cs_missing_everything',
+            'payment_intent': 'pi_metadata_source',
+            'metadata': None,
+            'client_reference_id': '9',
+        }
+
+        refreshed_session = {
+            'id': 'cs_missing_everything',
+            'payment_intent': 'pi_metadata_source',
+            'metadata': None,
+        }
+        mock_session_retrieve.return_value = refreshed_session
+
+        intent = Mock()
+        intent.metadata = {
+            'user_id': '9',
+            'payment_id': '321',
+            'credits': '4200',
+        }
+        mock_payment_intent_retrieve.return_value = intent
+
+        stripe_service._handle_checkout_completed(webhook_session)
+
+        mock_session_retrieve.assert_called_once_with('cs_missing_everything', expand=['metadata'])
+        mock_payment_intent_retrieve.assert_called_once_with(
+            'pi_metadata_source', expand=['metadata']
+        )
+
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 9
+        assert add_kwargs['payment_id'] == 321
+        assert add_kwargs['credits'] == 42.0
+
+        mock_update_payment.assert_called_once_with(
+            payment_id=321,
+            status='completed',
+            stripe_payment_intent_id='pi_metadata_source',
+            stripe_session_id='cs_missing_everything'
+>>>>>>> origin/main
         )
 
     def test_checkout_completed_raises_when_metadata_and_id_missing(self, stripe_service):

@@ -215,14 +215,16 @@ def test_create_api_key_primary_sets_trial_and_prefix_and_audit(monkeypatch, mod
 
 
 def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fake_supabase):
-    fake_supabase.fail_next_insert(
-        "api_keys_new",
-        RuntimeError("{'code': 'PGRST204', 'message': 'Could not find column in schema cache'}"),
+    from postgrest import APIError
+    # Simulate PostgREST schema cache error
+    error = APIError(
+        {'code': 'PGRST204', 'message': 'Could not find column in schema cache'}
     )
+    fake_supabase.fail_next_insert("api_keys_new", error)
 
     refresh_calls = {"count": 0}
 
-    def fake_refresh():
+    def fake_refresh(client):
         refresh_calls["count"] += 1
         return True
 
@@ -237,17 +239,15 @@ def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fak
 
 def test_create_api_key_schema_cache_error_fallback(monkeypatch, mod, fake_supabase):
     """Ensure we recover from PostgREST schema cache misses for new columns."""
+    from postgrest import APIError
     monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
 
-    fake_supabase.fail_next_insert(
-        "api_keys_new",
-        RuntimeError(
-            "{'code': 'PGRST204', 'message': \"Could not find the 'key_version' column "
-            "of 'api_keys_new' in the schema cache\"}"
-        ),
+    error = APIError(
+        {'code': 'PGRST204', 'message': "Could not find the 'key_version' column of 'api_keys_new' in the schema cache"}
     )
+    fake_supabase.fail_next_insert("api_keys_new", error)
 
-    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", lambda: True)
+    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", lambda client: True)
 
     api_key, key_id = mod.create_api_key(user_id=1, key_name="Primary", is_primary=True)
 
