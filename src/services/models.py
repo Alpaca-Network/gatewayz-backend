@@ -38,6 +38,10 @@ from src.cache import (
     _xai_models_cache,
     is_cache_fresh,
     should_revalidate_in_background,
+    set_gateway_error,
+    is_gateway_in_error_state,
+    clear_gateway_error,
+    get_gateway_error_message,
 )
 from src.config import Config
 from src.services.google_models_config import register_google_models_in_canonical_registry
@@ -414,13 +418,33 @@ def get_all_models_parallel():
             "aihubmix",
             "alibaba",
         ]
+        
+        # Filter out gateways that are currently in error state (circuit breaker pattern)
+        active_gateways = []
+        for gw in gateways:
+            if is_gateway_in_error_state(gw):
+                error_msg = get_gateway_error_message(gw)
+                logger.info(
+                    "Skipping %s in parallel fetch - gateway in error state: %s",
+                    sanitize_for_logging(gw),
+                    sanitize_for_logging(error_msg or "unknown error")[:100]
+                )
+            else:
+                active_gateways.append(gw)
+        
+        logger.info(
+            "Fetching from %d/%d active gateways (%d in error state)",
+            len(active_gateways),
+            len(gateways),
+            len(gateways) - len(active_gateways)
+        )
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
         # Since get_cached_models uses synchronous httpx, we use threads
         # Reduced max_workers from 16 to 8 to prevent thread exhaustion
         # in case of recursive calls or errors
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {executor.submit(get_cached_models, gw): gw for gw in gateways}
+            futures = {executor.submit(get_cached_models, gw): gw for gw in active_gateways}
             all_models = []
 
             for future in futures:
@@ -552,6 +576,16 @@ def get_cached_models(gateway: str = "openrouter"):
             cached = _fresh_cached_models(_fireworks_models_cache, "fireworks")
             if cached is not None:
                 return cached
+            
+            # Check if gateway is in error state (exponential backoff)
+            if is_gateway_in_error_state("fireworks"):
+                error_msg = get_gateway_error_message("fireworks")
+                logger.warning(
+                    "Skipping Fireworks fetch - gateway in error state: %s",
+                    sanitize_for_logging(error_msg or "unknown error")
+                )
+                return None
+            
             result = fetch_models_from_fireworks()
             _register_canonical_records("fireworks", result)
             return result
@@ -791,10 +825,20 @@ def fetch_models_from_openrouter():
                 model["pricing"] = sanitize_pricing(model["pricing"])
         _models_cache["data"] = models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("openrouter")
 
         return _models_cache["data"]
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("OpenRouter HTTP error: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
+        return None
     except Exception as e:
-        logger.error("Failed to fetch models from OpenRouter: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from OpenRouter: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
         return None
 
 
@@ -841,20 +885,21 @@ def fetch_models_from_deepinfra():
 
         _deepinfra_models_cache["data"] = normalized_models
         _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("deepinfra")
 
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
         return _deepinfra_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "DeepInfra HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("DeepInfra HTTP error: %s", error_msg)
+        set_gateway_error("deepinfra", error_msg)
         return None
     except Exception as e:
-        logger.error(
-            "Failed to fetch models from DeepInfra: %s", sanitize_for_logging(str(e)), exc_info=True
-        )
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from DeepInfra: %s", error_msg, exc_info=True)
+        set_gateway_error("deepinfra", error_msg)
         return None
 
 
@@ -906,18 +951,21 @@ def fetch_models_from_featherless():
 
         _featherless_models_cache["data"] = normalized_models
         _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("featherless")
 
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
         return _featherless_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Featherless HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Featherless HTTP error: %s", error_msg)
+        set_gateway_error("featherless", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Featherless: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Featherless: %s", error_msg)
+        set_gateway_error("featherless", error_msg)
         return None
 
 
@@ -1056,18 +1104,21 @@ def fetch_models_from_groq():
 
         _groq_models_cache["data"] = normalized_models
         _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("groq")
 
         logger.info(f"Fetched {len(normalized_models)} Groq models")
         return _groq_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Groq HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Groq HTTP error: %s", error_msg)
+        set_gateway_error("groq", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Groq: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Groq: %s", error_msg)
+        set_gateway_error("groq", error_msg)
         return None
 
 
@@ -1245,18 +1296,25 @@ def fetch_models_from_fireworks():
 
         _fireworks_models_cache["data"] = normalized_models
         _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("fireworks")
 
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
         return _fireworks_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Fireworks HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Fireworks HTTP error: %s", error_msg)
+        
+        # Cache error state to prevent continuous retries
+        set_gateway_error("fireworks", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Fireworks: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Fireworks: %s", error_msg)
+        
+        # Cache error state to prevent continuous retries
+        set_gateway_error("fireworks", error_msg)
         return None
 
 
@@ -1386,18 +1444,21 @@ def fetch_models_from_together():
 
         _together_models_cache["data"] = normalized_models
         _together_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("together")
 
         logger.info(f"Fetched {len(normalized_models)} Together models")
         return _together_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Together HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Together HTTP error: %s", error_msg)
+        set_gateway_error("together", error_msg)
         return None
     except Exception as e:
-        logger.error("Failed to fetch models from Together: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from Together: %s", error_msg)
+        set_gateway_error("together", error_msg)
         return None
 
 
@@ -1529,17 +1590,20 @@ def fetch_models_from_aimo():
 
         _aimo_models_cache["data"] = deduplicated_models
         _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        
+        # Clear error state on successful fetch
+        clear_gateway_error("aimo")
 
         return _aimo_models_cache["data"]
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "AIMO HTTP error: %s - %s",
-            e.response.status_code,
-            sanitize_for_logging(e.response.text),
-        )
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("AIMO HTTP error: %s", error_msg)
+        set_gateway_error("aimo", error_msg)
         return []
     except Exception as e:
-        logger.error("Failed to fetch models from AIMO: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from AIMO: %s", error_msg)
+        set_gateway_error("aimo", error_msg)
         return []
 
 
