@@ -486,71 +486,27 @@ jobs:
               body: '✅ All CI checks passed! This PR is ready to merge and deploy.'
             })
 
-  # Job 5B: Trigger Claude on CI Failure (for PRs)
-  trigger-claude-on-failure:
-    name: Trigger Claude Auto-Fix
+  # Job 5B: Trigger Cursor CLI Auto-Fix
+  # (Automatically triggers via workflow_run, but can also be manually dispatched)
+  trigger-cursor-auto-fix:
+    name: Notify Cursor Auto-Fix
     runs-on: ubuntu-latest
-    # Depends on critical jobs and runs if any failed, only for pull requests
+    # Depends on critical jobs and runs if any failed
     needs: [lint, security, test, coverage, build]
-    if: failure() && github.event_name == 'pull_request'
-    permissions:
-      actions: write
+    if: failure()
 
     steps:
-      - name: Dispatch claude-on-failure workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              console.log('Triggering claude-on-failure workflow...');
-              const response = await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'claude-on-failure.yml',
-                ref: context.payload.pull_request.head.ref,
-              });
-              console.log('✅ Claude on-failure workflow triggered successfully');
-            } catch (error) {
-              console.error('⚠️ Failed to trigger workflow:', error.message);
-              // Don't fail the job - this is a best-effort notification
-            }
-
-  # Job 5C: Trigger Codex Auto-Fix (for test failures)
-  trigger-codex-on-test-failure:
-    name: Trigger Codex Auto-Fix
-    runs-on: ubuntu-latest
-    needs: [coverage]
-    if: failure() && needs.coverage.outputs.has_failures == 'true'
-    permissions:
-      actions: write
-
-    steps:
-      - name: Check if test-failures artifact exists
-        id: check_artifact
+      - name: Log CI failure detected
         run: |
-          echo "Waiting to verify test failure artifact..."
-          echo "Codex will be triggered to fix test failures"
-
-      - name: Dispatch codex test fixer workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              console.log('Triggering Codex test fixer workflow...');
-              const response = await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'test-failure-auto-fix.yml',
-                ref: context.ref,
-                inputs: {
-                  'test_output_artifact': 'test-failures'
-                }
-              });
-              console.log('✅ Codex test fixer workflow triggered successfully');
-            } catch (error) {
-              console.error('⚠️ Failed to trigger Codex workflow:', error.message);
-              // Don't fail the job - this is a best-effort notification
-            }
+          echo "📌 CI failure detected - Cursor auto-fix workflow will be triggered"
+          echo ""
+          echo "The 'fix-ci-cursor' workflow will:"
+          echo "  ✓ Detect the failure"
+          echo "  ✓ Analyze root cause"
+          echo "  ✓ Apply targeted fixes"
+          echo "  ✓ Commit directly to PR branch"
+          echo ""
+          echo "🔗 Workflow: .github/workflows/fix-ci-cursor.yml"
 
   # Job 6: Railway Deployment Notification
   notify-deployment:
