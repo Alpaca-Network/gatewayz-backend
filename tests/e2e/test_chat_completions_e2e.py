@@ -13,18 +13,16 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import AsyncClient
 
 
-@pytest.mark.asyncio
 class TestChatCompletionsE2E:
     """E2E tests for chat completions endpoint."""
 
-    async def test_chat_completions_basic_request(
+    def test_chat_completions_basic_request(
         self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test basic chat completion request and response."""
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=base_chat_payload,
             headers=auth_headers,
@@ -40,7 +38,7 @@ class TestChatCompletionsE2E:
         assert "role" in data["choices"][0]["message"]
         assert data["choices"][0]["message"]["role"] == "assistant"
 
-    async def test_chat_completions_with_system_prompt(
+    def test_chat_completions_with_system_prompt(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with system prompt."""
@@ -55,7 +53,7 @@ class TestChatCompletionsE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -65,7 +63,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert data["choices"][0]["message"]["role"] == "assistant"
 
-    async def test_chat_completions_with_all_parameters(
+    def test_chat_completions_with_all_parameters(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with all optional parameters."""
@@ -80,7 +78,7 @@ class TestChatCompletionsE2E:
             "stream": False,
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -93,13 +91,13 @@ class TestChatCompletionsE2E:
         if "usage" in data:
             assert data["usage"]["completion_tokens"] <= 100
 
-    async def test_chat_completions_streaming(
+    def test_chat_completions_streaming(
         self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test streaming chat completion."""
         payload = {**base_chat_payload, "stream": True}
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -114,13 +112,13 @@ class TestChatCompletionsE2E:
         assert "data:" in content
         assert "[DONE]" in content
 
-    async def test_chat_completions_with_provider_openrouter(
+    def test_chat_completions_with_provider_openrouter(
         self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test chat completion with explicit OpenRouter provider."""
         payload = {**base_chat_payload, "provider": "openrouter"}
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -130,7 +128,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert "choices" in data
 
-    async def test_chat_completions_with_provider_featherless(
+    def test_chat_completions_with_provider_featherless(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with Featherless provider."""
@@ -140,7 +138,7 @@ class TestChatCompletionsE2E:
             "provider": "featherless",
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -149,7 +147,7 @@ class TestChatCompletionsE2E:
         # Should succeed or fail gracefully with provider error
         assert response.status_code in [200, 503]
 
-    async def test_chat_completions_with_provider_fireworks(
+    def test_chat_completions_with_provider_fireworks(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with Fireworks provider."""
@@ -159,7 +157,7 @@ class TestChatCompletionsE2E:
             "provider": "fireworks",
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -167,11 +165,11 @@ class TestChatCompletionsE2E:
 
         assert response.status_code in [200, 503]
 
-    async def test_chat_completions_missing_api_key(
+    def test_chat_completions_missing_api_key(
         self, client: AsyncClient, base_chat_payload: dict
     ):
         """Test chat completion without API key."""
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=base_chat_payload,
         )
@@ -180,7 +178,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert "detail" in data
 
-    async def test_chat_completions_empty_messages(
+    def test_chat_completions_empty_messages(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with empty messages array."""
@@ -189,7 +187,7 @@ class TestChatCompletionsE2E:
             "messages": [],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -199,7 +197,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert "detail" in data
 
-    async def test_chat_completions_invalid_role(
+    def test_chat_completions_invalid_role(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with invalid message role."""
@@ -208,7 +206,7 @@ class TestChatCompletionsE2E:
             "messages": [{"role": "invalid_role", "content": "Hello"}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -216,7 +214,7 @@ class TestChatCompletionsE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_chat_completions_empty_content(
+    def test_chat_completions_empty_content(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with empty message content."""
@@ -225,7 +223,7 @@ class TestChatCompletionsE2E:
             "messages": [{"role": "user", "content": ""}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -233,7 +231,7 @@ class TestChatCompletionsE2E:
 
         assert response.status_code == 422  # Validation error
 
-    async def test_chat_completions_multiple_messages(
+    def test_chat_completions_multiple_messages(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with conversation history."""
@@ -247,7 +245,7 @@ class TestChatCompletionsE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -257,7 +255,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert "choices" in data
 
-    async def test_chat_completions_with_tools(
+    def test_chat_completions_with_tools(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with function calling tools."""
@@ -285,7 +283,7 @@ class TestChatCompletionsE2E:
             ],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -294,7 +292,7 @@ class TestChatCompletionsE2E:
         # Should succeed even if tool not used
         assert response.status_code == 200
 
-    async def test_chat_completions_response_format_json(
+    def test_chat_completions_response_format_json(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with JSON response format."""
@@ -309,7 +307,7 @@ class TestChatCompletionsE2E:
             "response_format": {"type": "json_object"},
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -318,7 +316,7 @@ class TestChatCompletionsE2E:
         # Response format may not be supported by all models
         assert response.status_code in [200, 400, 422]
 
-    async def test_chat_completions_very_long_message(
+    def test_chat_completions_very_long_message(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test chat completion with very long message."""
@@ -329,7 +327,7 @@ class TestChatCompletionsE2E:
             "messages": [{"role": "user", "content": long_content}],
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -338,11 +336,11 @@ class TestChatCompletionsE2E:
         # Should either succeed or fail with appropriate error
         assert response.status_code in [200, 413, 400, 429]
 
-    async def test_chat_completions_session_id_parameter(
+    def test_chat_completions_session_id_parameter(
         self, client: AsyncClient, auth_headers: dict, base_chat_payload: dict
     ):
         """Test chat completion with session_id query parameter."""
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions?session_id=1",
             json=base_chat_payload,
             headers=auth_headers,
@@ -351,7 +349,7 @@ class TestChatCompletionsE2E:
         # Session_id is optional; should still work
         assert response.status_code in [200, 404]  # 404 if session doesn't exist
 
-    async def test_chat_completions_default_max_tokens(
+    def test_chat_completions_default_max_tokens(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test that max_tokens defaults to 950."""
@@ -361,7 +359,7 @@ class TestChatCompletionsE2E:
             # max_tokens not specified - should default to 950
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
@@ -373,7 +371,7 @@ class TestChatCompletionsE2E:
         if "usage" in data:
             assert data["usage"]["completion_tokens"] <= 950
 
-    async def test_chat_completions_default_temperature(
+    def test_chat_completions_default_temperature(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test that temperature defaults to 1.0."""
@@ -383,7 +381,7 @@ class TestChatCompletionsE2E:
             # temperature not specified - should default to 1.0
         }
 
-        response = await client.post(
+        response = client.post(
             "/v1/chat/completions",
             json=payload,
             headers=auth_headers,
