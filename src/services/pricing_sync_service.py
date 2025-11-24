@@ -16,6 +16,7 @@ Features:
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -36,7 +37,7 @@ SYNC_LOG_FILE = Config.PRICING_SYNC_LOG_FILE
 BACKUP_DIR.mkdir(exist_ok=True)
 
 
-@dict
+@dataclass
 class PricingSyncConfig:
     """Configuration for pricing sync"""
 

@@ -47,9 +47,20 @@ class StripeService:
         self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
         self.publishable_key = os.getenv("STRIPE_PUBLISHABLE_KEY")
 
-        if not self.api_key:
-            raise ValueError("STRIPE_SECRET_KEY not found in environment variables")
+        # Configuration (always set, regardless of Stripe initialization)
+        self.default_currency = StripeCurrency.USD
+        self.min_amount = 50  # $0.50 minimum
+        self.max_amount = 99999999  # ~$1M maximum
+        self.frontend_url = os.getenv("FRONTEND_URL", "https://gatewayz.ai")
 
+        if not self.api_key:
+            logger.warning(
+                "STRIPE_SECRET_KEY not found in environment variables - Stripe functionality will be unavailable"
+            )
+            self.initialized = False
+            return
+
+        self.initialized = True
         # Validate webhook secret is configured for security
         if not self.webhook_secret:
             logger.warning(
@@ -59,13 +70,12 @@ class StripeService:
         # Set Stripe API key
         stripe.api_key = self.api_key
 
-        # Configuration
-        self.default_currency = StripeCurrency.USD
-        self.min_amount = 50  # $0.50 minimum
-        self.max_amount = 99999999  # ~$1M maximum
-        self.frontend_url = os.getenv("FRONTEND_URL", "https://gatewayz.ai")
-
         logger.info("Stripe service initialized")
+
+    def _ensure_initialized(self):
+        """Ensure Stripe is initialized, raise error if not"""
+        if not self.initialized:
+            raise ValueError("Stripe is not initialized - STRIPE_SECRET_KEY is missing")
 
     @staticmethod
     def _get_session_value(session_obj: Any, field: str):
