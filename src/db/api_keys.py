@@ -28,7 +28,7 @@ def _is_schema_cache_error(error: Exception) -> bool:
     return isinstance(error, APIError) and getattr(error, "code", None) == SCHEMA_CACHE_ERROR_CODE
 
 
-def _refresh_postgrest_schema_cache(client) -> bool:
+def refresh_postgrest_schema_cache(client) -> bool:
     """Trigger PostgREST to reload its schema cache via RPC."""
     try:
         if not hasattr(client, "rpc"):
@@ -76,7 +76,7 @@ def _handle_schema_cache_insert_error(
         sanitize_for_logging(str(original_error)),
     )
 
-    if _refresh_postgrest_schema_cache(client):
+    if refresh_postgrest_schema_cache(client):
         try:
             return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=True)
         except APIError as retry_error:
