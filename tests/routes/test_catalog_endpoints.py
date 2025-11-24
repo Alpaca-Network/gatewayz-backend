@@ -207,6 +207,25 @@ class TestModelsEndpoint:
         assert payload["returned"] == 0
         assert payload["data"] == []
 
+    @patch('src.routes.catalog.get_cached_models')
+    def test_xai_gateway_returns_empty_catalog(self, mock_get_cached_models):
+        """Requests for xAI should return 200 even if no catalog is available."""
+
+        def fake_get_cached_models(gateway: str):
+            assert gateway == "xai"
+            return []
+
+        mock_get_cached_models.side_effect = fake_get_cached_models
+
+        response = client.get("/models?gateway=xai&include_huggingface=false")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["gateway"] == "xai"
+        assert payload["total"] == 0
+        assert payload["returned"] == 0
+        assert payload["data"] == []
+
     @patch('src.routes.catalog.enhance_providers_with_logos_and_sites')
     @patch('src.routes.catalog.get_cached_providers')
     @patch('src.routes.catalog.get_cached_models')
