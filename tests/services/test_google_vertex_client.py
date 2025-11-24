@@ -1,5 +1,6 @@
 """Tests for Google Vertex AI client"""
 
+import base64
 import json
 import pytest
 import sys
@@ -30,11 +31,13 @@ try:
         _process_google_vertex_rest_response,
         _ensure_vertex_imports,
         _ensure_protobuf_imports,
+        _load_env_credentials_json,
     )
     GOOGLE_VERTEX_AVAILABLE = True
 except ImportError:
     GOOGLE_VERTEX_AVAILABLE = False
 
+import src.services.google_vertex_client as google_vertex_client_module
 from src.config import Config
 
 
@@ -50,6 +53,42 @@ def force_rest_transport(monkeypatch):
     """Force Vertex client to use REST transport."""
     monkeypatch.setattr(Config, "GOOGLE_VERTEX_TRANSPORT", "rest")
     yield
+
+
+@pytest.fixture(autouse=True)
+def reset_vertex_credentials_cache():
+    """Ensure credential cache does not leak between tests."""
+    google_vertex_client_module._VERTEX_CREDENTIALS_CACHE = None
+    google_vertex_client_module._VERTEX_CREDENTIALS_CACHE_RAW = None
+    google_vertex_client_module._VERTEX_CREDENTIALS_CACHE_JSON = None
+    yield
+    google_vertex_client_module._VERTEX_CREDENTIALS_CACHE = None
+    google_vertex_client_module._VERTEX_CREDENTIALS_CACHE_RAW = None
+    google_vertex_client_module._VERTEX_CREDENTIALS_CACHE_JSON = None
+
+
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
+class TestCredentialJsonLoading:
+    """Unit tests for GOOGLE_VERTEX_CREDENTIALS_JSON parsing."""
+
+    def test_load_env_credentials_accepts_raw_json(self, monkeypatch):
+        raw_json = '{"type":"service_account","client_email":"raw@example.com"}'
+        monkeypatch.setenv("GOOGLE_VERTEX_CREDENTIALS_JSON", raw_json)
+
+        creds, normalized = _load_env_credentials_json()
+
+        assert creds["client_email"] == "raw@example.com"
+        assert normalized == raw_json
+
+    def test_load_env_credentials_accepts_base64_json(self, monkeypatch):
+        raw_json = '{"type":"service_account","client_email":"base64@example.com"}'
+        encoded = base64.b64encode(raw_json.encode("utf-8")).decode("utf-8")
+        monkeypatch.setenv("GOOGLE_VERTEX_CREDENTIALS_JSON", encoded)
+
+        creds, normalized = _load_env_credentials_json()
+
+        assert creds["client_email"] == "base64@example.com"
+        assert normalized == raw_json
 
 
 @pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
