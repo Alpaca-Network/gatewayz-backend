@@ -5,10 +5,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from src.config import Config
 from src.db.api_keys import increment_api_key_usage
+from src.db.model_health import record_model_call
 from src.db.users import deduct_credits, get_user, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
 from src.security.deps import get_api_key
@@ -27,7 +28,11 @@ router = APIRouter()
 
 
 @router.post("/v1/images/generations", response_model=ImageGenerationResponse, tags=["images"])
-async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(get_api_key)):
+async def generate_images(
+    req: ImageGenerationRequest,
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(get_api_key),
+):
     """
     OpenAI-compatible image generation endpoint.
 
@@ -151,6 +156,7 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             provider = (
                 req.provider if req.provider else "deepinfra"
             )  # Default to DeepInfra for images
+            actual_provider = provider  # Initialize for error handling
 
             # Make image generation request
             logger.info(f"Generating {req.n} image(s) with prompt: {prompt[:50]}...")
@@ -205,6 +211,15 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             # Calculate inference latency
             elapsed = max(0.001, time.monotonic() - start)
 
+            # Record successful model call
+            background_tasks.add_task(
+                record_model_call,
+                provider=actual_provider,
+                model=model,
+                response_time_ms=elapsed * 1000,
+                status="success",
+            )
+
             # Deduct credits (100 tokens per image generated)
             tokens_charged = 100 * req.n
 
@@ -245,6 +260,19 @@ async def generate_images(req: ImageGenerationRequest, api_key: str = Depends(ge
             raise
         except Exception as e:
             logger.error(f"Unexpected error in image generation: {e}")
+
+            # Record failed model call if we have provider and model info
+            if 'actual_provider' in locals() and 'model' in locals() and 'start' in locals():
+                elapsed = max(0.001, time.monotonic() - start)
+                background_tasks.add_task(
+                    record_model_call,
+                    provider=actual_provider,
+                    model=model,
+                    response_time_ms=elapsed * 1000,
+                    status="error",
+                    error_message=str(e)[:500],
+                )
+
             raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}") from e
 
         finally:
