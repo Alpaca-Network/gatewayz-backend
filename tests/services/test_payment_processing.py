@@ -5,7 +5,7 @@ Tests Stripe integration for checkout sessions, payment intents, webhooks
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock, call
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, UTC
 import stripe
 
 from src.services.payments import StripeService
@@ -103,7 +103,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -168,7 +168,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_456'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_456'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = 'pi_cs_test_456'
         mock_stripe_create.return_value = mock_session
 
@@ -187,6 +187,51 @@ class TestCheckoutSession:
             stripe_session_id='cs_test_456',
             stripe_payment_intent_id='pi_cs_test_456'
         )
+
+    @patch('src.services.payments.get_user_by_id')
+    @patch('src.services.payments.create_payment')
+    @patch('stripe.checkout.Session.create')
+    @patch('src.services.payments.update_payment_status')
+    def test_create_checkout_session_attaches_metadata_to_payment_intent(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment
+    ):
+        """Ensure checkout metadata is mirrored onto the backing PaymentIntent."""
+
+        mock_get_user.return_value = mock_user
+        mock_create_payment.return_value = mock_payment
+
+        mock_session = Mock()
+        mock_session.id = 'cs_meta_sync'
+        mock_session.url = 'https://checkout.stripe.com/pay/cs_meta_sync'
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
+        mock_session.payment_intent = 'pi_meta_sync'
+        mock_stripe_create.return_value = mock_session
+
+        request = CreateCheckoutSessionRequest(
+            amount=2500,
+            currency=StripeCurrency.USD,
+            metadata={'plan': 'pro', 'source': 'settings'}
+        )
+
+        stripe_service.create_checkout_session(user_id=1, request=request)
+
+        call_kwargs = mock_stripe_create.call_args.kwargs
+        metadata = call_kwargs['metadata']
+        assert metadata == {
+            'user_id': '1',
+            'payment_id': '1',
+            'credits': '2500',
+            'plan': 'pro',
+            'source': 'settings',
+        }
+        assert call_kwargs['payment_intent_data']['metadata'] is metadata
 
     @patch('src.services.payments.get_user_by_id')
     def test_create_checkout_session_user_not_found(self, mock_get_user, stripe_service):
@@ -263,7 +308,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -855,7 +900,7 @@ class TestRefunds:
         mock_refund.currency = 'usd'
         mock_refund.status = 'succeeded'
         mock_refund.reason = 'requested_by_customer'
-        mock_refund.created = int(datetime.now(timezone.utc).timestamp())
+        mock_refund.created = int(datetime.now(UTC).timestamp())
         mock_stripe_refund.return_value = mock_refund
 
         request = CreateRefundRequest(
@@ -963,7 +1008,7 @@ class TestPaymentIntegration:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -1015,7 +1060,7 @@ class TestPaymentIntegration:
             'payment_id': 1,
             'status': 'completed',
             'stripe_payment_intent_id': 'pi_test_123',
-            'stripe_session_id': 'cs_test_123'
+            'stripe_session_id': 'cs_test_123',
         }
 
     @patch('src.services.payments.add_credits_to_user')
@@ -1141,5 +1186,148 @@ class TestPaymentIntegration:
             payment_id=555,
             status='completed',
             stripe_payment_intent_id='pi_missing_payment',
-            stripe_session_id='cs_missing_payment'
+            stripe_session_id='cs_missing_payment',
         )
+
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.stripe.PaymentIntent.retrieve')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    def test_checkout_completed_hydrates_metadata_from_payment_intent(
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_payment_intent_retrieve,
+        mock_get_payment,
+        stripe_service
+    ):
+        """Ensure handler can hydrate missing metadata from the PaymentIntent before falling back."""
+
+        session = Mock()
+        session.metadata = {}
+        session.id = 'cs_pi_metadata'
+        session.payment_intent = 'pi_pi_metadata'
+        session.amount_total = 1000
+        session.currency = 'usd'
+
+        mock_payment_intent = Mock()
+        mock_payment_intent.metadata = {
+            'user_id': '88',
+            'payment_id': '901',
+            'credits': '1000',
+        }
+        mock_payment_intent_retrieve.return_value = mock_payment_intent
+        mock_get_payment.return_value = None
+
+        stripe_service._handle_checkout_completed(session)
+
+        mock_payment_intent_retrieve.assert_called_once_with(
+            'pi_pi_metadata', expand=['metadata']
+        )
+        mock_get_payment.assert_not_called()
+        mock_add_credits.assert_called_once()
+        add_kwargs = mock_add_credits.call_args[1]
+        assert add_kwargs['user_id'] == 88
+        assert add_kwargs['payment_id'] == 901
+        assert add_kwargs['credits'] == 10.0
+        mock_update_payment.assert_called_once_with(
+            payment_id=901,
+            status='completed',
+            stripe_payment_intent_id='pi_pi_metadata',
+            stripe_session_id='cs_pi_metadata',
+        )
+
+
+class TestMetadataHydration:
+    """Focused tests for metadata hydration helpers."""
+
+    @patch('stripe.checkout.Session.retrieve')
+    def test_checkout_metadata_returns_existing_payload(
+        self,
+        mock_session_retrieve,
+        stripe_service
+    ):
+        session = Mock()
+        session.metadata = {'user_id': '1', 'payment_id': '9'}
+
+        hydrated_session, metadata = stripe_service._hydrate_checkout_session_metadata(session)
+
+        assert hydrated_session is session
+        assert metadata == {'user_id': '1', 'payment_id': '9'}
+        mock_session_retrieve.assert_not_called()
+
+    @patch.object(StripeService, '_hydrate_payment_intent_metadata_from_session')
+    @patch('stripe.checkout.Session.retrieve')
+    def test_checkout_metadata_falls_back_to_payment_intent(
+        self,
+        mock_session_retrieve,
+        mock_intent_hydrate,
+        stripe_service
+    ):
+        session = Mock()
+        session.id = 'cs_hydrate'
+        session.payment_intent = 'pi_hydrate'
+        session.metadata = None
+
+        refreshed_session = Mock()
+        refreshed_session.id = 'cs_hydrate'
+        refreshed_session.payment_intent = 'pi_hydrate'
+        refreshed_session.metadata = None
+        mock_session_retrieve.return_value = refreshed_session
+
+        fallback_metadata = {'user_id': '11', 'payment_id': '77', 'credits': '9000'}
+        mock_intent_hydrate.return_value = fallback_metadata
+
+        hydrated_session, metadata = stripe_service._hydrate_checkout_session_metadata(session)
+
+        mock_session_retrieve.assert_called_once_with('cs_hydrate', expand=['metadata'])
+        mock_intent_hydrate.assert_called_once_with(refreshed_session)
+        assert hydrated_session is refreshed_session
+        assert metadata == fallback_metadata
+
+    @patch.object(StripeService, '_hydrate_payment_intent_metadata_from_session')
+    def test_checkout_metadata_handles_missing_session_id(
+        self,
+        mock_intent_hydrate,
+        stripe_service
+    ):
+        session = Mock()
+        session.id = None
+        session.payment_intent = 'pi_intent_only'
+        session.metadata = None
+
+        fallback = {'user_id': '23', 'payment_id': '501'}
+        mock_intent_hydrate.return_value = fallback
+
+        hydrated_session, metadata = stripe_service._hydrate_checkout_session_metadata(session)
+
+        mock_intent_hydrate.assert_called_once_with(session)
+        assert hydrated_session is session
+        assert metadata == fallback
+
+    @patch('stripe.PaymentIntent.retrieve')
+    def test_payment_intent_metadata_fetches_stripe_payload(
+        self,
+        mock_intent_retrieve,
+        stripe_service
+    ):
+        intent = Mock()
+        intent.metadata = {'user_id': '5', 'payment_id': '10'}
+        mock_intent_retrieve.return_value = intent
+
+        metadata = stripe_service._hydrate_payment_intent_metadata('pi_meta')
+
+        mock_intent_retrieve.assert_called_once_with('pi_meta', expand=['metadata'])
+        assert metadata == {'user_id': '5', 'payment_id': '10'}
+
+    @patch('stripe.PaymentIntent.retrieve')
+    def test_payment_intent_metadata_handles_stripe_error(
+        self,
+        mock_intent_retrieve,
+        stripe_service
+    ):
+        mock_intent_retrieve.side_effect = stripe.StripeError("boom")
+
+        metadata = stripe_service._hydrate_payment_intent_metadata('pi_error')
+
+        assert metadata == {}
