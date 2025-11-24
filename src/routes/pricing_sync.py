@@ -246,7 +246,7 @@ async def get_sync_status(api_key: str = Query(None)):
             ],
             "auto_sync_enabled": True,
             "sync_interval_hours": 24,
-            "next_sync_estimate": "Daily at 00:00 UTC",
+            "next_sync_estimate": "Daily at 00:00 timezone.utc",
         }
     except Exception as e:
         logger.error(f"Error getting sync status: {e}")

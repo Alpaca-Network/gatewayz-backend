@@ -10,7 +10,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -282,7 +282,7 @@ class ModelHealthMonitor:
             gateway=gateway,
             status=status,
             response_time_ms=response_time_ms,
-            last_checked=datetime.now(UTC),
+            last_checked=datetime.now(timezone.utc),
             error_message=error_message,
         )
 
@@ -497,7 +497,7 @@ class ModelHealthMonitor:
                 unhealthy_models=stats["unhealthy_models"],
                 avg_response_time_ms=avg_response_time,
                 overall_uptime=overall_uptime,
-                last_checked=datetime.now(UTC),
+                last_checked=datetime.now(timezone.utc),
             )
 
             self.provider_data[provider_key] = provider_metrics
@@ -550,7 +550,7 @@ class ModelHealthMonitor:
             degraded_models=degraded_models,
             unhealthy_models=unhealthy_models,
             system_uptime=system_uptime,
-            last_updated=datetime.now(UTC),
+            last_updated=datetime.now(timezone.utc),
         )
 
     def get_model_health(self, model_id: str, gateway: str = None) -> ModelHealthMetrics | None:
@@ -604,7 +604,7 @@ class ModelHealthMonitor:
             "providers": [asdict(p) for p in self.provider_data.values()],
             "models": [asdict(m) for m in self.health_data.values()],
             "monitoring_active": self.monitoring_active,
-            "last_check": datetime.now(UTC).isoformat(),
+            "last_check": datetime.now(timezone.utc).isoformat(),
         }
 
 
