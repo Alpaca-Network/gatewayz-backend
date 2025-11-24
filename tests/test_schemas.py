@@ -109,13 +109,27 @@ class TestPrivyLinkedAccount:
         assert account.email == "user@gmail.com"
         assert account.name == "Test User"
 
+    def test_create_with_address_field(self):
+        """Test creating email account that uses address instead of email"""
+        from src.schemas.auth import PrivyLinkedAccount
+
+        account = PrivyLinkedAccount(
+            type="email",
+            address="address_only@example.com",
+            first_verified_at=1234567890,
+        )
+
+        assert account.type == "email"
+        assert account.address == "address_only@example.com"
+        assert account.email is None
+
     def test_all_optional_fields(self):
         """Test creating account with only required field"""
         from src.schemas.auth import PrivyLinkedAccount
 
-        account = PrivyLinkedAccount(type="wallet")
+        account = PrivyLinkedAccount(type="email")
 
-        assert account.type == "wallet"
+        assert account.type == "email"
         assert account.email is None
         assert account.name is None
         assert account.verified_at is None
@@ -149,7 +163,7 @@ class TestPrivyUserData:
             created_at=1234567890,
             linked_accounts=[
                 PrivyLinkedAccount(type="email", email="test@example.com"),
-                PrivyLinkedAccount(type="wallet", subject="0x123abc")
+                PrivyLinkedAccount(type="google_oauth", email="user@gmail.com")
             ],
             has_accepted_terms=True
         )

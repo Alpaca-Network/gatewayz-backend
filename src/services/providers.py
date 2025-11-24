@@ -6,7 +6,6 @@ import httpx
 from src.config import Config
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Provider cache for OpenRouter providers
@@ -78,7 +77,10 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             "ai21": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/ai21labs.svg",
             "inflection": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/inflection.svg",
             "vercel": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/vercel.svg",
+            "helicone": "https://www.helicone.ai/favicon.ico",
             "aihubmix": "https://aihubmix.com/favicon.ico",
+            "anannas": "https://api.anannas.ai/favicon.ico",
+            "alpaca-network": "https://console.anyscale.com/favicon.ico",
         }
 
         # Try manual mapping first
@@ -232,11 +234,23 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
             # Generate logo URL using Google favicon service
             logo_url = None
             if site_url:
-                # Clean the site URL for favicon service
-                clean_url = site_url.replace("https://", "").replace("http://", "")
-                if clean_url.startswith("www."):
-                    clean_url = clean_url[4:]
-                logo_url = f"https://www.google.com/s2/favicons?domain={clean_url}&sz=128"
+                # Extract domain from URL for favicon service
+                try:
+                    parsed_url = urlparse(site_url)
+                    domain = parsed_url.netloc or parsed_url.path
+                    # Remove www. prefix if present
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+                    logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+                except Exception as e:
+                    logger.warning(f"Failed to parse site_url '{site_url}': {e}")
+                    # Fallback to old method
+                    clean_url = (
+                        site_url.replace("https://", "").replace("http://", "").split("/")[0]
+                    )
+                    if clean_url.startswith("www."):
+                        clean_url = clean_url[4:]
+                    logo_url = f"https://www.google.com/s2/favicons?domain={clean_url}&sz=128"
 
             enhanced_provider = {**provider, "site_url": site_url, "logo_url": logo_url}
 
@@ -246,3 +260,32 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
     except Exception as e:
         logger.error(f"Error enhancing providers with logos and sites: {e}")
         return providers
+
+
+# Import fetch_models functions from their respective client modules
+def fetch_models_from_cerebras():
+    """Fetch models from Cerebras client"""
+    from src.services.cerebras_client import fetch_models_from_cerebras as _fetch
+
+    return _fetch()
+
+
+def fetch_models_from_xai():
+    """Fetch models from xAI client"""
+    from src.services.xai_client import fetch_models_from_xai as _fetch
+
+    return _fetch()
+
+
+def fetch_models_from_nebius():
+    """Fetch models from Nebius client"""
+    from src.services.nebius_client import fetch_models_from_nebius as _fetch
+
+    return _fetch()
+
+
+def fetch_models_from_novita():
+    """Fetch models from Novita client"""
+    from src.services.novita_client import fetch_models_from_novita as _fetch
+
+    return _fetch()

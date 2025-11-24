@@ -37,9 +37,8 @@ class ProxyRequest(BaseModel):
     frequency_penalty: float | None = 0.0
     presence_penalty: float | None = 0.0
     stream: bool | None = False
-    provider: str | None = None  # Provider selection: "openrouter" or "portkey"
-    portkey_provider: str | None = "openai"  # Sub-provider for Portkey
-    portkey_virtual_key: str | None = None  # Virtual key for Portkey
+    tools: list[dict] | None = None  # Function calling tools
+    provider: str | None = None  # Provider selection: "openrouter", etc
 
     class Config:
         extra = "allow"
@@ -87,10 +86,9 @@ class ResponseRequest(BaseModel):
     frequency_penalty: float | None = 0.0
     presence_penalty: float | None = 0.0
     stream: bool | None = False
+    tools: list[dict] | None = None  # Function calling tools
     response_format: ResponseFormat | None = None
     provider: str | None = None
-    portkey_provider: str | None = "openai"
-    portkey_virtual_key: str | None = None
 
     class Config:
         extra = "allow"
@@ -138,7 +136,9 @@ class AnthropicMessage(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def validate_content(cls, content: str | list[ContentBlock]) -> str | list[ContentBlock]:
+    def validate_content(
+        cls, content: str | list[ContentBlock]
+    ) -> str | list[ContentBlock]:
         if isinstance(content, str):
             if not content.strip():
                 raise ValueError("Message content must be a non-empty string.")
@@ -160,6 +160,7 @@ class MessagesRequest(BaseModel):
     - 'max_tokens' is REQUIRED (not optional)
     - Content can be string or array of content blocks
     - No frequency_penalty or presence_penalty
+    - Supports tool use (function calling)
     """
 
     model: str  # e.g., "claude-sonnet-4-5-20250929"
@@ -172,11 +173,11 @@ class MessagesRequest(BaseModel):
     stop_sequences: list[str] | None = None
     stream: bool | None = False
     metadata: dict[str, Any] | None = None
+    tools: list[dict] | None = None  # Tool definitions for function calling
+    tool_choice: Any | None = None  # Tool selection: "auto", "required", or specific tool
 
     # Gateway-specific fields (not part of Anthropic API)
     provider: str | None = None
-    portkey_provider: str | None = "openai"
-    portkey_virtual_key: str | None = None
 
     class Config:
         extra = "allow"

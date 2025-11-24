@@ -21,6 +21,7 @@ from fastapi import HTTPException
 
 from src.services.provider_failover import (
     build_provider_failover_chain,
+    enforce_model_failover_rules,
     should_failover,
     map_provider_error,
     FALLBACK_PROVIDER_PRIORITY,
@@ -127,12 +128,14 @@ class TestBuildProviderFailoverChain:
         # Unknown providers should only return themselves (no fallback)
         assert chain == ["custom_provider"]
 
-    def test_chain_with_portkey(self):
-        """Test chain with portkey (not eligible for fallback)"""
-        chain = build_provider_failover_chain("portkey")
+    def test_chain_with_removed_provider(self):
+        """Test chain with removed provider (not eligible for fallback)"""
+        # Portkey has been removed and is no longer a valid provider
+        # Test that unknown providers return only themselves
+        chain = build_provider_failover_chain("unknown_provider")
 
-        # Portkey should only return itself (no fallback chain)
-        assert chain == ["portkey"]
+        # Unknown providers should only return themselves (no fallback chain)
+        assert chain == ["unknown_provider"]
 
     def test_chain_case_insensitive(self):
         """Test chain building is case insensitive"""
@@ -158,6 +161,28 @@ class TestBuildProviderFailoverChain:
 
         # Verify FALLBACK_ELIGIBLE_PROVIDERS matches priority list
         assert FALLBACK_ELIGIBLE_PROVIDERS == set(FALLBACK_PROVIDER_PRIORITY)
+
+
+class TestEnforceModelFailoverRules:
+    """Test model-specific failover filtering"""
+
+    def test_openrouter_prefix_locked(self):
+        chain = ["openrouter", "cerebras", "huggingface"]
+        filtered = enforce_model_failover_rules("openrouter/auto", chain)
+
+        assert filtered == ["openrouter"]
+
+    def test_openrouter_suffix_locked(self):
+        chain = ["openrouter", "huggingface"]
+        filtered = enforce_model_failover_rules("z-ai/glm-4.6:exacto", chain)
+
+        assert filtered == ["openrouter"]
+
+    def test_non_locked_model_noop(self):
+        chain = ["openrouter", "cerebras"]
+        filtered = enforce_model_failover_rules("deepseek-ai/deepseek-v3", chain)
+
+        assert filtered == chain
 
 
 # ============================================================

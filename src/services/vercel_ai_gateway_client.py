@@ -1,14 +1,25 @@
 import logging
-from openai import OpenAI
+
+import httpx
+
 from src.config import Config
+from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.connection_pool import get_pooled_client
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
+
+# Standard timeout for Vercel AI Gateway
+VERCEL_TIMEOUT = httpx.Timeout(
+    connect=5.0,
+    read=60.0,
+    write=10.0,
+    pool=5.0,
+)
 
 
 def get_vercel_ai_gateway_client():
-    """Get Vercel AI Gateway client using OpenAI-compatible interface
+    """Get Vercel AI Gateway client using OpenAI-compatible interface with connection pooling
 
     Vercel AI Gateway is a unified interface to multiple AI providers with automatic failover,
     caching, and analytics. It provides access to hundreds of models across different providers.
@@ -23,7 +34,13 @@ def get_vercel_ai_gateway_client():
                 "Vercel AI Gateway API key not configured. Please set VERCEL_AI_GATEWAY_API_KEY environment variable."
             )
 
-        return OpenAI(base_url="https://ai-gateway.vercel.sh/v1", api_key=api_key)
+        # Use connection pool with standard timeout
+        return get_pooled_client(
+            provider="vercel-ai-gateway",
+            base_url="https://ai-gateway.vercel.sh/v1",
+            api_key=api_key,
+            timeout=VERCEL_TIMEOUT,
+        )
     except Exception as e:
         logger.error(f"Failed to initialize Vercel AI Gateway client: {e}")
         raise
@@ -68,19 +85,24 @@ def make_vercel_ai_gateway_request_openai_stream(messages, model, **kwargs):
 def process_vercel_ai_gateway_response(response):
     """Process Vercel AI Gateway response to extract relevant data"""
     try:
+        choices = []
+        for choice in response.choices:
+            msg = extract_message_with_tools(choice.message)
+
+            choices.append(
+                {
+                    "index": choice.index,
+                    "message": msg,
+                    "finish_reason": choice.finish_reason,
+                }
+            )
+
         return {
             "id": response.id,
             "object": response.object,
             "created": response.created,
             "model": response.model,
-            "choices": [
-                {
-                    "index": choice.index,
-                    "message": {"role": choice.message.role, "content": choice.message.content},
-                    "finish_reason": choice.finish_reason,
-                }
-                for choice in response.choices
-            ],
+            "choices": choices,
             "usage": (
                 {
                     "prompt_tokens": response.usage.prompt_tokens,

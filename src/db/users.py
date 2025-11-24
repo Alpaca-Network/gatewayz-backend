@@ -1,17 +1,21 @@
 import logging
-from typing import Any
-from datetime import datetime, timedelta, timezone
-
-from src.db.api_keys import create_api_key
-from src.config.supabase_config import get_supabase_client
 import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import create_api_key
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
 
 def create_enhanced_user(
-    username: str, email: str, auth_method: str, credits: int = 10, privy_user_id: str | None = None
+    username: str,
+    email: str,
+    auth_method: str,
+    credits: int = 10,
+    privy_user_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a new user with automatic 3-day trial and $10 credits"""
     try:
@@ -225,7 +229,9 @@ def add_credits_to_user(
         # Update user credits
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -286,7 +292,7 @@ def log_api_usage_transaction(
         is_trial: Whether user is on trial (if True, cost should be 0 and no credits deducted)
     """
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -351,7 +357,7 @@ def deduct_credits(
         return
 
     try:
-        from src.db.credit_transactions import log_credit_transaction, TransactionType
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         user = get_user(api_key)
         if not user:
@@ -368,7 +374,9 @@ def deduct_credits(
         client = get_supabase_client()
         result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -584,7 +592,9 @@ def get_admin_monitor_data() -> dict[str, Any]:
         # This is the main source of truth for API usage tracking
         activity_logs = []
         try:
-            activity_result = client.table("activity_log").select("*").order("timestamp", desc=True).execute()
+            activity_result = (
+                client.table("activity_log").select("*").order("timestamp", desc=True).execute()
+            )
             activity_logs = activity_result.data or []
             logger.info(f"Retrieved {len(activity_logs)} activity log records")
         except Exception as e:
@@ -611,7 +621,9 @@ def get_admin_monitor_data() -> dict[str, Any]:
 
         # Also check api_keys_new table for users who might not have api_key in users table
         try:
-            api_keys_result = client.table("api_keys_new").select("user_id, api_key, is_primary").execute()
+            api_keys_result = (
+                client.table("api_keys_new").select("user_id, api_key, is_primary").execute()
+            )
             if api_keys_result.data:
                 for key_data in api_keys_result.data:
                     user_id = key_data.get("user_id")
@@ -632,7 +644,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
             user_id = activity.get("user_id")
             # Look up API key from mapping
             api_key = user_id_to_api_key.get(user_id, "unknown")
-            
+
             # Create a usage record-like entry from activity log
             usage_record = {
                 "user_id": user_id,
@@ -675,7 +687,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
                     # Handle different timestamp formats
                     if "Z" in timestamp_str:
                         timestamp_str = timestamp_str.replace("Z", "+00:00")
-                    
+
                     # Fix malformed timestamps with odd-numbered microseconds
                     # e.g., "2025-10-14T15:24:27.81588+00:00" -> "2025-10-14T15:24:27.815880+00:00"
                     if "." in timestamp_str and "+" in timestamp_str:
@@ -694,7 +706,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
                                     elif len(micros_part) > 6:
                                         micros_part = micros_part[:6]
                                     timestamp_str = f"{seconds_part}.{micros_part}{tz_part}"
-                    
+
                     record_time = datetime.fromisoformat(timestamp_str)
 
                     if record_time > day_ago:
@@ -922,7 +934,9 @@ def mark_welcome_email_sent(user_id: int) -> bool:
 
         result = (
             client.table("users")
-            .update({"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(
+                {"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()}
+            )
             .eq("id", user_id)
             .execute()
         )

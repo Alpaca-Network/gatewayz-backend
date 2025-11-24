@@ -6,25 +6,26 @@ Endpoints for handling Stripe webhooks and payment operations
 
 import inspect
 import logging
+from datetime import datetime, timezone
 from typing import Any
-from fastapi import APIRouter, HTTPException, Request, Header, Depends
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from src.db.payments import (
+    get_payment,
+    get_user_payments,
+)
 from src.schemas.payments import (
-    WebhookProcessingResult,
     CreateCheckoutSessionRequest,
     CreatePaymentIntentRequest,
     CreateRefundRequest,
     CreateSubscriptionCheckoutRequest,
+    WebhookProcessingResult,
 )
-from src.services.payments import StripeService
-
 from src.security import deps as security_deps
 from src.security.deps import security as bearer_security
-from src.db.payments import (
-    get_user_payments,
-    get_payment,
-)
+from src.services.payments import StripeService
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -93,28 +94,38 @@ async def stripe_webhook(
     3. Select events to listen for (listed above)
     4. Copy webhook signing secret to STRIPE_WEBHOOK_SECRET env variable
 
+    IMPORTANT: This endpoint ALWAYS returns HTTP 200 status code to Stripe, even when
+    processing fails. Errors are logged for investigation but do not cause HTTP errors,
+    as this prevents Stripe from retrying the webhook. Stripe expects webhooks to be
+    delivered asynchronously and will handle retries automatically.
+
     Args:
         request: FastAPI request object containing raw webhook payload
         stripe_signature: Stripe signature header for verification
 
     Returns:
-        JSONResponse with processing result
-
-    Raises:
-        HTTPException: If signature verification fails or processing error
+        JSONResponse with HTTP 200 and processing result (always)
     """
-    try:
-        # Get raw request body
-        payload = await request.body()
+    payload = await request.body()
+    event_type = "unknown"
+    event_id = "unknown"
+    success = False
+    message = "Webhook received"
 
+    try:
         if not stripe_signature:
             logger.error("Missing Stripe signature header")
-            raise HTTPException(status_code=400, detail="Missing stripe-signature header")
+            raise ValueError("Missing stripe-signature header")
 
         # Process webhook through Stripe service
         result: WebhookProcessingResult = stripe_service.handle_webhook(
             payload=payload, signature=stripe_signature
         )
+
+        event_type = result.event_type
+        event_id = result.event_id
+        success = result.success
+        message = result.message
 
         logger.info(f"Webhook processed: {result.event_type} - {result.message}")
 
@@ -129,17 +140,33 @@ async def stripe_webhook(
             },
         )
 
-    except HTTPException:
-        raise
-
     except ValueError as e:
-        # Signature verification failed
-        logger.error(f"Webhook signature verification failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid signature: {str(e)}")
+        # Signature verification failed or missing header
+        logger.error(f"Webhook validation failed: {e}", exc_info=True)
+        message = f"Validation failed: {str(e)}"
+        success = False
 
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}")
-        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+        # Log the error with full context for investigation
+        logger.error(
+            f"Webhook processing error for event_type={event_type}, event_id={event_id}: {e}",
+            exc_info=True,
+        )
+        message = f"Processing error: {str(e)}"
+        success = False
+
+    # Always return 200 OK to Stripe, even on errors
+    # Stripe will retry failed webhooks automatically
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": success,
+            "event_type": event_type,
+            "event_id": event_id,
+            "message": message,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
 # ==================== Checkout Sessions ====================
@@ -496,7 +523,8 @@ async def get_payment_details(
             "status": payment["status"],
             "payment_method": payment["payment_method"],
             "stripe_payment_intent_id": payment.get("stripe_payment_intent_id"),
-            "stripe_session_id": payment.get("stripe_session_id"),
+            "stripe_session_id": payment.get("stripe_checkout_session_id")
+            or payment.get("stripe_session_id"),
             "stripe_customer_id": payment.get("stripe_customer_id"),
             "created_at": payment["created_at"],
             "updated_at": payment.get("updated_at"),

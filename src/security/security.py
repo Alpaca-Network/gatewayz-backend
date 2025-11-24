@@ -218,8 +218,8 @@ def validate_api_key_security(
 
     client = get_supabase_client()
 
-    # Check both new and legacy API key tables
-    tables_to_check = ["api_keys_new", "api_keys"]
+    # Check api_keys_new table (legacy keys fall back to user validation)
+    tables_to_check = ["api_keys_new"]
 
     for table_name in tables_to_check:
         logger.debug(f"Checking {table_name} table for API key")
@@ -336,9 +336,9 @@ def _validate_key_constraints(
 
     # 6. Update last used timestamp
     try:
-        client.table(table_name).update({"last_used_at": datetime.now(timezone.utc).isoformat()}).eq(
-            "id", key_id
-        ).execute()
+        client.table(table_name).update(
+            {"last_used_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", key_id).execute()
     except Exception as e:
         logger.warning(f"Failed to update last_used_at for key {key_id}: {e}")
 
