@@ -224,7 +224,7 @@ def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fak
 
     refresh_calls = {"count": 0}
 
-    def fake_refresh():
+    def fake_refresh(client):
         refresh_calls["count"] += 1
         return True
 
@@ -247,7 +247,7 @@ def test_create_api_key_schema_cache_error_fallback(monkeypatch, mod, fake_supab
     )
     fake_supabase.fail_next_insert("api_keys_new", error)
 
-    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", lambda: True)
+    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", lambda client: True)
 
     api_key, key_id = mod.create_api_key(user_id=1, key_name="Primary", is_primary=True)
 
