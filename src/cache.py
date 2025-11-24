@@ -180,6 +180,10 @@ _alibaba_models_cache = {
 # Some deployed modules may still reference the old name
 _hug_models_cache = _huggingface_models_cache
 
+# Error state cache for tracking failed gateway fetches
+# Structure: {gateway: {"error": error_message, "timestamp": datetime, "failure_count": int}}
+_gateway_error_cache = {}
+
 
 # Cache access functions
 def get_models_cache(gateway: str):
@@ -356,3 +360,108 @@ def initialize_featherless_cache_from_catalog():
         _featherless_models_cache["data"] = []
         _featherless_models_cache["timestamp"] = None
         logger.debug(f"Featherless cache init deferred: {type(error).__name__}")
+
+
+# Error state caching functions
+def set_gateway_error(gateway: str, error_message: str):
+    """Cache error state for a gateway with exponential backoff
+    
+    Args:
+        gateway: The gateway name (e.g., "fireworks", "deepinfra")
+        error_message: The error message to cache
+    """
+    current_error = _gateway_error_cache.get(gateway)
+    failure_count = 1
+    
+    if current_error:
+        # Increment failure count for exponential backoff
+        failure_count = current_error.get("failure_count", 0) + 1
+    
+    _gateway_error_cache[gateway] = {
+        "error": error_message,
+        "timestamp": datetime.now(timezone.utc),
+        "failure_count": failure_count,
+    }
+    
+    logger.debug(
+        f"Cached error state for {gateway} (failure #{failure_count}): {error_message[:100]}"
+    )
+
+
+def get_gateway_error_ttl(failure_count: int) -> int:
+    """Calculate TTL for error cache based on failure count (exponential backoff)
+    
+    Args:
+        failure_count: Number of consecutive failures
+        
+    Returns:
+        TTL in seconds
+    """
+    # Exponential backoff: 5 min, 15 min, 30 min, 1 hour, then cap at 1 hour
+    if failure_count == 1:
+        return 300  # 5 minutes
+    elif failure_count == 2:
+        return 900  # 15 minutes
+    elif failure_count == 3:
+        return 1800  # 30 minutes
+    else:
+        return 3600  # 1 hour (max)
+
+
+def is_gateway_in_error_state(gateway: str) -> bool:
+    """Check if a gateway is currently in error state
+    
+    Args:
+        gateway: The gateway name (e.g., "fireworks", "deepinfra")
+        
+    Returns:
+        True if gateway is in error state and TTL hasn't expired, False otherwise
+    """
+    error_state = _gateway_error_cache.get(gateway)
+    
+    if not error_state:
+        return False
+    
+    # Check if error TTL has expired
+    timestamp = error_state.get("timestamp")
+    failure_count = error_state.get("failure_count", 1)
+    
+    if not timestamp:
+        return False
+    
+    ttl = get_gateway_error_ttl(failure_count)
+    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    
+    if age >= ttl:
+        # TTL expired, clear error state
+        clear_gateway_error(gateway)
+        return False
+    
+    return True
+
+
+def clear_gateway_error(gateway: str):
+    """Clear error state for a gateway (called after successful fetch)
+    
+    Args:
+        gateway: The gateway name (e.g., "fireworks", "deepinfra")
+    """
+    if gateway in _gateway_error_cache:
+        del _gateway_error_cache[gateway]
+        logger.debug(f"Cleared error state for {gateway}")
+
+
+def get_gateway_error_message(gateway: str) -> str | None:
+    """Get the cached error message for a gateway
+    
+    Args:
+        gateway: The gateway name (e.g., "fireworks", "deepinfra")
+        
+    Returns:
+        Error message if gateway is in error state, None otherwise
+    """
+    if is_gateway_in_error_state(gateway):
+        error_state = _gateway_error_cache.get(gateway)
+        if error_state:
+            return error_state.get("error")
+    return None
