@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.utils.sentry_context import capture_database_error
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,18 @@ def log_credit_transaction(
 
     except Exception as e:
         logger.error(f"Error logging credit transaction: {e}", exc_info=True)
+        capture_database_error(
+            e,
+            operation='insert',
+            table='credit_transactions',
+            details={
+                'user_id': user_id,
+                'amount': amount,
+                'transaction_type': transaction_type,
+                'balance_before': balance_before,
+                'balance_after': balance_after
+            }
+        )
         return None
 
 
@@ -553,7 +566,7 @@ def get_transaction_summary(
         )
 
         # Calculate average by type
-        for trans_type, type_data in summary["by_type"].items():
+        for _, type_data in summary["by_type"].items():
             if type_data["count"] > 0:
                 type_data["average_amount"] = type_data["total_amount"] / type_data["count"]
 

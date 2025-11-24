@@ -221,15 +221,19 @@ class TestRetrievePayments:
         result_found = Mock()
         result_found.data = [mock_payment_data]
 
-        table_mock.select.return_value.eq.return_value.execute.side_effect = [
-            result_empty,
-            result_found
-        ]
+        select_mock = table_mock.select.return_value
+        eq_mock = select_mock.eq.return_value
+        eq_mock.execute.side_effect = [result_empty, result_found]
 
         payment = get_payment_by_stripe_intent('cs_def456')
 
         assert payment is not None
         assert payment['stripe_checkout_session_id'] == 'cs_def456'
+
+        # Verify fallback query targets the checkout session column
+        eq_calls = select_mock.eq.call_args_list
+        assert eq_calls[0].args == ('stripe_payment_intent_id', 'cs_def456')
+        assert eq_calls[1].args == ('stripe_checkout_session_id', 'cs_def456')
 
     @patch('src.db.payments.get_supabase_client')
     def test_get_user_payments(self, mock_get_client, mock_supabase_client):
@@ -355,6 +359,34 @@ class TestUpdatePayments:
         # Verify update called with completed_at timestamp
         update_call_args = table_mock.update.call_args[0][0]
         assert 'completed_at' in update_call_args
+
+    @patch('src.db.payments.get_supabase_client')
+    def test_update_payment_status_sets_checkout_session_id(
+        self, mock_get_client, mock_supabase_client
+    ):
+        """Ensure stripe session updates use the checkout session column"""
+        client, table_mock = mock_supabase_client
+        mock_get_client.return_value = client
+
+        updated_payment = {'id': 1, 'status': 'processing'}
+        result_mock = Mock()
+        result_mock.data = [updated_payment]
+
+        update_mock = Mock()
+        eq_mock = Mock()
+
+        table_mock.update.return_value = update_mock
+        update_mock.eq.return_value = eq_mock
+        eq_mock.execute.return_value = result_mock
+
+        update_payment_status(
+            1,
+            'processing',
+            stripe_session_id='cs_new_session'
+        )
+
+        update_call_args = table_mock.update.call_args[0][0]
+        assert update_call_args['stripe_checkout_session_id'] == 'cs_new_session'
 
     @patch('src.db.payments.get_supabase_client')
     @patch('src.db.payments.get_payment')

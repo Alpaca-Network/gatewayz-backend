@@ -4,12 +4,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.api_keys import validate_api_key_permissions
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.db_security import get_audit_logs
 from src.security.deps import get_api_key
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()

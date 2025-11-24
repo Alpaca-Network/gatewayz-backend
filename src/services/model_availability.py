@@ -281,7 +281,9 @@ class ModelAvailabilityService:
             return False
 
         # Check maintenance
-        if availability.maintenance_until and availability.maintenance_until > datetime.now(timezone.utc):
+        if availability.maintenance_until and availability.maintenance_until > datetime.now(
+            timezone.utc
+        ):
             return False
 
         return availability.status == AvailabilityStatus.AVAILABLE

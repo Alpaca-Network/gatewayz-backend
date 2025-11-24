@@ -13,11 +13,10 @@ from src.db.rate_limits import (
     get_user_rate_limit_configs,
     update_rate_limit_config,
 )
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.security.deps import get_api_key, require_admin
 
 # Initialize logging
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
