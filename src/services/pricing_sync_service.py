@@ -36,7 +36,6 @@ SYNC_LOG_FILE = Config.PRICING_SYNC_LOG_FILE
 BACKUP_DIR.mkdir(exist_ok=True)
 
 
-@dict
 class PricingSyncConfig:
     """Configuration for pricing sync"""
 
