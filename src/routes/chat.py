@@ -48,6 +48,7 @@ import importlib
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
 import src.db.chat_history as chat_history_module
+import src.db.model_health as model_health_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
@@ -408,6 +409,10 @@ def track_trial_usage(*args, **kwargs):
     return trial_module.track_trial_usage(*args, **kwargs)
 
 
+def record_model_call(*args, **kwargs):
+    return model_health_module.record_model_call(*args, **kwargs)
+
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -607,6 +612,18 @@ async def _process_stream_completion_background(
                     f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
                     exc_info=True,
                 )
+
+        # Record successful streaming model call
+        try:
+            await record_model_call(
+                provider=provider,
+                model=model,
+                response_time_ms=elapsed * 1000,
+                status="success",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record model health for streaming: {e}")
+
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
@@ -1002,6 +1019,7 @@ async def chat_completions(
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
             last_http_exc = None
+            request_start_time = None  # Track individual request start time
             for idx, attempt_provider in enumerate(provider_chain):
                 attempt_model = transform_model_id(original_model, attempt_provider)
                 if attempt_model != original_model:
@@ -1010,6 +1028,7 @@ async def chat_completions(
                     )
 
                 request_model = attempt_model
+                request_start_time = time.monotonic()  # Start timing this specific provider attempt
                 try:
                     if attempt_provider == "featherless":
                         stream = await _to_thread(
@@ -1159,6 +1178,27 @@ async def chat_completions(
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
+                    # Determine error status for health tracking
+                    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                        error_status = "timeout"
+                    elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+                        error_status = "rate_limited"
+                    elif isinstance(exc, httpx.RequestError):
+                        error_status = "network_error"
+                    else:
+                        error_status = "error"
+
+                    # Record failed model call (streaming)
+                    request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
+                    background_tasks.add_task(
+                        record_model_call,
+                        provider=attempt_provider,
+                        model=request_model,
+                        response_time_ms=request_elapsed,
+                        status=error_status,
+                        error_message=str(exc)[:500],  # Limit error message length
+                    )
+
                     last_http_exc = http_exc
                     if idx < len(provider_chain) - 1 and should_failover(http_exc):
                         next_provider = provider_chain[idx + 1]
@@ -1179,6 +1219,7 @@ async def chat_completions(
         start = time.monotonic()
         processed = None
         last_http_exc = None
+        request_start_time = None  # Track individual request start time
 
         for idx, attempt_provider in enumerate(provider_chain):
             attempt_model = transform_model_id(original_model, attempt_provider)
@@ -1194,6 +1235,7 @@ async def chat_completions(
                     "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                 )
 
+            request_start_time = time.monotonic()  # Start timing this specific provider attempt
             try:
                 if attempt_provider == "featherless":
                     resp_raw = await asyncio.wait_for(
@@ -1355,6 +1397,16 @@ async def chat_completions(
 
                 provider = attempt_provider
                 model = request_model
+
+                # Record successful model call
+                request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
+                background_tasks.add_task(
+                    record_model_call,
+                    provider=attempt_provider,
+                    model=request_model,
+                    response_time_ms=request_elapsed,
+                    status="success",
+                )
                 break
             except Exception as exc:
                 if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
@@ -1368,6 +1420,27 @@ async def chat_completions(
                 else:
                     logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
                 http_exc = map_provider_error(attempt_provider, request_model, exc)
+
+                # Determine error status for health tracking
+                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                    error_status = "timeout"
+                elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+                    error_status = "rate_limited"
+                elif isinstance(exc, httpx.RequestError):
+                    error_status = "network_error"
+                else:
+                    error_status = "error"
+
+                # Record failed model call
+                request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
+                background_tasks.add_task(
+                    record_model_call,
+                    provider=attempt_provider,
+                    model=request_model,
+                    response_time_ms=request_elapsed,
+                    status=error_status,
+                    error_message=str(exc)[:500],  # Limit error message length
+                )
 
                 last_http_exc = http_exc
                 if idx < len(provider_chain) - 1 and should_failover(http_exc):

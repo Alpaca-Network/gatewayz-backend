@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
 import src.db.chat_history as chat_history_module
+import src.db.model_health as model_health_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
@@ -141,6 +142,10 @@ def validate_trial_access(*args, **kwargs):
 
 def track_trial_usage(*args, **kwargs):
     return trial_module.track_trial_usage(*args, **kwargs)
+
+
+def record_model_call(*args, **kwargs):
+    return model_health_module.record_model_call(*args, **kwargs)
 
 
 def _fallback_get_user(api_key: str):
@@ -387,6 +392,7 @@ async def anthropic_messages(
         start = time.monotonic()
         processed = None
         last_http_exc = None
+        request_start_time = None  # Track individual request start time
 
         for idx, attempt_provider in enumerate(provider_chain):
             logger.debug("Messages failover iteration %s provider=%s", idx, attempt_provider)
@@ -403,6 +409,7 @@ async def anthropic_messages(
                     "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                 )
 
+            request_start_time = time.monotonic()  # Start timing this specific provider attempt
             http_exc = None
             try:
                 if attempt_provider == "aihubmix":
@@ -529,6 +536,16 @@ async def anthropic_messages(
 
                 provider = attempt_provider
                 model = request_model
+
+                # Record successful model call
+                request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
+                background_tasks.add_task(
+                    record_model_call,
+                    provider=attempt_provider,
+                    model=request_model,
+                    response_time_ms=request_elapsed,
+                    status="success",
+                )
                 break
             except Exception as exc:
                 if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
@@ -547,6 +564,27 @@ async def anthropic_messages(
                         sanitize_for_logging(str(exc)),
                     )
                 http_exc = map_provider_error(attempt_provider, request_model, exc)
+
+                # Determine error status for health tracking
+                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                    error_status = "timeout"
+                elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+                    error_status = "rate_limited"
+                elif isinstance(exc, httpx.RequestError):
+                    error_status = "network_error"
+                else:
+                    error_status = "error"
+
+                # Record failed model call
+                request_elapsed = (time.monotonic() - request_start_time) * 1000 if request_start_time else 0
+                background_tasks.add_task(
+                    record_model_call,
+                    provider=attempt_provider,
+                    model=request_model,
+                    response_time_ms=request_elapsed,
+                    status=error_status,
+                    error_message=str(exc)[:500],  # Limit error message length
+                )
 
             if http_exc is None:
                 continue
