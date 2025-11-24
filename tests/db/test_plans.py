@@ -35,6 +35,7 @@ class _Table:
         self._filters = []   # list of (field, op, value)
         self._order = None
         self._desc = False
+        self._limit = None
         self._last_update = None
         self._last_delete = None
 
@@ -46,8 +47,16 @@ class _Table:
         self._filters.append((field, "eq", value))
         return self
 
+    def ilike(self, field, value):
+        self._filters.append((field, "ilike", value))
+        return self
+
     def gte(self, field, value):
         self._filters.append((field, "gte", value))
+        return self
+
+    def limit(self, n):
+        self._limit = n
         return self
 
     def order(self, field, desc=False):
@@ -62,6 +71,12 @@ class _Table:
         for field, op, val in self._filters:
             if op == "eq":
                 if row.get(field) != val:
+                    return False
+            elif op == "ilike":
+                # Case-insensitive substring match with wildcards
+                field_val = str(row.get(field, "")).lower()
+                search_val = val.lower().replace("%", "")
+                if search_val not in field_val:
                     return False
             elif op == "gte":
                 rv = row.get(field)
@@ -113,6 +128,8 @@ class _Table:
         rows = [r for r in self._rows() if self._match(r)]
         if self._order:
             rows.sort(key=lambda r: r.get(self._order), reverse=self._desc)
+        if self._limit:
+            rows = rows[:self._limit]
         return _Result(rows)
 
 
