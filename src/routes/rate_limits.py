@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -14,7 +13,7 @@ from src.db.rate_limits import (
     get_user_rate_limit_configs,
     update_rate_limit_config,
 )
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.security.deps import get_api_key, require_admin
 
 # Initialize logging
@@ -267,7 +266,7 @@ async def get_system_rate_limits(admin_user: dict = Depends(require_admin)):
 
 @router.get("/admin/rate-limits/alerts", tags=["admin"])
 async def get_rate_limit_alerts_endpoint(
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     resolved: bool = False,
     limit: int = 100,
     admin_user: dict = Depends(require_admin),

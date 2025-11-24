@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException
@@ -42,9 +41,10 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
+_OPENROUTER_SUFFIX_LOCKS = {"exacto", "free", "extended"}
 
 
-def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
+def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     """Return the provider attempt order starting with the initial provider.
 
     Always includes all eligible providers in the failover chain.
@@ -55,7 +55,7 @@ def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
         return [provider] if provider else ["openrouter"]
 
-    chain: List[str] = []
+    chain: list[str] = []
     if provider:
         chain.append(provider)
 
@@ -74,6 +74,41 @@ def build_provider_failover_chain(initial_provider: Optional[str]) -> List[str]:
 def should_failover(http_exc: HTTPException) -> bool:
     """Return True if the raised HTTPException qualifies for a failover attempt."""
     return http_exc.status_code in FAILOVER_STATUS_CODES
+
+
+def enforce_model_failover_rules(model_id: str | None, provider_chain: list[str]) -> list[str]:
+    """
+    Restrict the provider chain when a model is provider-specific.
+
+    Currently we only lock models that use the OpenRouter namespace or special OpenRouter
+    suffixes (e.g. openrouter/auto, z-ai/glm-4.6:exacto). These identifiers are not
+    recognized by other providers, so attempting failover creates noisy upstream errors.
+    """
+    if not model_id:
+        return provider_chain
+
+    normalized = model_id.lower()
+    locked_provider = None
+
+    if normalized.startswith("openrouter/"):
+        locked_provider = "openrouter"
+    elif ":" in normalized:
+        suffix = normalized.split(":", 1)[1]
+        if suffix in _OPENROUTER_SUFFIX_LOCKS:
+            locked_provider = "openrouter"
+
+    if not locked_provider or locked_provider not in provider_chain:
+        return provider_chain
+
+    if provider_chain == [locked_provider]:
+        return provider_chain
+
+    logger.info(
+        "Model '%s' is restricted to provider '%s'; suppressing failover to other providers",
+        model_id,
+        locked_provider,
+    )
+    return [locked_provider]
 
 
 def map_provider_error(
@@ -136,7 +171,7 @@ def map_provider_error(
         except (TypeError, ValueError):
             status = 500
         detail = "Upstream error"
-        headers: Optional[Dict[str, str]] = None
+        headers: dict[str, str] | None = None
 
         if RateLimitError and isinstance(exc, RateLimitError):
             retry_after = None
@@ -189,7 +224,7 @@ def map_provider_error(
     if OpenAIError and isinstance(exc, OpenAIError):
         return HTTPException(status_code=502, detail=str(exc))
 
-    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
         return HTTPException(status_code=504, detail="Upstream timeout")
 
     if isinstance(exc, httpx.HTTPStatusError):

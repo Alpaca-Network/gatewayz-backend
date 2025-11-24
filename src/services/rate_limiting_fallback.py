@@ -9,7 +9,6 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Optional
 
 from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
 
@@ -29,7 +28,7 @@ def _populate_rate_limit_headers(
     config: "RateLimitConfig",
     request_limit: int,
     token_limit: int,
-    reset_time: Optional[int] = None,
+    reset_time: int | None = None,
 ) -> None:
     """Populate rate limit header fields in the result object.
 
@@ -67,11 +66,11 @@ class RateLimitResult:
     """Rate limit check result"""
 
     allowed: bool
-    reason: Optional[str] = None
-    retry_after: Optional[int] = None
+    reason: str | None = None
+    retry_after: int | None = None
     remaining_requests: int = 0
     remaining_tokens: int = 0
-    reset_time: Optional[int] = None
+    reset_time: int | None = None
     # Rate limit headers for HTTP responses
     ratelimit_limit_requests: int = 0  # X-RateLimit-Limit-Requests
     ratelimit_limit_tokens: int = 0  # X-RateLimit-Limit-Tokens
@@ -314,7 +313,7 @@ class FallbackRateLimitManager:
         """Release a concurrent request"""
         await self.rate_limiter.release_concurrent_request(api_key)
 
-    async def _load_key_config_from_db(self, api_key: str) -> Optional[RateLimitConfig]:
+    async def _load_key_config_from_db(self, api_key: str) -> RateLimitConfig | None:
         """Load rate limit configuration from database"""
         try:
             config_data = get_rate_limit_config(api_key)

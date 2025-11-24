@@ -5,9 +5,9 @@ This module provides persistent HTTP client connections with connection pooling,
 keepalive, and optimized timeout settings to improve chat streaming performance.
 """
 
+import hashlib
 import logging
 from threading import Lock
-from typing import Dict, Optional
 
 import httpx
 from openai import AsyncOpenAI, OpenAI
@@ -17,8 +17,8 @@ from src.config import Config
 logger = logging.getLogger(__name__)
 
 # Global connection pool instances
-_client_pool: Dict[str, OpenAI] = {}
-_async_client_pool: Dict[str, AsyncOpenAI] = {}
+_client_pool: dict[str, OpenAI] = {}
+_async_client_pool: dict[str, AsyncOpenAI] = {}
 _pool_lock = Lock()
 
 # Connection pool configuration
@@ -41,6 +41,48 @@ HUGGINGFACE_TIMEOUT = httpx.Timeout(
     write=10.0,
     pool=5.0,
 )
+
+
+def _normalize_base_url(base_url: str) -> str:
+    """Normalize base URLs to avoid duplicate cache keys due to trailing slashes."""
+    stripped = base_url.strip()
+    return stripped[:-1] if stripped.endswith("/") else stripped
+
+
+def _pool_prefix(provider: str, base_url: str) -> str:
+    """Build a stable prefix for all clients of a provider/base_url combination."""
+    return f"{provider.lower()}::{_normalize_base_url(base_url)}"
+
+
+def _api_key_hash(api_key: str | None) -> str:
+    """Hash API keys so rotations create distinct clients without storing secrets."""
+    if not api_key:
+        return "no-key"
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
+def _cache_key(provider: str, base_url: str, api_key: str | None) -> str:
+    """Generate the full cache key including the hashed API key."""
+    return f"{_pool_prefix(provider, base_url)}::{_api_key_hash(api_key)}"
+
+
+def _evict_sync_clients(prefix: str):
+    """Remove (and close) cached sync clients that match the prefix."""
+    stale_keys = [key for key in _client_pool if key.startswith(prefix)]
+    for stale_key in stale_keys:
+        client = _client_pool.pop(stale_key, None)
+        if client:
+            try:
+                client.close()
+            except Exception as exc:
+                logger.warning(f"Error closing client for {prefix}: {exc}")
+
+
+def _evict_async_clients(prefix: str):
+    """Remove cached async clients that match the prefix (no close call)."""
+    stale_keys = [key for key in _async_client_pool if key.startswith(prefix)]
+    for stale_key in stale_keys:
+        _async_client_pool.pop(stale_key, None)
 
 
 def _get_http_client(
@@ -81,8 +123,8 @@ def get_pooled_client(
     provider: str,
     base_url: str,
     api_key: str,
-    default_headers: Optional[Dict[str, str]] = None,
-    timeout: Optional[httpx.Timeout] = None,
+    default_headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
 ) -> OpenAI:
     """
     Get or create a pooled OpenAI client for a specific provider.
@@ -97,35 +139,42 @@ def get_pooled_client(
     Returns:
         OpenAI client with connection pooling enabled
     """
-    cache_key = f"{provider}_{base_url}"
+    prefix = _pool_prefix(provider, base_url)
+    cache_key = _cache_key(provider, base_url, api_key)
 
     with _pool_lock:
-        if cache_key not in _client_pool:
-            http_client = _get_http_client(
-                timeout=timeout or DEFAULT_TIMEOUT,
-                limits=DEFAULT_LIMITS,
-            )
+        cached = _client_pool.get(cache_key)
+        if cached:
+            return cached
 
-            client = OpenAI(
-                base_url=base_url,
-                api_key=api_key,
-                default_headers=default_headers or {},
-                http_client=http_client,
-                max_retries=2,  # Enable automatic retries
-            )
+        # API key rotated: evict any stale clients for this provider/base pair
+        _evict_sync_clients(prefix)
 
-            _client_pool[cache_key] = client
-            logger.info(f"Created pooled client for {provider}")
+        http_client = _get_http_client(
+            timeout=timeout or DEFAULT_TIMEOUT,
+            limits=DEFAULT_LIMITS,
+        )
 
-        return _client_pool[cache_key]
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers=default_headers or {},
+            http_client=http_client,
+            max_retries=2,  # Enable automatic retries
+        )
+
+        _client_pool[cache_key] = client
+        logger.info(f"Created pooled client for {provider}")
+
+        return client
 
 
 def get_pooled_async_client(
     provider: str,
     base_url: str,
     api_key: str,
-    default_headers: Optional[Dict[str, str]] = None,
-    timeout: Optional[httpx.Timeout] = None,
+    default_headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
 ) -> AsyncOpenAI:
     """
     Get or create a pooled AsyncOpenAI client for a specific provider.
@@ -140,27 +189,33 @@ def get_pooled_async_client(
     Returns:
         AsyncOpenAI client with connection pooling enabled
     """
-    cache_key = f"{provider}_{base_url}_async"
+    prefix = _pool_prefix(provider, base_url)
+    cache_key = _cache_key(provider, base_url, api_key) + "_async"
 
     with _pool_lock:
-        if cache_key not in _async_client_pool:
-            http_client = _get_async_http_client(
-                timeout=timeout or DEFAULT_TIMEOUT,
-                limits=DEFAULT_LIMITS,
-            )
+        cached = _async_client_pool.get(cache_key)
+        if cached:
+            return cached
 
-            client = AsyncOpenAI(
-                base_url=base_url,
-                api_key=api_key,
-                default_headers=default_headers or {},
-                http_client=http_client,
-                max_retries=2,
-            )
+        _evict_async_clients(prefix)
 
-            _async_client_pool[cache_key] = client
-            logger.info(f"Created pooled async client for {provider}")
+        http_client = _get_async_http_client(
+            timeout=timeout or DEFAULT_TIMEOUT,
+            limits=DEFAULT_LIMITS,
+        )
 
-        return _async_client_pool[cache_key]
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers=default_headers or {},
+            http_client=http_client,
+            max_retries=2,
+        )
+
+        _async_client_pool[cache_key] = client
+        logger.info(f"Created pooled async client for {provider}")
+
+        return client
 
 
 def clear_connection_pools():
@@ -187,7 +242,7 @@ def clear_connection_pools():
         logger.info("Cleared all connection pools")
 
 
-def get_pool_stats() -> Dict[str, int]:
+def get_pool_stats() -> dict[str, int]:
     """Get statistics about current connection pools."""
     with _pool_lock:
         return {

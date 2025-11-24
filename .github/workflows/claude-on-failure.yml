@@ -154,8 +154,38 @@ jobs:
           echo "✅ ANTHROPIC_API_KEY is configured"
           echo "✅ GitHub token is available"
 
+      - name: Pre-flight system diagnostics
+        run: |
+          echo "=== System Information ==="
+          uname -a
+          echo ""
+          echo "=== Disk Space ==="
+          df -h
+          echo ""
+          echo "=== Memory Usage ==="
+          free -h
+          echo ""
+          echo "=== Repository Status ==="
+          git status
+          echo ""
+          echo "=== Failure Logs Content ==="
+          if [ -f failure-logs.md ]; then
+            echo "File size: $(wc -c < failure-logs.md) bytes"
+            echo "First 100 lines:"
+            head -100 failure-logs.md
+          else
+            echo "failure-logs.md not found"
+          fi
+          echo ""
+          echo "=== Python Environment ==="
+          python --version
+          echo "Python path: $(which python)"
+          echo ""
+          echo "=== Current directory contents ==="
+          ls -lah | head -20
+
       - name: Run Claude Code (fix CI failures and push)
-        timeout-minutes: 50
+        timeout-minutes: 120
         uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf  # v1.0.16
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -203,6 +233,23 @@ jobs:
 
             **IMPORTANT**: Always check for merge conflicts first, then read failure-logs.md for exact error details!
 
+      - name: Debug - Check for action completion
+        if: always()
+        run: |
+          echo "=== Post-Claude-Code Status ==="
+          echo "Current time: $(date)"
+          echo "Recent git log:"
+          git log --oneline -10
+          echo ""
+          echo "Git status after action:"
+          git status
+          echo ""
+          echo "Check for uncommitted changes:"
+          git diff --stat
+          echo ""
+          echo "Check if action wrote any files:"
+          find . -type f -mmin -5 -not -path './.git/*' | head -20
+
       - name: Verify fixes with test run
         if: always()
         continue-on-error: true
@@ -224,7 +271,6 @@ jobs:
 
             // Check if Claude made any commits
             const { execSync } = require('child_process');
-            const fs = require('fs');
 
             try {
               const newCommits = execSync('git log --oneline ${{ github.event.workflow_run.head_sha }}..HEAD').toString();

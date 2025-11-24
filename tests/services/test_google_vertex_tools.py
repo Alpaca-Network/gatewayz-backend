@@ -10,7 +10,15 @@ sys.modules['vertexai.generative_models'] = MagicMock()
 sys.modules['google.protobuf'] = MagicMock()
 sys.modules['google.protobuf.json_format'] = MagicMock()
 
+from src.config import Config
 from src.services.google_vertex_client import make_google_vertex_request_openai, _ensure_vertex_imports
+
+
+@pytest.fixture(autouse=True)
+def force_sdk_transport(monkeypatch):
+    """Ensure tests exercise the SDK code path."""
+    monkeypatch.setattr(Config, "GOOGLE_VERTEX_TRANSPORT", "sdk")
+    yield
 
 
 class TestGoogleVertexToolsSupport:

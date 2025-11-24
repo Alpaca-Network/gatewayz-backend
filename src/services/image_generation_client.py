@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -33,7 +33,7 @@ def get_image_http_client() -> httpx.Client:
 
 def make_deepinfra_image_request(
     prompt: str, model: str = "stabilityai/sd3.5", size: str = "1024x1024", n: int = 1, **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request directly to DeepInfra
 
     Args:
@@ -89,7 +89,7 @@ def make_google_vertex_image_request(
     location: str = None,
     endpoint_id: str = None,
     **kwargs,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make image generation request to Google Vertex AI endpoint
 
     Args:
@@ -108,7 +108,6 @@ def make_google_vertex_image_request(
     try:
         # Import Google Cloud AI Platform SDK
         try:
-            from google.auth import impersonated_credentials
             from google.cloud import aiplatform
         except ImportError:
             raise ImportError(
@@ -133,7 +132,7 @@ def make_google_vertex_image_request(
         logger.info(f"Making image generation request to Google Vertex AI endpoint {endpoint_id}")
 
         # Service account to impersonate (if key creation is disabled)
-        target_sa = os.getenv(
+        os.getenv(
             "GOOGLE_VERTEX_SERVICE_ACCOUNT", "vertex-client@gatewayz-468519.iam.gserviceaccount.com"
         )
 
@@ -217,8 +216,8 @@ def make_google_vertex_image_request(
 
 
 def process_image_generation_response(
-    response: Dict[str, Any], provider: str, model: str
-) -> Dict[str, Any]:
+    response: dict[str, Any], provider: str, model: str
+) -> dict[str, Any]:
     """Process image generation response to standard format
 
     Args:

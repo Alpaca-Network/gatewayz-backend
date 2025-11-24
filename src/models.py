@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -10,14 +10,14 @@ class ImageGenerationRequest(BaseModel):
     model: str = "stabilityai/sd3.5"
     size: str = "1024x1024"
     n: int = 1
-    quality: Optional[Literal["standard", "hd"]] = "standard"
-    style: Optional[Literal["natural", "vivid"]] = "natural"
-    provider: Optional[str] = (
+    quality: Literal["standard", "hd"] | None = "standard"
+    style: Literal["natural", "vivid"] | None = "natural"
+    provider: str | None = (
         "deepinfra"  # Provider selection: "deepinfra" or "google-vertex"
     )
-    google_project_id: Optional[str] = None  # Google Cloud project ID for Vertex AI
-    google_location: Optional[str] = None  # Google Cloud region for Vertex AI
-    google_endpoint_id: Optional[str] = None  # Vertex AI endpoint ID
+    google_project_id: str | None = None  # Google Cloud project ID for Vertex AI
+    google_location: str | None = None  # Google Cloud region for Vertex AI
+    google_endpoint_id: str | None = None  # Vertex AI endpoint ID
 
     class Config:
         extra = "allow"
@@ -27,13 +27,13 @@ class ImageData(BaseModel):
     """Individual image data in response"""
 
     url: str
-    b64_json: Optional[str] = None
+    b64_json: str | None = None
 
 
 class ImageGenerationResponse(BaseModel):
     """Response model for image generation"""
 
     created: int
-    data: List[ImageData]
-    provider: Optional[str] = None
-    model: Optional[str] = None
+    data: list[ImageData]
+    provider: str | None = None
+    model: str | None = None

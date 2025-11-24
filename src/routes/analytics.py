@@ -4,7 +4,7 @@ Server-side endpoint for logging analytics events to Statsig and PostHog
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -22,16 +22,16 @@ class AnalyticsEvent(BaseModel):
     """Analytics event model"""
 
     event_name: str = Field(..., description="Event name (e.g., 'chat_message_sent')")
-    user_id: Optional[str] = Field(
+    user_id: str | None = Field(
         None, description="User ID (optional, will use authenticated user if not provided)"
     )
-    value: Optional[str] = Field(None, description="Optional event value")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional event metadata")
+    value: str | None = Field(None, description="Optional event value")
+    metadata: dict[str, Any] | None = Field(None, description="Optional event metadata")
 
 
 @router.post("/events")
 async def log_event(
-    event: AnalyticsEvent, current_user: Optional[dict] = Depends(get_current_user)
+    event: AnalyticsEvent, current_user: dict | None = Depends(get_current_user)
 ):
     """
     Log an analytics event to both Statsig and PostHog via backend
@@ -76,7 +76,7 @@ async def log_event(
 
 @router.post("/batch")
 async def log_batch_events(
-    events: List[AnalyticsEvent], current_user: Optional[dict] = Depends(get_current_user)
+    events: list[AnalyticsEvent], current_user: dict | None = Depends(get_current_user)
 ):
     """
     Log multiple analytics events in batch to both Statsig and PostHog

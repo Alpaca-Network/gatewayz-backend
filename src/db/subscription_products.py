@@ -5,11 +5,45 @@ Handles retrieval of subscription product configurations
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
+from postgrest import APIError
+
 from src.config.supabase_config import get_supabase_client
+from src.db.postgrest_schema import is_schema_cache_error, refresh_postgrest_schema_cache
+from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
+
+
+def _execute_with_schema_cache_retry(operation: Callable[[], Any]) -> Any:
+    """
+    Execute a Supabase operation and transparently retry once on schema cache errors.
+    """
+    try:
+        return operation()
+    except APIError as api_error:
+        if not is_schema_cache_error(api_error):
+            raise
+
+        logger.warning(
+            "subscription_products query failed due to PostgREST schema cache miss (%s); attempting refresh",
+            sanitize_for_logging(str(api_error)),
+        )
+
+        if not refresh_postgrest_schema_cache():
+            raise
+
+        try:
+            return operation()
+        except APIError as retry_error:
+            logger.error(
+                "subscription_products query failed again after schema cache refresh: %s",
+                sanitize_for_logging(str(retry_error)),
+                exc_info=True,
+            )
+            raise
 
 
 def get_tier_from_product_id(product_id: str) -> str:
@@ -25,13 +59,16 @@ def get_tier_from_product_id(product_id: str) -> str:
     try:
         client = get_supabase_client()
 
-        result = (
-            client.table("subscription_products")
-            .select("tier")
-            .eq("product_id", product_id)
-            .eq("is_active", True)
-            .execute()
-        )
+        def query():
+            return (
+                client.table("subscription_products")
+                .select("tier")
+                .eq("product_id", product_id)
+                .eq("is_active", True)
+                .execute()
+            )
+
+        result = _execute_with_schema_cache_retry(query)
 
         if result.data:
             tier = result.data[0]["tier"]
@@ -60,14 +97,17 @@ def get_credits_from_tier(tier: str) -> float:
     try:
         client = get_supabase_client()
 
-        result = (
-            client.table("subscription_products")
-            .select("credits_per_month")
-            .eq("tier", tier)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
-        )
+        def query():
+            return (
+                client.table("subscription_products")
+                .select("credits_per_month")
+                .eq("tier", tier)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+
+        result = _execute_with_schema_cache_retry(query)
 
         if result.data:
             credits = float(result.data[0]["credits_per_month"])
@@ -96,9 +136,15 @@ def get_subscription_product(product_id: str) -> dict[str, Any] | None:
     try:
         client = get_supabase_client()
 
-        result = (
-            client.table("subscription_products").select("*").eq("product_id", product_id).execute()
-        )
+        def query():
+            return (
+                client.table("subscription_products")
+                .select("*")
+                .eq("product_id", product_id)
+                .execute()
+            )
+
+        result = _execute_with_schema_cache_retry(query)
 
         if result.data:
             return result.data[0]
@@ -119,13 +165,16 @@ def get_all_active_products() -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
 
-        result = (
-            client.table("subscription_products")
-            .select("*")
-            .eq("is_active", True)
-            .order("credits_per_month")
-            .execute()
-        )
+        def query():
+            return (
+                client.table("subscription_products")
+                .select("*")
+                .eq("is_active", True)
+                .order("credits_per_month")
+                .execute()
+            )
+
+        result = _execute_with_schema_cache_retry(query)
 
         return result.data or []
 
@@ -159,20 +208,23 @@ def add_subscription_product(
     try:
         client = get_supabase_client()
 
-        result = (
-            client.table("subscription_products")
-            .insert(
-                {
-                    "product_id": product_id,
-                    "tier": tier,
-                    "display_name": display_name,
-                    "credits_per_month": credits_per_month,
-                    "description": description,
-                    "is_active": is_active,
-                }
+        def query():
+            return (
+                client.table("subscription_products")
+                .insert(
+                    {
+                        "product_id": product_id,
+                        "tier": tier,
+                        "display_name": display_name,
+                        "credits_per_month": credits_per_month,
+                        "description": description,
+                        "is_active": is_active,
+                    }
+                )
+                .execute()
             )
-            .execute()
-        )
+
+        result = _execute_with_schema_cache_retry(query)
 
         if result.data:
             logger.info(f"Added subscription product: {product_id} ({tier})")
@@ -228,12 +280,15 @@ def update_subscription_product(
             logger.warning("No fields to update for subscription product")
             return False
 
-        result = (
-            client.table("subscription_products")
-            .update(update_data)
-            .eq("product_id", product_id)
-            .execute()
-        )
+        def query():
+            return (
+                client.table("subscription_products")
+                .update(update_data)
+                .eq("product_id", product_id)
+                .execute()
+            )
+
+        result = _execute_with_schema_cache_retry(query)
 
         if result.data:
             logger.info(f"Updated subscription product: {product_id}")

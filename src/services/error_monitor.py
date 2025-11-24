@@ -10,10 +10,10 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -55,16 +55,16 @@ class ErrorPattern:
     message: str
     category: ErrorCategory
     severity: ErrorSeverity
-    file: Optional[str]
-    line: Optional[int]
-    function: Optional[str]
-    stack_trace: Optional[str]
+    file: str | None
+    line: int | None
+    function: str | None
+    stack_trace: str | None
     timestamp: datetime
     count: int = 1
-    last_seen: Optional[datetime] = None
-    examples: List[str] = None
+    last_seen: datetime | None = None
+    examples: list[str] = None
     fixable: bool = False
-    suggested_fix: Optional[str] = None
+    suggested_fix: str | None = None
 
     def __post_init__(self):
         if self.examples is None:
@@ -72,7 +72,7 @@ class ErrorPattern:
         if self.last_seen is None:
             self.last_seen = self.timestamp
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         data["timestamp"] = self.timestamp.isoformat()
@@ -86,10 +86,10 @@ class ErrorMonitor:
     """Monitors application errors from logs."""
 
     def __init__(self):
-        self.session: Optional[httpx.AsyncClient] = None
-        self.error_patterns: Dict[str, ErrorPattern] = {}
+        self.session: httpx.AsyncClient | None = None
+        self.error_patterns: dict[str, ErrorPattern] = {}
         self.loki_enabled = Config.LOKI_ENABLED
-        self.loki_url = Config.LOKI_PUSH_URL
+        self.loki_query_url = Config.LOKI_QUERY_URL
 
     async def __aenter__(self):
         self.session = httpx.AsyncClient(timeout=10.0)
@@ -108,7 +108,7 @@ class ErrorMonitor:
         if self.session:
             await self.session.aclose()
 
-    async def fetch_recent_errors(self, hours: int = 1, limit: int = 100) -> List[Dict[str, Any]]:
+    async def fetch_recent_errors(self, hours: int = 1, limit: int = 100) -> list[dict[str, Any]]:
         """
         Fetch recent errors from Loki.
 
@@ -119,7 +119,7 @@ class ErrorMonitor:
         Returns:
             List of error log entries
         """
-        if not self.loki_enabled or not self.loki_url or not self.session:
+        if not self.loki_enabled or not self.loki_query_url or not self.session:
             logger.warning("Loki not enabled or not initialized")
             return []
 
@@ -133,7 +133,10 @@ class ErrorMonitor:
             }
 
             # Loki query API endpoint (typically /loki/api/v1/query_range)
-            url = f"{self.loki_url.rstrip('/')}/loki/api/v1/query_range"
+            # Extract base URL (scheme://host:port) from the push URL
+            parsed_url = urlparse(self.loki_query_url)
+            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+            url = f"{base_url}/loki/api/v1/query_range"
 
             response = await self.session.get(url, params=params)
             response.raise_for_status()
@@ -157,7 +160,7 @@ class ErrorMonitor:
             logger.error(f"Error fetching from Loki: {e}")
             return []
 
-    def classify_error(self, error_data: Dict[str, Any]) -> tuple[ErrorCategory, ErrorSeverity]:
+    def classify_error(self, error_data: dict[str, Any]) -> tuple[ErrorCategory, ErrorSeverity]:
         """
         Classify an error based on its content.
 
@@ -221,7 +224,7 @@ class ErrorMonitor:
 
         return ErrorCategory.INTERNAL_ERROR, ErrorSeverity.MEDIUM
 
-    def extract_error_details(self, error_data: Dict[str, Any]) -> ErrorPattern:
+    def extract_error_details(self, error_data: dict[str, Any]) -> ErrorPattern:
         """Extract details from error log."""
         message = error_data.get("message", "Unknown error")
         stack_trace = error_data.get("stack_trace", "")
@@ -245,7 +248,7 @@ class ErrorMonitor:
         category, severity = self.classify_error(error_data)
 
         # Generate pattern key for grouping similar errors
-        pattern_key = f"{category.value}:{message[:50]}"
+        f"{category.value}:{message[:50]}"
 
         return ErrorPattern(
             error_type=error_data.get("error_type", "Exception"),
@@ -260,7 +263,7 @@ class ErrorMonitor:
             examples=[message],
         )
 
-    def group_similar_errors(self, errors: List[ErrorPattern]) -> Dict[str, ErrorPattern]:
+    def group_similar_errors(self, errors: list[ErrorPattern]) -> dict[str, ErrorPattern]:
         """Group similar errors together."""
         grouped = {}
 
@@ -279,7 +282,7 @@ class ErrorMonitor:
 
         return grouped
 
-    def determine_fixability(self, error: ErrorPattern) -> tuple[bool, Optional[str]]:
+    def determine_fixability(self, error: ErrorPattern) -> tuple[bool, str | None]:
         """Determine if an error is automatically fixable and suggest a fix."""
         category = error.category
         message = error.message.lower()
@@ -312,7 +315,7 @@ class ErrorMonitor:
 
         return False, None
 
-    async def analyze_errors(self, raw_errors: List[Dict[str, Any]]) -> List[ErrorPattern]:
+    async def analyze_errors(self, raw_errors: list[dict[str, Any]]) -> list[ErrorPattern]:
         """Analyze raw errors and return structured error patterns."""
         error_patterns = []
 
@@ -330,7 +333,7 @@ class ErrorMonitor:
         grouped = self.group_similar_errors(error_patterns)
         return list(grouped.values())
 
-    async def get_critical_errors(self, hours: int = 1) -> List[ErrorPattern]:
+    async def get_critical_errors(self, hours: int = 1) -> list[ErrorPattern]:
         """Get critical errors from the last N hours."""
         raw_errors = await self.fetch_recent_errors(hours=hours)
         patterns = await self.analyze_errors(raw_errors)
@@ -342,7 +345,7 @@ class ErrorMonitor:
 
         return sorted(critical, key=lambda p: p.count, reverse=True)
 
-    async def get_fixable_errors(self, hours: int = 1) -> List[ErrorPattern]:
+    async def get_fixable_errors(self, hours: int = 1) -> list[ErrorPattern]:
         """Get errors that can be automatically fixed."""
         raw_errors = await self.fetch_recent_errors(hours=hours)
         patterns = await self.analyze_errors(raw_errors)
@@ -400,7 +403,7 @@ class ErrorMonitor:
 
 
 # Singleton instance
-_error_monitor: Optional[ErrorMonitor] = None
+_error_monitor: ErrorMonitor | None = None
 
 
 async def get_error_monitor() -> ErrorMonitor:

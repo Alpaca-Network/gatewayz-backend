@@ -399,14 +399,18 @@ async def get_models(
         if gateway_value in ("nebius", "all"):
             nebius_models = get_cached_models("nebius") or []
             if gateway_value == "nebius" and not nebius_models:
-                logger.error("No Nebius models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+                logger.info(
+                    "Nebius gateway requested but no cached catalog is available; "
+                    "returning an empty list because Nebius does not publish a public model listing"
+                )
 
         if gateway_value in ("xai", "all"):
             xai_models = get_cached_models("xai") or []
             if gateway_value == "xai" and not xai_models:
-                logger.error("No Xai models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+                logger.info(
+                    "xAI gateway requested but no cached catalog is available; "
+                    "returning an empty list because xAI does not publish a public model listing"
+                )
 
         if gateway_value in ("novita", "all"):
             novita_models = get_cached_models("novita") or []
@@ -520,8 +524,13 @@ async def get_models(
             )
 
         if not models:
-            logger.debug("No models data available after applying gateway selection")
-            raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if gateway_value == "nebius":
+                logger.info(
+                    "Returning empty Nebius catalog response because no public model listing exists"
+                )
+            else:
+                logger.debug("No models data available after applying gateway selection")
+                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
 
         provider_groups: List[List[dict]] = []
 
@@ -726,7 +735,7 @@ async def get_models(
             "fireworks": "Fireworks catalog",
             "together": "Together catalog",
             "cerebras": "Cerebras catalog",
-            "nebius": "Nebius catalog",
+            "nebius": "Nebius catalog (no public listing is currently available)",
             "xai": "Xai catalog",
             "novita": "Novita catalog",
             "hug": "Hugging Face catalog",

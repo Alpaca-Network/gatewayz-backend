@@ -6,8 +6,9 @@ Compatible with Claude API: https://docs.claude.com/en/api/messages
 import asyncio
 import importlib
 import logging
+import os
 import time
-from typing import Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -71,6 +72,7 @@ from src.services.openrouter_client import (
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
+    enforce_model_failover_rules,
     map_provider_error,
     should_failover,
 )
@@ -78,6 +80,7 @@ from src.services.together_client import make_together_request_openai, process_t
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.token_estimator import estimate_message_tokens
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -183,12 +186,23 @@ async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
+async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
+    """Ensure plan limits allow another request before contacting providers."""
+    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
+
+
 @router.post("/v1/messages", tags=["chat"])
 async def anthropic_messages(
     req: MessagesRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
-    session_id: Optional[int] = Query(None, description="Chat session ID to save messages to"),
+    session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
     """
@@ -229,7 +243,7 @@ async def anthropic_messages(
     ```
     """
     # Initialize performance tracker
-    tracker = PerformanceTracker(endpoint="/v1/messages")
+    PerformanceTracker(endpoint="/v1/messages")
 
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
@@ -270,14 +284,66 @@ async def anthropic_messages(
             else:
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
+        await _ensure_plan_capacity(user["id"], environment_tag)
+
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False)
+        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
 
-        # Initialize rate limit variables
+        # Pre-check plan limits before making upstream calls
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+            )
+
+        # Rate limit pre-check (non-trial users only)
         rl_final = None
+        if rate_limit_mgr and not disable_rate_limiting and not trial.get("is_trial", False):
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                await _to_thread(
+                    create_rate_limit_alert,
+                    api_key,
+                    "rate_limit_exceeded",
+                    {
+                        "reason": rl_pre.reason,
+                        "retry_after": rl_pre.retry_after,
+                        "remaining_requests": rl_pre.remaining_requests,
+                        "remaining_tokens": rl_pre.remaining_tokens,
+                    },
+                )
+                headers = get_rate_limit_headers(rl_pre)
+                if rl_pre.retry_after:
+                    headers["Retry-After"] = str(rl_pre.retry_after)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers=headers or None,
+                )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
+
+        # Pre-check plan limits before processing (fail fast)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
+
+        # Rate limit precheck (before making upstream request)
+        rl_pre = None
+        if rate_limit_mgr:
+            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
+            if not rl_pre.allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded: {rl_pre.reason}",
+                    headers={"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                )
 
         # === 2) Transform Anthropic format to OpenAI format ===
         messages_data = [msg.model_dump() for msg in req.messages]
@@ -320,6 +386,14 @@ async def anthropic_messages(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+
+        # === 2.2) Plan limit pre-check with estimated tokens ===
+        estimated_tokens = estimate_message_tokens(openai_messages, req.max_tokens)
+        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        if not pre_plan.get("allowed", False):
+            raise HTTPException(
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+            )
 
         original_model = req.model
 
@@ -386,6 +460,7 @@ async def anthropic_messages(
                     # Otherwise default to openrouter (already set)
 
         provider_chain = build_provider_failover_chain(provider)
+        provider_chain = enforce_model_failover_rules(original_model, provider_chain)
         model = original_model
 
         # === 3) Call upstream with failover ===
@@ -548,7 +623,7 @@ async def anthropic_messages(
                 )
                 break
             except Exception as exc:
-                if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                     logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
                 elif isinstance(exc, httpx.RequestError):
                     logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -801,6 +876,8 @@ async def anthropic_messages(
         headers = {}
         if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
+        elif rl_pre is not None:
+            headers.update(get_rate_limit_headers(rl_pre))
 
         return JSONResponse(content=anthropic_response, headers=headers)
 

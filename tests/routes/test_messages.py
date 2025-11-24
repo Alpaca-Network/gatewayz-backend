@@ -600,8 +600,12 @@ class TestMessagesEndpointRateLimiting:
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
     @patch('src.routes.messages.get_rate_limit_manager')
+    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
     def test_messages_endpoint_rate_limit_exceeded(
         self,
+        mock_process_or,
+        mock_make_or,
         mock_rate_limit_mgr,
         mock_validate_trial,
         mock_enforce_plan,
@@ -614,6 +618,11 @@ class TestMessagesEndpointRateLimiting:
         mock_get_user.return_value = mock_user
         mock_enforce_plan.return_value = {'allowed': True}
         mock_validate_trial.return_value = {'is_valid': True, 'is_trial': False}
+        mock_make_or.return_value = {"_raw": True}
+        mock_process_or.return_value = {
+            "content": [{"type": "text", "text": "test"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
         # Rate limit exceeded
         rate_limit_result = Mock()
@@ -652,8 +661,12 @@ class TestMessagesEndpointPlanLimits:
     @patch('src.routes.messages.get_user')
     @patch('src.routes.messages.enforce_plan_limits')
     @patch('src.routes.messages.validate_trial_access')
+    @patch('src.routes.messages.make_openrouter_request_openai')
+    @patch('src.routes.messages.process_openrouter_response')
     def test_messages_endpoint_plan_limit_exceeded(
         self,
+        mock_process_or,
+        mock_make_or,
         mock_validate_trial,
         mock_enforce_plan,
         mock_get_user,
@@ -668,6 +681,11 @@ class TestMessagesEndpointPlanLimits:
             'reason': 'Monthly token limit exceeded'
         }
         mock_validate_trial.return_value = {'is_valid': True, 'is_trial': False}
+        mock_make_or.return_value = {"_raw": True}
+        mock_process_or.return_value = {
+            "content": [{"type": "text", "text": "test"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
         response = client.post(
             '/v1/messages',

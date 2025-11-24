@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key
@@ -15,8 +15,8 @@ def create_enhanced_user(
     email: str,
     auth_method: str,
     credits: int = 10,
-    privy_user_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    privy_user_id: str | None = None,
+) -> dict[str, Any]:
     """Create a new user with automatic 3-day trial and $10 credits"""
     try:
         client = get_supabase_client()
@@ -87,7 +87,7 @@ def create_enhanced_user(
         raise RuntimeError(f"Failed to create enhanced user: {e}")
 
 
-def get_user(api_key: str) -> Optional[Dict[str, Any]]:
+def get_user(api_key: str) -> dict[str, Any] | None:
     """Get user by API key from unified system"""
     try:
         client = get_supabase_client()
@@ -128,7 +128,7 @@ def get_user(api_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     """
     Get user by user ID (primary key)
 
@@ -157,7 +157,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_privy_id(privy_user_id: str) -> Optional[Dict[str, Any]]:
+def get_user_by_privy_id(privy_user_id: str) -> dict[str, Any] | None:
     """Get user by Privy user ID"""
     try:
         client = get_supabase_client()
@@ -174,7 +174,7 @@ def get_user_by_privy_id(privy_user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+def get_user_by_username(username: str) -> dict[str, Any] | None:
     """Get user by username"""
     try:
         client = get_supabase_client()
@@ -196,8 +196,8 @@ def add_credits_to_user(
     credits: float,
     transaction_type: str = "admin_credit",
     description: str = "Credits added",
-    payment_id: Optional[int] = None,
-    metadata: Optional[dict] = None,
+    payment_id: int | None = None,
+    metadata: dict | None = None,
 ) -> None:
     """
     Add credits to user account by user ID and log the transaction
@@ -277,7 +277,7 @@ def log_api_usage_transaction(
     api_key: str,
     cost: float,
     description: str = "API usage",
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
     is_trial: bool = False,
 ) -> None:
     """
@@ -333,7 +333,7 @@ def log_api_usage_transaction(
 
 
 def deduct_credits(
-    api_key: str, tokens: float, description: str = "API usage", metadata: Optional[dict] = None
+    api_key: str, tokens: float, description: str = "API usage", metadata: dict | None = None
 ) -> None:
     """
     Deduct credits from user account by API key and log the transaction
@@ -420,7 +420,7 @@ def deduct_credits(
         raise RuntimeError(f"Failed to deduct credits: {e}") from e
 
 
-def get_all_users() -> List[Dict[str, Any]]:
+def get_all_users() -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
         result = client.table("users").select("*").execute()
@@ -500,7 +500,7 @@ def record_usage(
         # Don't raise the exception to avoid breaking the main flow
 
 
-def get_user_usage_metrics(api_key: str) -> Dict[str, Any]:
+def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
@@ -574,7 +574,7 @@ def get_user_usage_metrics(api_key: str) -> Dict[str, Any]:
         return None
 
 
-def get_admin_monitor_data() -> Dict[str, Any]:
+def get_admin_monitor_data() -> dict[str, Any]:
     """Get admin monitoring data with robust error handling"""
     try:
         client = get_supabase_client()
@@ -846,7 +846,7 @@ def get_admin_monitor_data() -> Dict[str, Any]:
         }
 
 
-def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str, Any]:
     """Update user profile information"""
     try:
         client = get_supabase_client()
@@ -884,7 +884,7 @@ def update_user_profile(api_key: str, profile_data: Dict[str, Any]) -> Dict[str,
         raise RuntimeError(f"Failed to update user profile: {e}")
 
 
-def get_user_profile(api_key: str) -> Dict[str, Any]:
+def get_user_profile(api_key: str) -> dict[str, Any]:
     """Get user profile information"""
     try:
         logger.info(f"get_user_profile called for API key: {api_key[:10]}...")

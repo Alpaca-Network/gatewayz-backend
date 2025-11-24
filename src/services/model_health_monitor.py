@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,16 +45,16 @@ class ModelHealthMetrics:
     provider: str
     gateway: str
     status: HealthStatus
-    response_time_ms: Optional[float] = None
+    response_time_ms: float | None = None
     success_rate: float = 0.0
-    last_checked: Optional[datetime] = None
-    last_success: Optional[datetime] = None
-    last_failure: Optional[datetime] = None
+    last_checked: datetime | None = None
+    last_success: datetime | None = None
+    last_failure: datetime | None = None
     error_count: int = 0
     total_requests: int = 0
-    avg_response_time_ms: Optional[float] = None
+    avg_response_time_ms: float | None = None
     uptime_percentage: float = 0.0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -68,10 +68,10 @@ class ProviderHealthMetrics:
     healthy_models: int = 0
     degraded_models: int = 0
     unhealthy_models: int = 0
-    avg_response_time_ms: Optional[float] = None
+    avg_response_time_ms: float | None = None
     overall_uptime: float = 0.0
-    last_checked: Optional[datetime] = None
-    error_message: Optional[str] = None
+    last_checked: datetime | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -88,7 +88,7 @@ class SystemHealthMetrics:
     degraded_models: int = 0
     unhealthy_models: int = 0
     system_uptime: float = 0.0
-    last_updated: Optional[datetime] = None
+    last_updated: datetime | None = None
 
 
 class ModelHealthMonitor:
@@ -102,9 +102,9 @@ class ModelHealthMonitor:
         batch_interval: float = 0.0,
         fetch_chunk_size: int = 100,
     ):
-        self.health_data: Dict[str, ModelHealthMetrics] = {}
-        self.provider_data: Dict[str, ProviderHealthMetrics] = {}
-        self.system_data: Optional[SystemHealthMetrics] = None
+        self.health_data: dict[str, ModelHealthMetrics] = {}
+        self.provider_data: dict[str, ProviderHealthMetrics] = {}
+        self.system_data: SystemHealthMetrics | None = None
         self.monitoring_active = False
         self.check_interval = check_interval  # seconds
         self.timeout = 30  # 30 seconds
@@ -169,7 +169,7 @@ class ModelHealthMonitor:
                 return_exceptions=True,
             )
 
-            for model, result in zip(batch, results):
+            for model, result in zip(batch, results, strict=False):
                 if isinstance(result, Exception):
                     logger.error("Health check failed for model %s: %s", model.get("id"), result)
                     continue
@@ -188,7 +188,7 @@ class ModelHealthMonitor:
 
         logger.info("Health checks completed. Checked %s models", total_models)
 
-    async def _get_models_to_check(self) -> List[Dict[str, Any]]:
+    async def _get_models_to_check(self) -> list[dict[str, Any]]:
         """Get list of models to check for health monitoring"""
         models = []
 
@@ -240,7 +240,7 @@ class ModelHealthMonitor:
         return models
 
     @staticmethod
-    def _chunk_list(items: List[Dict[str, Any]], size: int):
+    def _chunk_list(items: list[dict[str, Any]], size: int):
         """Yield successive chunks from a list."""
         if size <= 0:
             size = len(items) or 1
@@ -248,7 +248,7 @@ class ModelHealthMonitor:
         for index in range(0, len(items), size):
             yield items[index : index + size]
 
-    async def _check_model_health(self, model: Dict[str, Any]) -> Optional[ModelHealthMetrics]:
+    async def _check_model_health(self, model: dict[str, Any]) -> ModelHealthMetrics | None:
         """Check health of a specific model"""
         model_id = model["id"]
         provider = model["provider"]
@@ -288,7 +288,7 @@ class ModelHealthMonitor:
 
         return health_metrics
 
-    async def _perform_model_request(self, model_id: str, gateway: str) -> Dict[str, Any]:
+    async def _perform_model_request(self, model_id: str, gateway: str) -> dict[str, Any]:
         """Perform a real test request to a model"""
         try:
             if os.getenv("TESTING", "").lower() == "true":
@@ -553,7 +553,7 @@ class ModelHealthMonitor:
             last_updated=datetime.now(timezone.utc),
         )
 
-    def get_model_health(self, model_id: str, gateway: str = None) -> Optional[ModelHealthMetrics]:
+    def get_model_health(self, model_id: str, gateway: str = None) -> ModelHealthMetrics | None:
         """Get health metrics for a specific model"""
         if gateway:
             model_key = f"{gateway}:{model_id}"
@@ -567,7 +567,7 @@ class ModelHealthMonitor:
 
     def get_provider_health(
         self, provider: str, gateway: str = None
-    ) -> Optional[ProviderHealthMetrics]:
+    ) -> ProviderHealthMetrics | None:
         """Get health metrics for a specific provider"""
         if gateway:
             provider_key = f"{gateway}:{provider}"
@@ -579,25 +579,25 @@ class ModelHealthMonitor:
                     return provider_data
             return None
 
-    def get_system_health(self) -> Optional[SystemHealthMetrics]:
+    def get_system_health(self) -> SystemHealthMetrics | None:
         """Get overall system health metrics"""
         return self.system_data
 
-    def get_all_models_health(self, gateway: str = None) -> List[ModelHealthMetrics]:
+    def get_all_models_health(self, gateway: str = None) -> list[ModelHealthMetrics]:
         """Get health metrics for all models"""
         if gateway:
             return [h for h in self.health_data.values() if h.gateway == gateway]
         else:
             return list(self.health_data.values())
 
-    def get_all_providers_health(self, gateway: str = None) -> List[ProviderHealthMetrics]:
+    def get_all_providers_health(self, gateway: str = None) -> list[ProviderHealthMetrics]:
         """Get health metrics for all providers"""
         if gateway:
             return [p for p in self.provider_data.values() if p.gateway == gateway]
         else:
             return list(self.provider_data.values())
 
-    def get_health_summary(self) -> Dict[str, Any]:
+    def get_health_summary(self) -> dict[str, Any]:
         """Get a comprehensive health summary"""
         return {
             "system": asdict(self.system_data) if self.system_data else None,

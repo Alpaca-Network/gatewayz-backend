@@ -6,6 +6,7 @@ from openai import OpenAI
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_openrouter_pooled_client
+from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ def get_openrouter_client():
         return get_openrouter_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize OpenRouter client: {e}")
+        capture_provider_error(e, provider='openrouter', endpoint='client_init')
         raise
 
 
@@ -34,6 +36,12 @@ def make_openrouter_request_openai(messages, model, **kwargs):
         return response
     except Exception as e:
         logger.error(f"OpenRouter request failed: {e}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions'
+        )
         raise
 
 
@@ -70,6 +78,11 @@ def process_openrouter_response(response):
         }
     except Exception as e:
         logger.error(f"Failed to process OpenRouter response: {e}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            endpoint='response_processing'
+        )
         raise
 
 
@@ -83,4 +96,10 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
         return stream
     except Exception as e:
         logger.error(f"OpenRouter streaming request failed: {e}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions (stream)'
+        )
         raise

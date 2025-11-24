@@ -146,7 +146,6 @@ def fetch_models_from_huggingface_api(
             # Use shorter timeout in test mode to prevent test timeouts
             # Test mode: 8s * 3 attempts + 1s + 2s delays = ~27s total (within 30s test timeout)
             # Production: 30s timeout for better reliability with slow networks
-            request_timeout = 8.0 if Config.IS_TESTING else 30.0
 
             for attempt in range(max_retries):
                 try:

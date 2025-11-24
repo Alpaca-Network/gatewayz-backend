@@ -10,11 +10,10 @@ import os
 from contextlib import redirect_stdout
 from datetime import date, datetime, timezone
 from html import escape
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 from src.cache import (
@@ -31,7 +30,6 @@ from src.services.models import (
     fetch_models_from_aimo,
     fetch_models_from_anannas,
     fetch_models_from_chutes,
-    fetch_models_from_deepinfra,
     fetch_models_from_fal,
     fetch_models_from_featherless,
     fetch_models_from_fireworks,
@@ -66,7 +64,7 @@ except Exception as e:  # pragma: no cover - optional dependency for dashboard
 router = APIRouter()
 
 
-def get_all_gateway_names() -> List[str]:
+def get_all_gateway_names() -> list[str]:
     """
     Get all gateway names from GATEWAY_CONFIG.
 
@@ -98,7 +96,7 @@ def get_all_gateway_names() -> List[str]:
     ]
 
 
-def get_cacheable_gateways() -> List[str]:
+def get_cacheable_gateways() -> list[str]:
     """
     Get list of gateways that support cache refresh.
 
@@ -162,8 +160,8 @@ def get_fetch_function(gateway: str):
     return fetch_functions.get(gateway)
 
 
-def _normalize_timestamp(value: Any) -> Optional[datetime]:
-    """Convert a cached timestamp into an aware ``datetime`` in UTC."""
+def _normalize_timestamp(value: Any) -> datetime | None:
+    """Convert a cached timestamp into an aware ``datetime`` in timezone.utc."""
 
     if not value:
         return None
@@ -174,7 +172,7 @@ def _normalize_timestamp(value: Any) -> Optional[datetime]:
     if isinstance(value, date):
         return datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
 
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         try:
             return datetime.fromtimestamp(value, tz=timezone.utc)
         except (OSError, OverflowError, ValueError):
@@ -191,7 +189,7 @@ def _normalize_timestamp(value: Any) -> Optional[datetime]:
     return None
 
 
-def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix: bool) -> str:
+def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix: bool) -> str:
     """Generate a minimal HTML dashboard for gateway health results."""
 
     timestamp = escape(results.get("timestamp", ""))
@@ -203,7 +201,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         "fixed": results.get("fixed", 0),
     }
 
-    def format_price_value(value: Any) -> Optional[str]:
+    def format_price_value(value: Any) -> str | None:
         if value is None:
             return None
         value_str = str(value).strip()
@@ -225,7 +223,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         except ValueError:
             return value_str
 
-    def format_pricing_display(pricing: Optional[Dict[str, Any]]) -> str:
+    def format_pricing_display(pricing: dict[str, Any] | None) -> str:
         if not isinstance(pricing, dict):
             return ""
         label_map = {
@@ -256,7 +254,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
             "training": " /hr",
             "fine_tune": " /hr",
         }
-        parts: List[str] = []
+        parts: list[str] = []
         for key, raw_value in pricing.items():
             normalized = format_price_value(raw_value)
             if not normalized:
@@ -279,7 +277,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         return f'<span class="{cls}">{escape(status.title())}</span>'
 
     rows = []
-    gateways: Dict[str, Any] = results.get("gateways", {}) or {}
+    gateways: dict[str, Any] = results.get("gateways", {}) or {}
     for gateway_id in sorted(gateways.keys()):
         data = gateways[gateway_id] or {}
         name = data.get("name") or gateway_id.title()
@@ -358,8 +356,8 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
         if has_models:
             model_items = []
             for model in models:
-                pricing_info: Optional[Dict[str, Any]] = None
-                pricing_source: Optional[str] = None
+                pricing_info: dict[str, Any] | None = None
+                pricing_source: str | None = None
 
                 if isinstance(model, dict):
                     model_id = model.get("id") or model.get("model") or str(model)
@@ -1041,7 +1039,7 @@ def _render_gateway_dashboard(results: Dict[str, Any], log_output: str, auto_fix
     """
 
 
-async def _run_gateway_check(auto_fix: bool) -> tuple[Dict[str, Any], str]:
+async def _run_gateway_check(auto_fix: bool) -> tuple[dict[str, Any], str]:
     """Execute the comprehensive check and capture stdout."""
 
     if run_comprehensive_check is None:
@@ -1057,7 +1055,7 @@ async def _run_gateway_check(auto_fix: bool) -> tuple[Dict[str, Any], str]:
     return results, buffer.getvalue()
 
 
-async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> tuple[Dict[str, Any], str]:
+async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> tuple[dict[str, Any], str]:
     """Execute the check for a single gateway and capture stdout."""
 
     if run_comprehensive_check is None:
@@ -1368,7 +1366,7 @@ async def refresh_gateway_cache(
 
 @router.post("/cache/clear", tags=["cache"])
 async def clear_all_caches(
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None, description="Specific gateway to clear, or all if not specified"
     )
 ):
@@ -1662,7 +1660,7 @@ async def gateway_health_dashboard_data(
                 "error": str(e),
             }
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "success": True,
         "timestamp": results.get("timestamp"),
         "auto_fix": auto_fix,

@@ -16,9 +16,10 @@ class _Result:
 
 
 class _Table:
-    def __init__(self, store, name):
+    def __init__(self, store, name, supabase=None):
         self.store = store
         self.name = name
+        self.supabase = supabase
         self._filters = []   # list of (field, op, value)
         self._select = None
         self._order = None
@@ -61,6 +62,11 @@ class _Table:
     def insert(self, data):
         # accept dict or list[dict]
         rows = data if isinstance(data, list) else [data]
+        if self.supabase:
+            failures = self.supabase.insert_failures.get(self.name, [])
+            if failures:
+                exc = failures.pop(0)
+                raise exc
         for r in rows:
             if "id" not in r:
                 r["id"] = len(self.store[self.name]) + 1
@@ -107,11 +113,16 @@ class FakeSupabase:
             "rate_limit_configs": [],
             "api_key_audit_logs": [],
         }
+        self.insert_failures = {}
 
     def table(self, name):
         if name not in self.store:
             self.store[name] = []
-        return _Table(self.store, name)
+        return _Table(self.store, name, supabase=self)
+
+    def fail_next_insert(self, table_name, exception):
+        queue = self.insert_failures.setdefault(table_name, [])
+        queue.append(exception)
 
 
 # ------------------------ Shared fixtures ------------------------
@@ -201,6 +212,51 @@ def test_create_api_key_primary_sets_trial_and_prefix_and_audit(monkeypatch, mod
     # audit log created
     logs = fake_supabase.store["api_key_audit_logs"]
     assert logs and logs[0]["action"] == "create"
+
+
+def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fake_supabase):
+    from postgrest import APIError
+    # Simulate PostgREST schema cache error
+    error = APIError(
+        {'code': 'PGRST204', 'message': 'Could not find column in schema cache'}
+    )
+    fake_supabase.fail_next_insert("api_keys_new", error)
+
+    refresh_calls = {"count": 0}
+
+    def fake_refresh(client):
+        refresh_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", fake_refresh)
+
+    api_key, key_id = mod.create_api_key(user_id=7, key_name="RetryKey")
+
+    assert api_key.startswith("gw_live_")
+    assert refresh_calls["count"] == 1
+    assert len(fake_supabase.store["api_keys_new"]) == 1
+
+
+def test_create_api_key_schema_cache_error_fallback(monkeypatch, mod, fake_supabase):
+    """Ensure we recover from PostgREST schema cache misses for new columns."""
+    from postgrest import APIError
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
+
+    error = APIError(
+        {'code': 'PGRST204', 'message': "Could not find the 'key_version' column of 'api_keys_new' in the schema cache"}
+    )
+    fake_supabase.fail_next_insert("api_keys_new", error)
+
+    monkeypatch.setattr(mod, "refresh_postgrest_schema_cache", lambda client: True)
+
+    api_key, key_id = mod.create_api_key(user_id=1, key_name="Primary", is_primary=True)
+
+    assert api_key.startswith("gw_live_")
+    assert key_id == 1
+
+    stored_row = fake_supabase.store["api_keys_new"][0]
+    assert "key_version" not in stored_row
+    assert stored_row["api_key"] == api_key
 
 
 def test_get_user_api_keys_builds_fields(mod, fake_supabase):

@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any
 
 import redis
 
@@ -80,8 +80,8 @@ class RateLimitResult:
     remaining_requests: int
     remaining_tokens: int
     reset_time: datetime
-    retry_after: Optional[int] = None
-    reason: Optional[str] = None
+    retry_after: int | None = None
+    reason: str | None = None
     burst_remaining: int = 0
     concurrency_remaining: int = 0
     # Rate limit headers for HTTP responses
@@ -108,7 +108,7 @@ DEFAULT_CONFIG = RateLimitConfig(
 class SlidingWindowRateLimiter:
     """Simplified rate limiter using fallback system"""
 
-    def __init__(self, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, redis_client: redis.Redis | None = None):
         # Use fallback rate limiting system (no Redis)
         self.fallback_manager = get_fallback_rate_limit_manager()
         self.concurrent_requests = defaultdict(int)
@@ -220,7 +220,7 @@ class SlidingWindowRateLimiter:
 
     async def _check_concurrency_limit(
         self, api_key: str, config: RateLimitConfig
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check concurrent request limit"""
         current_concurrent = self.concurrent_requests.get(api_key, 0)
 
@@ -245,7 +245,7 @@ class SlidingWindowRateLimiter:
             "limit": config.concurrency_limit,
         }
 
-    async def _check_burst_limit(self, api_key: str, config: RateLimitConfig) -> Dict[str, Any]:
+    async def _check_burst_limit(self, api_key: str, config: RateLimitConfig) -> dict[str, Any]:
         """Check burst limit using token bucket algorithm"""
         now = time.time()
         key = f"burst:{api_key}"
@@ -312,7 +312,7 @@ class SlidingWindowRateLimiter:
 
     async def _check_sliding_window(
         self, api_key: str, config: RateLimitConfig, tokens_used: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check sliding window rate limits"""
         now = datetime.now(timezone.utc)
         window_start = now - timedelta(seconds=config.window_size_seconds)
@@ -335,7 +335,7 @@ class SlidingWindowRateLimiter:
         tokens_used: int,
         now: datetime,
         window_start: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check sliding window using Redis"""
         pipe = self.redis_client.pipeline()
 
@@ -456,7 +456,7 @@ class SlidingWindowRateLimiter:
         tokens_used: int,
         now: datetime,
         window_start: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check sliding window using local cache (fallback)"""
         if api_key not in self.local_cache:
             # tokens: deque of (timestamp, amount)
@@ -527,13 +527,13 @@ class SlidingWindowRateLimiter:
 class RateLimitManager:
     """Manager for rate limiting with per-key configuration (OPTIMIZED: with caching)"""
 
-    def __init__(self, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, redis_client: redis.Redis | None = None):
         self.rate_limiter = SlidingWindowRateLimiter(redis_client)
         self.key_configs = {}  # Cache for per-key configurations
         self.default_config = RateLimitConfig()
         self.fallback_manager = get_fallback_rate_limit_manager()
         # OPTIMIZATION: Short-lived cache for rate limit results (15-30ms faster per cached request)
-        self._result_cache: Dict[str, tuple[RateLimitResult, float]] = {}
+        self._result_cache: dict[str, tuple[RateLimitResult, float]] = {}
         self._cache_ttl = 15.0  # Cache results for 15 seconds (increased from 5s for better performance)
 
     async def get_key_config(self, api_key: str) -> RateLimitConfig:
@@ -641,7 +641,7 @@ class RateLimitManager:
         except Exception as e:
             logger.error(f"Failed to save rate limit config to DB: {e}")
 
-    async def get_rate_limit_status(self, api_key: str, config: RateLimitConfig) -> Dict[str, Any]:
+    async def get_rate_limit_status(self, api_key: str, config: RateLimitConfig) -> dict[str, Any]:
         """Get current rate limit status"""
         # Fallback manager doesn't have get_rate_limit_status, return default
         return {
@@ -679,7 +679,7 @@ async def increment_request(api_key: str, config: RateLimitConfig, tokens_used: 
     await limiter.increment_request(api_key, config, tokens_used)
 
 
-async def get_rate_limit_status(api_key: str, config: RateLimitConfig) -> Dict[str, Any]:
+async def get_rate_limit_status(api_key: str, config: RateLimitConfig) -> dict[str, Any]:
     """Get rate limit status for API key"""
     limiter = get_rate_limiter()
     return await limiter.get_rate_limit_status(api_key, config)

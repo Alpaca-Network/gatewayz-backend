@@ -5,17 +5,14 @@ Provides API endpoints for viewing errors, generating fixes, and tracking status
 """
 
 import logging
-from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from src.services.autonomous_monitor import get_autonomous_monitor
 from src.services.bug_fix_generator import (
-    BugFix,
     get_bug_fix_generator,
 )
 from src.services.error_monitor import (
-    ErrorPattern,
     get_error_monitor,
 )
 
@@ -183,7 +180,7 @@ async def generate_fix_for_error(
 
 @router.post("/fixes/generate-batch")
 async def generate_fixes_batch(
-    error_ids: List[str] = Query(...),
+    error_ids: list[str] = Query(...),
     create_prs: bool = Query(False),
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
