@@ -15,16 +15,19 @@ Features:
 import json
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
+from src.utils.path_utils import get_data_dir, resolve_path
+
 logger = logging.getLogger(__name__)
 
 # Path to store pricing history
-PRICING_HISTORY_DIR = Path("/root/repo/src/data/pricing_history")
-PRICING_HISTORY_DIR.mkdir(exist_ok=True)
+PRICING_HISTORY_DIR = resolve_path(
+    "PRICING_HISTORY_DIR", get_data_dir("pricing_history")
+)
+PRICING_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
