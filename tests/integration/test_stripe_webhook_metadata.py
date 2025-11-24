@@ -145,8 +145,8 @@ class TestWebhookMetadataHandling:
 
             # Verify it was processed
             assert result.success, f"Webhook processing failed: {result.message}"
-            mock_add_credits_to_user.assert_called_once()
-            call_kwargs = mock_add_credits_to_user.call_args[1]
+            mock_add_credits.assert_called_once()
+            call_kwargs = mock_add_credits.call_args[1]
             assert call_kwargs["user_id"] == 42, "Incorrect user_id extracted"
             assert call_kwargs["credits"] == 25.0, "Incorrect credits amount (should be cents/100)"
 
@@ -190,8 +190,8 @@ class TestWebhookMetadataHandling:
 
             # Should still process successfully with fallback
             assert result.success, f"Webhook processing failed: {result.message}"
-            mock_add_credits_to_user.assert_called_once()
-            call_kwargs = mock_add_credits_to_user.call_args[1]
+            mock_add_credits.assert_called_once()
+            call_kwargs = mock_add_credits.call_args[1]
             assert call_kwargs["credits"] == 15.0, "Failed to parse credits with fallback"
 
     def test_webhook_always_marked_processed_even_on_error(self, stripe_service):
@@ -244,12 +244,8 @@ class TestWebhookHttpStatus:
 
     def test_webhook_endpoint_returns_200_on_success(self):
         """Verify webhook endpoint returns HTTP 200 on success"""
-        from src.routes.payments import stripe_webhook
         from fastapi.testclient import TestClient
-        from fastapi import FastAPI
-
-        app = FastAPI()
-        app.include_router(stripe_webhook.router)
+        from src.main import app
 
         with patch("src.routes.payments.stripe_service.handle_webhook") as mock_handle:
             result = WebhookProcessingResult(
@@ -261,47 +257,37 @@ class TestWebhookHttpStatus:
             )
             mock_handle.return_value = result
 
-            with patch.dict(os.environ, {
-                "STRIPE_WEBHOOK_SECRET": "whsec_test_123"
-            }):
-                client = TestClient(app)
-                response = client.post(
-                    "/api/stripe/webhook",
-                    json={"test": "payload"},
-                    headers={"stripe-signature": "test_sig"}
-                )
+            client = TestClient(app)
+            response = client.post(
+                "/api/stripe/webhook",
+                json={"test": "payload"},
+                headers={"stripe-signature": "test_sig"}
+            )
 
-                assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-                data = response.json()
-                assert data["success"] is True
+            assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+            data = response.json()
+            assert data["success"] is True
 
     def test_webhook_endpoint_returns_200_on_error(self):
         """Verify webhook endpoint returns HTTP 200 even on processing errors"""
-        from src.routes.payments import stripe_webhook
         from fastapi.testclient import TestClient
-        from fastapi import FastAPI
-
-        app = FastAPI()
-        app.include_router(stripe_webhook.router)
+        from src.main import app
 
         with patch("src.routes.payments.stripe_service.handle_webhook") as mock_handle:
             mock_handle.side_effect = ValueError("Invalid signature")
 
-            with patch.dict(os.environ, {
-                "STRIPE_WEBHOOK_SECRET": "whsec_test_123"
-            }):
-                client = TestClient(app)
-                response = client.post(
-                    "/api/stripe/webhook",
-                    json={"test": "payload"},
-                    headers={"stripe-signature": "test_sig"}
-                )
+            client = TestClient(app)
+            response = client.post(
+                "/api/stripe/webhook",
+                json={"test": "payload"},
+                headers={"stripe-signature": "test_sig"}
+            )
 
-                # Should return 200 even with error
-                assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-                data = response.json()
-                assert data["success"] is False
-                assert "error" in data["message"].lower() or "invalid" in data["message"].lower()
+            # Should return 200 even with error
+            assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+            data = response.json()
+            assert data["success"] is False
+            assert "error" in data["message"].lower() or "invalid" in data["message"].lower()
 
 
 class TestMetadataExtraction:

@@ -214,7 +214,7 @@ class StripeService:
             return {}
 
         try:
-            intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["metadata"])
             metadata = self._metadata_to_dict(self._get_stripe_object_value(intent, "metadata"))
             if metadata:
                 logger.info(
