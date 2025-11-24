@@ -67,6 +67,33 @@ def get_plan_by_id(plan_id: int) -> dict[str, Any] | None:
         return None
 
 
+def get_plan_id_by_tier(tier: str) -> int | None:
+    """Get plan ID for a given tier name (pro, max, etc.)"""
+    try:
+        client = get_supabase_client()
+        # Query plans table for a plan matching the tier name
+        result = (
+            client.table("plans")
+            .select("id")
+            .ilike("name", f"%{tier}%")
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+
+        if result.data:
+            plan_id = result.data[0]["id"]
+            logger.info(f"Found plan ID {plan_id} for tier: {tier}")
+            return plan_id
+        else:
+            logger.warning(f"No plan found for tier: {tier}")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error getting plan ID for tier {tier}: {e}")
+        return None
+
+
 def get_user_plan(user_id: int) -> dict[str, Any] | None:
     """Get current active plan for user (robust: never silently falls back to trial)"""
     try:

@@ -1056,6 +1056,7 @@ class StripeService:
 
             # Update user's subscription status and tier
             from src.config.supabase_config import get_supabase_client
+            from src.db.plans import get_plan_id_by_tier
 
             client = get_supabase_client()
 
@@ -1073,6 +1074,38 @@ class StripeService:
                 update_data["subscription_end_date"] = subscription.current_period_end
 
             client.table("users").update(update_data).eq("id", user_id).execute()
+
+            # Create/assign user_plans entry for the new tier
+            plan_id = get_plan_id_by_tier(tier)
+            if plan_id:
+                # Deactivate any existing plans
+                client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
+
+                # Create new plan assignment for the subscription period
+                start_date = datetime.now(timezone.utc)
+                # Use subscription period end if available, otherwise 1 month
+                if subscription.current_period_end:
+                    end_date = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                else:
+                    end_date = start_date + timedelta(days=30)
+
+                user_plan_data = {
+                    "user_id": user_id,
+                    "plan_id": plan_id,
+                    "started_at": start_date.isoformat(),
+                    "expires_at": end_date.isoformat(),
+                    "is_active": True,
+                }
+
+                result = client.table("user_plans").insert(user_plan_data).execute()
+                if result.data:
+                    logger.info(
+                        f"User {user_id} assigned to plan {plan_id} (tier={tier}) for subscription {subscription.id}"
+                    )
+                else:
+                    logger.error(f"Failed to create user_plans entry for user {user_id}, plan {plan_id}")
+            else:
+                logger.warning(f"Could not find plan ID for tier: {tier}, user plan entry not created")
 
             # Clear trial status for all user's API keys
             client.table("api_keys_new").update(
@@ -1105,6 +1138,7 @@ class StripeService:
 
             # Update user's subscription status
             from src.config.supabase_config import get_supabase_client
+            from src.db.plans import get_plan_id_by_tier
 
             client = get_supabase_client()
 
@@ -1126,8 +1160,40 @@ class StripeService:
 
             client.table("users").update(update_data).eq("id", user_id).execute()
 
-            # Clear trial status for all user's API keys when subscription becomes active
+            # Update user_plans entry when subscription is active
             if status == "active":
+                plan_id = get_plan_id_by_tier(tier)
+                if plan_id:
+                    # Deactivate any existing plans
+                    client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
+
+                    # Create new plan assignment for the updated subscription period
+                    start_date = datetime.now(timezone.utc)
+                    # Use subscription period end if available, otherwise 1 month
+                    if subscription.current_period_end:
+                        end_date = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                    else:
+                        end_date = start_date + timedelta(days=30)
+
+                    user_plan_data = {
+                        "user_id": user_id,
+                        "plan_id": plan_id,
+                        "started_at": start_date.isoformat(),
+                        "expires_at": end_date.isoformat(),
+                        "is_active": True,
+                    }
+
+                    result = client.table("user_plans").insert(user_plan_data).execute()
+                    if result.data:
+                        logger.info(
+                            f"User {user_id} assigned to plan {plan_id} (tier={tier}) on subscription update"
+                        )
+                    else:
+                        logger.error(f"Failed to create user_plans entry for user {user_id}, plan {plan_id}")
+                else:
+                    logger.warning(f"Could not find plan ID for tier: {tier} on subscription update")
+
+                # Clear trial status for all user's API keys when subscription becomes active
                 client.table("api_keys_new").update(
                     {
                         "is_trial": False,
