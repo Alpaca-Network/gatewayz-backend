@@ -206,9 +206,9 @@ class StripeService:
             )
         return metadata
 
-    def _hydrate_payment_intent_metadata(self, payment_intent_id: str | None) -> dict[str, Any]:
+    def _hydrate_payment_intent_metadata_from_id(self, payment_intent_id: str | None) -> dict[str, Any]:
         """
-        Fetch metadata from the payment intent when checkout session metadata is missing.
+        Fetch metadata from the payment intent ID when checkout session metadata is missing.
         """
         if not payment_intent_id:
             return {}
@@ -661,7 +661,7 @@ class StripeService:
             if payment_intent_id and any(
                 not metadata.get(key) for key in required_metadata_keys
             ):
-                intent_metadata = self._hydrate_payment_intent_metadata(payment_intent_id)
+                intent_metadata = self._hydrate_payment_intent_metadata_from_id(payment_intent_id)
                 if intent_metadata:
                     for key, value in intent_metadata.items():
                         metadata.setdefault(key, value)
