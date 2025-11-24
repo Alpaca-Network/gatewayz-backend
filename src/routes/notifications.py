@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.supabase_config import get_supabase_client
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.enhanced_notification_service import enhanced_notification_service
 from src.schemas.notification import (
     NotificationChannel,

@@ -4,7 +4,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from src.db.users import get_user
+from src.services.user_lookup_cache import get_user
 from src.security.deps import get_api_key
 from src.services.referral import (
     create_user_referral_code,
