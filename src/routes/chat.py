@@ -22,6 +22,7 @@ import src.db.users as users_module
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
+from src.services.passive_health_monitor import capture_model_health
 from src.utils.rate_limit_headers import get_rate_limit_headers
 
 # Request correlation ID for distributed tracing
@@ -620,6 +621,23 @@ async def _process_stream_completion_background(
                     f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
                     exc_info=True,
                 )
+
+        # Capture health metrics (passive monitoring)
+        try:
+            await capture_model_health(
+                provider=provider,
+                model=model,
+                response_time_ms=elapsed * 1000,
+                status="success",
+                usage={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                },
+            )
+        except Exception as e:
+            logger.debug(f"Failed to capture health metric: {e}")
+
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
@@ -1678,6 +1696,20 @@ async def chat_completions(
             span.end()
         except Exception as e:
             logger.warning(f"Failed to log to Braintrust: {e}")
+
+        # Capture health metrics (passive monitoring) - run as background task
+        background_tasks.add_task(
+            capture_model_health,
+            provider=provider,
+            model=model,
+            response_time_ms=elapsed * 1000,
+            status="success",
+            usage={
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+        )
 
         # Prepare headers including rate limit information
         headers = {}
