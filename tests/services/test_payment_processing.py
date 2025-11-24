@@ -71,10 +71,12 @@ class TestStripeServiceInitialization:
             assert service.max_amount == 99999999
 
     def test_init_missing_api_key(self):
-        """Test initialization fails without API key"""
+        """Test initialization gracefully handles missing API key"""
         with patch.dict('os.environ', {}, clear=True):
-            with pytest.raises(ValueError, match="STRIPE_SECRET_KEY not found"):
-                StripeService()
+            service = StripeService()
+            # Should initialize but set initialized=False and log warning
+            assert service.initialized is False
+            assert service.api_key is None
 
 
 class TestCheckoutSession:
