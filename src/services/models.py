@@ -695,9 +695,21 @@ def get_cached_models(gateway: str = "openrouter"):
             return result
 
         if gateway == "aimo":
-            cached = _fresh_cached_models(_aimo_models_cache, "aimo")
+            cache = _aimo_models_cache
+            cached = _fresh_cached_models(cache, "aimo")
             if cached is not None:
                 return cached
+
+            # Allow stale cache to be served to prevent blocking threads when AIMO is slow
+            if cache.get("data") and should_revalidate_in_background(cache):
+                logger.info(
+                    "Serving stale AIMO catalog (age %.0fs) while revalidating in background",
+                    (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds(),
+                )
+                revalidate_cache_in_background("aimo", fetch_models_from_aimo)
+                _register_canonical_records("aimo", cache["data"])
+                return cache["data"]
+
             result = fetch_models_from_aimo()
             _register_canonical_records("aimo", result)
             return result
@@ -1532,12 +1544,46 @@ def normalize_together_model(together_model: dict) -> dict:
     return enrich_model_with_pricing(normalized, "together")
 
 
-def fetch_models_from_aimo():
-    """Fetch models from AIMO Network API
+def _resolve_aimo_base_urls() -> list[str]:
+    """Build an ordered list of candidate AIMO API base URLs."""
+    default_base = "https://devnet.aimo.network/api/v1"
+    configured = (Config.AIMO_API_BASE_URL or default_base).rstrip("/")
 
-    Note: AIMO is a decentralized AI marketplace with OpenAI-compatible API.
-    Models are fetched from the marketplace endpoint if available.
-    """
+    candidates = [configured or default_base]
+    if Config.AIMO_ALLOW_HTTP_FALLBACK and configured.startswith("https://"):
+        http_candidate = f"http://{configured[len('https://'):]}"
+        candidates.append(http_candidate)
+
+    # Deduplicate while preserving order
+    return list(dict.fromkeys(candidates))
+
+
+def _aimo_models_endpoint(base_url: str) -> str:
+    """Ensure the base URL targets the /models endpoint."""
+    normalized = (base_url or "").rstrip("/")
+    if normalized.lower().endswith("/models"):
+        return normalized
+    return f"{normalized}/models"
+
+
+def _aimo_timeout() -> httpx.Timeout:
+    """Build an httpx timeout configuration with sane defaults."""
+    connect = Config.AIMO_CONNECT_TIMEOUT or 4.0
+    read = Config.AIMO_READ_TIMEOUT or 12.0
+    write = Config.AIMO_WRITE_TIMEOUT or 6.0
+    pool = Config.AIMO_POOL_TIMEOUT or 2.0
+
+    # Enforce minimum positive values to avoid invalid timeout settings
+    connect = connect if connect > 0 else 4.0
+    read = read if read > 0 else 12.0
+    write = write if write > 0 else 6.0
+    pool = pool if pool > 0 else 2.0
+
+    return httpx.Timeout(connect=connect, read=read, write=write, pool=pool)
+
+
+def fetch_models_from_aimo():
+    """Fetch models from AIMO Network API with resilient fallback and fast timeouts."""
     try:
         if not Config.AIMO_API_KEY:
             logger.error("AIMO API key not configured")
@@ -1548,62 +1594,100 @@ def fetch_models_from_aimo():
             "Content-Type": "application/json",
         }
 
-        # Try to fetch models from AIMO marketplace
-        # Note: Using standard OpenAI-compatible /models endpoint
-        response = httpx.get(
-            "https://devnet.aimo.network/api/v1/models",
-            headers=headers,
-            timeout=20.0,
-        )
-        response.raise_for_status()
+        timeout = _aimo_timeout()
+        max_retries = max(1, int(getattr(Config, "AIMO_MAX_RETRIES", 1) or 1))
+        last_error: Exception | None = None
 
-        payload = response.json()
-        raw_models = payload.get("data", [])
+        for base_url in _resolve_aimo_base_urls():
+            endpoint = _aimo_models_endpoint(base_url)
 
-        if not raw_models:
-            logger.warning("No models returned from AIMO API")
-            return []
+            for attempt in range(1, max_retries + 1):
+                try:
+                    with httpx.Client(timeout=timeout, http2=False) as client:
+                        response = client.get(endpoint, headers=headers)
+                    response.raise_for_status()
 
-        # Normalize models and filter out None values (models without providers)
-        normalized_models = [
-            normalized
-            for model in raw_models
-            if model and (normalized := normalize_aimo_model(model)) is not None
-        ]
+                    payload = response.json()
+                    raw_models = payload.get("data", [])
 
-        # Deduplicate models by canonical_slug (same model from different AIMO providers)
-        # Keep only the first occurrence of each unique model
-        seen_models = {}
-        deduplicated_models = []
-        for model in normalized_models:
-            canonical_slug = model.get("canonical_slug")
-            if canonical_slug and canonical_slug not in seen_models:
-                seen_models[canonical_slug] = True
-                deduplicated_models.append(model)
-            elif not canonical_slug:
-                # If no canonical slug, keep it (shouldn't happen but be safe)
-                deduplicated_models.append(model)
+                    if not raw_models:
+                        logger.warning("No models returned from AIMO API (%s)", sanitize_for_logging(endpoint))
+                        return []
 
-        logger.info(
-            f"Fetched {len(normalized_models)} AIMO models, deduplicated to {len(deduplicated_models)} unique models"
-        )
+                    normalized_models = [
+                        normalized
+                        for model in raw_models
+                        if model and (normalized := normalize_aimo_model(model)) is not None
+                    ]
 
-        _aimo_models_cache["data"] = deduplicated_models
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
-        # Clear error state on successful fetch
-        clear_gateway_error("aimo")
+                    seen_models = {}
+                    deduplicated_models = []
+                    for model in normalized_models:
+                        canonical_slug = model.get("canonical_slug")
+                        if canonical_slug and canonical_slug not in seen_models:
+                            seen_models[canonical_slug] = True
+                            deduplicated_models.append(model)
+                        elif not canonical_slug:
+                            deduplicated_models.append(model)
 
-        return _aimo_models_cache["data"]
-    except httpx.HTTPStatusError as e:
-        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
-        logger.error("AIMO HTTP error: %s", error_msg)
-        set_gateway_error("aimo", error_msg)
-        return []
-    except Exception as e:
-        error_msg = sanitize_for_logging(str(e))
+                    logger.info(
+                        "Fetched %d AIMO models from %s (deduplicated to %d)",
+                        len(normalized_models),
+                        sanitize_for_logging(endpoint),
+                        len(deduplicated_models),
+                    )
+
+                    _aimo_models_cache["data"] = deduplicated_models
+                    _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+                    clear_gateway_error("aimo")
+                    return _aimo_models_cache["data"]
+                except (httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+                    last_error = exc
+                    logger.warning(
+                        "AIMO fetch attempt %d/%d via %s timed out (%s)",
+                        attempt,
+                        max_retries,
+                        sanitize_for_logging(endpoint),
+                        type(exc).__name__,
+                    )
+                    continue
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    status = exc.response.status_code
+                    body = sanitize_for_logging(exc.response.text)
+                    logger.error(
+                        "AIMO HTTP error (attempt %d/%d, %s): HTTP %s - %s",
+                        attempt,
+                        max_retries,
+                        sanitize_for_logging(endpoint),
+                        status,
+                        body,
+                    )
+                    if status < 500:
+                        break
+                except httpx.HTTPError as exc:
+                    last_error = exc
+                    logger.warning(
+                        "AIMO fetch attempt %d/%d via %s failed: %s",
+                        attempt,
+                        max_retries,
+                        sanitize_for_logging(endpoint),
+                        sanitize_for_logging(str(exc)),
+                    )
+                    continue
+
+        error_msg = sanitize_for_logging(str(last_error) if last_error else "Unable to reach AIMO")
         logger.error("Failed to fetch models from AIMO: %s", error_msg)
         set_gateway_error("aimo", error_msg)
+
+        cached_data = _aimo_models_cache.get("data")
+        if cached_data:
+            logger.info(
+                "Returning %d cached AIMO models despite fetch failure",
+                len(cached_data),
+            )
+            return cached_data
+
         return []
 
 

@@ -143,6 +143,23 @@ class Config:
 
     # AIMO Configuration
     AIMO_API_KEY = os.environ.get("AIMO_API_KEY")
+    AIMO_API_BASE_URL = os.environ.get(
+        "AIMO_API_BASE_URL",
+        "https://devnet.aimo.network/api/v1",
+    )
+    AIMO_CONNECT_TIMEOUT = float(os.environ.get("AIMO_CONNECT_TIMEOUT", "4.0"))
+    AIMO_READ_TIMEOUT = float(os.environ.get("AIMO_READ_TIMEOUT", "12.0"))
+    AIMO_WRITE_TIMEOUT = float(os.environ.get("AIMO_WRITE_TIMEOUT", "6.0"))
+    AIMO_POOL_TIMEOUT = float(os.environ.get("AIMO_POOL_TIMEOUT", "2.0"))
+    AIMO_MAX_RETRIES = int(os.environ.get("AIMO_MAX_RETRIES", "2"))
+    AIMO_ALLOW_HTTP_FALLBACK = (
+        os.environ.get("AIMO_ALLOW_HTTP_FALLBACK", "false").lower()
+        in {
+            "1",
+            "true",
+            "yes",
+        }
+    )
 
     # Near AI Configuration
     NEAR_API_KEY = os.environ.get("NEAR_API_KEY")

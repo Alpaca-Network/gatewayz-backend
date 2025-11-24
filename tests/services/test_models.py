@@ -5,19 +5,24 @@ Tests for models service functions
 These integration tests execute code to increase coverage
 """
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock, MagicMock, patch
+
+import httpx
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from src.services.models import (
-    sanitize_pricing,
-    load_featherless_catalog_export,
-    get_cached_models,
-    enhance_model_with_provider_info,
+    detect_model_gateway,
     enhance_model_with_huggingface_data,
-    get_model_count_by_provider,
+    enhance_model_with_provider_info,
     fetch_specific_model,
     fetch_specific_model_from_fal,
-    detect_model_gateway,
+    get_cached_models,
+    get_model_count_by_provider,
+    load_featherless_catalog_export,
+    sanitize_pricing,
+    fetch_models_from_aimo,
 )
+from src.config import Config
 
 
 class TestSanitizePricing:
@@ -185,6 +190,157 @@ class TestGetCachedModels:
         # Both should work without errors
         assert result1 is None or isinstance(result1, list)
         assert result2 is None or isinstance(result2, list)
+
+
+class TestAimoModelFetching:
+    """Tests covering resilient AIMO catalog fetching."""
+
+    def _preset_cache(self):
+        from src.cache import _aimo_models_cache
+
+        return _aimo_models_cache
+
+    @patch("src.services.models.httpx.Client")
+    def test_fetch_models_from_aimo_returns_cached_on_timeout(self, mock_client):
+        """Ensure stale cache is returned when the upstream call keeps timing out."""
+        cache = self._preset_cache()
+        original_data = cache.get("data")
+        original_timestamp = cache.get("timestamp")
+        try:
+            cache["data"] = [
+                {
+                    "id": "aimo/test-model",
+                    "canonical_slug": "test-model",
+                    "provider_slug": "aimo",
+                }
+            ]
+            cache["timestamp"] = datetime.now(timezone.utc) - timedelta(hours=2)
+
+            failing_context = mock_client.return_value
+            failing_client = failing_context.__enter__.return_value
+            failing_client.get.side_effect = httpx.ConnectTimeout("ssl handshake timeout")
+
+            with patch.multiple(
+                Config,
+                AIMO_API_KEY="test-key",
+                AIMO_API_BASE_URL="https://example.com/api/v1",
+                AIMO_CONNECT_TIMEOUT=0.1,
+                AIMO_READ_TIMEOUT=0.1,
+                AIMO_WRITE_TIMEOUT=0.1,
+                AIMO_POOL_TIMEOUT=0.1,
+                AIMO_MAX_RETRIES=1,
+                AIMO_ALLOW_HTTP_FALLBACK=False,
+            ):
+                result = fetch_models_from_aimo()
+
+            assert result == cache["data"]
+        finally:
+            cache["data"] = original_data
+            cache["timestamp"] = original_timestamp
+
+    @patch("src.services.models.httpx.Client")
+    def test_fetch_models_from_aimo_falls_back_to_http_when_allowed(self, mock_client):
+        """Verify that HTTP fallback is attempted when enabled and HTTPS fails."""
+        from src.cache import _aimo_models_cache
+
+        captured_urls = []
+
+        class DummyResponse:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._payload
+
+        class FailingClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def get(self, url, headers):
+                captured_urls.append(url)
+                raise httpx.ConnectTimeout("ssl handshake timeout")
+
+        class SuccessfulClient:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def get(self, url, headers):
+                captured_urls.append(url)
+                return DummyResponse(self.payload)
+
+        payload = {
+            "data": [
+                {
+                    "name": "DeepSeek-V3",
+                    "display_name": "DeepSeek V3",
+                    "providers": [
+                        {
+                            "id": "provider-1",
+                            "name": "provider",
+                            "pricing": {"prompt": "0.1", "completion": "0.2"},
+                        }
+                    ],
+                }
+            ]
+        }
+
+        mock_client.side_effect = [FailingClient(), SuccessfulClient(payload)]
+
+        original_cache = dict(_aimo_models_cache)
+        try:
+            with patch.multiple(
+                Config,
+                AIMO_API_KEY="test-key",
+                AIMO_API_BASE_URL="https://example.com/api/v1",
+                AIMO_CONNECT_TIMEOUT=0.1,
+                AIMO_READ_TIMEOUT=0.1,
+                AIMO_WRITE_TIMEOUT=0.1,
+                AIMO_POOL_TIMEOUT=0.1,
+                AIMO_MAX_RETRIES=1,
+                AIMO_ALLOW_HTTP_FALLBACK=True,
+            ):
+                result = fetch_models_from_aimo()
+
+            assert result
+            assert result[0]["id"] == "aimo/deepseek-v3"
+            assert captured_urls[0].startswith("https://example.com/api/v1")
+            assert captured_urls[-1].startswith("http://example.com/api/v1")
+        finally:
+            _aimo_models_cache.update(original_cache)
+
+    @patch("src.services.models.revalidate_cache_in_background")
+    def test_get_cached_models_uses_stale_aimo_cache(self, mock_revalidate):
+        """Ensure stale cache entries are served while background refresh runs."""
+        from src.cache import _aimo_models_cache
+
+        original_data = _aimo_models_cache.get("data")
+        original_timestamp = _aimo_models_cache.get("timestamp")
+        try:
+            _aimo_models_cache["data"] = [
+                {"id": "aimo/demo", "canonical_slug": "demo", "provider_slug": "aimo"}
+            ]
+            # Force cache to be stale but within stale_ttl window
+            _aimo_models_cache["timestamp"] = datetime.now(timezone.utc) - timedelta(seconds=4000)
+
+            result = get_cached_models("aimo")
+
+            assert result == _aimo_models_cache["data"]
+            mock_revalidate.assert_called_once()
+        finally:
+            _aimo_models_cache["data"] = original_data
+            _aimo_models_cache["timestamp"] = original_timestamp
 
 
 class TestEnhanceModelWithProviderInfo:
