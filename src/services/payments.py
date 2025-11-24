@@ -186,25 +186,7 @@ class StripeService:
         Fetch metadata from the PaymentIntent when it is not present on the checkout session.
         """
         payment_intent_id = self._get_stripe_object_value(session, "payment_intent")
-        if not payment_intent_id:
-            return {}
-
-        try:
-            intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["metadata"])
-        except stripe.StripeError as exc:
-            logger.warning(
-                "Unable to hydrate metadata from payment intent %s: %s", payment_intent_id, exc
-            )
-            return {}
-
-        metadata = self._metadata_to_dict(self._get_stripe_object_value(intent, "metadata"))
-        if metadata:
-            logger.info(
-                "Hydrated checkout metadata from PaymentIntent %s (session_id=%s)",
-                payment_intent_id,
-                self._get_stripe_object_value(session, "id"),
-            )
-        return metadata
+        return self._hydrate_payment_intent_metadata_from_id(payment_intent_id)
 
     def _hydrate_payment_intent_metadata_from_id(self, payment_intent_id: str | None) -> dict[str, Any]:
         """
