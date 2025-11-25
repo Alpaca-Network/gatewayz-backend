@@ -6,12 +6,12 @@ response times, success rates, and error tracking.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import model_health as model_health_db
-from src.security.deps import get_api_key_optional  # Optional auth for monitoring
+from src.security.deps import get_optional_user  # Optional auth for monitoring
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,6 +23,7 @@ async def get_all_model_health(
     status: Optional[str] = Query(None, description="Filter by last status (success, error, timeout, etc.)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
+    _: dict[str, Any] | None = Depends(get_optional_user),
 ) -> Dict:
     """
     Get health metrics for all monitored models.
@@ -66,6 +67,7 @@ async def get_all_model_health(
 async def get_model_health(
     provider: str,
     model: str,
+    _: dict[str, Any] | None = Depends(get_optional_user),
 ) -> Dict:
     """
     Get health metrics for a specific provider-model combination.
@@ -98,6 +100,7 @@ async def get_model_health(
 async def get_unhealthy_models(
     error_threshold: float = Query(0.2, ge=0.0, le=1.0, description="Minimum error rate (0.0-1.0)"),
     min_calls: int = Query(10, ge=1, description="Minimum number of calls to evaluate"),
+    _: dict[str, Any] | None = Depends(get_optional_user),
 ) -> Dict:
     """
     Get models with high error rates (unhealthy models).
@@ -127,7 +130,9 @@ async def get_unhealthy_models(
 
 
 @router.get("/v1/model-health/stats", tags=["monitoring"])
-async def get_model_health_stats() -> Dict:
+async def get_model_health_stats(
+    _: dict[str, Any] | None = Depends(get_optional_user),
+) -> Dict:
     """
     Get aggregate statistics for model health tracking.
 
@@ -149,7 +154,10 @@ async def get_model_health_stats() -> Dict:
 
 
 @router.get("/v1/model-health/provider/{provider}/summary", tags=["monitoring"])
-async def get_provider_health_summary(provider: str) -> Dict:
+async def get_provider_health_summary(
+    provider: str,
+    _: dict[str, Any] | None = Depends(get_optional_user),
+) -> Dict:
     """
     Get health summary for all models from a specific provider.
 
@@ -177,7 +185,9 @@ async def get_provider_health_summary(provider: str) -> Dict:
 
 
 @router.get("/v1/model-health/providers", tags=["monitoring"])
-async def get_all_providers() -> Dict:
+async def get_all_providers(
+    _: dict[str, Any] | None = Depends(get_optional_user),
+) -> Dict:
     """
     Get list of all providers with health data.
 
