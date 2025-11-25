@@ -267,6 +267,7 @@ def create_app() -> FastAPI:
         ("catalog", "Model Catalog"),
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
+        ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
         ("system", "System & Health"),  # Cache management and health monitoring
         (
             "optimization_monitor",
