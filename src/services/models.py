@@ -1689,6 +1689,20 @@ def fetch_models_from_aimo():
             return cached_data
 
         return []
+    except Exception as exc:
+        error_msg = sanitize_for_logging(str(exc))
+        logger.error("Failed to fetch models from AIMO: %s", error_msg)
+        set_gateway_error("aimo", error_msg)
+
+        cached_data = _aimo_models_cache.get("data")
+        if cached_data:
+            logger.info(
+                "Returning %d cached AIMO models despite unexpected error",
+                len(cached_data),
+            )
+            return cached_data
+
+        return []
 
 
 def normalize_aimo_model(aimo_model: dict) -> dict:

@@ -314,7 +314,7 @@ class TestAimoModelFetching:
                 result = fetch_models_from_aimo()
 
             assert result
-            assert result[0]["id"] == "aimo/deepseek-v3"
+            assert result[0]["id"] == "aimo/DeepSeek-V3"
             assert captured_urls[0].startswith("https://example.com/api/v1")
             assert captured_urls[-1].startswith("http://example.com/api/v1")
         finally:
