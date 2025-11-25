@@ -8,13 +8,13 @@ response times, success rates, and error tracking.
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import model_health as model_health_db
-from src.security.deps import get_api_key_optional  # Optional auth for monitoring
+from src.security.deps import get_optional_user  # Optional auth for monitoring
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_optional_user)])
 
 
 @router.get("/v1/model-health", tags=["monitoring"])
