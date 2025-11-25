@@ -37,6 +37,25 @@ Welcome! This is your complete guide to deploying Gatewayz to Railway with integ
   - 📊 Monitoring your errors
   - 🛠️ Troubleshooting
 
+### APIdog General Runner Integration (5 minutes)
+- **[APIDOG_RUNNER_QUICKSTART.md](docs/APIDOG_RUNNER_QUICKSTART.md)** - Quick setup
+  - ⚡ Automated deployment (2 steps)
+  - 🔑 Environment configuration
+  - ✅ Verification steps
+
+- **[APIDOG_RUNNER_SETUP.md](docs/APIDOG_RUNNER_SETUP.md)** - Complete guide
+  - 🏗️ Multi-service architecture
+  - 📋 3 deployment options
+  - 🔌 Integration with your API
+  - 🛠️ Troubleshooting & monitoring
+  - 📊 Performance & scaling
+
+- **[APIDOG_RUNNER_IMPLEMENTATION_SUMMARY.md](docs/APIDOG_RUNNER_IMPLEMENTATION_SUMMARY.md)** - Implementation details
+  - 📝 What was implemented
+  - ✅ Deployment checklist
+  - 📈 Architecture & resources
+  - 🔒 Security considerations
+
 ---
 
 ## 🎯 Choose Your Path
@@ -79,6 +98,26 @@ railway domains
 
 ---
 
+### Path 4: "Add APIdog General Runner" (5 minutes)
+*For automated API testing and performance monitoring*
+
+```bash
+# 1. Deploy APIdog runner
+bash scripts/add-apidog-runner-to-railway.sh
+
+# 2. Verify deployment
+railway service list
+
+# 3. Check logs
+railway logs --follow --service apidog-runner
+```
+
+**Result**: ✅ Multi-service deployment with testing capabilities!
+
+See: [APIDOG_RUNNER_QUICKSTART.md](docs/APIDOG_RUNNER_QUICKSTART.md)
+
+---
+
 ## 🚀 Quick Commands
 
 ### Setup (First Time)
@@ -93,7 +132,7 @@ bash scripts/setup_railway.sh
 
 ### Daily Operations
 ```bash
-# View logs
+# View logs (gateway-api)
 railway logs --follow
 
 # Check status
@@ -104,6 +143,30 @@ curl $(railway domains | head -1)/api/error-monitor/status
 
 # View errors
 curl $(railway domains | head -1)/api/error-monitor/errors
+```
+
+### APIdog Runner Management
+```bash
+# View all services
+railway service list
+
+# View apidog-runner logs
+railway logs --follow --service apidog-runner
+
+# Check apidog-runner status
+railway status --service apidog-runner
+
+# Get apidog-runner domain
+railway domain --service apidog-runner
+
+# Update apidog-runner variables
+railway variables set KEY VALUE --service apidog-runner
+
+# Restart apidog-runner
+railway up --service apidog-runner --detach
+
+# Shell into apidog-runner
+railway shell --service apidog-runner
 ```
 
 ### Troubleshooting
