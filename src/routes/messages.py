@@ -31,6 +31,7 @@ from src.services.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
+from src.services.passive_health_monitor import capture_model_health
 from src.services.aihubmix_client import (
     make_aihubmix_request_openai,
     process_aihubmix_response,
@@ -871,6 +872,20 @@ async def anthropic_messages(
         }
         if not trial.get("is_trial", False):
             anthropic_response["gateway_usage"]["cost_usd"] = round(cost, 6)
+
+        # Capture health metrics (passive monitoring) - run as background task
+        background_tasks.add_task(
+            capture_model_health,
+            provider=provider,
+            model=model,
+            response_time_ms=elapsed * 1000,
+            status="success",
+            usage={
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+        )
 
         # Prepare headers including rate limit information
         headers = {}
