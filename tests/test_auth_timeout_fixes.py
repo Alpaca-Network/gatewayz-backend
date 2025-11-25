@@ -32,6 +32,7 @@ from src.services.connection_pool_monitor import (
 )
 
 
+@pytest.mark.unit
 class TestQueryTimeout:
     """Test query timeout functionality."""
 
@@ -43,23 +44,25 @@ class TestQueryTimeout:
         result = execute_with_timeout(quick_operation, timeout_seconds=5)
         assert result == {"result": "success"}
 
+    @pytest.mark.timeout(10)  # Allow extra time for this test
     def test_execute_with_timeout_exceeds_limit(self):
         """Test that operation exceeding timeout raises error."""
         import time
 
         def slow_operation():
-            time.sleep(3)  # Sleep longer than timeout
+            time.sleep(2)  # Sleep longer than timeout
             return {"result": "success"}
 
         with pytest.raises(QueryTimeoutError):
-            execute_with_timeout(slow_operation, timeout_seconds=1)
+            execute_with_timeout(slow_operation, timeout_seconds=0.5)
 
+    @pytest.mark.timeout(10)  # Allow extra time for this test
     def test_safe_query_with_timeout_fallback(self):
         """Test that fallback value is returned on timeout."""
         import time
 
         def slow_operation():
-            time.sleep(2)
+            time.sleep(1.5)
             return {"result": "success"}
 
         mock_client = Mock()
@@ -67,7 +70,7 @@ class TestQueryTimeout:
             mock_client,
             "users",
             slow_operation,
-            timeout_seconds=1,
+            timeout_seconds=0.5,
             operation_name="test query",
             fallback_value=None,
             log_errors=False,
@@ -94,6 +97,7 @@ class TestQueryTimeout:
         assert result == {"fallback": True}
 
 
+@pytest.mark.unit
 class TestAuthCache:
     """Test authentication caching functionality."""
 
@@ -176,6 +180,7 @@ class TestAuthCache:
         assert result is None
 
 
+@pytest.mark.unit
 class TestConnectionPoolMonitor:
     """Test connection pool monitoring functionality."""
 
@@ -240,6 +245,7 @@ class TestConnectionPoolMonitor:
         assert result is None
 
 
+@pytest.mark.unit
 class TestTimeoutConstants:
     """Test that timeout constants are reasonable."""
 
