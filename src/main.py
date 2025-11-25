@@ -105,6 +105,7 @@ def create_app() -> FastAPI:
         FRONTEND_BETA_URL,
         FRONTEND_STAGING_URL,
         "https://api.gatewayz.ai",  # Added for chat API access from frontend
+        "https://docs.gatewayz.ai",  # Added for documentation site access
     ]
 
     if Config.IS_PRODUCTION:
