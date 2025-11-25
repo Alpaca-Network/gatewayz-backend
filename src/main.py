@@ -101,11 +101,12 @@ def create_app() -> FastAPI:
 
     # Environment-aware CORS origins
     # Always include beta.gatewayz.ai for frontend access
+    # External tools (Apidog, Postman, etc.) should use https://api.gatewayz.ai
     base_origins = [
         FRONTEND_BETA_URL,
         FRONTEND_STAGING_URL,
-        "https://api.gatewayz.ai",  # Added for chat API access from frontend
-        "https://docs.gatewayz.ai",  # Added for documentation site access
+        "https://api.gatewayz.ai",  # Added for chat API access from frontend and external tools
+        "https://docs.gatewayz.ai",  # Added for documentation site access (Apidog)
     ]
 
     if Config.IS_PRODUCTION:
