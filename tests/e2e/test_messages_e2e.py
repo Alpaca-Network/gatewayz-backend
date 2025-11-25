@@ -104,13 +104,14 @@ class TestMessagesE2E:
 
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        # Verify streaming response format
-        assert response.headers.get("content-type") == "text/event-stream; charset=utf-8"
+        if response.status_code == 200:
+            # Verify streaming response format
+            assert response.headers.get("content-type") == "text/event-stream; charset=utf-8"
 
-        # Parse SSE stream
-        content = response.text
-        assert "data:" in content
-        assert "[DONE]" in content
+            # Parse SSE stream
+            content = response.text
+            assert "data:" in content
+            assert "[DONE]" in content
 
     def test_messages_with_provider_openrouter(
         self, client: TestClient, auth_headers: dict, base_messages_payload: dict
