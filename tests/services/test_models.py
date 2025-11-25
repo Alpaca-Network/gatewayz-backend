@@ -6,7 +6,7 @@ These integration tests execute code to increase coverage
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest

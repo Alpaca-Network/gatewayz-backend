@@ -1597,8 +1597,12 @@ def fetch_models_from_aimo():
         timeout = _aimo_timeout()
         max_retries = max(1, int(getattr(Config, "AIMO_MAX_RETRIES", 1) or 1))
         last_error: Exception | None = None
+        client_error_occurred = False
 
         for base_url in _resolve_aimo_base_urls():
+            if client_error_occurred:
+                break
+                
             endpoint = _aimo_models_endpoint(base_url)
 
             for attempt in range(1, max_retries + 1):
@@ -1664,6 +1668,8 @@ def fetch_models_from_aimo():
                         body,
                     )
                     if status < 500:
+                        # Client errors (4xx) won't be fixed by retrying or trying different URLs
+                        client_error_occurred = True
                         break
                 except httpx.HTTPError as exc:
                     last_error = exc
