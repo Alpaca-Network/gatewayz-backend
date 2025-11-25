@@ -14,7 +14,7 @@ from src.db import model_health as model_health_db
 from src.security.deps import get_optional_user  # Optional auth for monitoring
 
 logger = logging.getLogger(__name__)
-router = APIRouter(dependencies=[Depends(get_optional_user)])
+router = APIRouter()
 
 
 @router.get("/v1/model-health", tags=["monitoring"])
