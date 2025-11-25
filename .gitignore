@@ -44,6 +44,8 @@ __pycache__
 !docs/**/*.md
 !docs/README.md
 !SECURITY_INCIDENT_RESPONSE.md
+!FAILOVER_TESTING_GUIDE.md
+!LIVE_API_TESTING_GUIDE.md
 
 # Temp and output files
 temp*.json
@@ -65,6 +67,7 @@ models_export_*.csv
 *.bat
 *.sh
 !start.sh
+!scripts/test_api_live.sh
 
 server.log
 nul
