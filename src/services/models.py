@@ -207,6 +207,42 @@ def _fresh_cached_models(cache: dict, provider_slug: str):
     return None
 
 
+def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
+    """Get fresh cache if available, or stale cache within stale_ttl window.
+
+    Implements stale-while-revalidate pattern for improved resilience:
+    - Returns fresh cache if within normal TTL
+    - Returns stale cache if still within stale_ttl (2x TTL) and no fresh data available
+    - Allows serving stale data while background processes revalidate
+    - Prevents timeout failures from blocking catalog assembly
+
+    Args:
+        cache: Cache dictionary with data, timestamp, ttl, stale_ttl keys
+        provider_slug: Provider identifier for canonical registration
+
+    Returns:
+        Cached data if available and valid (fresh or stale), None otherwise
+    """
+    if not cache.get("data") or not cache.get("timestamp"):
+        return None
+
+    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    ttl = cache.get("ttl", 3600)
+    stale_ttl = cache.get("stale_ttl", 7200)
+
+    if cache_age < ttl:
+        # Fresh cache
+        _register_canonical_records(provider_slug, cache["data"])
+        return cache["data"]
+    elif cache_age < stale_ttl:
+        # Stale but still usable (stale-while-revalidate)
+        logger.debug(f"{provider_slug} serving stale cache (age: {cache_age:.1f}s, stale_ttl: {stale_ttl}s)")
+        _register_canonical_records(provider_slug, cache["data"])
+        return cache["data"]
+
+    return None
+
+
 def sanitize_pricing(pricing: dict) -> dict:
     """
     Sanitize pricing data by converting negative values to 0.
@@ -695,12 +731,25 @@ def get_cached_models(gateway: str = "openrouter"):
             return result
 
         if gateway == "aimo":
+            # Try fresh cache first
             cached = _fresh_cached_models(_aimo_models_cache, "aimo")
             if cached is not None:
                 return cached
+
+            # Fetch fresh data (with resilience features)
             result = fetch_models_from_aimo()
-            _register_canonical_records("aimo", result)
-            return result
+
+            # If fetch succeeded, use fresh data
+            if result:
+                return result
+
+            # Fetch failed - fall back to stale-while-revalidate cache if available
+            stale_cached = _get_fresh_or_stale_cached_models(_aimo_models_cache, "aimo")
+            if stale_cached is not None:
+                logger.warning("AIMO fetch failed, returning stale cache")
+                return stale_cached
+
+            return []
 
         if gateway == "near":
             cached = _fresh_cached_models(_near_models_cache, "near")
@@ -1533,78 +1582,129 @@ def normalize_together_model(together_model: dict) -> dict:
 
 
 def fetch_models_from_aimo():
-    """Fetch models from AIMO Network API
+    """Fetch models from AIMO Network API with resilience features
+
+    Hardening measures:
+    - Configurable, shorter timeouts (5s fetch, 3s connect) to prevent thread pool blocking
+    - Retry logic with exponential backoff across multiple base URLs
+    - Optional HTTP fallback for HTTPS failures
+    - Stale-while-revalidate caching to serve cached data on failure
+    - Non-blocking: failures don't block the thread pool during parallel catalog builds
 
     Note: AIMO is a decentralized AI marketplace with OpenAI-compatible API.
     Models are fetched from the marketplace endpoint if available.
     """
-    try:
-        if not Config.AIMO_API_KEY:
-            logger.error("AIMO API key not configured")
-            return None
+    if not Config.AIMO_API_KEY:
+        logger.error("AIMO API key not configured")
+        return _aimo_models_cache.get("data", [])
 
-        headers = {
-            "Authorization": f"Bearer {Config.AIMO_API_KEY}",
-            "Content-Type": "application/json",
-        }
+    headers = {
+        "Authorization": f"Bearer {Config.AIMO_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-        # Try to fetch models from AIMO marketplace
-        # Note: Using standard OpenAI-compatible /models endpoint
-        response = httpx.get(
-            "https://devnet.aimo.network/api/v1/models",
-            headers=headers,
-            timeout=20.0,
-        )
-        response.raise_for_status()
+    # Build list of URLs to try, starting with HTTPS (primary and fallback)
+    urls_to_try = [f"{base_url}/models" for base_url in Config.AIMO_BASE_URLS]
 
-        payload = response.json()
-        raw_models = payload.get("data", [])
-
-        if not raw_models:
-            logger.warning("No models returned from AIMO API")
-            return []
-
-        # Normalize models and filter out None values (models without providers)
-        normalized_models = [
-            normalized
-            for model in raw_models
-            if model and (normalized := normalize_aimo_model(model)) is not None
+    # Add HTTP fallback URLs if enabled
+    if Config.AIMO_ENABLE_HTTP_FALLBACK:
+        http_urls = [
+            url.replace("https://", "http://") for url in urls_to_try if url.startswith("https://")
         ]
+        urls_to_try.extend(http_urls)
 
-        # Deduplicate models by canonical_slug (same model from different AIMO providers)
-        # Keep only the first occurrence of each unique model
-        seen_models = {}
-        deduplicated_models = []
-        for model in normalized_models:
-            canonical_slug = model.get("canonical_slug")
-            if canonical_slug and canonical_slug not in seen_models:
-                seen_models[canonical_slug] = True
-                deduplicated_models.append(model)
-            elif not canonical_slug:
-                # If no canonical slug, keep it (shouldn't happen but be safe)
-                deduplicated_models.append(model)
+    # Create timeout with separate connect and read timeouts
+    timeout_config = httpx.Timeout(
+        timeout=Config.AIMO_FETCH_TIMEOUT,
+        connect=Config.AIMO_CONNECT_TIMEOUT,
+    )
 
-        logger.info(
-            f"Fetched {len(normalized_models)} AIMO models, deduplicated to {len(deduplicated_models)} unique models"
+    last_error = None
+    for attempt in range(Config.AIMO_MAX_RETRIES + 1):
+        for url_idx, url in enumerate(urls_to_try):
+            try:
+                logger.debug(
+                    f"AIMO fetch attempt {attempt + 1}/{Config.AIMO_MAX_RETRIES + 1}, "
+                    f"URL {url_idx + 1}/{len(urls_to_try)}: {url}"
+                )
+
+                response = httpx.get(url, headers=headers, timeout=timeout_config)
+                response.raise_for_status()
+
+                payload = response.json()
+                raw_models = payload.get("data", [])
+
+                if not raw_models:
+                    logger.warning("No models returned from AIMO API at %s", url)
+                    continue
+
+                # Normalize models and filter out None values (models without providers)
+                normalized_models = [
+                    normalized
+                    for model in raw_models
+                    if model and (normalized := normalize_aimo_model(model)) is not None
+                ]
+
+                # Deduplicate models by canonical_slug (same model from different AIMO providers)
+                # Keep only the first occurrence of each unique model
+                seen_models = {}
+                deduplicated_models = []
+                for model in normalized_models:
+                    canonical_slug = model.get("canonical_slug")
+                    if canonical_slug and canonical_slug not in seen_models:
+                        seen_models[canonical_slug] = True
+                        deduplicated_models.append(model)
+                    elif not canonical_slug:
+                        # If no canonical slug, keep it (shouldn't happen but be safe)
+                        deduplicated_models.append(model)
+
+                logger.info(
+                    f"Fetched {len(normalized_models)} AIMO models from {url}, "
+                    f"deduplicated to {len(deduplicated_models)} unique models"
+                )
+
+                _aimo_models_cache["data"] = deduplicated_models
+                _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+                # Clear error state on successful fetch
+                clear_gateway_error("aimo")
+
+                return _aimo_models_cache["data"]
+
+            except httpx.TimeoutException as e:
+                last_error = f"Timeout at {url} after {Config.AIMO_FETCH_TIMEOUT}s"
+                logger.warning("AIMO timeout: %s (attempt %d)", last_error, attempt + 1)
+                continue
+
+            except httpx.HTTPStatusError as e:
+                last_error = f"HTTP {e.response.status_code} at {url}"
+                logger.warning(
+                    "AIMO HTTP error: %s - %s (attempt %d)",
+                    last_error,
+                    sanitize_for_logging(e.response.text[:200]),
+                    attempt + 1,
+                )
+                continue
+
+            except Exception as e:
+                last_error = f"Error at {url}: {sanitize_for_logging(str(e))}"
+                logger.warning("AIMO fetch error: %s (attempt %d)", last_error, attempt + 1)
+                continue
+
+    # All retries exhausted - use stale cache if available (stale-while-revalidate)
+    if _aimo_models_cache.get("data"):
+        logger.warning(
+            "AIMO fetch failed after all retries, returning stale cached data. Last error: %s",
+            last_error,
         )
-
-        _aimo_models_cache["data"] = deduplicated_models
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
-        # Clear error state on successful fetch
-        clear_gateway_error("aimo")
-
+        set_gateway_error("aimo", f"Using stale cache: {last_error}")
         return _aimo_models_cache["data"]
-    except httpx.HTTPStatusError as e:
-        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
-        logger.error("AIMO HTTP error: %s", error_msg)
-        set_gateway_error("aimo", error_msg)
-        return []
-    except Exception as e:
-        error_msg = sanitize_for_logging(str(e))
-        logger.error("Failed to fetch models from AIMO: %s", error_msg)
-        set_gateway_error("aimo", error_msg)
-        return []
+
+    # No cached data available
+    error_msg = last_error or "Unknown error during AIMO fetch"
+    logger.error("Failed to fetch models from AIMO after all retries: %s", error_msg)
+    set_gateway_error("aimo", error_msg)
+    return []
 
 
 def normalize_aimo_model(aimo_model: dict) -> dict:
