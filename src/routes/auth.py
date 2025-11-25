@@ -18,6 +18,19 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
+from src.services.auth_cache import (
+    cache_user_by_privy_id,
+    cache_user_by_username,
+    get_cached_user_by_privy_id,
+    get_cached_user_by_username,
+    invalidate_user_cache,
+)
+from src.services.query_timeout import (
+    AUTH_QUERY_TIMEOUT,
+    USER_LOOKUP_TIMEOUT,
+    QueryTimeoutError,
+    safe_query_with_timeout,
+)
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -81,17 +94,29 @@ def _handle_existing_user(
     api_key_to_return = existing_user.get("api_key")
 
     try:
-        all_keys_result = (
-            client.table("api_keys_new")
-            .select("api_key, is_primary, created_at")
-            .eq("user_id", existing_user["id"])
-            .eq("is_active", True)
-            .order("is_primary", desc=True)
-            .order("created_at", desc=False)
-            .execute()
+        # Fetch API keys with timeout protection
+        def fetch_api_keys():
+            return (
+                client.table("api_keys_new")
+                .select("api_key, is_primary, created_at")
+                .eq("user_id", existing_user["id"])
+                .eq("is_active", True)
+                .order("is_primary", desc=True)
+                .order("created_at", desc=False)
+                .execute()
+            )
+
+        all_keys_result = safe_query_with_timeout(
+            client,
+            "api_keys_new",
+            fetch_api_keys,
+            timeout_seconds=AUTH_QUERY_TIMEOUT,
+            operation_name=f"fetch API keys for user {existing_user['id']}",
+            fallback_value=None,
+            log_errors=True,
         )
 
-        if all_keys_result.data:
+        if all_keys_result and all_keys_result.data:
             sorted_keys = sorted(
                 all_keys_result.data,
                 key=lambda k: (not k.get("is_primary", False), k.get("created_at", "")),
@@ -109,6 +134,12 @@ def _handle_existing_user(
                 "No API keys found in api_keys_new for user %s, using legacy key",
                 existing_user["id"],
             )
+    except QueryTimeoutError as key_error:
+        logger.error(
+            "Timeout retrieving API keys for user %s: %s, falling back to legacy key",
+            existing_user["id"],
+            key_error,
+        )
     except Exception as key_error:
         logger.error(
             "Error retrieving API keys for user %s: %s, falling back to legacy key",
@@ -317,6 +348,76 @@ def _log_registration_activity_background(user_id: str, metadata: dict):
         )
 
 
+def _process_referral_code_background(
+    referral_code: str, user_id: str, username: str, is_new_user: bool = True
+):
+    """Process referral code in background to avoid blocking auth response.
+
+    OPTIMIZATION: Moved from main auth flow to background task to reduce
+    latency on auth endpoint. Referral tracking is non-critical for login success.
+    """
+    try:
+        logger.info(f"Background task: Processing referral code '{referral_code}' for user {user_id}")
+
+        from src.services.referral import (
+            send_referral_signup_notification,
+            track_referral_signup,
+        )
+
+        # Track referral signup and get referrer info
+        success, error_msg, referrer = track_referral_signup(referral_code, user_id)
+
+        if success and referrer:
+            logger.info(
+                f"Background task: Valid referral code processed: {referral_code} "
+                f"for user {user_id}"
+            )
+
+            try:
+                # Store referral code for the user
+                client = supabase_config.get_supabase_client()
+                client.table("users").update(
+                    {"referred_by_code": referral_code}
+                ).eq("id", user_id).execute()
+
+                logger.info(
+                    f"Background task: Stored referral code {referral_code} "
+                    f"for user {user_id}"
+                )
+
+                # Send notification to referrer
+                if referrer.get("email"):
+                    try:
+                        send_referral_signup_notification(
+                            referrer_id=referrer["id"],
+                            referrer_email=referrer["email"],
+                            referrer_username=referrer.get("username", "User"),
+                            referee_username=username,
+                        )
+                        logger.info(
+                            f"Background task: Referral notification sent to referrer "
+                            f"{referrer['id']}"
+                        )
+                    except Exception as notify_error:
+                        logger.error(
+                            f"Background task: Failed to send referral notification: {notify_error}"
+                        )
+            except Exception as store_error:
+                logger.error(
+                    f"Background task: Failed to store referral code: {store_error}"
+                )
+        else:
+            logger.warning(
+                f"Background task: Invalid referral code provided: {referral_code} - {error_msg}"
+            )
+    except Exception as e:
+        logger.error(
+            f"Background task: Error processing referral code '{referral_code}' "
+            f"for user {user_id}: {e}",
+            exc_info=True,
+        )
+
+
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
 async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTasks):
     """Authenticate user via Privy and return API key"""
@@ -399,12 +500,59 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
         username = email.split("@")[0] if email else f"user_{request.user.id[:8]}"
         logger.debug(f"Generated username for user {request.user.id}: {username}")
 
-        # Check if user already exists by privy_user_id
-        existing_user = users_module.get_user_by_privy_id(request.user.id)
+        # Check if user already exists by privy_user_id (with cache + timeout)
+        existing_user = None
+
+        # Try cache first
+        logger.debug(f"Checking cache for Privy ID: {request.user.id}")
+        existing_user = get_cached_user_by_privy_id(request.user.id)
+
+        # If not in cache, try database with timeout
+        if not existing_user:
+            try:
+                logger.debug(f"Cache miss for Privy ID, querying database...")
+                existing_user = safe_query_with_timeout(
+                    supabase_config.get_supabase_client(),
+                    "users",
+                    lambda: users_module.get_user_by_privy_id(request.user.id),
+                    timeout_seconds=USER_LOOKUP_TIMEOUT,
+                    operation_name="get user by privy_id",
+                    fallback_value=None,
+                    log_errors=True,
+                )
+                if existing_user:
+                    # Cache the result for future lookups
+                    cache_user_by_privy_id(request.user.id, existing_user)
+            except QueryTimeoutError as e:
+                logger.error(f"Privy ID lookup timed out: {e}")
+                existing_user = None
 
         # Fallback: check by username if privy_user_id lookup failed
         if not existing_user:
-            existing_user = users_module.get_user_by_username(username)
+            logger.debug(f"Privy ID lookup failed, trying username: {username}")
+
+            # Try cache first
+            existing_user = get_cached_user_by_username(username)
+
+            if not existing_user:
+                try:
+                    logger.debug(f"Cache miss for username, querying database...")
+                    existing_user = safe_query_with_timeout(
+                        supabase_config.get_supabase_client(),
+                        "users",
+                        lambda: users_module.get_user_by_username(username),
+                        timeout_seconds=USER_LOOKUP_TIMEOUT,
+                        operation_name="get user by username",
+                        fallback_value=None,
+                        log_errors=True,
+                    )
+                    if existing_user:
+                        # Cache the result
+                        cache_user_by_username(username, existing_user)
+                except QueryTimeoutError as e:
+                    logger.error(f"Username lookup timed out: {e}")
+                    existing_user = None
+
             if existing_user:
                 logger.warning(
                     f"User found by username '{username}' but not by privy_user_id. Updating privy_user_id..."
@@ -412,11 +560,23 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 # Update the existing user with the privy_user_id
                 try:
                     client = supabase_config.get_supabase_client()
-                    client.table("users").update({"privy_user_id": request.user.id}).eq(
-                        "id", existing_user["id"]
-                    ).execute()
+                    safe_query_with_timeout(
+                        client,
+                        "users",
+                        lambda: client.table("users").update({"privy_user_id": request.user.id}).eq(
+                            "id", existing_user["id"]
+                        ).execute(),
+                        timeout_seconds=AUTH_QUERY_TIMEOUT,
+                        operation_name="update privy_user_id",
+                        fallback_value=None,
+                        log_errors=True,
+                    )
                     existing_user["privy_user_id"] = request.user.id
                     logger.info(f"Updated user {existing_user['id']} with privy_user_id")
+                    # Invalidate caches since we updated the user
+                    invalidate_user_cache(privy_id=request.user.id, username=username)
+                except QueryTimeoutError as e:
+                    logger.error(f"Failed to update privy_user_id (timeout): {e}")
                 except Exception as e:
                     logger.error(f"Failed to update privy_user_id: {e}")
 
@@ -661,56 +821,20 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         status_code=500, detail="Failed to create user account"
                     ) from fallback_error
 
-            # Process referral code if provided
+            # OPTIMIZATION: Process referral code in background to avoid blocking auth response
+            # Referral tracking is non-critical for successful login/signup
             referral_code_valid = False
             if request.referral_code:
-                try:
-                    from src.services.referral import (
-                        send_referral_signup_notification,
-                        track_referral_signup,
-                    )
-
-                    client = supabase_config.get_supabase_client()
-
-                    # Track referral signup and store referred_by_code
-                    success, error_msg, referrer = track_referral_signup(
-                        request.referral_code, user_data["user_id"]
-                    )
-
-                    if success and referrer:
-                        referral_code_valid = True
-                        logger.info(
-                            f"Valid referral code provided during signup: {request.referral_code}"
-                        )
-
-                        # Store referral code for the new user
-                        try:
-                            client.table("users").update(
-                                {"referred_by_code": request.referral_code}
-                            ).eq("id", user_data["user_id"]).execute()
-                            logger.info(
-                                f"Stored referral code {request.referral_code} for new user {user_data['user_id']}"
-                            )
-
-                            # OPTIMIZATION: Send notification to referrer in background
-                            if referrer.get("email"):
-                                background_tasks.add_task(
-                                    send_referral_signup_notification,
-                                    referrer_id=referrer["id"],
-                                    referrer_email=referrer["email"],
-                                    referrer_username=referrer.get("username", "User"),
-                                    referee_username=username,
-                                )
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to store referral code or send notification for new user: {e}"
-                            )
-                    else:
-                        logger.warning(
-                            f"Invalid referral code provided during signup: {request.referral_code} - {error_msg}"
-                        )
-                except Exception as e:
-                    logger.error(f"Error processing referral code: {e}")
+                logger.info(f"Queuing referral code processing for new user: {request.referral_code}")
+                background_tasks.add_task(
+                    _process_referral_code_background,
+                    referral_code=request.referral_code,
+                    user_id=user_data["user_id"],
+                    username=username,
+                    is_new_user=True,
+                )
+                # We don't know if it's valid until processed in background, so assume it might be valid
+                # This is logged/tracked in the background task
 
             # OPTIMIZATION: Send welcome email in background for new users
             if email:
@@ -780,24 +904,46 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])
-async def register_user(request: UserRegistrationRequest):
+async def register_user(request: UserRegistrationRequest, background_tasks: BackgroundTasks):
     """Register a new user with username and email"""
     try:
         logger.info(f"Registration request for user: {request.username}")
 
         client = supabase_config.get_supabase_client()
 
-        # Check if email already exists
-        existing_email = client.table("users").select("id").eq("email", request.email).execute()
-        if existing_email.data:
-            raise HTTPException(status_code=400, detail="User with this email already exists")
+        # Check if email already exists (with timeout)
+        try:
+            existing_email = safe_query_with_timeout(
+                client,
+                "users",
+                lambda: client.table("users").select("id").eq("email", request.email).execute(),
+                timeout_seconds=AUTH_QUERY_TIMEOUT,
+                operation_name="check existing email",
+                fallback_value=None,
+                log_errors=True,
+            )
+            if existing_email and existing_email.data:
+                raise HTTPException(status_code=400, detail="User with this email already exists")
+        except QueryTimeoutError:
+            logger.error("Timeout checking existing email, treating as unavailable")
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
-        # Check if username already exists
-        existing_username = (
-            client.table("users").select("id").eq("username", request.username).execute()
-        )
-        if existing_username.data:
-            raise HTTPException(status_code=400, detail="Username already taken")
+        # Check if username already exists (with timeout)
+        try:
+            existing_username = safe_query_with_timeout(
+                client,
+                "users",
+                lambda: client.table("users").select("id").eq("username", request.username).execute(),
+                timeout_seconds=AUTH_QUERY_TIMEOUT,
+                operation_name="check existing username",
+                fallback_value=None,
+                log_errors=True,
+            )
+            if existing_username and existing_username.data:
+                raise HTTPException(status_code=400, detail="Username already taken")
+        except QueryTimeoutError:
+            logger.error("Timeout checking existing username, treating as unavailable")
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
         # Create user first
         try:
@@ -895,47 +1041,16 @@ async def register_user(request: UserRegistrationRequest):
                     status_code=500, detail="Failed to create user account"
                 ) from fallback_error
 
-        # Validate and track referral code if provided
+        # OPTIMIZATION: Process referral code in background to avoid blocking registration response
         if request.referral_code:
-            try:
-                from src.services.referral import (
-                    send_referral_signup_notification,
-                    track_referral_signup,
-                )
-
-                # Track referral signup and store referred_by_code
-                success, error_msg, referrer = track_referral_signup(
-                    request.referral_code, user_data["user_id"]
-                )
-
-                if success and referrer:
-                    logger.info(f"Valid referral code provided: {request.referral_code}")
-
-                    # Store referral code for the new user
-                    try:
-                        client.table("users").update(
-                            {"referred_by_code": request.referral_code}
-                        ).eq("id", user_data["user_id"]).execute()
-                        logger.info(
-                            f"Stored referral code {request.referral_code} for user {user_data['user_id']}"
-                        )
-
-                        # Send notification to referrer
-                        if referrer.get("email"):
-                            send_referral_signup_notification(
-                                referrer_id=referrer["id"],
-                                referrer_email=referrer["email"],
-                                referrer_username=referrer.get("username", "User"),
-                                referee_username=request.username,
-                            )
-                    except Exception as e:
-                        logger.error(f"Failed to store referral code or send notification: {e}")
-                else:
-                    logger.warning(
-                        f"Invalid referral code provided: {request.referral_code} - {error_msg}"
-                    )
-            except Exception as e:
-                logger.error(f"Error processing referral code: {e}")
+            logger.info(f"Queuing referral code processing for user: {request.referral_code}")
+            background_tasks.add_task(
+                _process_referral_code_background,
+                referral_code=request.referral_code,
+                user_id=user_data["user_id"],
+                username=request.username,
+                is_new_user=True,
+            )
 
         # Send welcome email
         try:
