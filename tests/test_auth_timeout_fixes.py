@@ -235,7 +235,7 @@ class TestConnectionPoolMonitor:
         stats.active_connections = 10
         assert stats.get_health_status() == "CRITICAL"
 
-    @patch("src.services.connection_pool_monitor.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_get_supabase_pool_stats_unavailable(self, mock_get_supabase):
         """Test getting pool stats when unavailable."""
         mock_get_supabase.side_effect = Exception("Client error")
