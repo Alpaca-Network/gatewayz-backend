@@ -5,10 +5,15 @@ This module handles recording and querying model call metrics,
 including response times, success rates, and health status.
 """
 
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from postgrest.exceptions import APIError
+
 from src.config.supabase_config import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 
 def record_model_call(
@@ -38,88 +43,117 @@ def record_model_call(
         total_tokens: Optional total tokens (input + output)
 
     Returns:
-        Dictionary with the updated/created record
+        Dictionary with the updated/created record, or empty dict if table doesn't exist
     """
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    # First, try to get the existing record
-    existing = (
-        supabase.table("model_health_tracking")
-        .select("*")
-        .eq("provider", provider)
-        .eq("model", model)
-        .execute()
-    )
-
-    if existing.data and len(existing.data) > 0:
-        # Update existing record
-        record = existing.data[0]
-        new_call_count = record["call_count"] + 1
-        new_success_count = record["success_count"] + (1 if status == "success" else 0)
-        new_error_count = record["error_count"] + (1 if status != "success" else 0)
-
-        # Calculate new average response time
-        if record["average_response_time_ms"] is not None:
-            new_avg = (
-                (record["average_response_time_ms"] * record["call_count"]) + response_time_ms
-            ) / new_call_count
-        else:
-            new_avg = response_time_ms
-
-        update_data = {
-            "last_response_time_ms": response_time_ms,
-            "last_status": status,
-            "last_called_at": datetime.utcnow().isoformat(),
-            "call_count": new_call_count,
-            "success_count": new_success_count,
-            "error_count": new_error_count,
-            "average_response_time_ms": new_avg,
-        }
-
-        if error_message:
-            update_data["last_error_message"] = error_message
-
-        if input_tokens is not None:
-            update_data["input_tokens"] = input_tokens
-        if output_tokens is not None:
-            update_data["output_tokens"] = output_tokens
-        if total_tokens is not None:
-            update_data["total_tokens"] = total_tokens
-
-        result = (
+        # First, try to get the existing record
+        existing = (
             supabase.table("model_health_tracking")
-            .update(update_data)
+            .select("*")
             .eq("provider", provider)
             .eq("model", model)
             .execute()
         )
-    else:
-        # Insert new record
-        insert_data = {
-            "provider": provider,
-            "model": model,
-            "last_response_time_ms": response_time_ms,
-            "last_status": status,
-            "last_called_at": datetime.utcnow().isoformat(),
-            "call_count": 1,
-            "success_count": 1 if status == "success" else 0,
-            "error_count": 1 if status != "success" else 0,
-            "average_response_time_ms": response_time_ms,
-        }
+    except APIError as e:
+        # Table doesn't exist (likely in test environment or migration not run)
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug(
+                f"model_health_tracking table not found - skipping health tracking "
+                f"for {provider}/{model}. Run migrations to enable health tracking."
+            )
+            return {}
+        # Re-raise other API errors
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to record model health for {provider}/{model}: {e}")
+        return {}
 
-        if error_message:
-            insert_data["last_error_message"] = error_message
+    try:
+        if existing.data and len(existing.data) > 0:
+            # Update existing record
+            record = existing.data[0]
+            new_call_count = record["call_count"] + 1
+            new_success_count = record["success_count"] + (1 if status == "success" else 0)
+            new_error_count = record["error_count"] + (1 if status != "success" else 0)
 
-        if input_tokens is not None:
-            insert_data["input_tokens"] = input_tokens
-        if output_tokens is not None:
-            insert_data["output_tokens"] = output_tokens
-        if total_tokens is not None:
-            insert_data["total_tokens"] = total_tokens
+            # Calculate new average response time
+            if record["average_response_time_ms"] is not None:
+                new_avg = (
+                    (record["average_response_time_ms"] * record["call_count"]) + response_time_ms
+                ) / new_call_count
+            else:
+                new_avg = response_time_ms
 
-        result = supabase.table("model_health_tracking").insert(insert_data).execute()
+            update_data = {
+                "last_response_time_ms": response_time_ms,
+                "last_status": status,
+                "last_called_at": datetime.utcnow().isoformat(),
+                "call_count": new_call_count,
+                "success_count": new_success_count,
+                "error_count": new_error_count,
+                "average_response_time_ms": new_avg,
+            }
 
-    return result.data[0] if result.data else {}
+            if error_message:
+                update_data["last_error_message"] = error_message
+
+            if input_tokens is not None:
+                update_data["input_tokens"] = input_tokens
+            if output_tokens is not None:
+                update_data["output_tokens"] = output_tokens
+            if total_tokens is not None:
+                update_data["total_tokens"] = total_tokens
+
+            result = (
+                supabase.table("model_health_tracking")
+                .update(update_data)
+                .eq("provider", provider)
+                .eq("model", model)
+                .execute()
+            )
+        else:
+            # Insert new record
+            insert_data = {
+                "provider": provider,
+                "model": model,
+                "last_response_time_ms": response_time_ms,
+                "last_status": status,
+                "last_called_at": datetime.utcnow().isoformat(),
+                "call_count": 1,
+                "success_count": 1 if status == "success" else 0,
+                "error_count": 1 if status != "success" else 0,
+                "average_response_time_ms": response_time_ms,
+            }
+
+            if error_message:
+                insert_data["last_error_message"] = error_message
+
+            if input_tokens is not None:
+                insert_data["input_tokens"] = input_tokens
+            if output_tokens is not None:
+                insert_data["output_tokens"] = output_tokens
+            if total_tokens is not None:
+                insert_data["total_tokens"] = total_tokens
+
+            result = supabase.table("model_health_tracking").insert(insert_data).execute()
+
+        return result.data[0] if result.data else {}
+
+    except APIError as e:
+        # Table doesn't exist or other API error
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug(
+                f"model_health_tracking table not found during update - skipping health tracking "
+                f"for {provider}/{model}"
+            )
+            return {}
+        # Re-raise other API errors
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to update model health for {provider}/{model}: {e}")
+        return {}
 
 
 def get_model_health(provider: str, model: str) -> Optional[Dict]:
@@ -133,17 +167,28 @@ def get_model_health(provider: str, model: str) -> Optional[Dict]:
     Returns:
         Dictionary with health tracking data or None if not found
     """
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    result = (
-        supabase.table("model_health_tracking")
-        .select("*")
-        .eq("provider", provider)
-        .eq("model", model)
-        .execute()
-    )
+        result = (
+            supabase.table("model_health_tracking")
+            .select("*")
+            .eq("provider", provider)
+            .eq("model", model)
+            .execute()
+        )
 
-    return result.data[0] if result.data else None
+        return result.data[0] if result.data else None
+
+    except APIError as e:
+        # Table doesn't exist
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug(f"model_health_tracking table not found")
+            return None
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to get model health for {provider}/{model}: {e}")
+        return None
 
 
 def get_all_model_health(
@@ -164,21 +209,31 @@ def get_all_model_health(
     Returns:
         List of health tracking records
     """
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    query = supabase.table("model_health_tracking").select("*")
+        query = supabase.table("model_health_tracking").select("*")
 
-    if provider:
-        query = query.eq("provider", provider)
+        if provider:
+            query = query.eq("provider", provider)
 
-    if status:
-        query = query.eq("last_status", status)
+        if status:
+            query = query.eq("last_status", status)
 
-    query = query.order("last_called_at", desc=True).range(offset, offset + limit - 1)
+        query = query.order("last_called_at", desc=True).range(offset, offset + limit - 1)
 
-    result = query.execute()
+        result = query.execute()
 
-    return result.data if result.data else []
+        return result.data if result.data else []
+
+    except APIError as e:
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug("model_health_tracking table not found")
+            return []
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to get all model health: {e}")
+        return []
 
 
 def get_unhealthy_models(
@@ -195,28 +250,38 @@ def get_unhealthy_models(
     Returns:
         List of unhealthy model records
     """
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    result = (
-        supabase.table("model_health_tracking")
-        .select("*")
-        .gte("call_count", min_calls)
-        .execute()
-    )
+        result = (
+            supabase.table("model_health_tracking")
+            .select("*")
+            .gte("call_count", min_calls)
+            .execute()
+        )
 
-    if not result.data:
+        if not result.data:
+            return []
+
+        # Filter for models with error rate above threshold
+        unhealthy = []
+        for record in result.data:
+            if record["call_count"] > 0:
+                error_rate = record["error_count"] / record["call_count"]
+                if error_rate >= error_threshold:
+                    record["error_rate"] = error_rate
+                    unhealthy.append(record)
+
+        return sorted(unhealthy, key=lambda x: x["error_rate"], reverse=True)
+
+    except APIError as e:
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug("model_health_tracking table not found")
+            return []
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to get unhealthy models: {e}")
         return []
-
-    # Filter for models with error rate above threshold
-    unhealthy = []
-    for record in result.data:
-        if record["call_count"] > 0:
-            error_rate = record["error_count"] / record["call_count"]
-            if error_rate >= error_threshold:
-                record["error_rate"] = error_rate
-                unhealthy.append(record)
-
-    return sorted(unhealthy, key=lambda x: x["error_rate"], reverse=True)
 
 
 def get_model_health_stats() -> Dict:
@@ -231,11 +296,54 @@ def get_model_health_stats() -> Dict:
         - total_errors: Total failed calls
         - average_response_time: Average response time across all models
     """
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    result = supabase.table("model_health_tracking").select("*").execute()
+        result = supabase.table("model_health_tracking").select("*").execute()
 
-    if not result.data:
+        if not result.data:
+            return {
+                "total_models": 0,
+                "total_calls": 0,
+                "total_success": 0,
+                "total_errors": 0,
+                "average_response_time": 0,
+            }
+
+        total_calls = sum(r["call_count"] for r in result.data)
+        total_success = sum(r["success_count"] for r in result.data)
+        total_errors = sum(r["error_count"] for r in result.data)
+
+        # Calculate weighted average response time
+        total_weighted_time = sum(
+            r["average_response_time_ms"] * r["call_count"]
+            for r in result.data
+            if r["average_response_time_ms"] is not None
+        )
+        avg_response_time = total_weighted_time / total_calls if total_calls > 0 else 0
+
+        return {
+            "total_models": len(result.data),
+            "total_calls": total_calls,
+            "total_success": total_success,
+            "total_errors": total_errors,
+            "average_response_time": avg_response_time,
+            "success_rate": total_success / total_calls if total_calls > 0 else 0,
+        }
+
+    except APIError as e:
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug("model_health_tracking table not found")
+            return {
+                "total_models": 0,
+                "total_calls": 0,
+                "total_success": 0,
+                "total_errors": 0,
+                "average_response_time": 0,
+            }
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to get model health stats: {e}")
         return {
             "total_models": 0,
             "total_calls": 0,
@@ -243,27 +351,6 @@ def get_model_health_stats() -> Dict:
             "total_errors": 0,
             "average_response_time": 0,
         }
-
-    total_calls = sum(r["call_count"] for r in result.data)
-    total_success = sum(r["success_count"] for r in result.data)
-    total_errors = sum(r["error_count"] for r in result.data)
-
-    # Calculate weighted average response time
-    total_weighted_time = sum(
-        r["average_response_time_ms"] * r["call_count"]
-        for r in result.data
-        if r["average_response_time_ms"] is not None
-    )
-    avg_response_time = total_weighted_time / total_calls if total_calls > 0 else 0
-
-    return {
-        "total_models": len(result.data),
-        "total_calls": total_calls,
-        "total_success": total_success,
-        "total_errors": total_errors,
-        "average_response_time": avg_response_time,
-        "success_rate": total_success / total_calls if total_calls > 0 else 0,
-    }
 
 
 def get_provider_health_summary(provider: str) -> Dict:
@@ -276,16 +363,63 @@ def get_provider_health_summary(provider: str) -> Dict:
     Returns:
         Dictionary with provider-level statistics
     """
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    result = (
-        supabase.table("model_health_tracking")
-        .select("*")
-        .eq("provider", provider)
-        .execute()
-    )
+        result = (
+            supabase.table("model_health_tracking")
+            .select("*")
+            .eq("provider", provider)
+            .execute()
+        )
 
-    if not result.data:
+        if not result.data:
+            return {
+                "provider": provider,
+                "total_models": 0,
+                "total_calls": 0,
+                "total_success": 0,
+                "total_errors": 0,
+                "average_response_time": 0,
+                "success_rate": 0,
+            }
+
+        total_calls = sum(r["call_count"] for r in result.data)
+        total_success = sum(r["success_count"] for r in result.data)
+        total_errors = sum(r["error_count"] for r in result.data)
+
+        total_weighted_time = sum(
+            r["average_response_time_ms"] * r["call_count"]
+            for r in result.data
+            if r["average_response_time_ms"] is not None
+        )
+        avg_response_time = total_weighted_time / total_calls if total_calls > 0 else 0
+
+        return {
+            "provider": provider,
+            "total_models": len(result.data),
+            "total_calls": total_calls,
+            "total_success": total_success,
+            "total_errors": total_errors,
+            "average_response_time": avg_response_time,
+            "success_rate": total_success / total_calls if total_calls > 0 else 0,
+        }
+
+    except APIError as e:
+        if "PGRST205" in str(e) or "Could not find the table" in str(e):
+            logger.debug(f"model_health_tracking table not found for provider {provider}")
+            return {
+                "provider": provider,
+                "total_models": 0,
+                "total_calls": 0,
+                "total_success": 0,
+                "total_errors": 0,
+                "average_response_time": 0,
+                "success_rate": 0,
+            }
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to get provider health summary for {provider}: {e}")
         return {
             "provider": provider,
             "total_models": 0,
@@ -295,27 +429,6 @@ def get_provider_health_summary(provider: str) -> Dict:
             "average_response_time": 0,
             "success_rate": 0,
         }
-
-    total_calls = sum(r["call_count"] for r in result.data)
-    total_success = sum(r["success_count"] for r in result.data)
-    total_errors = sum(r["error_count"] for r in result.data)
-
-    total_weighted_time = sum(
-        r["average_response_time_ms"] * r["call_count"]
-        for r in result.data
-        if r["average_response_time_ms"] is not None
-    )
-    avg_response_time = total_weighted_time / total_calls if total_calls > 0 else 0
-
-    return {
-        "provider": provider,
-        "total_models": len(result.data),
-        "total_calls": total_calls,
-        "total_success": total_success,
-        "total_errors": total_errors,
-        "average_response_time": avg_response_time,
-        "success_rate": total_success / total_calls if total_calls > 0 else 0,
-    }
 
 
 def delete_old_health_records(days: int = 30) -> int:
