@@ -8,6 +8,7 @@ from postgrest import APIError
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import src.db.subscription_products as subscription_products_module
 from src.db.subscription_products import (
     get_tier_from_product_id,
     get_credits_from_tier,
@@ -20,6 +21,12 @@ from src.db.subscription_products import (
 
 class TestSubscriptionProducts:
     """Test subscription products database operations"""
+
+    @pytest.fixture(autouse=True)
+    def reset_fallback_cache(self):
+        subscription_products_module._reset_fallback_cache()
+        yield
+        subscription_products_module._reset_fallback_cache()
 
     @pytest.fixture
     def mock_supabase_client(self):
@@ -77,7 +84,7 @@ class TestSubscriptionProducts:
         assert execute_mock.call_count == 2
 
     def test_get_tier_from_product_id_schema_cache_refresh_failure(self, mock_supabase_client):
-        """Ensure we fall back to basic tier when schema cache refresh cannot run."""
+        """Ensure we fall back to cached configuration when schema cache refresh cannot run."""
         execute_mock = (
             mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute
         )
@@ -88,11 +95,19 @@ class TestSubscriptionProducts:
         with patch(
             "src.db.subscription_products.refresh_postgrest_schema_cache", return_value=False
         ) as refresh_mock:
-            tier = get_tier_from_product_id("prod_schema_cache_fail")
+            tier = get_tier_from_product_id("prod_TKOqQPhVRxNp4Q")
 
-        assert tier == "basic"
+        assert tier == "pro"
         refresh_mock.assert_called_once()
         assert execute_mock.call_count == 1
+
+    def test_get_tier_from_product_id_uses_fallback_on_supabase_exception(self, mock_supabase_client):
+        """Known products should still resolve when Supabase raises."""
+        mock_supabase_client.table.side_effect = Exception("database down")
+
+        tier = get_tier_from_product_id("prod_TKOqQPhVRxNp4Q")
+
+        assert tier == "pro"
 
     def test_get_credits_from_tier_pro(self, mock_supabase_client):
         """Test getting credits for PRO tier"""
@@ -122,6 +137,14 @@ class TestSubscriptionProducts:
 
         assert credits == 0.0  # Should default to 0
 
+    def test_get_credits_from_tier_uses_fallback_on_supabase_exception(self, mock_supabase_client):
+        """Ensure credits are served from fallback when Supabase is unavailable."""
+        mock_supabase_client.table.side_effect = Exception("database down")
+
+        credits = get_credits_from_tier("pro")
+
+        assert credits == 20.0
+
     def test_get_subscription_product(self, mock_supabase_client):
         """Test getting full product configuration"""
         expected_product = {
@@ -140,6 +163,15 @@ class TestSubscriptionProducts:
         product = get_subscription_product("prod_TKOqQPhVRxNp4Q")
 
         assert product == expected_product
+
+    def test_get_subscription_product_uses_fallback_on_supabase_exception(self, mock_supabase_client):
+        """Ensure subscription product snapshot falls back to cached defaults."""
+        mock_supabase_client.table.side_effect = Exception("database down")
+
+        product = get_subscription_product("prod_TKOqQPhVRxNp4Q")
+
+        assert product is not None
+        assert product["tier"] == "pro"
 
     def test_get_all_active_products(self, mock_supabase_client):
         """Test getting all active products"""
@@ -162,6 +194,15 @@ class TestSubscriptionProducts:
 
         assert len(products) == 2
         assert products == expected_products
+
+    def test_get_all_active_products_uses_fallback_when_supabase_fails(self, mock_supabase_client):
+        """Ensure fallback list is returned when Supabase cannot be queried."""
+        mock_supabase_client.table.side_effect = Exception("database down")
+
+        products = get_all_active_products()
+
+        assert products  # Should contain fallback entries
+        assert any(product["tier"] == "pro" for product in products)
 
     def test_add_subscription_product(self, mock_supabase_client):
         """Test adding new subscription product"""
