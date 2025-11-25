@@ -1,5 +1,5 @@
 .vercel
-.venv
+.venv*
 venv
 .env
 .vscode
@@ -96,8 +96,6 @@ google_models_test_*.json
 test_results.txt
 .user_test_user_*.txt
 .test_api_key
-
-.venv.old/
 
 # Performance and load test files
 performance_test*.py
