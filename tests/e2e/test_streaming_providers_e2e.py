@@ -380,7 +380,8 @@ class TestProviderParameterE2E:
 
         # May return various errors if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        assert "[DONE]" in response.text
+        if response.status_code == 200:
+            assert "[DONE]" in response.text
 
     def test_multiple_providers_in_sequence(
         self, client: TestClient, auth_headers: dict

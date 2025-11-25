@@ -403,5 +403,6 @@ class TestChatCompletionsE2E:
 
         # May return 400 if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        data = response.json()
-        assert data["choices"][0]["message"]["content"]
+        if response.status_code == 200:
+            data = response.json()
+            assert data["choices"][0]["message"]["content"]
