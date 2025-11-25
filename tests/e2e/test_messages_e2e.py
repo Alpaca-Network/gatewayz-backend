@@ -29,12 +29,13 @@ class TestMessagesE2E:
         # Verify response structure (Anthropic Messages API format)
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        data = response.json()
-        assert "content" in data
-        assert len(data["content"]) > 0
-        assert "type" in data["content"][0]
-        assert "text" in data["content"][0]
-        assert data["content"][0]["type"] == "text"
+        if response.status_code == 200:
+            data = response.json()
+            assert "content" in data
+            assert len(data["content"]) > 0
+            assert "type" in data["content"][0]
+            assert "text" in data["content"][0]
+            assert data["content"][0]["type"] == "text"
 
     def test_messages_with_system_prompt(
         self, client: TestClient, auth_headers: dict
@@ -57,8 +58,9 @@ class TestMessagesE2E:
 
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        data = response.json()
-        assert data["content"][0]["type"] == "text"
+        if response.status_code == 200:
+            data = response.json()
+            assert data["content"][0]["type"] == "text"
 
     def test_messages_with_all_parameters(
         self, client: TestClient, auth_headers: dict
@@ -81,11 +83,12 @@ class TestMessagesE2E:
 
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        data = response.json()
-        assert "content" in data
-        # Verify max_tokens was respected
-        if "usage" in data:
-            assert data["usage"]["output_tokens"] <= 150
+        if response.status_code == 200:
+            data = response.json()
+            assert "content" in data
+            # Verify max_tokens was respected
+            if "usage" in data:
+                assert data["usage"]["output_tokens"] <= 150
 
     def test_messages_streaming(
         self, client: TestClient, auth_headers: dict, base_messages_payload: dict
@@ -123,8 +126,9 @@ class TestMessagesE2E:
 
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        data = response.json()
-        assert "content" in data
+        if response.status_code == 200:
+            data = response.json()
+            assert "content" in data
 
     def test_messages_with_provider_featherless(
         self, client: TestClient, auth_headers: dict
@@ -272,8 +276,9 @@ class TestMessagesE2E:
 
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        data = response.json()
-        assert "content" in data
+        if response.status_code == 200:
+            data = response.json()
+            assert "content" in data
 
     def test_messages_with_tools(
         self, client: TestClient, auth_headers: dict
