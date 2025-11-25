@@ -1,0 +1,27 @@
+# Dockerfile for APIdog General Runner
+# Wraps the official apidog/self-hosted-general-runner image
+# Includes Node.js 18, Java 21, Python 3, PHP 8
+
+FROM apidog/self-hosted-general-runner:latest
+
+# Metadata
+LABEL maintainer="Gatewayz Team"
+LABEL description="APIdog General Runner for Gatewayz inference API testing"
+LABEL version="1.0.0"
+
+# Environment defaults (can be overridden at runtime)
+# These are set via Railway environment variables, not hardcoded here
+ENV TZ=America/Toronto
+ENV SERVER_APP_BASE_URL=https://api.apidog.com
+
+# Health check to ensure container is running
+# The runner listens on port 4524 by default
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:4524/health || exit 1
+
+# Container runs as non-root for security (inherited from base image)
+# Expose the default runner port
+EXPOSE 4524
+
+# Entrypoint is inherited from base image
+# The runner will start automatically when container starts
