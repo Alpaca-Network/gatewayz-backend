@@ -74,6 +74,7 @@ test = [
     "pytest-timeout>=2.2.0",
     "pytest-mock>=3.12.0",
     "flask-sqlalchemy",
+    "playwright>=1.40.0",
 ]
 
 # Full production dependencies (Railway, self-hosted)
