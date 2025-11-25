@@ -505,6 +505,7 @@ Deploy to Kubernetes for scalability.
 | `SUPABASE_URL` | Supabase project URL | Yes | - | `https://xxx.supabase.co` |
 | `SUPABASE_KEY` | Supabase anon key | Yes | - | `eyJ...` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes | - | `eyJ...` |
+| `SUBSCRIPTION_PRODUCT_FALLBACKS` | JSON array of product→tier mappings used when Supabase schema cache is stale | No | Built-in Pro/MAX defaults | `[{"product_id":"prod_x","tier":"pro","credits_per_month":20.0}]` |
 | `OPENROUTER_API_KEY` | OpenRouter API key | Yes | - | `sk-or-...` |
 | `PORTKEY_API_KEY` | Portkey API key | No | - | `pk_...` |
 | `FEATHERLESS_API_KEY` | Featherless API key | No | - | `fl_...` |
