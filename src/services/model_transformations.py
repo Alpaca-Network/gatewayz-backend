@@ -56,6 +56,10 @@ OPENROUTER_AUTO_FALLBACKS = {
     "alibaba-cloud": "qwen/qwen-plus",
 }
 
+# Prefixes that never appear in Cerebras native model names.
+CEREBRAS_PREFIXES = ("cerebras/", "@cerebras/", "models/", "api/")
+
+
 # Shared helper for resolving aliases before any downstream routing logic runs.
 def apply_model_alias(model_id: str | None) -> str | None:
     if not model_id:
@@ -214,6 +218,15 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         stripped = model_id[len("aimo/") :]
         logger.info(f"Stripped 'aimo/' prefix: '{model_id}' -> '{stripped}' for AIMO")
         model_id = stripped
+
+    # Cerebras expects bare model IDs (e.g., 'llama-3.3-70b') without any prefixes.
+    if provider_lower == "cerebras":
+        normalized_cerebras_id = _normalize_cerebras_model_id(model_id)
+        if normalized_cerebras_id != model_id:
+            logger.info(
+                "Normalized Cerebras model ID '%s' -> '%s'", model_id, normalized_cerebras_id
+            )
+            model_id = normalized_cerebras_id
 
     # Get the mapping for this provider
     mapping = get_model_id_mapping(provider_lower)
@@ -664,6 +677,32 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
     }
 
     return mappings.get(provider, {})
+
+
+def _normalize_cerebras_model_id(model_id: str) -> str:
+    """
+    Cerebras native IDs never include org prefixes, so strip any user-provided
+    prefixes (like 'cerebras/' or 'meta-llama/') and return the final segment.
+    """
+
+    cleaned = model_id
+
+    # Remove known Cerebras-specific wrappers
+    prefix_was_removed = True
+    while prefix_was_removed:
+        prefix_was_removed = False
+        for prefix in CEREBRAS_PREFIXES:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix) :]
+                prefix_was_removed = True
+                break
+
+    # If the user still supplied an org prefix (e.g., meta-llama/llama-3.3-70b),
+    # strip it so Cerebras receives the bare model identifier.
+    if "/" in cleaned:
+        cleaned = cleaned.split("/", 1)[1]
+
+    return cleaned
 
 
 def normalize_model_name(model_id: str) -> str:
