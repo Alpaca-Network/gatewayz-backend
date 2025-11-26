@@ -100,8 +100,8 @@ jobs:
         run: |
           echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
 
-          # Remove any existing supabase binary
-          rm -f supabase
+          # Remove any existing supabase binary or directory
+          rm -rf supabase
 
           # Download and extract
           curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xzf -
@@ -217,8 +217,8 @@ jobs:
         run: |
           echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
 
-          # Remove any existing supabase binary
-          rm -f supabase
+          # Remove any existing supabase binary or directory
+          rm -rf supabase
 
           # Download and extract
           curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xzf -
