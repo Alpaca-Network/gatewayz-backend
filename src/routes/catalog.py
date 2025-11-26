@@ -208,7 +208,8 @@ async def get_providers(
         if gateway_value in ("openrouter", "all"):
             raw_providers = get_cached_providers()
             if not raw_providers and gateway_value == "openrouter":
-                raise HTTPException(status_code=503, detail=ERROR_PROVIDER_DATA_UNAVAILABLE)
+                # Graceful degradation - log warning and continue with empty providers
+                logger.warning("OpenRouter provider data unavailable - returning empty response")
 
             enhanced_openrouter = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(raw_providers or []),
@@ -240,13 +241,21 @@ async def get_providers(
                     derived_providers = derive_providers_from_models(gw_models, gw)
                     provider_groups.append(derived_providers)
                 elif gateway_value == gw:
-                    # Only raise error if specifically requesting this gateway
-                    raise HTTPException(
-                        status_code=503, detail=f"{gw.capitalize()} models data unavailable"
-                    )
+                    # Don't raise 503 - graceful degradation, return empty response
+                    logger.warning(f"{gw.capitalize()} models data unavailable - returning empty response")
 
         if not provider_groups:
-            raise HTTPException(status_code=503, detail=ERROR_PROVIDER_DATA_UNAVAILABLE)
+            # Graceful degradation - return empty response instead of 503
+            logger.warning(f"No provider data available for gateway={gateway_value} - returning empty response")
+            return {
+                "data": [],
+                "total": 0,
+                "returned": 0,
+                "offset": offset or 0,
+                "limit": limit,
+                "gateway": gateway_value,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
         combined_providers = merge_provider_lists(*provider_groups)
 
