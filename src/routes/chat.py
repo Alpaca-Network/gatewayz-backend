@@ -739,6 +739,30 @@ async def stream_generator(
             f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
         )
 
+        # DEFENSIVE: Detect empty streams and log as error
+        if chunk_count == 0:
+            logger.error(
+                f"[EMPTY STREAM] Provider {provider} returned zero chunks for model {model}. "
+                f"This indicates a provider routing or model ID transformation issue.",
+                exc_info=True
+            )
+            # Send error chunk to client
+            error_chunk = {
+                "error": {
+                    "message": f"Provider returned empty stream for model {model}. Please try again or contact support.",
+                    "type": "empty_stream_error",
+                    "provider": provider,
+                    "model": model,
+                }
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+        elif accumulated_content == "" and chunk_count > 0:
+            logger.warning(
+                f"[EMPTY CONTENT] Provider {provider} returned {chunk_count} chunks but no content for model {model}."
+            )
+
         # If no usage was provided, estimate based on content
         if total_tokens == 0:
             # Rough estimate: 1 token ≈ 4 characters
@@ -797,7 +821,7 @@ async def stream_generator(
         )
 
     except Exception as e:
-        logger.error(f"Streaming error: {e}")
+        logger.error(f"Streaming error: {e}", exc_info=True)
         error_chunk = {"error": {"message": "Streaming error occurred", "type": "stream_error"}}
         yield f"data: {json.dumps(error_chunk)}\n\n"
         yield "data: [DONE]\n\n"
