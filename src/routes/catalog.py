@@ -48,6 +48,7 @@ DESC_GATEWAY_WITH_ALL = (
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
+GATEWAYS_WITHOUT_PUBLIC_CATALOG = {"nebius", "xai"}
 
 # Query parameter description constants
 DESC_LIMIT_NUMBER_OF_RESULTS = "Limit number of results"
@@ -524,9 +525,10 @@ async def get_models(
             )
 
         if not models:
-            if gateway_value == "nebius":
+            if gateway_value in GATEWAYS_WITHOUT_PUBLIC_CATALOG:
                 logger.info(
-                    "Returning empty Nebius catalog response because no public model listing exists"
+                    "Returning empty %s catalog response because no public model listing exists",
+                    gateway_value,
                 )
             else:
                 logger.debug("No models data available after applying gateway selection")
@@ -736,7 +738,7 @@ async def get_models(
             "together": "Together catalog",
             "cerebras": "Cerebras catalog",
             "nebius": "Nebius catalog (no public listing is currently available)",
-            "xai": "Xai catalog",
+            "xai": "xAI catalog (no public listing is currently available)",
             "novita": "Novita catalog",
             "hug": "Hugging Face catalog",
             "aimo": "AIMO Network catalog",
