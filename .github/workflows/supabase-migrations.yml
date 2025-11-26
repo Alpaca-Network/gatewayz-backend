@@ -99,8 +99,17 @@ jobs:
       - name: Install Supabase CLI
         run: |
           echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
-          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xz
+
+          # Remove any existing supabase binary
+          rm -f supabase
+
+          # Download and extract
+          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xzf -
+
+          # Move to system path
           sudo mv supabase /usr/local/bin/
+
+          # Verify installation
           supabase --version
 
       - name: Validate migration files syntax
@@ -207,8 +216,17 @@ jobs:
       - name: Install Supabase CLI
         run: |
           echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
-          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xz
+
+          # Remove any existing supabase binary
+          rm -f supabase
+
+          # Download and extract
+          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xzf -
+
+          # Move to system path
           sudo mv supabase /usr/local/bin/
+
+          # Verify installation
           supabase --version
 
       - name: Configure Supabase CLI
