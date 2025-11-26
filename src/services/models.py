@@ -3397,9 +3397,18 @@ def fetch_models_from_alibaba():
         logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
         return _alibaba_models_cache["data"]
     except Exception as e:
-        # Only log as error if we have an API key configured (otherwise it's expected to fail)
-        if Config.ALIBABA_CLOUD_API_KEY:
-            logger.error("Failed to fetch models from Alibaba Cloud: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        # Check if it's a 401 authentication error
+        if "401" in error_msg or "Incorrect API key" in error_msg or "invalid_api_key" in error_msg:
+            logger.error(
+                "Alibaba Cloud authentication failed (401): %s. "
+                "Action required: Verify API key is valid and matches endpoint region. "
+                "Using 'dashscope-intl.aliyuncs.com' (Singapore). "
+                "If key is for China region, switch to 'dashscope.aliyuncs.com' in alibaba_cloud_client.py",
+                error_msg
+            )
+        elif Config.ALIBABA_CLOUD_API_KEY:
+            logger.error("Failed to fetch models from Alibaba Cloud: %s", error_msg)
         else:
             logger.debug("Alibaba Cloud not available (no API key configured)")
         return []
