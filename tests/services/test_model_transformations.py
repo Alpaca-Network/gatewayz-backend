@@ -7,6 +7,15 @@ def test_openrouter_prefixed_model_keeps_nested_provider():
     assert result == "openai/gpt-4"
 
 
+def test_openrouter_gpt51_hyphen_alias_transforms():
+    result = transform_model_id("openai/gpt-5-1", "openrouter")
+    assert result == "openai/gpt-5.1"
+
+
+def test_detect_provider_gpt51_alias_without_org():
+    assert detect_provider_from_model_id("gpt-5-1") == "openrouter"
+
+
 def test_openrouter_auto_preserves_prefix():
     result = transform_model_id("openrouter/auto", "openrouter")
     assert result == "openrouter/auto"
