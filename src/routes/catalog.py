@@ -356,6 +356,7 @@ async def get_models(
         anannas_models: List[dict] = []
         aihubmix_models: List[dict] = []
         vercel_ai_gateway_models: List[dict] = []
+        alibaba_models: List[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -465,6 +466,11 @@ async def get_models(
             if not vercel_ai_gateway_models and gateway_value == "vercel-ai-gateway":
                 logger.warning("Vercel AI Gateway models unavailable - continuing without them")
 
+        if gateway_value in ("alibaba", "all"):
+            alibaba_models = get_cached_models("alibaba") or []
+            if not alibaba_models and gateway_value == "alibaba":
+                logger.warning("Alibaba Cloud models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "featherless":
@@ -503,6 +509,8 @@ async def get_models(
             models = aihubmix_models
         elif gateway_value == "vercel-ai-gateway":
             models = vercel_ai_gateway_models
+        elif gateway_value == "alibaba":
+            models = alibaba_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -520,6 +528,7 @@ async def get_models(
                 anannas_models,
                 aihubmix_models,
                 vercel_ai_gateway_models,
+                alibaba_models,
             )
 
         if not models:

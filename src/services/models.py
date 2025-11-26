@@ -223,7 +223,8 @@ def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
     Returns:
         Cached data if available and valid (fresh or stale), None otherwise
     """
-    if not cache.get("data") or not cache.get("timestamp"):
+    # Explicitly check for None to allow empty lists to be cached
+    if cache.get("data") is None or not cache.get("timestamp"):
         return None
 
     cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
@@ -840,7 +841,7 @@ def get_cached_models(gateway: str = "openrouter"):
         # Cache expired or empty, fetch fresh data synchronously
         result = fetch_models_from_openrouter()
         _register_canonical_records("openrouter", result)
-        return result
+        return result if result is not None else []
     except Exception as e:
         logger.error(
             "Error getting cached models for gateway '%s': %s",
@@ -3400,12 +3401,22 @@ def fetch_models_from_alibaba():
         error_msg = sanitize_for_logging(str(e))
         # Check if it's a 401 authentication error
         if "401" in error_msg or "Incorrect API key" in error_msg or "invalid_api_key" in error_msg:
+            # Get the actual region being used
+            region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
+            if region == 'china':
+                current_endpoint = "dashscope.aliyuncs.com (China/Beijing)"
+                suggestion = "If key is for International region, set ALIBABA_CLOUD_REGION='international'"
+            else:
+                current_endpoint = "dashscope-intl.aliyuncs.com (International/Singapore)"
+                suggestion = "If key is for China region, set ALIBABA_CLOUD_REGION='china'"
+
             logger.error(
                 "Alibaba Cloud authentication failed (401): %s. "
                 "Action required: Verify API key is valid and matches endpoint region. "
-                "Using 'dashscope-intl.aliyuncs.com' (Singapore). "
-                "If key is for China region, switch to 'dashscope.aliyuncs.com' in alibaba_cloud_client.py",
-                error_msg
+                "Currently using: %s. %s",
+                error_msg,
+                current_endpoint,
+                suggestion
             )
         elif Config.ALIBABA_CLOUD_API_KEY:
             logger.error("Failed to fetch models from Alibaba Cloud: %s", error_msg)
