@@ -528,6 +528,10 @@ async def get_models(
                 logger.info(
                     "Returning empty Nebius catalog response because no public model listing exists"
                 )
+            elif gateway_value == "xai":
+                logger.info(
+                    "Returning empty xAI catalog response because no public model listing exists"
+                )
             else:
                 logger.debug("No models data available after applying gateway selection")
                 raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
