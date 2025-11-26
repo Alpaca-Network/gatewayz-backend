@@ -22,6 +22,23 @@ MODEL_PROVIDER_OVERRIDES = {
     "cerebras/llama-3.1-70b-instruct": "openrouter",
 }
 
+# Canonical aliases for commonly mistyped or reformatted model IDs.
+# Keep keys in lowercase to simplify lookups.
+MODEL_ID_ALIASES = {
+    # GPT-5.1 variants (hyphen, underscore, missing org, etc.)
+    "openai/gpt-5-1": "openai/gpt-5.1",
+    "openai/gpt5-1": "openai/gpt-5.1",
+    "openai/gpt5.1": "openai/gpt-5.1",
+    "openai/gpt-5_1": "openai/gpt-5.1",
+    "openai/gpt5_1": "openai/gpt-5.1",
+    "gpt-5-1": "openai/gpt-5.1",
+    "gpt5-1": "openai/gpt-5.1",
+    "gpt-5_1": "openai/gpt-5.1",
+    "gpt5_1": "openai/gpt-5.1",
+    "gpt5.1": "openai/gpt-5.1",
+    "gpt-5.1": "openai/gpt-5.1",
+}
+
 # Provider-specific fallbacks for the OpenRouter auto model.
 # When failover routes an OpenRouter-only model to another provider, we remap it
 # to a widely available general-purpose chat model for that provider.
@@ -38,6 +55,18 @@ OPENROUTER_AUTO_FALLBACKS = {
     "anannas": "openai/gpt-4o-mini",
     "alibaba-cloud": "qwen/qwen-plus",
 }
+
+# Shared helper for resolving aliases before any downstream routing logic runs.
+def apply_model_alias(model_id: str | None) -> str | None:
+    if not model_id:
+        return model_id
+
+    alias_key = model_id.lower()
+    canonical = MODEL_ID_ALIASES.get(alias_key)
+    if canonical:
+        logger.debug("Resolved model alias '%s' -> '%s'", model_id, canonical)
+        return canonical
+    return model_id
 
 # Gemini model name constants to reduce duplication
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
@@ -82,6 +111,18 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         Input: "OpenAI/GPT-4", provider="openrouter"
         Output: "openai/gpt-4"
     """
+
+    if not model_id:
+        return model_id
+
+    user_supplied_model_id = model_id
+    model_id = apply_model_alias(model_id)
+    if model_id != user_supplied_model_id:
+        logger.info(
+            "Applying model alias: '%s' -> '%s' before provider transformation",
+            user_supplied_model_id,
+            model_id,
+        )
 
     provider_lower = (provider or "").lower()
 
@@ -714,6 +755,8 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
     Returns:
         The detected provider name, or None if unable to detect
     """
+
+    model_id = apply_model_alias(model_id)
 
     # Check multi-provider registry first
     try:

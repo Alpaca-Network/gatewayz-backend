@@ -5,6 +5,8 @@ Handles model pricing calculations and credit cost computation
 
 import logging
 
+from src.services.model_transformations import apply_model_alias
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,9 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
             logger.warning(f"No models in cache, using default pricing for {model_id}")
             return {"prompt": 0.00002, "completion": 0.00002, "found": False}
 
+        # Build candidate IDs for lookup (original + normalized variations)
+        candidate_ids = {model_id}
+
         # Strip provider-specific suffixes for matching
         # HuggingFace adds :hf-inference, other providers may add similar suffixes
         normalized_model_id = model_id
@@ -50,15 +55,30 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                 )
                 break
 
+        if normalized_model_id != model_id:
+            candidate_ids.add(normalized_model_id)
+
+        aliased_model_id = apply_model_alias(normalized_model_id)
+        if aliased_model_id and aliased_model_id != normalized_model_id:
+            logger.info(
+                "Resolved pricing lookup alias: '%s' -> '%s'",
+                normalized_model_id,
+                aliased_model_id,
+            )
+            normalized_model_id = aliased_model_id
+            candidate_ids.add(normalized_model_id)
+
+        # Remove any empty candidates that might have been added
+        candidate_ids = {cid for cid in candidate_ids if cid}
+
         # Find the specific model - try both original and normalized IDs
         for model in models:
             model_catalog_id = model.get("id")
             model_slug = model.get("slug")
 
             # Match against both original and normalized model IDs
-            if model_catalog_id in (model_id, normalized_model_id) or model_slug in (
-                model_id,
-                normalized_model_id,
+            if (model_catalog_id and model_catalog_id in candidate_ids) or (
+                model_slug and model_slug in candidate_ids
             ):
                 pricing = model.get("pricing", {})
 

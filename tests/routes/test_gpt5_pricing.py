@@ -93,6 +93,27 @@ class TestGPT51Pricing:
         assert float(pricing["completion"]) == 10.00
 
     @patch('src.services.models.get_cached_models')
+    def test_gpt51_pricing_lookup_hyphen_alias(self, mock_get_cached):
+        """Test that pricing lookup works for hyphenated GPT-5-1 alias"""
+        from src.services.pricing import get_model_pricing
+
+        mock_get_cached.return_value = [
+            {
+                "id": "openai/gpt-5.1",
+                "pricing": {
+                    "prompt": "1.25",
+                    "completion": "10.00"
+                }
+            }
+        ]
+
+        pricing = get_model_pricing("openai/gpt-5-1")
+
+        assert pricing["found"] is True
+        assert float(pricing["prompt"]) == 1.25
+        assert float(pricing["completion"]) == 10.00
+
+    @patch('src.services.models.get_cached_models')
     def test_gpt51_cost_calculation(self, mock_get_cached):
         """Test that costs are calculated correctly for GPT-5.1"""
         from src.services.pricing import calculate_cost
@@ -340,6 +361,26 @@ class TestGPT51CostEstimation:
         assert cost == pytest.approx(expected_cost, rel=1e-9)
         # Should be ~$0.625 (125 + 500) / 1M = 625 / 1M
         assert cost > 0.6 and cost < 0.7
+
+    @patch('src.services.models.get_cached_models')
+    def test_gpt51_hyphen_alias_cost(self, mock_get_cached):
+        """Test cost estimation works for hyphen alias input"""
+        from src.services.pricing import calculate_cost
+
+        mock_get_cached.return_value = [
+            {
+                "id": "openai/gpt-5.1",
+                "pricing": {
+                    "prompt": "1.25",
+                    "completion": "10.00"
+                }
+            }
+        ]
+
+        cost = calculate_cost("openai/gpt-5-1", 1000, 500)
+        expected_cost = (1000 * 1.25 + 500 * 10.00) / 1_000_000
+
+        assert cost == pytest.approx(expected_cost, rel=1e-9)
 
 
 class TestGPT51Integration:
