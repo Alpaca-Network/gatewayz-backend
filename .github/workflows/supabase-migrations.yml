@@ -99,7 +99,7 @@ jobs:
       - name: Install Supabase CLI
         run: |
           echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
-          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_${{ env.SUPABASE_CLI_VERSION }}_linux_amd64.tar.gz | tar -xz
+          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xz
           sudo mv supabase /usr/local/bin/
           supabase --version
 
@@ -207,7 +207,7 @@ jobs:
       - name: Install Supabase CLI
         run: |
           echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
-          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_${{ env.SUPABASE_CLI_VERSION }}_linux_amd64.tar.gz | tar -xz
+          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xz
           sudo mv supabase /usr/local/bin/
           supabase --version
 
