@@ -191,13 +191,13 @@ async def get_providers(
     limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     gateway: Optional[str] = Query(
-        "openrouter",
+        "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
 ):
     """Get all available provider list with detailed metric data including model count and logo URLs"""
     try:
-        gateway_value = (gateway or "openrouter").lower()
+        gateway_value = (gateway or "all").lower()
         # Support both 'huggingface' and 'hug' as aliases
         if gateway_value == "huggingface":
             gateway_value = "hug"
@@ -310,7 +310,7 @@ async def get_models(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
     gateway: Optional[str] = Query(
-        "openrouter",
+        "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
 ):
@@ -319,7 +319,7 @@ async def get_models(
     try:
         provider = normalize_developer_segment(provider)
         logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}")
-        gateway_value = (gateway or "openrouter").lower()
+        gateway_value = (gateway or "all").lower()
         # Support both 'huggingface' and 'hug' as aliases
         if gateway_value == "huggingface":
             gateway_value = "hug"
@@ -829,7 +829,7 @@ async def get_specific_model(
             )
 
         # Determine which gateway was used
-        detected_gateway = model_data.get("source_gateway", gateway or "openrouter")
+        detected_gateway = model_data.get("source_gateway", gateway or "all")
 
         # Get enhanced providers data for all gateways
         provider_groups: List[List[dict]] = []
