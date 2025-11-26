@@ -187,7 +187,7 @@ BEGIN
     RAISE NOTICE '  - Session creation: 5-15x faster ⚡ (timeout reduced from 15s to <2s)';
     RAISE NOTICE '  - Authentication: 20-100x faster ⚡';
     RAISE NOTICE '';
-    RAISE NOTICE 'Cache with 5min TTL adds additional 95%+ speedup for repeated users';
+    RAISE NOTICE 'Cache with 5min TTL adds additional 95%%+ speedup for repeated users';
     RAISE NOTICE 'Background activity logging eliminates 50-100ms per request';
     RAISE NOTICE '';
     RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to verify improvements!';
