@@ -114,19 +114,19 @@ class TestGetProvidersEndpoint:
 
     @patch('src.routes.catalog.get_cached_providers')
     def test_get_providers_empty_data(self, mock_providers):
-        """Test when no provider data available"""
+        """Test when no provider data available - should return 200 with empty response (graceful degradation)"""
         mock_providers.return_value = []
 
         response = client.get("/v1/provider")
-        assert response.status_code in [503, 500]
+        assert response.status_code == 200  # Changed: graceful degradation, not 503
 
     @patch('src.routes.catalog.get_cached_providers')
     def test_get_providers_none_data(self, mock_providers):
-        """Test when provider data is None"""
+        """Test when provider data is None - should return 200 with empty response (graceful degradation)"""
         mock_providers.return_value = None
 
         response = client.get("/v1/provider")
-        assert response.status_code == 503
+        assert response.status_code == 200  # Changed: graceful degradation, not 503
 
     @patch('src.routes.catalog.get_cached_models')
     def test_get_providers_groq(self, mock_models):
@@ -146,19 +146,19 @@ class TestGetProvidersEndpoint:
 
     @patch('src.routes.catalog.get_cached_models')
     def test_get_providers_together(self, mock_models):
-        """Test Together gateway"""
+        """Test Together gateway - should return 200 with empty data (graceful degradation)"""
         mock_models.return_value = []
 
         response = client.get("/v1/provider?gateway=together")
-        assert response.status_code in [503, 500]
+        assert response.status_code == 200  # Changed: graceful degradation, not 503
 
     @patch('src.routes.catalog.get_cached_models')
     def test_get_providers_cerebras(self, mock_models):
-        """Test Cerebras gateway"""
+        """Test Cerebras gateway - should return 200 with empty data (graceful degradation)"""
         mock_models.return_value = []
 
         response = client.get("/v1/provider?gateway=cerebras")
-        assert response.status_code in [503, 500]
+        assert response.status_code == 200  # Changed: graceful degradation, not 503
 
     @patch('src.routes.catalog.get_cached_models')
     def test_get_providers_xai(self, mock_models):
@@ -178,11 +178,11 @@ class TestGetProvidersEndpoint:
 
     @patch('src.routes.catalog.get_cached_models')
     def test_get_providers_featherless(self, mock_models):
-        """Test Featherless gateway"""
+        """Test Featherless gateway - should return 200 with empty data (graceful degradation)"""
         mock_models.return_value = []
 
         response = client.get("/v1/provider?gateway=featherless")
-        assert response.status_code in [503, 500]
+        assert response.status_code == 200  # Changed: graceful degradation, not 503
 
 
 class TestModelsEndpoint:
