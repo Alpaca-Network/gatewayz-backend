@@ -23,6 +23,53 @@ from src.utils.security_validators import sanitize_for_logging
 logger = logging.getLogger(__name__)
 
 
+def _invalidate_all_user_caches_by_user_id(user_id: int) -> None:
+    """
+    Invalidate ALL caches for a user by looking up their API keys.
+
+    This is a comprehensive cache invalidation that:
+    1. Invalidates user_id cache
+    2. Looks up all API keys for the user
+    3. Invalidates each API key cache
+
+    This ensures that credit updates are immediately reflected in all cached data,
+    preventing stale balance issues.
+
+    Args:
+        user_id: User ID to invalidate caches for
+    """
+    try:
+        # Always invalidate user_id cache
+        invalidate_user_by_id(user_id)
+
+        # Get all API keys for this user and invalidate each one
+        # Import here to avoid circular dependency
+        from src.db.api_keys import get_user_api_keys
+
+        api_keys = get_user_api_keys(user_id)
+
+        if api_keys:
+            for key_data in api_keys:
+                api_key = key_data.get("api_key")
+                if api_key:
+                    invalidate_api_key_cache(api_key)
+                    logger.debug(f"Invalidated API key cache for user {user_id}: {api_key[:15]}...")
+
+            logger.info(
+                f"Invalidated all caches for user {user_id}: "
+                f"user_id cache + {len(api_keys)} API key caches"
+            )
+        else:
+            logger.debug(f"No API keys found for user {user_id}, only invalidated user_id cache")
+
+    except Exception as e:
+        # Log error but don't raise - cache invalidation failure shouldn't break the operation
+        logger.error(
+            f"Failed to invalidate all caches for user {user_id}: {e}. "
+            f"Caches will expire naturally via TTL."
+        )
+
+
 def create_enhanced_user(
     username: str,
     email: str,
@@ -314,11 +361,12 @@ def add_credits_to_user(
             metadata=metadata,
         )
 
-        # IMPORTANT: Invalidate cache after credit update
-        invalidate_user_by_id(user_id)
+        # CRITICAL: Invalidate ALL caches for this user
+        # Must invalidate both user_id cache AND all API key caches
+        _invalidate_all_user_caches_by_user_id(user_id)
 
         logger.info(
-            "Added %s credits to user %s. Balance: %s → %s (cache invalidated)",
+            "Added %s credits to user %s. Balance: %s → %s (all caches invalidated)",
             sanitize_for_logging(str(credits)),
             sanitize_for_logging(str(user_id)),
             sanitize_for_logging(str(balance_before)),
@@ -945,7 +993,15 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         if not result.data:
             raise ValueError("Failed to update user profile")
 
-        # Return updated user data
+        # CRITICAL: Invalidate cache after profile update
+        user_id = user.get("id")
+        if user_id:
+            _invalidate_all_user_caches_by_user_id(user_id)
+        else:
+            # Fallback: at least invalidate the API key cache
+            invalidate_api_key_cache(api_key)
+
+        # Return updated user data (will fetch from DB since cache was invalidated)
         updated_user = get_user(api_key)
         return updated_user
 
@@ -1014,7 +1070,10 @@ def mark_welcome_email_sent(user_id: int) -> bool:
         if not result.data:
             raise ValueError(f"User with ID {user_id} not found")
 
-        logger.info(f"Welcome email marked as sent for user {user_id}")
+        # Invalidate cache after update
+        _invalidate_all_user_caches_by_user_id(user_id)
+
+        logger.info(f"Welcome email marked as sent for user {user_id} (cache invalidated)")
         return True
 
     except Exception as e:
