@@ -6,10 +6,26 @@ Handles CRUD operations for AI models with provider relationships
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_model_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert Decimal and other non-JSON-serializable types to JSON-compatible types"""
+    serialized = {}
+    for key, value in data.items():
+        if isinstance(value, Decimal):
+            serialized[key] = float(value)
+        elif isinstance(value, dict):
+            serialized[key] = _serialize_model_data(value)
+        elif isinstance(value, list):
+            serialized[key] = [_serialize_model_data(item) if isinstance(item, dict) else item for item in value]
+        else:
+            serialized[key] = value
+    return serialized
 
 
 def get_all_models(
@@ -156,7 +172,8 @@ def create_model(model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     try:
         supabase = get_supabase_client()
-        response = supabase.table("models").insert(model_data).execute()
+        serialized_data = _serialize_model_data(model_data)
+        response = supabase.table("models").insert(serialized_data).execute()
 
         if response.data:
             logger.info(f"Created model: {model_data.get('model_name')}")
@@ -472,10 +489,11 @@ def upsert_model(model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     try:
         supabase = get_supabase_client()
+        serialized_data = _serialize_model_data(model_data)
         response = (
             supabase.table("models")
             .upsert(
-                model_data,
+                serialized_data,
                 on_conflict="provider_id,provider_model_id"
             )
             .execute()
@@ -502,10 +520,14 @@ def bulk_upsert_models(models_data: List[Dict[str, Any]]) -> List[Dict[str, Any]
     """
     try:
         supabase = get_supabase_client()
+
+        # Serialize Decimal objects to floats
+        serialized_models = [_serialize_model_data(model) for model in models_data]
+
         response = (
             supabase.table("models")
             .upsert(
-                models_data,
+                serialized_models,
                 on_conflict="provider_id,provider_model_id"
             )
             .execute()

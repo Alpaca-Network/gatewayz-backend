@@ -259,6 +259,48 @@ class Config:
     LOKI_PUSH_URL = _default_loki_push_url
     LOKI_QUERY_URL = _default_loki_query_url
 
+    # Grafana Cloud Configuration
+    GRAFANA_CLOUD_ENABLED = os.environ.get("GRAFANA_CLOUD_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Grafana Cloud Prometheus (Metrics)
+    GRAFANA_PROMETHEUS_REMOTE_WRITE_URL = os.environ.get(
+        "GRAFANA_PROMETHEUS_REMOTE_WRITE_URL"
+    )
+    GRAFANA_PROMETHEUS_USERNAME = os.environ.get("GRAFANA_PROMETHEUS_USERNAME")
+    GRAFANA_PROMETHEUS_API_KEY = os.environ.get("GRAFANA_PROMETHEUS_API_KEY")
+
+    # Grafana Cloud Loki (Logs)
+    GRAFANA_LOKI_USERNAME = os.environ.get("GRAFANA_LOKI_USERNAME")
+    GRAFANA_LOKI_API_KEY = os.environ.get("GRAFANA_LOKI_API_KEY")
+
+    # Grafana Cloud Tempo (Traces)
+    GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
+    GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")
+
+    # Redis Configuration (for real-time metrics and rate limiting)
+    REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    REDIS_MAX_CONNECTIONS = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
+    REDIS_SOCKET_TIMEOUT = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
+    REDIS_SOCKET_CONNECT_TIMEOUT = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
+
+    # Metrics Aggregation Configuration
+    METRICS_AGGREGATION_ENABLED = os.environ.get("METRICS_AGGREGATION_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    METRICS_AGGREGATION_INTERVAL_MINUTES = int(
+        os.environ.get("METRICS_AGGREGATION_INTERVAL_MINUTES", "60")
+    )
+    METRICS_REDIS_RETENTION_HOURS = int(os.environ.get("METRICS_REDIS_RETENTION_HOURS", "2"))
+
     # ==================== Filesystem Paths ====================
     PROJECT_ROOT = _project_root
     SRC_ROOT = _src_root

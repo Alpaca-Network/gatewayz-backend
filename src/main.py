@@ -21,9 +21,50 @@ from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 configure_logging()
 logger = logging.getLogger(__name__)
 
-# Initialize Sentry for error monitoring
+# Initialize Sentry for error monitoring with adaptive sampling
 if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
     import sentry_sdk
+
+    def sentry_traces_sampler(sampling_context):
+        """
+        Adaptive sampling to control Sentry costs while maintaining visibility.
+
+        Sampling strategy:
+        - Development: 100% (all requests)
+        - Health/metrics endpoints: 0% (skip monitoring endpoints)
+        - Critical endpoints: 20% (chat, messages)
+        - Other endpoints: 10%
+        - Errors: Always sampled (parent_sampled)
+        """
+        # Always sample errors
+        if sampling_context.get("parent_sampled") is not None:
+            return 1.0
+
+        # 100% sampling in development
+        if Config.SENTRY_ENVIRONMENT == "development":
+            return 1.0
+
+        # Get endpoint path
+        endpoint = ""
+        if "wsgi_environ" in sampling_context:
+            endpoint = sampling_context["wsgi_environ"].get("PATH_INFO", "")
+        elif "asgi_scope" in sampling_context:
+            endpoint = sampling_context["asgi_scope"].get("path", "")
+
+        # Skip health check and monitoring endpoints (0%)
+        if endpoint in ["/health", "/metrics", "/api/health", "/api/monitoring/health"]:
+            return 0.0
+
+        # Critical inference endpoints: 20% sampling
+        if endpoint in ["/v1/chat/completions", "/v1/messages", "/v1/images/generations"]:
+            return 0.2
+
+        # Admin endpoints: 50% sampling (important but lower volume)
+        if endpoint.startswith("/api/admin"):
+            return 0.5
+
+        # All other endpoints: 10% sampling
+        return 0.1
 
     sentry_sdk.init(
         dsn=Config.SENTRY_DSN,
@@ -35,16 +76,16 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         environment=Config.SENTRY_ENVIRONMENT,
         # Release tracking for Sentry release management
         release=Config.SENTRY_RELEASE,
-        # Set traces_sample_rate to capture transactions for tracing
-        traces_sample_rate=Config.SENTRY_TRACES_SAMPLE_RATE,
-        # Set profiles_sample_rate to capture profiling data
-        profiles_sample_rate=Config.SENTRY_PROFILES_SAMPLE_RATE,
+        # Adaptive sampling function (replaces static traces_sample_rate)
+        traces_sampler=sentry_traces_sampler,
+        # Reduced profiling: 5% (down from default)
+        profiles_sample_rate=0.05,
         # Set profile_lifecycle to "trace" to run profiler during transactions
         profile_lifecycle="trace",
     )
     logger.info(
-        f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT}, "
-        f"release: {Config.SENTRY_RELEASE})"
+        f"✅ Sentry initialized with adaptive sampling "
+        f"(environment: {Config.SENTRY_ENVIRONMENT}, release: {Config.SENTRY_RELEASE})"
     )
 else:
     logger.info("⏭️  Sentry disabled (SENTRY_ENABLED=false or SENTRY_DSN not set)")
@@ -261,6 +302,7 @@ def create_app() -> FastAPI:
         ("health", "Health Check"),
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
+        ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
         ("chat", "Chat Completions"),  # Moved before catalog
         ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint

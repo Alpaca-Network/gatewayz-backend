@@ -24,6 +24,13 @@ from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key
 from src.services.passive_health_monitor import capture_model_health
 from src.utils.rate_limit_headers import get_rate_limit_headers
+from src.services.prometheus_metrics import (
+    model_inference_requests,
+    model_inference_duration,
+    tokens_used,
+    credits_used,
+)
+from src.services.redis_metrics import get_redis_metrics
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -339,6 +346,7 @@ from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
+    filter_by_circuit_breaker,
     map_provider_error,
     should_failover,
 )
@@ -464,6 +472,110 @@ def _fallback_get_user(api_key: str):
     return None
 
 
+async def _record_inference_metrics_and_health(
+    provider: str,
+    model: str,
+    elapsed_seconds: float,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost: float,
+    success: bool = True,
+    error_message: str | None = None,
+):
+    """
+    Record Prometheus metrics, Redis metrics, and passive health monitoring.
+
+    This centralizes metrics recording for both streaming and non-streaming requests.
+    """
+    try:
+        # Record Prometheus metrics
+        status = "success" if success else "error"
+
+        # Request count
+        model_inference_requests.labels(
+            provider=provider,
+            model=model,
+            status=status
+        ).inc()
+
+        # Duration
+        model_inference_duration.labels(
+            provider=provider,
+            model=model
+        ).observe(elapsed_seconds)
+
+        # Token usage
+        if prompt_tokens > 0:
+            tokens_used.labels(
+                provider=provider,
+                model=model,
+                token_type="input"
+            ).inc(prompt_tokens)
+
+        if completion_tokens > 0:
+            tokens_used.labels(
+                provider=provider,
+                model=model,
+                token_type="output"
+            ).inc(completion_tokens)
+
+        # Credits consumed
+        if cost > 0:
+            credits_used.labels(
+                provider=provider,
+                model=model
+            ).inc(cost)
+
+        # Record Redis metrics (real-time dashboards)
+        redis_metrics = get_redis_metrics()
+        await redis_metrics.record_request(
+            provider=provider,
+            model=model,
+            latency_ms=int(elapsed_seconds * 1000),
+            success=success,
+            cost=cost,
+            tokens_input=prompt_tokens,
+            tokens_output=completion_tokens,
+            error_message=error_message
+        )
+
+        # Passive health monitoring (background task)
+        response_time_ms = int(elapsed_seconds * 1000)
+        health_status = "success" if success else "error"
+
+        # Create usage dict for health monitoring
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens
+        }
+
+        # Call passive health monitor in background (non-blocking)
+        asyncio.create_task(
+            asyncio.to_thread(
+                capture_model_health,
+                provider,
+                model,
+                response_time_ms,
+                health_status,
+                error_message,
+                usage
+            )
+        )
+
+        logger.debug(
+            f"Recorded metrics for {provider}/{model}: "
+            f"duration={elapsed_seconds:.3f}s, "
+            f"tokens={prompt_tokens}+{completion_tokens}, "
+            f"cost=${cost:.4f}, "
+            f"status={status}"
+        )
+
+    except Exception as e:
+        # Never let metrics recording break the main flow
+        logger.warning(f"Failed to record inference metrics: {e}", exc_info=True)
+
+
 async def _process_stream_completion_background(
     user,
     api_key,
@@ -546,6 +658,18 @@ async def _process_stream_completion_background(
 
         # Increment API key usage counter
         await _to_thread(increment_api_key_usage, api_key)
+
+        # Record Prometheus metrics and passive health monitoring
+        await _record_inference_metrics_and_health(
+            provider=provider,
+            model=model,
+            elapsed_seconds=elapsed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            success=True,
+            error_message=None
+        )
 
         # Log activity
         try:
@@ -1102,6 +1226,7 @@ async def chat_completions(
 
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(original_model, provider_chain)
+            provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
             model = original_model
 
         # Diagnostic logging for tools parameter
@@ -1610,6 +1735,18 @@ async def chat_completions(
 
         await _to_thread(increment_api_key_usage, api_key)
 
+        # Record Prometheus metrics and passive health monitoring
+        await _record_inference_metrics_and_health(
+            provider=provider,
+            model=model,
+            elapsed_seconds=elapsed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            success=True,
+            error_message=None
+        )
+
         # === 4.5) Log activity for tracking and analytics ===
         try:
             provider_name = get_provider_from_model(model)
@@ -2026,6 +2163,7 @@ async def unified_responses(
 
         provider_chain = build_provider_failover_chain(provider)
         provider_chain = enforce_model_failover_rules(original_model, provider_chain)
+        provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
         model = original_model
 
         # Diagnostic logging for tools parameter
@@ -2397,6 +2535,18 @@ async def unified_responses(
             await _to_thread(update_rate_limit_usage, api_key, total_tokens)
 
         await _to_thread(increment_api_key_usage, api_key)
+
+        # Record Prometheus metrics and passive health monitoring
+        await _record_inference_metrics_and_health(
+            provider=provider,
+            model=model,
+            elapsed_seconds=elapsed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            success=True,
+            error_message=None
+        )
 
         # === 4.5) Log activity for tracking and analytics ===
         try:

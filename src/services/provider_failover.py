@@ -111,6 +111,77 @@ def enforce_model_failover_rules(model_id: str | None, provider_chain: list[str]
     return [locked_provider]
 
 
+def filter_by_circuit_breaker(
+    model_id: str | None,
+    provider_chain: list[str],
+    allow_emergency_fallback: bool = True
+) -> list[str]:
+    """
+    Filter provider chain based on circuit breaker state.
+
+    Removes providers with OPEN circuit breakers, but keeps at least one provider
+    if allow_emergency_fallback is True to prevent complete failure.
+
+    Args:
+        model_id: The model being requested
+        provider_chain: Original provider chain
+        allow_emergency_fallback: If True, keep least-failed provider even if circuit is open
+
+    Returns:
+        Filtered provider chain with circuit breakers considered
+    """
+    if not model_id or not provider_chain:
+        return provider_chain
+
+    try:
+        from src.services.model_availability import availability_service
+
+        # Filter providers based on circuit breaker state
+        available_providers = []
+        unavailable_providers = []
+
+        for provider in provider_chain:
+            is_available = availability_service.is_model_available(model_id, provider)
+
+            if is_available:
+                available_providers.append(provider)
+            else:
+                unavailable_providers.append(provider)
+
+                # Log why provider was filtered out
+                availability = availability_service.get_model_availability(model_id, provider)
+                if availability:
+                    logger.info(
+                        f"Provider '{provider}' filtered from chain for model '{model_id}': "
+                        f"circuit_breaker={availability.circuit_breaker_state}, "
+                        f"status={availability.status}"
+                    )
+
+        # If all providers filtered out and emergency fallback allowed, use least-failed
+        if not available_providers and allow_emergency_fallback and unavailable_providers:
+            # Use the first provider from original chain as emergency fallback
+            emergency_provider = unavailable_providers[0]
+            logger.warning(
+                f"All providers have open circuits for model '{model_id}'. "
+                f"Using emergency fallback: {emergency_provider}"
+            )
+            return [emergency_provider]
+
+        # Log filtering results
+        if unavailable_providers:
+            logger.info(
+                f"Circuit breaker filtering for '{model_id}': "
+                f"available={available_providers}, filtered_out={unavailable_providers}"
+            )
+
+        return available_providers if available_providers else provider_chain
+
+    except Exception as e:
+        # Never let circuit breaker checking break routing
+        logger.warning(f"Circuit breaker filter error for '{model_id}': {e}")
+        return provider_chain
+
+
 def map_provider_error(
     provider: str,
     model: str,

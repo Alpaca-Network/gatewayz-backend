@@ -44,10 +44,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
-      supabase_url: ${{ steps.set-env.outputs.supabase_url }}
-      supabase_key: ${{ steps.set-env.outputs.supabase_key }}
-      project_ref: ${{ steps.set-env.outputs.project_ref }}
-      db_password: ${{ steps.set-env.outputs.db_password }}
 
     steps:
       - name: Determine environment
@@ -70,19 +66,7 @@ jobs:
           fi
 
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-
-          # Set environment-specific secrets
-          if [ "$ENV" == "production" ]; then
-            echo "supabase_url=${{ secrets.SUPABASE_URL }}" >> $GITHUB_OUTPUT
-            echo "supabase_key=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> $GITHUB_OUTPUT
-            echo "project_ref=${{ secrets.SUPABASE_PROJECT_REF }}" >> $GITHUB_OUTPUT
-            echo "db_password=${{ secrets.SUPABASE_DB_PASSWORD }}" >> $GITHUB_OUTPUT
-          else
-            echo "supabase_url=${{ secrets.SUPABASE_STAGING_URL }}" >> $GITHUB_OUTPUT
-            echo "supabase_key=${{ secrets.SUPABASE_STAGING_SERVICE_ROLE_KEY }}" >> $GITHUB_OUTPUT
-            echo "project_ref=${{ secrets.SUPABASE_STAGING_PROJECT_REF }}" >> $GITHUB_OUTPUT
-            echo "db_password=${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}" >> $GITHUB_OUTPUT
-          fi
+          echo "✅ Detected environment: $ENV"
 
   # Validate migrations before applying
   validate-migrations:
@@ -232,8 +216,6 @@ jobs:
       - name: Configure Supabase CLI
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ needs.setup-environment.outputs.db_password }}
-          PROJECT_REF: ${{ needs.setup-environment.outputs.project_ref }}
         run: |
           echo "🔐 Authenticating with Supabase..."
 
@@ -247,13 +229,27 @@ jobs:
 
       - name: Link to Supabase project
         env:
-          PROJECT_REF: ${{ needs.setup-environment.outputs.project_ref }}
-          SUPABASE_DB_PASSWORD: ${{ needs.setup-environment.outputs.db_password }}
+          ENVIRONMENT: ${{ needs.setup-environment.outputs.environment }}
+          # Production secrets
+          PROD_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          PROD_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          # Staging secrets
+          STAGING_PROJECT_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
+          STAGING_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
         run: |
-          echo "🔗 Linking to Supabase project: $PROJECT_REF"
+          echo "🔗 Linking to Supabase project ($ENVIRONMENT)..."
+
+          # Select credentials based on environment
+          if [ "$ENVIRONMENT" == "production" ]; then
+            PROJECT_REF="$PROD_PROJECT_REF"
+            DB_PASSWORD="$PROD_DB_PASSWORD"
+          else
+            PROJECT_REF="$STAGING_PROJECT_REF"
+            DB_PASSWORD="$STAGING_DB_PASSWORD"
+          fi
 
           # Link to the project
-          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" || {
+          supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD" || {
             echo "❌ Failed to link to Supabase project"
             echo "This might be due to:"
             echo "  1. Invalid project reference"
@@ -263,7 +259,7 @@ jobs:
             exit 1
           }
 
-          echo "✅ Successfully linked to project"
+          echo "✅ Successfully linked to project: $PROJECT_REF"
 
       - name: Check migration status
         run: |
@@ -277,14 +273,25 @@ jobs:
       - name: Apply pending migrations
         id: apply
         env:
-          SUPABASE_DB_PASSWORD: ${{ needs.setup-environment.outputs.db_password }}
+          ENVIRONMENT: ${{ needs.setup-environment.outputs.environment }}
+          # Production secrets
+          PROD_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          # Staging secrets
+          STAGING_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
         run: |
-          echo "🚀 Applying pending migrations to ${{ needs.setup-environment.outputs.environment }}..."
+          echo "🚀 Applying pending migrations to $ENVIRONMENT..."
+
+          # Select credentials based on environment
+          if [ "$ENVIRONMENT" == "production" ]; then
+            DB_PASSWORD="$PROD_DB_PASSWORD"
+          else
+            DB_PASSWORD="$STAGING_DB_PASSWORD"
+          fi
 
           set +e  # Don't exit immediately on error
 
           # Apply migrations with detailed output
-          supabase db push --password "$SUPABASE_DB_PASSWORD" 2>&1 | tee migration-output.txt
+          supabase db push --password "$DB_PASSWORD" 2>&1 | tee migration-output.txt
 
           MIGRATION_EXIT_CODE=$?
 
@@ -336,8 +343,8 @@ jobs:
           echo "To rollback, run locally:"
           echo "  supabase migration repair --status reverted <timestamp>"
           echo ""
-          echo "Or restore from a backup in the Supabase Dashboard"
-          echo "  https://supabase.com/dashboard/project/${{ needs.setup-environment.outputs.project_ref }}/database/backups"
+          echo "Or restore from a backup in the Supabase Dashboard:"
+          echo "  https://supabase.com/dashboard → Your Project → Database → Backups"
 
   # Notification job
   notify:
