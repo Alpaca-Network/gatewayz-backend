@@ -191,24 +191,23 @@ BEGIN
     WHERE tablename = 'usage_records' 
         AND indexname LIKE 'idx_usage_records_%';
 
-    RAISE NOTICE '---';
+    RAISE NOTICE 'Migration Summary:';
     RAISE NOTICE '=================================================================';
-    RAISE NOTICE '✅ Performance Indexes Migration Completed Successfully!';
+    RAISE NOTICE 'Performance Indexes Migration Completed Successfully';
     RAISE NOTICE '=================================================================';
-    RAISE NOTICE '---';
+    RAISE NOTICE 'Index Counts:';
     RAISE NOTICE 'Indexes created on activity_log: %', activity_count;
     RAISE NOTICE 'Indexes created on usage_records: %', usage_count;
     RAISE NOTICE 'Total indexes: %', activity_count + usage_count;
-    RAISE NOTICE '---';
-    RAISE NOTICE 'Expected performance improvements:';
-    RAISE NOTICE '  - Gateway stats: 10-50x faster ⚡';
-    RAISE NOTICE '  - Provider stats: 10-50x faster ⚡';
-    RAISE NOTICE '  - Trending models: 5-20x faster ⚡';
-    RAISE NOTICE '  - User analytics: 5-15x faster ⚡';
-    RAISE NOTICE '---';
-    RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to see the improvements!';
+    RAISE NOTICE 'Expected Performance Improvements:';
+    RAISE NOTICE '  - Gateway stats: 10-50x faster';
+    RAISE NOTICE '  - Provider stats: 10-50x faster';
+    RAISE NOTICE '  - Trending models: 5-20x faster';
+    RAISE NOTICE '  - User analytics: 5-15x faster';
+    RAISE NOTICE 'Next Steps:';
+    RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to see the improvements';
     RAISE NOTICE '=================================================================';
-    RAISE NOTICE '---';
+    RAISE NOTICE 'Migration completed successfully';
 END $$;
 
 -- Display all indexes with sizes
