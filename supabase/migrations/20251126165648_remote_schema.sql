@@ -20,37 +20,37 @@ BEGIN
     END IF;
 END $$;
 
-drop policy "Service role can manage audit logs" on "public"."api_key_audit_logs";
+drop policy if exists "Service role can manage audit logs" on "public"."api_key_audit_logs";
 
-drop policy "Users can read their own audit logs" on "public"."api_key_audit_logs";
+drop policy if exists "Users can read their own audit logs" on "public"."api_key_audit_logs";
 
-drop policy "Allow authenticated read access to health history" on "public"."model_health_history";
+drop policy if exists "Allow authenticated read access to health history" on "public"."model_health_history";
 
-drop policy "Allow service role full access to health history" on "public"."model_health_history";
+drop policy if exists "Allow service role full access to health history" on "public"."model_health_history";
 
-drop policy "Authenticated users can read" on "public"."model_health_tracking";
+drop policy if exists "Authenticated users can read" on "public"."model_health_tracking";
 
-drop policy "Service role can do anything" on "public"."model_health_tracking";
+drop policy if exists "Service role can do anything" on "public"."model_health_tracking";
 
-drop policy "Allow authenticated read access to models" on "public"."models";
+drop policy if exists "Allow authenticated read access to models" on "public"."models";
 
-drop policy "Allow public read access to active models" on "public"."models";
+drop policy if exists "Allow public read access to active models" on "public"."models";
 
-drop policy "Allow service role full access to models" on "public"."models";
+drop policy if exists "Allow service role full access to models" on "public"."models";
 
-drop policy "Allow authenticated read access to providers" on "public"."providers";
+drop policy if exists "Allow authenticated read access to providers" on "public"."providers";
 
-drop policy "Allow public read access to providers" on "public"."providers";
+drop policy if exists "Allow public read access to providers" on "public"."providers";
 
-drop policy "Allow service role full access to providers" on "public"."providers";
+drop policy if exists "Allow service role full access to providers" on "public"."providers";
 
-drop policy "Service role can manage rate limit configs" on "public"."rate_limit_configs";
+drop policy if exists "Service role can manage rate limit configs" on "public"."rate_limit_configs";
 
-drop policy "Users can read their own rate limit configs" on "public"."rate_limit_configs";
+drop policy if exists "Users can read their own rate limit configs" on "public"."rate_limit_configs";
 
-drop policy "Service role can manage rate limit usage" on "public"."rate_limit_usage";
+drop policy if exists "Service role can manage rate limit usage" on "public"."rate_limit_usage";
 
-drop policy "Users can read their own rate limit usage" on "public"."rate_limit_usage";
+drop policy if exists "Users can read their own rate limit usage" on "public"."rate_limit_usage";
 
 revoke delete on table "public"."api_key_audit_logs" from "anon";
 
