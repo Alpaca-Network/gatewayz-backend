@@ -743,8 +743,7 @@ async def stream_generator(
         if chunk_count == 0:
             logger.error(
                 f"[EMPTY STREAM] Provider {provider} returned zero chunks for model {model}. "
-                f"This indicates a provider routing or model ID transformation issue.",
-                exc_info=True
+                f"This indicates a provider routing or model ID transformation issue."
             )
             # Send error chunk to client
             error_chunk = {
