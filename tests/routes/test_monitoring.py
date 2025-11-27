@@ -184,7 +184,7 @@ def mock_analytics_service():
 def mock_availability_service():
     """Mock model availability service"""
     with patch("src.routes.monitoring.availability_service") as mock:
-        # Create mock state objects that return the string when .name is accessed
+        # Create mock states with proper .name attribute
         closed_state = Mock()
         closed_state.name = "CLOSED"
 

@@ -7,7 +7,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 from src.services.analytics import get_trial_analytics
 
 
