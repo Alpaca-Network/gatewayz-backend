@@ -23,6 +23,18 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Setup Supabase CLI
+      uses: supabase/setup-cli@v1
+      with:
+        version: latest
+
+    - name: Start Supabase local instance
+      run: |
+        supabase start
+        # Get the local Supabase credentials
+        echo "SUPABASE_URL=http://127.0.0.1:54321" >> $GITHUB_ENV
+        echo "SUPABASE_KEY=$(supabase status --output json | jq -r .anon_key)" >> $GITHUB_ENV
+
     - name: Cache pip packages
       uses: actions/cache@v4
       with:
@@ -40,8 +52,7 @@ jobs:
 
     - name: Set test environment variables
       run: |
-        echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> $GITHUB_ENV
-        echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> $GITHUB_ENV
+        # SUPABASE_URL and SUPABASE_KEY already set by local instance
         echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" >> $GITHUB_ENV
         echo "ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}" >> $GITHUB_ENV
         echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
@@ -68,6 +79,10 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
+
+    - name: Stop Supabase
+      if: always()
+      run: supabase stop --no-backup
 
   critical-tests:
     runs-on: ubuntu-latest
