@@ -5,8 +5,7 @@ These tests verify that the caching layer works correctly with Redis.
 """
 
 import pytest
-import time
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from src.services.auth_cache import (
     cache_user_by_api_key,
@@ -14,9 +13,6 @@ from src.services.auth_cache import (
     invalidate_api_key_cache,
     cache_user_by_id,
     get_cached_user_by_id,
-    invalidate_user_by_id,
-    get_auth_cache_stats,
-    clear_all_auth_caches,
 )
 
 from src.services.db_cache import (
@@ -24,12 +20,10 @@ from src.services.db_cache import (
     get_db_cache,
     cache_user,
     get_cached_user,
-    invalidate_user,
     get_cache_stats,
 )
 
 from src.services.model_catalog_cache import (
-    ModelCatalogCache,
     cache_full_catalog,
     get_cached_full_catalog,
     invalidate_full_catalog,
@@ -85,8 +79,8 @@ class TestAuthCacheBasic:
             # Invalidate
             invalidate_api_key_cache(api_key)
 
-            # Should be gone
-            cached_after_invalidate = get_cached_user_by_api_key(api_key)
+            # Should be gone - verify cache miss
+            get_cached_user_by_api_key(api_key)
             # May return None (invalidated) or None (Redis unavailable)
             # Either way, next DB fetch will refresh
 

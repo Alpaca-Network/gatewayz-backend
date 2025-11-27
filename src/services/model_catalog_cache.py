@@ -12,7 +12,6 @@ This module significantly improves catalog endpoint performance by:
 
 import json
 import logging
-import time
 from typing import Any, List, Optional
 
 from src.config.redis_config import get_redis_client, is_redis_available

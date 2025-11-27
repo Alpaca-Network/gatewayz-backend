@@ -14,7 +14,6 @@ from src.services.auth_cache import (
     get_cached_user_by_id,
     get_cached_user_by_privy_id,
     get_cached_user_by_username,
-    invalidate_all_user_caches,
     invalidate_api_key_cache,
     invalidate_user_by_id,
 )
