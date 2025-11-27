@@ -18,6 +18,18 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
+from src.main import app
+
+
+@pytest.fixture
+def client():
+    """FastAPI test client"""
+    # Clear any existing dependency overrides
+    app.dependency_overrides = {}
+    yield TestClient(app)
+    # Cleanup after test
+    app.dependency_overrides = {}
+
 
 @pytest.fixture
 def mock_redis_metrics():

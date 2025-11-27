@@ -361,7 +361,11 @@ class RedisMetrics:
             # Get all providers from sorted set (high to low)
             providers = self.redis.zrevrange("provider_health", 0, -1, withscores=True)
 
-            return {provider: score for provider, score in providers}
+            # Decode bytes to strings if needed
+            return {
+                provider.decode() if isinstance(provider, bytes) else provider: score
+                for provider, score in providers
+            }
         except Exception as e:
             logger.warning(f"Failed to get all provider health: {e}")
             return {}
@@ -392,8 +396,11 @@ class RedisMetrics:
             # Scan for old metric keys
             deleted_count = 0
             for key in self.redis.scan_iter("metrics:*"):
+                # Decode key if it's bytes
+                key_str = key.decode() if isinstance(key, bytes) else key
+
                 # Extract hour from key (format: metrics:provider:YYYY-MM-DD:HH)
-                parts = key.split(":")
+                parts = key_str.split(":")
                 if len(parts) >= 3:
                     hour_part = parts[2]
                     if hour_part < cutoff_key:
