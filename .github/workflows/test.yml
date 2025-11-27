@@ -30,13 +30,9 @@ jobs:
 
     - name: Start Supabase local instance
       run: |
-        # Supabase project already initialized in repo
+        # Start Supabase (automatically applies migrations in chronological order)
         supabase start
-        # Wait for services to be ready
-        sleep 5
-        # Apply migrations
-        supabase db push
-        # Get the local Supabase credentials
+        # Get the local Supabase credentials from the running instance
         echo "SUPABASE_URL=http://127.0.0.1:54321" >> $GITHUB_ENV
         echo "SUPABASE_KEY=$(supabase status --output json | jq -r .anon_key)" >> $GITHUB_ENV
 
