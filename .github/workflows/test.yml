@@ -30,9 +30,12 @@ jobs:
 
     - name: Start Supabase local instance
       run: |
-        supabase init --force || true
+        # Supabase project already initialized in repo
         supabase start
-        supabase db reset
+        # Wait for services to be ready
+        sleep 5
+        # Apply migrations
+        supabase db push
         # Get the local Supabase credentials
         echo "SUPABASE_URL=http://127.0.0.1:54321" >> $GITHUB_ENV
         echo "SUPABASE_KEY=$(supabase status --output json | jq -r .anon_key)" >> $GITHUB_ENV
