@@ -122,3 +122,17 @@ def test_openrouter_colon_suffix_variants():
     for model_id, expected_provider in test_cases:
         result = detect_provider_from_model_id(model_id)
         assert result == expected_provider, f"Expected '{expected_provider}' for {model_id}, got {result}"
+
+
+def test_transform_model_id_x_ai_alias():
+    """
+    Ensure deprecated x-ai prefix is normalized before provider-specific transform
+    """
+    result = transform_model_id("x-ai/grok-2", "xai")
+    assert result == "grok-2"
+
+
+def test_detect_provider_from_model_id_x_ai_prefix():
+    """Deprecated x-ai prefix should still route to the xai provider"""
+    result = detect_provider_from_model_id("x-ai/grok-code-fast-1")
+    assert result == "xai"

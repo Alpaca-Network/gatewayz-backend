@@ -134,50 +134,98 @@ def filter_by_circuit_breaker(
         return provider_chain
 
     try:
-        from src.services.model_availability import availability_service
+        from src.services.model_availability import (
+            AvailabilityStatus,
+            CircuitBreakerState,
+            availability_service,
+        )
 
-        # Filter providers based on circuit breaker state
-        available_providers = []
-        unavailable_providers = []
+        available_providers: list[str] = []
+        unavailable_providers: list[str] = []
+        provider_availability: dict[str, object | None] = {}
 
         for provider in provider_chain:
             is_available = availability_service.is_model_available(model_id, provider)
+            availability = availability_service.get_model_availability(model_id, provider)
+            provider_availability[provider] = availability
 
             if is_available:
                 available_providers.append(provider)
-            else:
-                unavailable_providers.append(provider)
+                continue
 
-                # Log why provider was filtered out
-                availability = availability_service.get_model_availability(model_id, provider)
-                if availability:
-                    logger.info(
-                        f"Provider '{provider}' filtered from chain for model '{model_id}': "
-                        f"circuit_breaker={availability.circuit_breaker_state}, "
-                        f"status={availability.status}"
-                    )
+            unavailable_providers.append(provider)
 
-        # If all providers filtered out and emergency fallback allowed, use least-failed
-        if not available_providers and allow_emergency_fallback and unavailable_providers:
-            # Use the first provider from original chain as emergency fallback
-            emergency_provider = unavailable_providers[0]
+            if availability:
+                logger.info(
+                    "Provider '%s' filtered from chain for model '%s': circuit_breaker=%s, status=%s",
+                    provider,
+                    model_id,
+                    availability.circuit_breaker_state,
+                    availability.status,
+                )
+
+        if available_providers:
+            if unavailable_providers:
+                logger.info(
+                    "Circuit breaker filtering for '%s': available=%s, filtered_out=%s",
+                    model_id,
+                    available_providers,
+                    unavailable_providers,
+                )
+            return available_providers
+
+        if not allow_emergency_fallback:
+            return []
+
+        half_open_candidates = [
+            provider
+            for provider in provider_chain
+            if provider_availability.get(provider)
+            and provider_availability[provider].circuit_breaker_state
+            == CircuitBreakerState.HALF_OPEN
+        ]
+        if half_open_candidates:
             logger.warning(
-                f"All providers have open circuits for model '{model_id}'. "
-                f"Using emergency fallback: {emergency_provider}"
+                "All providers unhealthy for model '%s'; using half-open fallback providers: %s",
+                model_id,
+                half_open_candidates,
             )
-            return [emergency_provider]
+            return half_open_candidates
 
-        # Log filtering results
-        if unavailable_providers:
+        degraded_candidates = [
+            provider
+            for provider in provider_chain
+            if provider_availability.get(provider)
+            and provider_availability[provider].circuit_breaker_state != CircuitBreakerState.OPEN
+            and provider_availability[provider].status
+            in (AvailabilityStatus.DEGRADED, AvailabilityStatus.UNKNOWN)
+        ]
+        if degraded_candidates:
+            logger.warning(
+                "All providers unhealthy for model '%s'; using degraded providers: %s",
+                model_id,
+                degraded_candidates,
+            )
+            return degraded_candidates
+
+        unknown_candidates = [
+            provider for provider in provider_chain if provider_availability.get(provider) is None
+        ]
+        if unknown_candidates:
             logger.info(
-                f"Circuit breaker filtering for '{model_id}': "
-                f"available={available_providers}, filtered_out={unavailable_providers}"
+                "No availability data for model '%s'; falling back to untracked providers: %s",
+                model_id,
+                unknown_candidates,
             )
+            return unknown_candidates
 
-        return available_providers if available_providers else provider_chain
+        logger.error(
+            "All providers have open circuits for model '%s' and no safe emergency fallback is available",
+            model_id,
+        )
+        return []
 
     except Exception as e:
-        # Never let circuit breaker checking break routing
         logger.warning(f"Circuit breaker filter error for '{model_id}': {e}")
         return provider_chain
 

@@ -62,6 +62,16 @@ def apply_model_alias(model_id: str | None) -> str | None:
     if canonical:
         logger.debug("Resolved model alias '%s' -> '%s'", model_id, canonical)
         return canonical
+
+    if alias_key.startswith("x-ai/"):
+        suffix = alias_key[len("x-ai/") :]
+        canonical = f"xai/{suffix}"
+        logger.info(
+            "Normalizing legacy 'x-ai/' prefix: '%s' -> '%s'",
+            model_id,
+            canonical,
+        )
+        return canonical
     return model_id
 
 # Gemini model name constants to reduce duplication
@@ -973,7 +983,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "fal"
 
         # XAI models (e.g., "xai/grok-2")
-        if org == "xai":
+        if org in ("xai", "x-ai"):
             return "xai"
 
     # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")

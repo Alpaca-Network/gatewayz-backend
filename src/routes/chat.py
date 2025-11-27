@@ -1227,6 +1227,16 @@ async def chat_completions(
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(original_model, provider_chain)
             provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
+            if not provider_chain:
+                logger.error(
+                    "No healthy providers available after circuit breaker filtering for model %s",
+                    sanitize_for_logging(original_model),
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="All upstream providers are unavailable for the requested model. "
+                    "Please try again later.",
+                )
             model = original_model
 
         # Diagnostic logging for tools parameter
@@ -2164,6 +2174,17 @@ async def unified_responses(
         provider_chain = build_provider_failover_chain(provider)
         provider_chain = enforce_model_failover_rules(original_model, provider_chain)
         provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
+        if not provider_chain:
+            logger.error(
+                "No healthy providers available after circuit breaker filtering for model %s "
+                "(unified responses)",
+                sanitize_for_logging(original_model),
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="All upstream providers are unavailable for the requested model. "
+                "Please try again later.",
+            )
         model = original_model
 
         # Diagnostic logging for tools parameter
