@@ -84,7 +84,7 @@ class TestFetchModelsFromNovita:
         model_ids = [m['id'] for m in result]
         assert 'qwen3-235b-thinking' in model_ids or 'qwen3-max' in model_ids
 
-    @patch('src.services.novita_client.OpenAI')
+    @patch('openai.OpenAI')
     @patch('src.config.Config')
     def test_fetches_models_from_openai_api(self, mock_config, mock_openai):
         """Test that function fetches models from OpenAI-compatible API"""
@@ -112,7 +112,7 @@ class TestFetchModelsFromNovita:
         mock_openai.assert_called_once()
         mock_client.models.list.assert_called_once()
 
-    @patch('src.services.novita_client.OpenAI')
+    @patch('openai.OpenAI')
     @patch('src.config.Config')
     def test_returns_fallback_on_api_error(self, mock_config, mock_openai):
         """Test that function returns fallback models when API call fails"""
