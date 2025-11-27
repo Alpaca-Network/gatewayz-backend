@@ -1,3 +1,8 @@
+-- Create sequences first (must exist before table creation)
+CREATE SEQUENCE IF NOT EXISTS "public"."rate_limit_configs_id_seq";
+CREATE SEQUENCE IF NOT EXISTS "public"."rate_limit_usage_id_seq";
+CREATE SEQUENCE IF NOT EXISTS "public"."api_key_audit_logs_id_seq";
+
 -- Create rate_limit_configs table
 -- Stores per-API-key rate limit configurations
 CREATE TABLE IF NOT EXISTS "public"."rate_limit_configs" (
@@ -62,10 +67,10 @@ CREATE INDEX IF NOT EXISTS "api_key_audit_logs_api_key_id_idx" ON "public"."api_
 CREATE INDEX IF NOT EXISTS "api_key_audit_logs_action_idx" ON "public"."api_key_audit_logs" USING btree ("action");
 CREATE INDEX IF NOT EXISTS "api_key_audit_logs_timestamp_idx" ON "public"."api_key_audit_logs" USING btree ("timestamp");
 
--- Create sequences if they don't exist
-CREATE SEQUENCE IF NOT EXISTS "public"."rate_limit_configs_id_seq" OWNED BY "public"."rate_limit_configs"."id";
-CREATE SEQUENCE IF NOT EXISTS "public"."rate_limit_usage_id_seq" OWNED BY "public"."rate_limit_usage"."id";
-CREATE SEQUENCE IF NOT EXISTS "public"."api_key_audit_logs_id_seq" OWNED BY "public"."api_key_audit_logs"."id";
+-- Set sequence ownership (sequences created at top of file)
+ALTER SEQUENCE "public"."rate_limit_configs_id_seq" OWNED BY "public"."rate_limit_configs"."id";
+ALTER SEQUENCE "public"."rate_limit_usage_id_seq" OWNED BY "public"."rate_limit_usage"."id";
+ALTER SEQUENCE "public"."api_key_audit_logs_id_seq" OWNED BY "public"."api_key_audit_logs"."id";
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE "public"."rate_limit_configs" ENABLE ROW LEVEL SECURITY;
