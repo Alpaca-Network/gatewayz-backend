@@ -291,11 +291,11 @@ def test_privy_auth_existing_user_success(client, sb):
         'welcome_email_sent': True,
     }).execute()
 
-    # Create API key
+    # Create API key (realistic length: gw_live_ + 43 chars from token_urlsafe(32))
     sb.table('api_keys_new').insert({
         'id': '1',
         'user_id': '100',
-        'api_key': 'gw_live_primary_key',
+        'api_key': 'gw_live_test_primary_key_1234567890abcdefghijkl',  # 51 chars total
         'is_primary': True,
         'is_active': True,
     }).execute()
@@ -327,7 +327,7 @@ def test_privy_auth_existing_user_success(client, sb):
     assert data['success'] is True
     assert data['message'] == 'Login successful'
     assert data['user_id'] == 100  # Pydantic converts to int in response
-    assert data['api_key'] == 'gw_live_primary_key'
+    assert data['api_key'] == 'gw_live_test_primary_key_1234567890abcdefghijkl'
     assert data['is_new_user'] is False
     assert data['email'] == 'test@example.com'
     assert data['credits'] == 50.0
