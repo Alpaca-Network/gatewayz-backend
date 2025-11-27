@@ -259,6 +259,28 @@ def add_credits_to_user(
             sanitize_for_logging(str(balance_after)),
         )
 
+        # Invalidate cache for all user's API keys to ensure fresh credit balance
+        try:
+            from src.services.user_lookup_cache import invalidate_user
+
+            # Get all API keys for this user to invalidate their caches
+            api_keys_result = client.table("api_keys_new").select("key").eq("user_id", user_id).execute()
+
+            if api_keys_result.data:
+                for api_key_record in api_keys_result.data:
+                    invalidate_user(api_key_record["key"])
+                logger.debug(
+                    "Invalidated cache for %d API key(s) belonging to user %s",
+                    len(api_keys_result.data),
+                    sanitize_for_logging(str(user_id)),
+                )
+        except Exception as cache_error:
+            # Don't fail the transaction if cache invalidation fails
+            logger.warning(
+                "Failed to invalidate cache after adding credits: %s",
+                sanitize_for_logging(str(cache_error)),
+            )
+
     except Exception as e:
         logger.error("Failed to add credits: %s", sanitize_for_logging(str(e)))
         raise RuntimeError(f"Failed to add credits: {e}")
