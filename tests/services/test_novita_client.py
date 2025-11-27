@@ -38,7 +38,7 @@ class TestGetNovitaSDKClient:
         assert result is None
 
     @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.Config')
+    @patch('src.config.Config')
     def test_raises_error_when_api_key_missing(self, mock_config):
         """Test that function raises ValueError when API key is not configured"""
         from src.services.novita_client import get_novita_sdk_client
@@ -50,7 +50,7 @@ class TestGetNovitaSDKClient:
 
     @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
     @patch('src.services.novita_client.NovitaClient')
-    @patch('src.services.novita_client.Config')
+    @patch('src.config.Config')
     def test_returns_client_when_sdk_available_and_key_configured(self, mock_config, mock_novita_client):
         """Test that function returns NovitaClient instance when everything is configured"""
         from src.services.novita_client import get_novita_sdk_client
@@ -68,7 +68,7 @@ class TestGetNovitaSDKClient:
 class TestFetchModelsFromNovita:
     """Test fetch_models_from_novita function (LLM models)"""
 
-    @patch('src.services.novita_client.Config')
+    @patch('src.config.Config')
     def test_returns_fallback_when_api_key_missing(self, mock_config):
         """Test that function returns fallback models when API key is not configured"""
         from src.services.novita_client import fetch_models_from_novita
@@ -85,7 +85,7 @@ class TestFetchModelsFromNovita:
         assert 'qwen3-235b-thinking' in model_ids or 'qwen3-max' in model_ids
 
     @patch('src.services.novita_client.OpenAI')
-    @patch('src.services.novita_client.Config')
+    @patch('src.config.Config')
     def test_fetches_models_from_openai_api(self, mock_config, mock_openai):
         """Test that function fetches models from OpenAI-compatible API"""
         from src.services.novita_client import fetch_models_from_novita
@@ -113,7 +113,7 @@ class TestFetchModelsFromNovita:
         mock_client.models.list.assert_called_once()
 
     @patch('src.services.novita_client.OpenAI')
-    @patch('src.services.novita_client.Config')
+    @patch('src.config.Config')
     def test_returns_fallback_on_api_error(self, mock_config, mock_openai):
         """Test that function returns fallback models when API call fails"""
         from src.services.novita_client import fetch_models_from_novita
