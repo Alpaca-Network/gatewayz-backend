@@ -479,7 +479,7 @@ def test_streaming_response(
 @patch('src.db.users.record_usage')
 @patch('src.db.rate_limits.update_rate_limit_usage')
 @patch('src.db.api_keys.increment_api_key_usage')
-@patch('src.services.provider_failover.availability_service')
+@patch('src.services.model_availability.availability_service')
 def test_provider_failover_to_huggingface(
     mock_availability_service,
     mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
@@ -538,7 +538,7 @@ def test_provider_failover_to_huggingface(
 @patch('src.db.users.record_usage')
 @patch('src.db.rate_limits.update_rate_limit_usage')
 @patch('src.db.api_keys.increment_api_key_usage')
-@patch('src.services.provider_failover.availability_service')
+@patch('src.services.model_availability.availability_service')
 def test_provider_failover_on_404_to_huggingface(
     mock_availability_service,
     mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
