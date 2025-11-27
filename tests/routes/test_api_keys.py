@@ -90,7 +90,7 @@ def mock_api_keys_list():
     return [
         {
             'id': 1,
-            'api_key': 'gw_live_primary123',
+            'api_key': 'gw_live_primary123_test_key_1234567890abcdefgh',  # 51 chars
             'key_name': 'Primary Key',
             'environment_tag': 'live',
             'is_active': True,
