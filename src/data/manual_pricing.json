@@ -249,6 +249,69 @@
     }
   },
   "onerouter": {
+    "claude-sonnet-4.5@latest": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-sonnet-4.5@20250514": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-4.5-sonnet@latest": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-opus-4.5@latest": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-opus-4.5@20250514": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-4.5-opus@latest": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-haiku-4.5@latest": {
+      "prompt": "0.25",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-haiku-4.5@20250514": {
+      "prompt": "0.25",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-4.5-haiku@latest": {
+      "prompt": "0.25",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
     "claude-sonnet-4-20250514@latest": {
       "prompt": "3.00",
       "completion": "15.00",
