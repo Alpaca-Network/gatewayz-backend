@@ -249,7 +249,7 @@
     }
   },
   "onerouter": {
-    "claude-opus-4-5-@20251101": {
+    "claude-opus-4-5@20251101": {
       "prompt": "5.00",
       "completion": "25.00",
       "request": "0",

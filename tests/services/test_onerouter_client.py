@@ -230,3 +230,151 @@ class TestProcessOneRouterResponse:
         # The function doesn't explicitly handle errors, so it should raise
         with pytest.raises(Exception):
             process_onerouter_response(bad_response)
+
+
+class TestFetchModelsFromOneRouter:
+    """Test fetch_models_from_onerouter function with caching"""
+
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        """Clear the cache before each test"""
+        from src.cache import _onerouter_models_cache
+        _onerouter_models_cache["data"] = None
+        _onerouter_models_cache["timestamp"] = None
+        yield
+        # Clean up after test
+        _onerouter_models_cache["data"] = None
+        _onerouter_models_cache["timestamp"] = None
+
+    def test_fetch_models_success_with_caching(self, mock_onerouter_api_key):
+        """Test successful model fetch and verify cache is populated"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+        from src.cache import _onerouter_models_cache
+        from datetime import datetime, timezone
+
+        mock_models_response = {
+            "data": [
+                {
+                    "id": "claude-3-5-sonnet@20240620",
+                    "context_length": 200000,
+                    "owned_by": "anthropic"
+                },
+                {
+                    "id": "gpt-4o@latest",
+                    "context_window": 128000,
+                    "owned_by": "openai"
+                }
+            ]
+        }
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            mock_response = Mock()
+            mock_response.json.return_value = mock_models_response
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            # Verify cache is empty before fetch
+            assert _onerouter_models_cache["data"] is None
+            assert _onerouter_models_cache["timestamp"] is None
+
+            # Fetch models
+            models = fetch_models_from_onerouter()
+
+            # Verify models were returned
+            assert len(models) == 2
+            assert models[0]["id"] == "claude-3-5-sonnet@20240620"
+            assert models[0]["context_length"] == 200000
+            assert models[1]["id"] == "gpt-4o@latest"
+            assert models[1]["context_length"] == 128000  # Should use context_window fallback
+
+            # Verify cache was populated
+            assert _onerouter_models_cache["data"] == models
+            assert _onerouter_models_cache["timestamp"] is not None
+            assert isinstance(_onerouter_models_cache["timestamp"], datetime)
+
+            # Verify timestamp is recent (within last 5 seconds)
+            cache_age = (datetime.now(timezone.utc) - _onerouter_models_cache["timestamp"]).total_seconds()
+            assert cache_age < 5
+
+    def test_fetch_models_context_length_priority(self, mock_onerouter_api_key):
+        """Test that context_length is prioritized over context_window"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+
+        mock_models_response = {
+            "data": [
+                {
+                    "id": "test-model",
+                    "context_length": 100000,
+                    "context_window": 50000  # Should be ignored
+                }
+            ]
+        }
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            mock_response = Mock()
+            mock_response.json.return_value = mock_models_response
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            models = fetch_models_from_onerouter()
+
+            # Should use context_length, not context_window
+            assert models[0]["context_length"] == 100000
+
+    def test_fetch_models_no_api_key(self):
+        """Test fetch when API key is not configured"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+        from src.cache import _onerouter_models_cache
+
+        with patch('src.services.onerouter_client.Config') as mock_config:
+            mock_config.ONEROUTER_API_KEY = None
+
+            models = fetch_models_from_onerouter()
+
+            # Should return empty list
+            assert models == []
+
+            # Cache should still be populated (with empty list)
+            assert _onerouter_models_cache["data"] == []
+            assert _onerouter_models_cache["timestamp"] is not None
+
+    def test_fetch_models_http_error_with_caching(self, mock_onerouter_api_key):
+        """Test HTTP error handling and verify cache is still updated"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+        from src.cache import _onerouter_models_cache
+        import httpx
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            # Simulate HTTP error
+            mock_get.side_effect = httpx.HTTPStatusError(
+                "404 Not Found",
+                request=Mock(),
+                response=Mock(status_code=404)
+            )
+
+            models = fetch_models_from_onerouter()
+
+            # Should return empty list on error
+            assert models == []
+
+            # Cache should be populated with empty list to prevent repeated failed requests
+            assert _onerouter_models_cache["data"] == []
+            assert _onerouter_models_cache["timestamp"] is not None
+
+    def test_fetch_models_generic_error_with_caching(self, mock_onerouter_api_key):
+        """Test generic error handling and verify cache is updated"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+        from src.cache import _onerouter_models_cache
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            # Simulate generic error
+            mock_get.side_effect = Exception("Network timeout")
+
+            models = fetch_models_from_onerouter()
+
+            # Should return empty list on error
+            assert models == []
+
+            # Cache should be populated to prevent repeated errors
+            assert _onerouter_models_cache["data"] == []
+            assert _onerouter_models_cache["timestamp"] is not None

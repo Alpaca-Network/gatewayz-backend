@@ -4,8 +4,6 @@ Fetch all available models from OneRouter API and display pricing information.
 This script helps populate the manual_pricing.json file with current OneRouter models.
 """
 
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -178,8 +176,8 @@ def main():
 
         # Use placeholder pricing - needs to be filled with actual values
         print(f'  "{model_id}": {{')
-        print(f'    "prompt": "0.00",  // TODO: Add actual pricing')
-        print(f'    "completion": "0.00",  // TODO: Add actual pricing')
+        print(f'    "prompt": "0.00",')
+        print(f'    "completion": "0.00",')
         print(f'    "request": "0",')
         print(f'    "image": "0",')
         print(f'    "context_length": {context}')

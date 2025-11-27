@@ -1,7 +1,9 @@
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
+from src.cache import _onerouter_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_onerouter_pooled_client
@@ -123,11 +125,20 @@ def fetch_models_from_onerouter():
 
     OneRouter provides access to multiple AI models through their API.
     This function fetches the list of available models from their endpoint.
+
+    Models are cached with a 1-hour TTL to reduce API calls and improve performance.
     """
+
+    def _cache_and_return(models: list[dict]) -> list[dict]:
+        """Cache models and return them"""
+        _onerouter_models_cache["data"] = models
+        _onerouter_models_cache["timestamp"] = datetime.now(timezone.utc)
+        return models
+
     try:
         if not Config.ONEROUTER_API_KEY:
             logger.warning("OneRouter API key not configured, cannot fetch models")
-            return []
+            return _cache_and_return([])
 
         headers = {
             "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
@@ -149,13 +160,15 @@ def fetch_models_from_onerouter():
         transformed_models = []
         for model in models:
             model_id = model.get("id", "")
+            # Check both context_length and context_window fields (prioritize context_length)
+            context_length = model.get("context_length") or model.get("context_window", 4096)
             transformed_model = {
                 "id": model_id,
                 "slug": model_id,
                 "canonical_slug": model_id,
                 "name": model.get("id", "Unknown Model"),
                 "description": f"OneRouter model: {model_id}",
-                "context_length": model.get("context_window", 4096),
+                "context_length": context_length,
                 "architecture": {
                     "modality": "text->text",
                     "input_modalities": ["text"],
@@ -173,7 +186,7 @@ def fetch_models_from_onerouter():
             transformed_models.append(transformed_model)
 
         logger.info(f"Successfully fetched {len(transformed_models)} models from OneRouter")
-        return transformed_models
+        return _cache_and_return(transformed_models)
 
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching OneRouter models: {e}")
@@ -182,7 +195,7 @@ def fetch_models_from_onerouter():
             provider='onerouter',
             endpoint='/v1/models'
         )
-        return []
+        return _cache_and_return([])
     except Exception as e:
         logger.error(f"Failed to fetch models from OneRouter: {e}")
         capture_provider_error(
@@ -190,4 +203,4 @@ def fetch_models_from_onerouter():
             provider='onerouter',
             endpoint='/v1/models'
         )
-        return []
+        return _cache_and_return([])
