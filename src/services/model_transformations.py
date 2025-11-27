@@ -14,12 +14,8 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
-    # Llama models are better served through OpenRouter, Featherless, or HuggingFace
-    # rather than directly through Cerebras which doesn't have native Llama models
-    "cerebras/llama-3.3-70b": "openrouter",
-    "cerebras/llama-3.3-70b-instruct": "openrouter",
-    "cerebras/llama-3.1-70b": "openrouter",
-    "cerebras/llama-3.1-70b-instruct": "openrouter",
+    # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
+    # No override needed - let natural provider detection route to Cerebras
 }
 
 # Canonical aliases for commonly mistyped or reformatted model IDs.
@@ -320,6 +316,12 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
+            # Cerebras models explicitly routed through OpenRouter
+            # (for users who request provider="openrouter" explicitly or failover scenarios)
+            "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+            "cerebras/llama-3.3-70b-instruct": "meta-llama/llama-3.3-70b-instruct",
+            "cerebras/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+            "cerebras/llama-3.1-70b-instruct": "meta-llama/llama-3.1-70b-instruct",
         },
         "featherless": {
             # Featherless uses direct provider/model format
@@ -661,6 +663,24 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "xai/grok-2-1212": "grok-2-1212",
             "xai/grok-vision-beta": "grok-vision-beta",
         },
+        "cerebras": {
+            # Cerebras API expects model IDs without the "cerebras/" prefix
+            # Transform: "cerebras/llama-3.3-70b" → "llama-3.3-70b"
+            "cerebras/llama-3.3-70b": "llama-3.3-70b",
+            "cerebras/llama-3.3-70b-instruct": "llama-3.3-70b",
+            "cerebras/llama-3.3-405b": "llama-3.3-405b",
+            "cerebras/llama-3.1-70b": "llama3.1-70b",
+            "cerebras/llama-3.1-70b-instruct": "llama3.1-70b",
+            "cerebras/llama-3.1-8b": "llama3.1-8b",
+            "cerebras/llama-3.1-8b-instruct": "llama3.1-8b",
+            "cerebras/llama-3.1-405b": "llama3.1-405b",
+            # Support direct model names (passthrough)
+            "llama-3.3-70b": "llama-3.3-70b",
+            "llama-3.3-405b": "llama-3.3-405b",
+            "llama3.1-70b": "llama3.1-70b",
+            "llama3.1-8b": "llama3.1-8b",
+            "llama3.1-405b": "llama3.1-405b",
+        },
     }
 
     return mappings.get(provider, {})
@@ -904,6 +924,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # Near AI models (e.g., "near/deepseek-ai/DeepSeek-V3", "near/deepseek-ai/DeepSeek-R1")
         if org == "near":
             return "near"
+
+        # Cerebras models (e.g., "cerebras/llama-3.3-70b")
+        if org == "cerebras":
+            return "cerebras"
 
         # Anannas models (e.g., "anannas/openai/gpt-4o")
         if org == "anannas":

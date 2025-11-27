@@ -10,13 +10,27 @@ logger = logging.getLogger(__name__)
 
 
 def get_alibaba_cloud_client():
-    """Get Alibaba Cloud client with proper configuration"""
+    """Get Alibaba Cloud client with proper configuration
+
+    Supports two regions:
+    - International (Singapore): dashscope-intl.aliyuncs.com (default)
+    - China (Beijing): dashscope.aliyuncs.com
+
+    Set ALIBABA_CLOUD_REGION env var to 'china' to use China endpoint.
+    """
     try:
         if not Config.ALIBABA_CLOUD_API_KEY:
             raise ValueError("Alibaba Cloud API key not configured")
 
-        # Use Singapore region by default, can be switched to Beijing
-        base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        # Check region configuration
+        region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
+
+        if region == 'china':
+            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            logger.info("Using Alibaba Cloud China endpoint (Beijing)")
+        else:
+            base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            logger.debug("Using Alibaba Cloud International endpoint (Singapore)")
 
         return OpenAI(
             base_url=base_url,

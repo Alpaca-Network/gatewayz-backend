@@ -191,13 +191,13 @@ async def get_providers(
     limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     gateway: Optional[str] = Query(
-        "openrouter",
+        "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
 ):
     """Get all available provider list with detailed metric data including model count and logo URLs"""
     try:
-        gateway_value = (gateway or "openrouter").lower()
+        gateway_value = (gateway or "all").lower()
         # Support both 'huggingface' and 'hug' as aliases
         if gateway_value == "huggingface":
             gateway_value = "hug"
@@ -208,7 +208,8 @@ async def get_providers(
         if gateway_value in ("openrouter", "all"):
             raw_providers = get_cached_providers()
             if not raw_providers and gateway_value == "openrouter":
-                raise HTTPException(status_code=503, detail=ERROR_PROVIDER_DATA_UNAVAILABLE)
+                # Graceful degradation - log warning and continue with empty providers
+                logger.warning("OpenRouter provider data unavailable - returning empty response")
 
             enhanced_openrouter = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(raw_providers or []),
@@ -240,13 +241,21 @@ async def get_providers(
                     derived_providers = derive_providers_from_models(gw_models, gw)
                     provider_groups.append(derived_providers)
                 elif gateway_value == gw:
-                    # Only raise error if specifically requesting this gateway
-                    raise HTTPException(
-                        status_code=503, detail=f"{gw.capitalize()} models data unavailable"
-                    )
+                    # Don't raise 503 - graceful degradation, return empty response
+                    logger.warning(f"{gw.capitalize()} models data unavailable - returning empty response")
 
         if not provider_groups:
-            raise HTTPException(status_code=503, detail=ERROR_PROVIDER_DATA_UNAVAILABLE)
+            # Graceful degradation - return empty response instead of 503
+            logger.warning(f"No provider data available for gateway={gateway_value} - returning empty response")
+            return {
+                "data": [],
+                "total": 0,
+                "returned": 0,
+                "offset": offset or 0,
+                "limit": limit,
+                "gateway": gateway_value,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
         combined_providers = merge_provider_lists(*provider_groups)
 
@@ -310,7 +319,7 @@ async def get_models(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
     gateway: Optional[str] = Query(
-        "openrouter",
+        "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
 ):
@@ -319,7 +328,7 @@ async def get_models(
     try:
         provider = normalize_developer_segment(provider)
         logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}")
-        gateway_value = (gateway or "openrouter").lower()
+        gateway_value = (gateway or "all").lower()
         # Support both 'huggingface' and 'hug' as aliases
         if gateway_value == "huggingface":
             gateway_value = "hug"
@@ -347,54 +356,54 @@ async def get_models(
         anannas_models: List[dict] = []
         aihubmix_models: List[dict] = []
         vercel_ai_gateway_models: List[dict] = []
+        alibaba_models: List[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
-            if gateway_value == "openrouter" and not openrouter_models:
-                logger.error("No OpenRouter models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not openrouter_models:
+                logger.warning(
+                    "OpenRouter models unavailable (gateway=%s) - possible causes: "
+                    "API key not configured, API is down, network issues, or cache warming incomplete. "
+                    "Continuing with other providers if available.",
+                    gateway_value
+                )
+                # Don't fail with 503 - this prevents a single provider failure from breaking the entire API
+                # Users will get models from other providers if gateway="all", or empty list if gateway="openrouter"
 
         if gateway_value in ("featherless", "all"):
             featherless_models = get_cached_models("featherless") or []
-            if gateway_value == "featherless" and not featherless_models:
-                logger.error("No Featherless models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not featherless_models and gateway_value == "featherless":
+                logger.warning("Featherless models unavailable - continuing without them")
 
         if gateway_value in ("deepinfra", "all"):
             deepinfra_models = get_cached_models("deepinfra") or []
-            if gateway_value == "deepinfra" and not deepinfra_models:
-                logger.error("No DeepInfra models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not deepinfra_models and gateway_value == "deepinfra":
+                logger.warning("DeepInfra models unavailable - continuing without them")
 
         if gateway_value in ("chutes", "all"):
             chutes_models = get_cached_models("chutes") or []
-            if gateway_value == "chutes" and not chutes_models:
-                logger.error("No Chutes models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not chutes_models and gateway_value == "chutes":
+                logger.warning("Chutes models unavailable - continuing without them")
 
         if gateway_value in ("groq", "all"):
             groq_models = get_cached_models("groq") or []
-            if gateway_value == "groq" and not groq_models:
-                logger.error("No Groq models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not groq_models and gateway_value == "groq":
+                logger.warning("Groq models unavailable - continuing without them")
 
         if gateway_value in ("fireworks", "all"):
             fireworks_models = get_cached_models("fireworks") or []
-            if gateway_value == "fireworks" and not fireworks_models:
-                logger.error("No Fireworks models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not fireworks_models and gateway_value == "fireworks":
+                logger.warning("Fireworks models unavailable - continuing without them")
 
         if gateway_value in ("together", "all"):
             together_models = get_cached_models("together") or []
-            if gateway_value == "together" and not together_models:
-                logger.error("No Together models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not together_models and gateway_value == "together":
+                logger.warning("Together models unavailable - continuing without them")
 
         if gateway_value in ("cerebras", "all"):
             cerebras_models = get_cached_models("cerebras") or []
-            if gateway_value == "cerebras" and not cerebras_models:
-                logger.error("No Cerebras models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not cerebras_models and gateway_value == "cerebras":
+                logger.warning("Cerebras models unavailable - continuing without them")
 
         if gateway_value in ("nebius", "all"):
             nebius_models = get_cached_models("nebius") or []
@@ -414,57 +423,53 @@ async def get_models(
 
         if gateway_value in ("novita", "all"):
             novita_models = get_cached_models("novita") or []
-            if gateway_value == "novita" and not novita_models:
-                logger.error("No Novita models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not novita_models and gateway_value == "novita":
+                logger.warning("Novita models unavailable - continuing without them")
 
         if gateway_value in ("hug", "all"):
             hug_models = get_cached_models("hug") or []
-            if gateway_value == "hug" and not hug_models:
-                logger.error("No Hugging Face models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not hug_models and gateway_value == "hug":
+                logger.warning("Hugging Face models unavailable - continuing without them")
 
         if gateway_value in ("aimo", "all"):
             aimo_models = get_cached_models("aimo") or []
-            if gateway_value == "aimo" and not aimo_models:
-                logger.error("No AIMO models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not aimo_models and gateway_value == "aimo":
+                logger.warning("AIMO models unavailable - continuing without them")
 
         if gateway_value in ("near", "all"):
             near_models = get_cached_models("near") or []
-            if gateway_value == "near" and not near_models:
-                logger.error("No Near models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not near_models and gateway_value == "near":
+                logger.warning("Near models unavailable - continuing without them")
 
         if gateway_value in ("fal", "all"):
             fal_models = get_cached_models("fal") or []
-            if gateway_value == "fal" and not fal_models:
-                logger.error("No Fal models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not fal_models and gateway_value == "fal":
+                logger.warning("Fal models unavailable - continuing without them")
 
         if gateway_value in ("helicone", "all"):
             helicone_models = get_cached_models("helicone") or []
-            if gateway_value == "helicone" and not helicone_models:
-                logger.error("No Helicone models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not helicone_models and gateway_value == "helicone":
+                logger.warning("Helicone models unavailable - continuing without them")
 
         if gateway_value in ("anannas", "all"):
             anannas_models = get_cached_models("anannas") or []
-            if gateway_value == "anannas" and not anannas_models:
-                logger.error("No Anannas models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not anannas_models and gateway_value == "anannas":
+                logger.warning("Anannas models unavailable - continuing without them")
 
         if gateway_value in ("aihubmix", "all"):
             aihubmix_models = get_cached_models("aihubmix") or []
-            if gateway_value == "aihubmix" and not aihubmix_models:
-                logger.error("No AiHubMix models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not aihubmix_models and gateway_value == "aihubmix":
+                logger.warning("AiHubMix models unavailable - continuing without them")
 
         if gateway_value in ("vercel-ai-gateway", "all"):
             vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
-            if gateway_value == "vercel-ai-gateway" and not vercel_ai_gateway_models:
-                logger.error("No Vercel AI Gateway models data available from cache")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+            if not vercel_ai_gateway_models and gateway_value == "vercel-ai-gateway":
+                logger.warning("Vercel AI Gateway models unavailable - continuing without them")
+
+        if gateway_value in ("alibaba", "all"):
+            alibaba_models = get_cached_models("alibaba") or []
+            if not alibaba_models and gateway_value == "alibaba":
+                logger.warning("Alibaba Cloud models unavailable - continuing without them")
 
         if gateway_value == "openrouter":
             models = openrouter_models
@@ -504,6 +509,8 @@ async def get_models(
             models = aihubmix_models
         elif gateway_value == "vercel-ai-gateway":
             models = vercel_ai_gateway_models
+        elif gateway_value == "alibaba":
+            models = alibaba_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -521,6 +528,7 @@ async def get_models(
                 anannas_models,
                 aihubmix_models,
                 vercel_ai_gateway_models,
+                alibaba_models,
             )
 
         if not models:
@@ -533,15 +541,20 @@ async def get_models(
                     "Returning empty xAI catalog response because no public model listing exists"
                 )
             else:
-                logger.debug("No models data available after applying gateway selection")
-                raise HTTPException(status_code=503, detail=ERROR_MODELS_DATA_UNAVAILABLE)
+                logger.warning(
+                    "No models available for gateway=%s. Returning empty response. "
+                    "This may indicate provider API keys not configured or all providers are down.",
+                    gateway_value
+                )
+                # Instead of raising 503, return an empty but valid response
+                # This prevents the entire API from failing when a single provider is unavailable
 
         provider_groups: List[List[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             providers = get_cached_providers()
             if not providers and gateway_value == "openrouter":
-                raise HTTPException(status_code=503, detail=ERROR_PROVIDER_DATA_UNAVAILABLE)
+                logger.warning("OpenRouter provider data unavailable - returning empty providers list")
             enhanced_providers = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(providers or []),
                 "openrouter",
@@ -834,7 +847,7 @@ async def get_specific_model(
             )
 
         # Determine which gateway was used
-        detected_gateway = model_data.get("source_gateway", gateway or "openrouter")
+        detected_gateway = model_data.get("source_gateway", gateway or "all")
 
         # Get enhanced providers data for all gateways
         provider_groups: List[List[dict]] = []

@@ -171,28 +171,27 @@ BEGIN
     WHERE tablename IN ('chat_sessions', 'chat_messages')
         AND (indexname LIKE 'idx_chat_%');
 
-    RAISE NOTICE '';
+    RAISE NOTICE 'Migration Summary:';
     RAISE NOTICE '=================================================================';
-    RAISE NOTICE '✅ User Lookup Indexes Migration Completed Successfully!';
+    RAISE NOTICE 'User Lookup Indexes Migration Completed Successfully';
     RAISE NOTICE '=================================================================';
-    RAISE NOTICE '';
+    RAISE NOTICE 'Index Counts:';
     RAISE NOTICE 'Indexes created on api_keys_new: %', api_keys_count;
     RAISE NOTICE 'Indexes created on users: %', users_count;
     RAISE NOTICE 'Indexes created on chat tables: %', chat_count;
     RAISE NOTICE 'Total new indexes: %', api_keys_count + users_count + chat_count;
-    RAISE NOTICE '';
-    RAISE NOTICE 'Expected performance improvements:';
-    RAISE NOTICE '  - API key lookup: 10-100x faster ⚡ (was 100-500ms, now 5-50ms)';
-    RAISE NOTICE '  - User lookup: 5-50x faster ⚡';
-    RAISE NOTICE '  - Session creation: 5-15x faster ⚡ (timeout reduced from 15s to <2s)';
-    RAISE NOTICE '  - Authentication: 20-100x faster ⚡';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Cache with 5min TTL adds additional 95%%+ speedup for repeated users';
+    RAISE NOTICE 'Expected Performance Improvements:';
+    RAISE NOTICE '  - API key lookup: 10-100x faster (was 100-500ms, now 5-50ms)';
+    RAISE NOTICE '  - User lookup: 5-50x faster';
+    RAISE NOTICE '  - Session creation: 5-15x faster (timeout reduced from 15s to under 2s)';
+    RAISE NOTICE '  - Authentication: 20-100x faster';
+    RAISE NOTICE 'Additional Optimizations:';
+    RAISE NOTICE 'Cache with 5min TTL adds additional 95 percent speedup for repeated users';
     RAISE NOTICE 'Background activity logging eliminates 50-100ms per request';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to verify improvements!';
+    RAISE NOTICE 'Next Steps:';
+    RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to verify improvements';
     RAISE NOTICE '=================================================================';
-    RAISE NOTICE '';
+    RAISE NOTICE 'Migration completed successfully';
 END $$;
 
 -- Display all new indexes
