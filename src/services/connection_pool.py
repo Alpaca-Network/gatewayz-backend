@@ -365,3 +365,15 @@ def get_clarifai_pooled_client() -> OpenAI:
         api_key=Config.CLARIFAI_API_KEY,
         default_headers={"X-Clarifai-PAT": Config.CLARIFAI_API_KEY},
     )
+
+
+def get_onerouter_pooled_client() -> OpenAI:
+    """Get pooled client for OneRouter."""
+    if not Config.ONEROUTER_API_KEY:
+        raise ValueError("OneRouter API key not configured")
+
+    return get_pooled_client(
+        provider="onerouter",
+        base_url="https://llm.onerouter.pro/v1",
+        api_key=Config.ONEROUTER_API_KEY,
+    )
