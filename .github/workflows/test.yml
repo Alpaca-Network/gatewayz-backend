@@ -30,7 +30,9 @@ jobs:
 
     - name: Start Supabase local instance
       run: |
+        supabase init --force || true
         supabase start
+        supabase db reset
         # Get the local Supabase credentials
         echo "SUPABASE_URL=http://127.0.0.1:54321" >> $GITHUB_ENV
         echo "SUPABASE_KEY=$(supabase status --output json | jq -r .anon_key)" >> $GITHUB_ENV
