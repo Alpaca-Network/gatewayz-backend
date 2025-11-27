@@ -179,6 +179,7 @@ class Config:
 
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
+    ALIBABA_CLOUD_REGION = os.environ.get("ALIBABA_CLOUD_REGION", "international")  # 'international' or 'china'
 
     # Clarifai Configuration
     CLARIFAI_API_KEY = os.environ.get("CLARIFAI_API_KEY")

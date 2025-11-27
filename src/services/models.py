@@ -223,7 +223,8 @@ def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
     Returns:
         Cached data if available and valid (fresh or stale), None otherwise
     """
-    if not cache.get("data") or not cache.get("timestamp"):
+    # Explicitly check for None to allow empty lists to be cached
+    if cache.get("data") is None or not cache.get("timestamp"):
         return None
 
     cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
@@ -585,34 +586,34 @@ def get_cached_models(gateway: str = "openrouter"):
         gateway = (gateway or "openrouter").lower()
 
         if gateway == "featherless":
-            cached = _fresh_cached_models(_featherless_models_cache, "featherless")
+            cached = _get_fresh_or_stale_cached_models(_featherless_models_cache, "featherless")
             if cached is not None:
                 return cached
             result = fetch_models_from_featherless()
             _register_canonical_records("featherless", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "chutes":
-            cached = _fresh_cached_models(_chutes_models_cache, "chutes")
+            cached = _get_fresh_or_stale_cached_models(_chutes_models_cache, "chutes")
             if cached is not None:
                 return cached
             result = fetch_models_from_chutes()
             _register_canonical_records("chutes", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "groq":
-            cached = _fresh_cached_models(_groq_models_cache, "groq")
+            cached = _get_fresh_or_stale_cached_models(_groq_models_cache, "groq")
             if cached is not None:
                 return cached
             result = fetch_models_from_groq()
             _register_canonical_records("groq", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "fireworks":
-            cached = _fresh_cached_models(_fireworks_models_cache, "fireworks")
+            cached = _get_fresh_or_stale_cached_models(_fireworks_models_cache, "fireworks")
             if cached is not None:
                 return cached
-            
+
             # Check if gateway is in error state (exponential backoff)
             if is_gateway_in_error_state("fireworks"):
                 error_msg = get_gateway_error_message("fireworks")
@@ -620,67 +621,67 @@ def get_cached_models(gateway: str = "openrouter"):
                     "Skipping Fireworks fetch - gateway in error state: %s",
                     sanitize_for_logging(error_msg or "unknown error")
                 )
-                return None
-            
+                return []
+
             result = fetch_models_from_fireworks()
             _register_canonical_records("fireworks", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "together":
-            cached = _fresh_cached_models(_together_models_cache, "together")
+            cached = _get_fresh_or_stale_cached_models(_together_models_cache, "together")
             if cached is not None:
                 return cached
             result = fetch_models_from_together()
             _register_canonical_records("together", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "deepinfra":
-            cached = _fresh_cached_models(_deepinfra_models_cache, "deepinfra")
+            cached = _get_fresh_or_stale_cached_models(_deepinfra_models_cache, "deepinfra")
             if cached is not None:
                 return cached
             result = fetch_models_from_deepinfra()
             _register_canonical_records("deepinfra", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "google-vertex":
-            cached = _fresh_cached_models(_google_vertex_models_cache, "google-vertex")
+            cached = _get_fresh_or_stale_cached_models(_google_vertex_models_cache, "google-vertex")
             if cached is not None:
                 return cached
             result = fetch_models_from_google_vertex()
             _register_canonical_records("google-vertex", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "cerebras":
-            cached = _fresh_cached_models(_cerebras_models_cache, "cerebras")
+            cached = _get_fresh_or_stale_cached_models(_cerebras_models_cache, "cerebras")
             if cached is not None:
                 return cached
             result = fetch_models_from_cerebras()
             _register_canonical_records("cerebras", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "nebius":
-            cached = _fresh_cached_models(_nebius_models_cache, "nebius")
+            cached = _get_fresh_or_stale_cached_models(_nebius_models_cache, "nebius")
             if cached is not None:
                 return cached
             result = fetch_models_from_nebius()
             _register_canonical_records("nebius", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "xai":
-            cached = _fresh_cached_models(_xai_models_cache, "xai")
+            cached = _get_fresh_or_stale_cached_models(_xai_models_cache, "xai")
             if cached is not None:
                 return cached
             result = fetch_models_from_xai()
             _register_canonical_records("xai", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "novita":
-            cached = _fresh_cached_models(_novita_models_cache, "novita")
+            cached = _get_fresh_or_stale_cached_models(_novita_models_cache, "novita")
             if cached is not None:
                 return cached
             result = fetch_models_from_novita()
             _register_canonical_records("novita", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "hug" or gateway == "huggingface":
             from src.services.huggingface_models import ESSENTIAL_MODELS
@@ -752,60 +753,60 @@ def get_cached_models(gateway: str = "openrouter"):
             return []
 
         if gateway == "near":
-            cached = _fresh_cached_models(_near_models_cache, "near")
+            cached = _get_fresh_or_stale_cached_models(_near_models_cache, "near")
             if cached is not None:
                 return cached
             result = fetch_models_from_near()
             _register_canonical_records("near", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "fal":
-            cached = _fresh_cached_models(_fal_models_cache, "fal")
+            cached = _get_fresh_or_stale_cached_models(_fal_models_cache, "fal")
             if cached is not None:
                 return cached
             result = fetch_models_from_fal()
             _register_canonical_records("fal", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "vercel-ai-gateway":
-            cached = _fresh_cached_models(_vercel_ai_gateway_models_cache, "vercel-ai-gateway")
+            cached = _get_fresh_or_stale_cached_models(_vercel_ai_gateway_models_cache, "vercel-ai-gateway")
             if cached is not None:
                 return cached
             result = fetch_models_from_vercel_ai_gateway()
             _register_canonical_records("vercel-ai-gateway", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "helicone":
-            cached = _fresh_cached_models(_helicone_models_cache, "helicone")
+            cached = _get_fresh_or_stale_cached_models(_helicone_models_cache, "helicone")
             if cached is not None:
                 return cached
             result = fetch_models_from_helicone()
             _register_canonical_records("helicone", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "anannas":
-            cached = _fresh_cached_models(_anannas_models_cache, "anannas")
+            cached = _get_fresh_or_stale_cached_models(_anannas_models_cache, "anannas")
             if cached is not None:
                 return cached
             result = fetch_models_from_anannas()
             _register_canonical_records("anannas", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "aihubmix":
-            cached = _fresh_cached_models(_aihubmix_models_cache, "aihubmix")
+            cached = _get_fresh_or_stale_cached_models(_aihubmix_models_cache, "aihubmix")
             if cached is not None:
                 return cached
             result = fetch_models_from_aihubmix()
             _register_canonical_records("aihubmix", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "alibaba":
-            cached = _fresh_cached_models(_alibaba_models_cache, "alibaba")
+            cached = _get_fresh_or_stale_cached_models(_alibaba_models_cache, "alibaba")
             if cached is not None:
                 return cached
             result = fetch_models_from_alibaba()
             _register_canonical_records("alibaba", result)
-            return result
+            return result if result is not None else []
 
         if gateway == "all":
             cache = _multi_provider_catalog_cache
@@ -840,14 +841,14 @@ def get_cached_models(gateway: str = "openrouter"):
         # Cache expired or empty, fetch fresh data synchronously
         result = fetch_models_from_openrouter()
         _register_canonical_records("openrouter", result)
-        return result
+        return result if result is not None else []
     except Exception as e:
         logger.error(
             "Error getting cached models for gateway '%s': %s",
             sanitize_for_logging(gateway),
             sanitize_for_logging(str(e)),
         )
-        return None
+        return []
 
 
 def fetch_models_from_openrouter():
@@ -3373,7 +3374,10 @@ def fetch_models_from_alibaba():
     try:
         # Check if API key is configured
         if not Config.ALIBABA_CLOUD_API_KEY:
-            logger.warning("Alibaba Cloud API key not configured - skipping model fetch")
+            logger.debug("Alibaba Cloud API key not configured - skipping model fetch")
+            # Cache empty result to avoid repeated warnings
+            _alibaba_models_cache["data"] = []
+            _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
             return []
 
         from src.services.alibaba_cloud_client import get_alibaba_cloud_client
@@ -3394,7 +3398,30 @@ def fetch_models_from_alibaba():
         logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
         return _alibaba_models_cache["data"]
     except Exception as e:
-        logger.error("Failed to fetch models from Alibaba Cloud: %s", sanitize_for_logging(str(e)))
+        error_msg = sanitize_for_logging(str(e))
+        # Check if it's a 401 authentication error
+        if "401" in error_msg or "Incorrect API key" in error_msg or "invalid_api_key" in error_msg:
+            # Get the actual region being used
+            region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
+            if region == 'china':
+                current_endpoint = "dashscope.aliyuncs.com (China/Beijing)"
+                suggestion = "If key is for International region, set ALIBABA_CLOUD_REGION='international'"
+            else:
+                current_endpoint = "dashscope-intl.aliyuncs.com (International/Singapore)"
+                suggestion = "If key is for China region, set ALIBABA_CLOUD_REGION='china'"
+
+            logger.error(
+                "Alibaba Cloud authentication failed (401): %s. "
+                "Action required: Verify API key is valid and matches endpoint region. "
+                "Currently using: %s. %s",
+                error_msg,
+                current_endpoint,
+                suggestion
+            )
+        elif Config.ALIBABA_CLOUD_API_KEY:
+            logger.error("Failed to fetch models from Alibaba Cloud: %s", error_msg)
+        else:
+            logger.debug("Alibaba Cloud not available (no API key configured)")
         return []
 
 
