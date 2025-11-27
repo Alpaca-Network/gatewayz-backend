@@ -164,6 +164,8 @@ class TestConfigProviderKeys:
             "ANANNAS_API_KEY": "anannas_key",
             "ALPACA_NETWORK_API_KEY": "alpaca_key",
             "ALIBABA_CLOUD_API_KEY": "alibaba_key",
+            "ALIBABA_CLOUD_API_KEY_INTERNATIONAL": "intl_key",
+            "ALIBABA_CLOUD_API_KEY_CHINA": "china_key",
             "CLARIFAI_API_KEY": "clarifai_key",
         }
 
@@ -178,6 +180,8 @@ class TestConfigProviderKeys:
         assert config.Config.CEREBRAS_API_KEY == "cerebras_key"
         assert config.Config.FEATHERLESS_API_KEY == "featherless_key"
         assert config.Config.CHUTES_API_KEY == "chutes_key"
+        assert config.Config.ALIBABA_CLOUD_API_KEY_INTERNATIONAL == "intl_key"
+        assert config.Config.ALIBABA_CLOUD_API_KEY_CHINA == "china_key"
 
 
 class TestConfigGoogleVertex:

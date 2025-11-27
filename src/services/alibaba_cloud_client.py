@@ -31,6 +31,32 @@ _region_lock = Lock()
 T = TypeVar("T")
 
 
+def _region_specific_api_key(region: str | None) -> str | None:
+    normalized = _normalize_region(region)
+    if normalized == "china":
+        return getattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None)
+    if normalized == "international":
+        return getattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None)
+    return None
+
+
+def _get_region_api_key(region: str | None) -> str | None:
+    region_specific = _region_specific_api_key(region)
+    if region_specific:
+        return region_specific
+    return getattr(Config, "ALIBABA_CLOUD_API_KEY", None)
+
+
+def _any_api_key_configured() -> bool:
+    return any(
+        (
+            getattr(Config, "ALIBABA_CLOUD_API_KEY", None),
+            getattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None),
+            getattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None),
+        )
+    )
+
+
 def _normalize_region(region: str | None) -> str:
     if not region:
         return "international"
@@ -43,7 +69,7 @@ def _normalize_region(region: str | None) -> str:
 def _region_attempt_order() -> list[str]:
     explicit = _normalize_region(_explicit_region) if _explicit_region else None
     if explicit:
-        return [explicit]
+        return [explicit] if _get_region_api_key(explicit) else []
 
     attempts: list[str] = []
     if _inferred_region:
@@ -56,7 +82,7 @@ def _region_attempt_order() -> list[str]:
     for region in _VALID_REGIONS:
         if region not in attempts:
             attempts.append(region)
-    return attempts
+    return [region for region in attempts if _get_region_api_key(region)]
 
 
 def _remember_successful_region(region: str) -> None:
@@ -89,6 +115,11 @@ def _is_auth_error(error: Exception) -> bool:
 
 def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:
     attempts = _region_attempt_order()
+    if not attempts:
+        raise ValueError(
+            "Alibaba Cloud API key not configured for any region. "
+            "Set ALIBABA_CLOUD_API_KEY or a region-specific key."
+        )
     last_error: Exception | None = None
 
     for idx, region in enumerate(attempts):
@@ -142,17 +173,27 @@ def get_alibaba_cloud_client(region_override: str | None = None):
     Region selection will automatically fall back if credentials fail for the default endpoint.
     """
     try:
-        if not Config.ALIBABA_CLOUD_API_KEY:
-            raise ValueError("Alibaba Cloud API key not configured")
+        if not _any_api_key_configured():
+            raise ValueError(
+                "Alibaba Cloud API key not configured. "
+                "Set ALIBABA_CLOUD_API_KEY or region-specific keys "
+                "(ALIBABA_CLOUD_API_KEY_INTERNATIONAL / ALIBABA_CLOUD_API_KEY_CHINA)."
+            )
 
         region = _normalize_region(region_override or getattr(Config, "ALIBABA_CLOUD_REGION", None))
+        api_key = _get_region_api_key(region)
+        if not api_key:
+            raise ValueError(
+                f"No Alibaba Cloud API key configured for {_describe_region(region)}. "
+                "Provide ALIBABA_CLOUD_API_KEY or the matching region-specific key."
+            )
         base_url = _REGION_ENDPOINTS[region]
 
         logger.debug("Using Alibaba Cloud endpoint %s", _describe_region(region))
 
         return OpenAI(
             base_url=base_url,
-            api_key=Config.ALIBABA_CLOUD_API_KEY,
+            api_key=api_key,
         )
     except Exception as e:
         logger.error(f"Failed to initialize Alibaba Cloud client: {e}")

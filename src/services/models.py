@@ -3384,7 +3384,11 @@ def fetch_models_from_alibaba():
     """
     try:
         # Check if API key is configured
-        if not Config.ALIBABA_CLOUD_API_KEY:
+        if not (
+            Config.ALIBABA_CLOUD_API_KEY
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None)
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None)
+        ):
             logger.debug("Alibaba Cloud API key not configured - skipping model fetch")
             # Cache empty result to avoid repeated warnings
             _alibaba_models_cache["data"] = []
@@ -3415,10 +3419,17 @@ def fetch_models_from_alibaba():
             region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
             if region == 'china':
                 current_endpoint = "dashscope.aliyuncs.com (China/Beijing)"
-                suggestion = "If key is for International region, set ALIBABA_CLOUD_REGION='international'"
+                suggestion = (
+                    "If your key only works for the International endpoint, set "
+                    "ALIBABA_CLOUD_REGION='international' or provide "
+                    "ALIBABA_CLOUD_API_KEY_INTERNATIONAL."
+                )
             else:
                 current_endpoint = "dashscope-intl.aliyuncs.com (International/Singapore)"
-                suggestion = "If key is for China region, set ALIBABA_CLOUD_REGION='china'"
+                suggestion = (
+                    "If your key only works for the China endpoint, set "
+                    "ALIBABA_CLOUD_REGION='china' or provide ALIBABA_CLOUD_API_KEY_CHINA."
+                )
 
             logger.error(
                 "Alibaba Cloud authentication failed (401): %s. "
@@ -3428,7 +3439,11 @@ def fetch_models_from_alibaba():
                 current_endpoint,
                 suggestion
             )
-        elif Config.ALIBABA_CLOUD_API_KEY:
+        elif (
+            Config.ALIBABA_CLOUD_API_KEY
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None)
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None)
+        ):
             logger.error("Failed to fetch models from Alibaba Cloud: %s", error_msg)
         else:
             logger.debug("Alibaba Cloud not available (no API key configured)")
