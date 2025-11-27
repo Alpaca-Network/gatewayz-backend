@@ -249,98 +249,28 @@
     }
   },
   "onerouter": {
-    "claude-sonnet-4.5@latest": {
+    "claude-opus-4-5-@20251101": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-haiku-4-5@20251001": {
+      "prompt": "1.00",
+      "completion": "5.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-sonnet-4-5@20250929": {
       "prompt": "3.00",
       "completion": "15.00",
       "request": "0",
       "image": "0",
-      "context_length": 200000
+      "context_length": 1000000
     },
-    "claude-sonnet-4.5@20250514": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-4.5-sonnet@latest": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-opus-4.5@latest": {
-      "prompt": "15.00",
-      "completion": "75.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-opus-4.5@20250514": {
-      "prompt": "15.00",
-      "completion": "75.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-4.5-opus@latest": {
-      "prompt": "15.00",
-      "completion": "75.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-haiku-4.5@latest": {
-      "prompt": "0.25",
-      "completion": "1.25",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-haiku-4.5@20250514": {
-      "prompt": "0.25",
-      "completion": "1.25",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-4.5-haiku@latest": {
-      "prompt": "0.25",
-      "completion": "1.25",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-sonnet-4-20250514@latest": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-sonnet-4@latest": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-sonnet-4@20250514": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-4-sonnet@latest": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-opus-4@latest": {
+    "claude-opus-4-1@20250805": {
       "prompt": "15.00",
       "completion": "75.00",
       "request": "0",
@@ -354,56 +284,21 @@
       "image": "0",
       "context_length": 200000
     },
-    "claude-4-opus@latest": {
-      "prompt": "15.00",
-      "completion": "75.00",
+    "claude-sonnet-4@20250514": {
+      "prompt": "3.00",
+      "completion": "15.00",
       "request": "0",
       "image": "0",
-      "context_length": 200000
+      "context_length": 1000000
     },
-    "claude-haiku-4@latest": {
-      "prompt": "0.25",
-      "completion": "1.25",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-haiku-4@20250514": {
-      "prompt": "0.25",
-      "completion": "1.25",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-4-haiku@latest": {
-      "prompt": "0.25",
-      "completion": "1.25",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-3-5-sonnet-20241022@latest": {
+    "claude-3-7-sonnet@20250219": {
       "prompt": "3.00",
       "completion": "15.00",
       "request": "0",
       "image": "0",
       "context_length": 200000
     },
-    "claude-3-5-sonnet@20241022": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-3-5-sonnet@20240620": {
-      "prompt": "3.00",
-      "completion": "15.00",
-      "request": "0",
-      "image": "0",
-      "context_length": 200000
-    },
-    "claude-3-5-sonnet@latest": {
+    "claude-3-5-sonnet-v2@20241022": {
       "prompt": "3.00",
       "completion": "15.00",
       "request": "0",
@@ -417,9 +312,9 @@
       "image": "0",
       "context_length": 200000
     },
-    "claude-3-5-haiku@latest": {
-      "prompt": "0.80",
-      "completion": "4.00",
+    "claude-3-5-sonnet@20240620": {
+      "prompt": "3.00",
+      "completion": "15.00",
       "request": "0",
       "image": "0",
       "context_length": 200000
