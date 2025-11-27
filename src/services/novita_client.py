@@ -360,16 +360,14 @@ def _extract_supported_parameters(payload: dict[str, Any]) -> list[str]:
 
 def _cleanup_model_id(model_id: str) -> str:
     cleaned = model_id.strip()
+    # Remove leading @ symbols and @novita/ prefix
     if cleaned.startswith("@"):
         cleaned = cleaned.lstrip("@")
-    if cleaned.startswith("novita/"):
-        cleaned = cleaned.split("novita/", 1)[1]
-    if cleaned.startswith("models/"):
-        cleaned = cleaned.split("models/", 1)[1]
-    if cleaned.startswith("api/"):
-        cleaned = cleaned.split("api/", 1)[1]
-    if cleaned.startswith("@novita/"):
-        cleaned = cleaned.split("@novita/", 1)[1]
+    # Remove common prefixes
+    for prefix in ("novita/", "models/", "api/"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned.split(prefix, 1)[1]
+            break
     return cleaned
 
 

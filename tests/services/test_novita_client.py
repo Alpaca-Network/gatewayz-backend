@@ -2,8 +2,7 @@
 Comprehensive tests for src/services/novita_client.py
 """
 import pytest
-from unittest.mock import Mock, MagicMock, patch
-from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 
 class TestNovitaSDKImport:
