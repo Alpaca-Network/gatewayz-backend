@@ -111,7 +111,7 @@ class TestChatCompletionsE2E:
             headers=auth_headers,
         )
 
-        # May return 400, 401, or 502 if backend doesn't support certain features or auth fails
+        # May return 400, 401 (auth), or 502 if backend doesn't support certain features or has invalid credentials
         assert response.status_code in [200, 400, 401, 502]
         if response.status_code == 200:
             # Verify streaming response format only if successful

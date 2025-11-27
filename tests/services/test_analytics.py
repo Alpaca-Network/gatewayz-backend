@@ -11,60 +11,73 @@ from unittest.mock import Mock, patch, MagicMock
 from src.services.analytics import get_trial_analytics
 
 
+@pytest.fixture
+def mock_supabase_analytics():
+    """Mock Supabase client for analytics tests"""
+    with patch("src.services.analytics.get_supabase_client") as mock_get_client:
+        mock_client = Mock()
+
+        # Mock table().select().eq().execute() chain for signups
+        signups_result = Mock()
+        signups_result.count = 0
+        signups_chain = Mock()
+        signups_chain.execute.return_value = signups_result
+
+        # Mock table().select().eq().gt().execute() chain for started_trial
+        started_result = Mock()
+        started_result.count = 0
+        started_chain = Mock()
+        started_chain.execute.return_value = started_result
+
+        # Mock table().select().in_().is_not().execute() chain for converted
+        converted_result = Mock()
+        converted_result.count = 0
+        converted_chain = Mock()
+        converted_chain.execute.return_value = converted_result
+
+        # Set up the mock to return appropriate chains
+        def table_mock(table_name):
+            table_obj = Mock()
+
+            def select_mock(*args, **kwargs):
+                select_obj = Mock()
+
+                def eq_mock(field, value):
+                    if field == "subscription_status" and value == "trial":
+                        # Check if this is for started_trial (has gt call)
+                        eq_obj = Mock()
+                        eq_obj.execute.return_value = signups_result
+                        eq_obj.gt = Mock(return_value=started_chain)
+                        return eq_obj
+                    return Mock(execute=Mock(return_value=signups_result))
+
+                def in_mock(field, values):
+                    in_obj = Mock()
+                    in_obj.is_not = Mock(return_value=converted_chain)
+                    return in_obj
+
+                select_obj.eq = eq_mock
+                select_obj.in_ = in_mock
+                return select_obj
+
+            table_obj.select = select_mock
+            return table_obj
+
+        mock_client.table = table_mock
+        mock_get_client.return_value = mock_client
+        yield mock_client
+
+
 class TestTrialAnalytics:
     """Test trial analytics function"""
 
-    @patch('src.services.analytics.get_supabase_client')
-    def test_get_trial_analytics_returns_dict(self, mock_supabase):
+    def test_get_trial_analytics_returns_dict(self, mock_supabase_analytics):
         """Test that get_trial_analytics returns a dictionary"""
-        # Mock Supabase client and query chain
-        mock_client = Mock()
-        mock_supabase.return_value = mock_client
-
-        # Create mock result with count attribute
-        mock_result = Mock()
-        mock_result.count = 0
-        mock_result.data = []
-
-        # Mock all possible query chains
-        mock_query = MagicMock()
-        mock_query.select.return_value = mock_query
-        mock_query.eq.return_value = mock_query
-        mock_query.gt.return_value = mock_query
-        mock_query.in_.return_value = mock_query
-        mock_query.is_not.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.execute.return_value = mock_result
-
-        mock_client.table.return_value = mock_query
-
         result = get_trial_analytics()
         assert isinstance(result, dict)
 
-    @patch('src.services.analytics.get_supabase_client')
-    def test_get_trial_analytics_has_required_keys(self, mock_supabase):
+    def test_get_trial_analytics_has_required_keys(self, mock_supabase_analytics):
         """Test that result has all required keys"""
-        # Mock Supabase client and query chain
-        mock_client = Mock()
-        mock_supabase.return_value = mock_client
-
-        # Create mock result with count attribute
-        mock_result = Mock()
-        mock_result.count = 0
-        mock_result.data = []
-
-        # Mock all possible query chains
-        mock_query = MagicMock()
-        mock_query.select.return_value = mock_query
-        mock_query.eq.return_value = mock_query
-        mock_query.gt.return_value = mock_query
-        mock_query.in_.return_value = mock_query
-        mock_query.is_not.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.execute.return_value = mock_result
-
-        mock_client.table.return_value = mock_query
-
         result = get_trial_analytics()
 
         assert 'signups' in result
@@ -72,30 +85,8 @@ class TestTrialAnalytics:
         assert 'converted' in result
         assert 'conversion_rate' in result
 
-    @patch('src.services.analytics.get_supabase_client')
-    def test_get_trial_analytics_default_values(self, mock_supabase):
+    def test_get_trial_analytics_default_values(self, mock_supabase_analytics):
         """Test that default values are zero (TODO implementation)"""
-        # Mock Supabase client and query chain
-        mock_client = Mock()
-        mock_supabase.return_value = mock_client
-
-        # Create mock result with count attribute
-        mock_result = Mock()
-        mock_result.count = 0
-        mock_result.data = []
-
-        # Mock all possible query chains
-        mock_query = MagicMock()
-        mock_query.select.return_value = mock_query
-        mock_query.eq.return_value = mock_query
-        mock_query.gt.return_value = mock_query
-        mock_query.in_.return_value = mock_query
-        mock_query.is_not.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.execute.return_value = mock_result
-
-        mock_client.table.return_value = mock_query
-
         result = get_trial_analytics()
 
         assert result['signups'] == 0
@@ -103,30 +94,8 @@ class TestTrialAnalytics:
         assert result['converted'] == 0
         assert result['conversion_rate'] == 0.0
 
-    @patch('src.services.analytics.get_supabase_client')
-    def test_get_trial_analytics_value_types(self, mock_supabase):
+    def test_get_trial_analytics_value_types(self, mock_supabase_analytics):
         """Test that values have correct types"""
-        # Mock Supabase client and query chain
-        mock_client = Mock()
-        mock_supabase.return_value = mock_client
-
-        # Create mock result with count attribute
-        mock_result = Mock()
-        mock_result.count = 0
-        mock_result.data = []
-
-        # Mock all possible query chains
-        mock_query = MagicMock()
-        mock_query.select.return_value = mock_query
-        mock_query.eq.return_value = mock_query
-        mock_query.gt.return_value = mock_query
-        mock_query.in_.return_value = mock_query
-        mock_query.is_not.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.execute.return_value = mock_result
-
-        mock_client.table.return_value = mock_query
-
         result = get_trial_analytics()
 
         assert isinstance(result['signups'], int)

@@ -497,6 +497,9 @@ def test_provider_failover_to_huggingface(
     mock_detect_provider.return_value = None
     mock_calculate_cost.return_value = 0.012345
 
+    # Mock availability service to allow all providers through circuit breaker
+    mock_availability.is_model_available.return_value = True
+
     # Featherless fails
     def failing_featherless(*args, **kwargs):
         request = Request("POST", "https://featherless.test/v1/chat")
@@ -555,6 +558,9 @@ def test_provider_failover_on_404_to_huggingface(
     mock_enforce_limits.return_value = {"allowed": True}
     mock_detect_provider.return_value = None
     mock_calculate_cost.return_value = 0.012345
+
+    # Mock availability service to allow all providers through circuit breaker
+    mock_availability.is_model_available.return_value = True
 
     # Featherless returns 404
     def missing_featherless(*args, **kwargs):
