@@ -33,6 +33,7 @@ from src.cache import (
     _near_models_cache,
     _nebius_models_cache,
     _novita_models_cache,
+    _onerouter_models_cache,
     _together_models_cache,
     _vercel_ai_gateway_models_cache,
     _xai_models_cache,
@@ -55,6 +56,7 @@ from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
+from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.xai_client import fetch_models_from_xai
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
@@ -454,6 +456,7 @@ def get_all_models_parallel():
             "anannas",
             "aihubmix",
             "alibaba",
+            "onerouter",
         ]
         
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -681,6 +684,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_novita()
             _register_canonical_records("novita", result)
+            return result if result is not None else []
+
+        if gateway == "onerouter":
+            cached = _get_fresh_or_stale_cached_models(_onerouter_models_cache, "onerouter")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_onerouter()
+            _register_canonical_records("onerouter", result)
             return result if result is not None else []
 
         if gateway == "hug" or gateway == "huggingface":
