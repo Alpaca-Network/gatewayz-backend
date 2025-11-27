@@ -3380,10 +3380,9 @@ def fetch_models_from_alibaba():
             _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
             return []
 
-        from src.services.alibaba_cloud_client import get_alibaba_cloud_client
+        from src.services.alibaba_cloud_client import list_alibaba_models
 
-        client = get_alibaba_cloud_client()
-        response = client.models.list()
+        response = list_alibaba_models()
 
         if not response or not hasattr(response, "data"):
             logger.warning("No models returned from Alibaba Cloud")
