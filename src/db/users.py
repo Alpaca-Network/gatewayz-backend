@@ -36,6 +36,7 @@ def create_enhanced_user(
             "subscription_status": "trial",
             "trial_expires_at": trial_end.isoformat(),
             "welcome_email_sent": False,  # New users haven't received welcome email yet
+            "tier": "basic",
         }
 
         # Add privy_user_id if provided
@@ -81,6 +82,9 @@ def create_enhanced_user(
             "email": email,
             "credits": credits,
             "primary_api_key": primary_key,
+            "subscription_status": "trial",
+            "trial_expires_at": trial_end.isoformat(),
+            "tier": "basic",
         }
 
     except Exception as e:

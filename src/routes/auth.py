@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -69,6 +69,12 @@ def _generate_unique_username(client, base_username: str) -> str:
 
     # Last resort: append a longer random suffix
     return f"{sanitized}_{secrets.token_hex(4)}"
+
+
+def _get_tier_display_name(tier: str | None) -> str | None:
+    """Return a user-friendly display name for a subscription tier."""
+    tier_display_map = {"basic": "Basic", "pro": "Pro", "max": "MAX"}
+    return tier_display_map.get(tier) if tier else None
 
 
 def _handle_existing_user(
@@ -193,6 +199,12 @@ def _handle_existing_user(
         )
         user_credits = 0.0
 
+    tier = existing_user.get("tier")
+    tier_display_name = _get_tier_display_name(tier)
+    subscription_status_value = existing_user.get("subscription_status")
+    trial_expires_at = existing_user.get("trial_expires_at")
+    subscription_end_date = existing_user.get("subscription_end_date")
+
     user_email = existing_user.get("email") or email
     logger.info(
         "Welcome email check - User ID: %s, Welcome sent: %s",
@@ -281,6 +293,11 @@ def _handle_existing_user(
         email=user_email,
         credits=user_credits,
         timestamp=datetime.now(timezone.utc),
+        subscription_status=subscription_status_value,
+        tier=tier,
+        tier_display_name=tier_display_name,
+        trial_expires_at=trial_expires_at,
+        subscription_end_date=subscription_end_date,
     )
 
 
@@ -726,6 +743,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     )
                     username = resolved_username
 
+                trial_start = datetime.now(timezone.utc)
+                trial_end = trial_start + timedelta(days=3)
+
                 user_payload = {
                     "username": username,
                     "email": fallback_email,
@@ -734,8 +754,11 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                     ),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": trial_start.isoformat(),
                     "welcome_email_sent": False,
+                    "subscription_status": "trial",
+                    "trial_expires_at": trial_end.isoformat(),
+                    "tier": "basic",
                 }
 
                 try:
@@ -884,6 +907,10 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         "primary_api_key": api_key_value,
                         "api_key": api_key_value,
                         "scope_permissions": created_user.get("scope_permissions", {}),
+                        "subscription_status": created_user.get("subscription_status", "trial"),
+                        "trial_expires_at": created_user.get("trial_expires_at"),
+                        "tier": created_user.get("tier"),
+                        "subscription_end_date": created_user.get("subscription_end_date"),
                     }
                     logger.info(
                         (
@@ -964,6 +991,8 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 new_user_credits = 10.0
             logger.info(f"Returning registration response with credits: {new_user_credits}")
 
+            tier_value = user_data.get("tier")
+
             return PrivyAuthResponse(
                 success=True,
                 message="Account created successfully",
@@ -976,6 +1005,11 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 email=email,
                 credits=new_user_credits,
                 timestamp=datetime.now(timezone.utc),
+                subscription_status=user_data.get("subscription_status", "trial"),
+                tier=tier_value,
+                tier_display_name=_get_tier_display_name(tier_value),
+                trial_expires_at=user_data.get("trial_expires_at"),
+                subscription_end_date=user_data.get("subscription_end_date"),
             )
 
     except Exception as e:
@@ -1047,6 +1081,9 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                 str(creation_error),
             )
 
+            trial_start = datetime.now(timezone.utc)
+            trial_end = trial_start + timedelta(days=3)
+
             fallback_payload = {
                 "username": request.username,
                 "email": request.email,
@@ -1057,8 +1094,11 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                     if hasattr(request.auth_method, "value")
                     else str(request.auth_method)
                 ),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": trial_start.isoformat(),
                 "welcome_email_sent": False,
+                "subscription_status": "trial",
+                "trial_expires_at": trial_end.isoformat(),
+                "tier": "basic",
             }
 
             try:
@@ -1108,6 +1148,10 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                     "primary_api_key": api_key_value,
                     "api_key": api_key_value,
                     "scope_permissions": created_user.get("scope_permissions", {}),
+                    "subscription_status": created_user.get("subscription_status", "trial"),
+                    "trial_expires_at": created_user.get("trial_expires_at"),
+                    "tier": created_user.get("tier"),
+                    "subscription_end_date": created_user.get("subscription_end_date"),
                 }
                 logger.info(
                     f"Successfully created fallback registration user {created_user['id']} "
