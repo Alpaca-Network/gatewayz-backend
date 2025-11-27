@@ -4,39 +4,51 @@
 -- Creates the notifications table for tracking email and webhook notifications
 -- =====================================================
 
--- Create notification types enum
-CREATE TYPE notification_type AS ENUM (
-    'low_balance',
-    'trial_expiring',
-    'trial_expired',
-    'plan_expiring',
-    'plan_expired',
-    'subscription_expiring',
-    'credit_added',
-    'usage_alert',
-    'welcome',
-    'password_reset',
-    'usage_report',
-    'api_key_created',
-    'plan_upgrade',
-    'referral_signup',
-    'referral_bonus'
-);
+-- Create notification types enum (if not exists)
+DO $$ BEGIN
+    CREATE TYPE notification_type AS ENUM (
+        'low_balance',
+        'trial_expiring',
+        'trial_expired',
+        'plan_expiring',
+        'plan_expired',
+        'subscription_expiring',
+        'credit_added',
+        'usage_alert',
+        'welcome',
+        'password_reset',
+        'usage_report',
+        'api_key_created',
+        'plan_upgrade',
+        'referral_signup',
+        'referral_bonus'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
--- Create notification channels enum
-CREATE TYPE notification_channel AS ENUM (
-    'email',
-    'webhook',
-    'sms'
-);
+-- Create notification channels enum (if not exists)
+DO $$ BEGIN
+    CREATE TYPE notification_channel AS ENUM (
+        'email',
+        'webhook',
+        'sms'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
--- Create notification status enum
-CREATE TYPE notification_status AS ENUM (
-    'pending',
-    'sent',
-    'delivered',
-    'failed'
-);
+-- Create notification status enum (if not exists)
+DO $$ BEGIN
+    CREATE TYPE notification_status AS ENUM (
+        'pending',
+        'sent',
+        'delivered',
+        'failed'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- Create notifications table
 CREATE TABLE IF NOT EXISTS public.notifications (
@@ -85,25 +97,32 @@ ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notification_preferences ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policies for notifications
+DROP POLICY IF EXISTS "Users can view their own notifications" ON public.notifications;
 CREATE POLICY "Users can view their own notifications" ON public.notifications
     FOR SELECT USING (auth.uid()::text = user_id::text);
 
+DROP POLICY IF EXISTS "Users can insert their own notifications" ON public.notifications;
 CREATE POLICY "Users can insert their own notifications" ON public.notifications
     FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
 
+DROP POLICY IF EXISTS "Service role can manage all notifications" ON public.notifications;
 CREATE POLICY "Service role can manage all notifications" ON public.notifications
     FOR ALL USING (auth.role() = 'service_role');
 
 -- Create RLS policies for notification preferences
+DROP POLICY IF EXISTS "Users can view their own notification preferences" ON public.notification_preferences;
 CREATE POLICY "Users can view their own notification preferences" ON public.notification_preferences
     FOR SELECT USING (auth.uid()::text = user_id::text);
 
+DROP POLICY IF EXISTS "Users can update their own notification preferences" ON public.notification_preferences;
 CREATE POLICY "Users can update their own notification preferences" ON public.notification_preferences
     FOR UPDATE USING (auth.uid()::text = user_id::text);
 
+DROP POLICY IF EXISTS "Users can insert their own notification preferences" ON public.notification_preferences;
 CREATE POLICY "Users can insert their own notification preferences" ON public.notification_preferences
     FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
 
+DROP POLICY IF EXISTS "Service role can manage all notification preferences" ON public.notification_preferences;
 CREATE POLICY "Service role can manage all notification preferences" ON public.notification_preferences
     FOR ALL USING (auth.role() = 'service_role');
 
@@ -126,12 +145,14 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for notifications table
+DROP TRIGGER IF EXISTS trigger_update_notifications_updated_at ON public.notifications;
 CREATE TRIGGER trigger_update_notifications_updated_at
     BEFORE UPDATE ON public.notifications
     FOR EACH ROW
     EXECUTE FUNCTION update_notifications_updated_at();
 
 -- Create trigger for notification_preferences table
+DROP TRIGGER IF EXISTS trigger_update_notification_preferences_updated_at ON public.notification_preferences;
 CREATE TRIGGER trigger_update_notification_preferences_updated_at
     BEFORE UPDATE ON public.notification_preferences
     FOR EACH ROW
