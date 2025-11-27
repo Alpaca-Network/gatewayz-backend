@@ -184,14 +184,21 @@ def mock_analytics_service():
 def mock_availability_service():
     """Mock model availability service"""
     with patch("src.routes.monitoring.availability_service") as mock:
+        # Create mock state objects that return the string when .name is accessed
+        closed_state = Mock()
+        closed_state.name = "CLOSED"
+
+        open_state = Mock()
+        open_state.name = "OPEN"
+
         mock.circuit_breakers = {
             "openrouter:gpt-4": Mock(
-                state=Mock(name="CLOSED"),
+                state=closed_state,
                 failure_count=0,
                 last_failure_time=0.0
             ),
             "fireworks:llama-3-70b": Mock(
-                state=Mock(name="OPEN"),
+                state=open_state,
                 failure_count=5,
                 last_failure_time=datetime.now(timezone.utc).timestamp()
             )
