@@ -273,8 +273,12 @@ def test_create_enhanced_user_creates_trial_and_primary(sb):
     row = users_rows[0]
     assert row["subscription_status"] == "trial"
     assert "trial_expires_at" in row
+    assert row["tier"] == "basic"
     assert out["primary_api_key"] == "gw_live_primary_TESTKEY_1234567890abcdefghijklm"
     assert row["api_key"] == "gw_live_primary_TESTKEY_1234567890abcdefghijklm"
+    assert out["subscription_status"] == "trial"
+    assert out["trial_expires_at"]
+    assert out["tier"] == "basic"
 
 def test_get_user_prefers_new_api_keys_then_legacy(sb):
     import src.db.users as users
@@ -428,6 +432,8 @@ def test_create_enhanced_user_with_privy_id(sb):
     assert row["auth_method"] == "google"
     assert row["credits"] == 20
     assert out["credits"] == 20
+    assert out["subscription_status"] == "trial"
+    assert out["tier"] == "basic"
 
 
 def test_create_enhanced_user_failure_no_data(sb, monkeypatch):

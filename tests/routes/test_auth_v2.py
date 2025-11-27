@@ -194,6 +194,7 @@ def client(sb, monkeypatch):
 
     def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=10):
         # Create user (let stub auto-assign ID)
+        trial_expires_at = datetime.now(timezone.utc).isoformat()
         user_data = {
             'username': username,
             'email': email,
@@ -201,6 +202,9 @@ def client(sb, monkeypatch):
             'privy_user_id': privy_user_id,
             'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
             'created_at': datetime.now(timezone.utc).isoformat(),
+            'subscription_status': 'trial',
+            'trial_expires_at': trial_expires_at,
+            'tier': 'basic',
         }
         result = sb.table('users').insert(user_data).execute()
         created_user = result.data[0]  # Get the user with auto-assigned ID
@@ -224,6 +228,9 @@ def client(sb, monkeypatch):
             'credits': credits,
             'primary_api_key': api_key,
             'api_key': api_key,
+            'subscription_status': 'trial',
+            'trial_expires_at': trial_expires_at,
+            'tier': 'basic',
         }
 
     def mock_log_activity(*args, **kwargs):
@@ -289,6 +296,10 @@ def test_privy_auth_existing_user_success(client, sb):
         'privy_user_id': 'privy_user_123',
         'api_key': 'gw_legacy_key',
         'welcome_email_sent': True,
+        'subscription_status': 'active',
+        'tier': 'pro',
+        'trial_expires_at': '2024-01-01T00:00:00+00:00',
+        'subscription_end_date': 1704067200,
     }).execute()
 
     # Create API key (realistic length: gw_live_ + 43 chars from token_urlsafe(32))
@@ -331,6 +342,11 @@ def test_privy_auth_existing_user_success(client, sb):
     assert data['is_new_user'] is False
     assert data['email'] == 'test@example.com'
     assert data['credits'] == 50.0
+    assert data['subscription_status'] == 'active'
+    assert data['tier'] == 'pro'
+    assert data['tier_display_name'] == 'Pro'
+    assert data['trial_expires_at'] == '2024-01-01T00:00:00+00:00'
+    assert data['subscription_end_date'] == 1704067200
 
 
 def test_privy_auth_existing_user_no_api_keys_uses_legacy(client, sb):

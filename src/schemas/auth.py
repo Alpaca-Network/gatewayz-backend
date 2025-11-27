@@ -116,3 +116,8 @@ class PrivyAuthResponse(BaseModel):
     email: str | None = None
     credits: float | None = None
     timestamp: datetime | None = None
+    subscription_status: str | None = None
+    tier: str | None = None
+    tier_display_name: str | None = None
+    trial_expires_at: str | None = None
+    subscription_end_date: int | None = None
