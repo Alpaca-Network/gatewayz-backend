@@ -1,6 +1,14 @@
 import logging
+import os
+from threading import Lock
+from typing import Callable, TypeVar
 
 from openai import OpenAI
+
+try:  # pragma: no cover - defensive import for differing OpenAI SDKs
+    from openai import AuthenticationError
+except ImportError:  # pragma: no cover
+    AuthenticationError = Exception  # type: ignore[assignment]
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
@@ -8,29 +16,139 @@ from src.services.anthropic_transformer import extract_message_with_tools
 # Initialize logging
 logger = logging.getLogger(__name__)
 
+_REGION_ENDPOINTS = {
+    "china": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "international": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+}
+_REGION_DESCRIPTIONS = {
+    "china": "dashscope.aliyuncs.com (China/Beijing)",
+    "international": "dashscope-intl.aliyuncs.com (International/Singapore)",
+}
+_VALID_REGIONS = tuple(_REGION_ENDPOINTS.keys())
+_explicit_region = os.environ.get("ALIBABA_CLOUD_REGION")
+_inferred_region: str | None = None
+_region_lock = Lock()
+T = TypeVar("T")
 
-def get_alibaba_cloud_client():
+
+def _normalize_region(region: str | None) -> str:
+    if not region:
+        return "international"
+    normalized = region.lower()
+    if normalized not in _VALID_REGIONS:
+        return "international"
+    return normalized
+
+
+def _region_attempt_order() -> list[str]:
+    explicit = _normalize_region(_explicit_region) if _explicit_region else None
+    if explicit:
+        return [explicit]
+
+    attempts: list[str] = []
+    if _inferred_region:
+        attempts.append(_inferred_region)
+
+    default_region = _normalize_region(getattr(Config, "ALIBABA_CLOUD_REGION", None))
+    if default_region not in attempts:
+        attempts.append(default_region)
+
+    for region in _VALID_REGIONS:
+        if region not in attempts:
+            attempts.append(region)
+    return attempts
+
+
+def _remember_successful_region(region: str) -> None:
+    if _explicit_region:
+        return
+    global _inferred_region
+    with _region_lock:
+        _inferred_region = region
+
+
+def _describe_region(region: str) -> str:
+    return _REGION_DESCRIPTIONS.get(region, region)
+
+
+def _is_auth_error(error: Exception) -> bool:
+    if isinstance(error, AuthenticationError):
+        return True
+
+    message = str(error).lower()
+    indicators = [
+        "incorrect api key",
+        "invalid_api_key",
+        "invalid api key",
+        "error code: 401",
+        "status code: 401",
+        "unauthorized",
+    ]
+    return any(indicator in message for indicator in indicators)
+
+
+def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:
+    attempts = _region_attempt_order()
+    last_error: Exception | None = None
+
+    for idx, region in enumerate(attempts):
+        try:
+            client = get_alibaba_cloud_client(region_override=region)
+            result = fn(client)
+            _remember_successful_region(region)
+            if idx > 0:
+                logger.info(
+                    "Alibaba Cloud %s succeeded after switching to %s",
+                    operation_name,
+                    _describe_region(region),
+                )
+            return result
+        except Exception as exc:  # noqa: PERF203 - clarity over premature micro-opt
+            last_error = exc
+            should_retry = _is_auth_error(exc) and idx < len(attempts) - 1
+
+            if should_retry:
+                next_region = attempts[idx + 1]
+                logger.warning(
+                    "Alibaba Cloud %s rejected credentials at %s (error: %s). "
+                    "Retrying with %s.",
+                    operation_name,
+                    _describe_region(region),
+                    exc,
+                    _describe_region(next_region),
+                )
+                continue
+
+            logger.error(
+                "Alibaba Cloud %s failed for %s (error: %s)",
+                operation_name,
+                _describe_region(region),
+                exc,
+            )
+            raise
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Alibaba Cloud operation failed without error details")
+
+
+def get_alibaba_cloud_client(region_override: str | None = None):
     """Get Alibaba Cloud client with proper configuration
 
     Supports two regions:
     - International (Singapore): dashscope-intl.aliyuncs.com (default)
     - China (Beijing): dashscope.aliyuncs.com
 
-    Set ALIBABA_CLOUD_REGION env var to 'china' to use China endpoint.
+    Region selection will automatically fall back if credentials fail for the default endpoint.
     """
     try:
         if not Config.ALIBABA_CLOUD_API_KEY:
             raise ValueError("Alibaba Cloud API key not configured")
 
-        # Check region configuration
-        region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
+        region = _normalize_region(region_override or getattr(Config, "ALIBABA_CLOUD_REGION", None))
+        base_url = _REGION_ENDPOINTS[region]
 
-        if region == 'china':
-            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            logger.info("Using Alibaba Cloud China endpoint (Beijing)")
-        else:
-            base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-            logger.debug("Using Alibaba Cloud International endpoint (Singapore)")
+        logger.debug("Using Alibaba Cloud endpoint %s", _describe_region(region))
 
         return OpenAI(
             base_url=base_url,
@@ -41,15 +159,17 @@ def get_alibaba_cloud_client():
         raise
 
 
+def list_alibaba_models():
+    """List models from Alibaba Cloud with automatic region fallback."""
+    return _execute_with_region_failover("models.list", lambda client: client.models.list())
+
+
 def make_alibaba_cloud_request_openai(messages, model, **kwargs):
     """Make request to Alibaba Cloud using OpenAI-compatible API"""
-    try:
-        client = get_alibaba_cloud_client()
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
-        return response
-    except Exception as e:
-        logger.error(f"Alibaba Cloud request failed: {e}")
-        raise
+    return _execute_with_region_failover(
+        "chat.completions.create",
+        lambda client: client.chat.completions.create(model=model, messages=messages, **kwargs),
+    )
 
 
 def process_alibaba_cloud_response(response):
@@ -108,15 +228,15 @@ def process_alibaba_cloud_response(response):
 
 def make_alibaba_cloud_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to Alibaba Cloud using OpenAI-compatible API"""
-    try:
-        client = get_alibaba_cloud_client()
-        stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
-        )
-        return stream
-    except Exception as e:
-        logger.error(f"Alibaba Cloud streaming request failed: {e}")
-        raise
+    return _execute_with_region_failover(
+        "chat.completions.create (stream)",
+        lambda client: client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+            **kwargs,
+        ),
+    )
 
 
 def validate_stream_chunk(chunk):
