@@ -72,35 +72,8 @@ ALTER SEQUENCE "public"."rate_limit_configs_id_seq" OWNED BY "public"."rate_limi
 ALTER SEQUENCE "public"."rate_limit_usage_id_seq" OWNED BY "public"."rate_limit_usage"."id";
 ALTER SEQUENCE "public"."api_key_audit_logs_id_seq" OWNED BY "public"."api_key_audit_logs"."id";
 
--- Enable Row Level Security (RLS)
-ALTER TABLE "public"."rate_limit_configs" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."rate_limit_usage" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."api_key_audit_logs" ENABLE ROW LEVEL SECURITY;
-
--- Set up RLS policies for rate_limit_configs
-CREATE POLICY "Users can read their own rate limit configs" ON "public"."rate_limit_configs"
-    FOR SELECT USING (
-        api_key_id IN (
-            SELECT id FROM public.api_keys_new WHERE user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "Service role can manage rate limit configs" ON "public"."rate_limit_configs"
-    FOR ALL USING (auth.role() = 'service_role');
-
--- Set up RLS policies for rate_limit_usage
-CREATE POLICY "Users can read their own rate limit usage" ON "public"."rate_limit_usage"
-    FOR SELECT USING (user_id = auth.uid());
-
-CREATE POLICY "Service role can manage rate limit usage" ON "public"."rate_limit_usage"
-    FOR ALL USING (auth.role() = 'service_role');
-
--- Set up RLS policies for api_key_audit_logs
-CREATE POLICY "Users can read their own audit logs" ON "public"."api_key_audit_logs"
-    FOR SELECT USING (user_id = auth.uid());
-
-CREATE POLICY "Service role can manage audit logs" ON "public"."api_key_audit_logs"
-    FOR ALL USING (auth.role() = 'service_role');
+-- Note: RLS not enabled - this app uses custom auth with bigint user IDs, not Supabase Auth (UUID)
+-- Access control is handled at the application layer via API keys
 
 -- Grant permissions
 GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."rate_limit_configs" TO "authenticated";
