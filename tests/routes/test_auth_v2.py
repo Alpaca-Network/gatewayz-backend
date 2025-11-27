@@ -366,6 +366,114 @@ def test_privy_auth_existing_user_no_api_keys_uses_legacy(client, sb):
     assert data['api_key'] == 'gw_legacy_fallback'
 
 
+def test_privy_auth_replaces_temporary_api_key_before_response(client, sb, monkeypatch):
+    """Ensure temporary placeholder keys are replaced before responding."""
+    user_id = '371'
+    temp_key = 'gw_live_' + 'x' * 22  # 30 characters total
+    sb.table('users').insert({
+        'id': user_id,
+        'username': 'tempuser',
+        'email': 'temp@example.com',
+        'credits': 25.0,
+        'privy_user_id': 'privy_temp_371',
+        'api_key': temp_key,
+        'welcome_email_sent': True,
+    }).execute()
+
+    created_keys = []
+
+    import src.db.api_keys as api_keys_module
+
+    def fake_create_api_key(user_id, key_name, environment_tag='live', is_primary=False, **kwargs):
+        new_key = f"gw_live_mock_primary_key_{len(created_keys) + 1}_ABCDEFGHIJK"
+        payload = {
+            'user_id': str(user_id),
+            'api_key': new_key,
+            'key_name': key_name,
+            'is_primary': is_primary,
+            'is_active': True,
+            'environment_tag': environment_tag,
+        }
+        result = sb.table('api_keys_new').insert(payload).execute()
+        created_keys.append(new_key)
+        return new_key, result.data[0]['id']
+
+    monkeypatch.setattr(api_keys_module, "create_api_key", fake_create_api_key)
+
+    request_data = {
+        "user": {
+            "id": "privy_temp_371",
+            "created_at": 1705123456,
+            "linked_accounts": [{"type": "email", "email": "temp@example.com"}],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_temp",
+        "auto_create_api_key": True
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['api_key'].startswith('gw_live_mock_primary_key')
+    assert len(data['api_key']) > 40
+    assert data['api_key'] != temp_key
+
+    # Verify database reflects the new key
+    user_row = sb.table('users').select('*').eq('id', user_id).execute().data[0]
+    assert user_row['api_key'] == data['api_key']
+
+    new_keys = sb.table('api_keys_new').select('*').eq('user_id', user_id).execute().data
+    assert len(new_keys) == 1
+    assert new_keys[0]['api_key'] == data['api_key']
+
+
+def test_privy_auth_temporary_key_replacement_failure_returns_500(client, sb, monkeypatch):
+    """If primary key regeneration fails, the request should not leak the temporary key."""
+    user_id = '372'
+    sb.table('users').insert({
+        'id': user_id,
+        'username': 'tempfail',
+        'email': 'tempfail@example.com',
+        'credits': 30.0,
+        'privy_user_id': 'privy_temp_fail',
+        'api_key': 'gw_live_' + 'y' * 22,
+    }).execute()
+
+    import src.db.api_keys as api_keys_module
+
+    def failing_create_api_key(*_args, **_kwargs):
+        raise RuntimeError("creation failed")
+
+    monkeypatch.setattr(api_keys_module, "create_api_key", failing_create_api_key)
+
+    request_data = {
+        "user": {
+            "id": "privy_temp_fail",
+            "created_at": 1705123456,
+            "linked_accounts": [{"type": "email", "email": "tempfail@example.com"}],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_temp_fail",
+        "auto_create_api_key": True
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 500
+    assert 'temporary api key' in response.json()['detail'].lower()
+
+    # Ensure no api_keys_new rows were created and legacy key remains untouched
+    assert not sb.table('api_keys_new').select('*').eq('user_id', user_id).execute().data
+    user_row = sb.table('users').select('*').eq('id', user_id).execute().data[0]
+    assert user_row['api_key'].startswith('gw_live_')
+    assert len(user_row['api_key']) == 30
+
+
 def test_privy_auth_fallback_to_username_lookup(client, sb):
     """Test fallback to username lookup if Privy ID not found"""
     # User exists but doesn't have privy_user_id set yet

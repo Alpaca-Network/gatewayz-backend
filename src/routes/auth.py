@@ -71,6 +71,27 @@ def _generate_unique_username(client, base_username: str) -> str:
     return f"{sanitized}_{secrets.token_hex(4)}"
 
 
+def _is_temporary_live_key(api_key: str | None) -> bool:
+    """Return True when the api_key value matches the short-lived placeholder format."""
+    if not api_key or not api_key.startswith("gw_live_"):
+        return False
+    # Placeholder keys are 30 chars ("gw_live_" + token_urlsafe(16)). Real keys are 51 chars.
+    return len(api_key) < 40
+
+
+def _refresh_cached_user(existing_user: dict[str, Any]) -> None:
+    """Invalidate and repopulate auth caches after mutating a user record."""
+    privy_id = existing_user.get("privy_user_id")
+    username = existing_user.get("username")
+
+    invalidate_user_cache(privy_id=privy_id, username=username)
+
+    if privy_id:
+        cache_user_by_privy_id(privy_id, existing_user)
+    if username:
+        cache_user_by_username(username, existing_user)
+
+
 def _handle_existing_user(
     existing_user: dict[str, Any],
     request: PrivyAuthRequest,
@@ -93,6 +114,8 @@ def _handle_existing_user(
 
     client = supabase_config.get_supabase_client()
     api_key_to_return = existing_user.get("api_key")
+    temp_key_detected = False
+    temp_key_preview = None
 
     try:
         # Fetch API keys with timeout protection
@@ -154,24 +177,15 @@ def _handle_existing_user(
     # Proper keys from create_api_key: gw_live_{token_urlsafe(32)}
     #   - Format: "gw_live_" (8 chars) + token_urlsafe(32) (43 chars) = 51 chars total
     # Note: token_urlsafe() can contain underscores, so we check total length, not split by _
-    if api_key_to_return and api_key_to_return.startswith("gw_live_"):
-        key_length = len(api_key_to_return)
-        # Threshold: midpoint between 30 (temp) and 51 (proper) = 40
-        # Any gw_live_ key shorter than 40 chars is a temp key
-        if key_length < 40:
-            logger.error(
-                "Detected temporary API key pattern for user %s: %s (length: %d). "
-                "This key should have been replaced during user creation.",
-                existing_user["id"],
-                api_key_to_return[:15] + "...",
-                key_length,
-            )
-            # Don't return temporary keys - force key recreation by setting to None
-            api_key_to_return = None
-            logger.warning(
-                "Nullified temporary key for user %s to force proper key recreation",
-                existing_user["id"],
-            )
+    if _is_temporary_live_key(api_key_to_return):
+        temp_key_detected = True
+        temp_key_preview = api_key_to_return[:15] + "..."
+        # Don't return temporary keys - force key recreation by setting to None
+        api_key_to_return = None
+        logger.warning(
+            "Temporary API key placeholder detected for user %s; regenerating primary key",
+            existing_user["id"],
+        )
 
     user_credits = existing_user.get("credits")
     try:
@@ -243,10 +257,17 @@ def _handle_existing_user(
                     client.table("users").update({"api_key": primary_key}).eq(
                         "id", existing_user["id"]
                     ).execute()
+                    existing_user["api_key"] = primary_key
+                    _refresh_cached_user(existing_user)
                     logger.info(
                         "Successfully created and set new primary key for user %s",
                         existing_user["id"],
                     )
+                    if temp_key_detected:
+                        logger.info(
+                            "Replaced temporary API key placeholder for user %s",
+                            existing_user["id"],
+                        )
                 except Exception as update_error:
                     logger.warning(
                         "Failed to update users.api_key for user %s: %s",
@@ -266,6 +287,24 @@ def _handle_existing_user(
                 existing_user["id"],
             )
             # Return None as api_key - frontend should handle this case
+
+    if temp_key_detected:
+        if not api_key_to_return or _is_temporary_live_key(api_key_to_return):
+            detail = (
+                "Temporary API key detected but replacement failed. "
+                "Please retry login so we can issue a new key."
+            )
+            if not auto_create_api_key:
+                detail = (
+                    "Temporary API key detected but auto creation is disabled for this request. "
+                    "Please create a new key manually from the dashboard."
+                )
+            logger.error(
+                "Failed to replace temporary API key for user %s (preview: %s)",
+                existing_user["id"],
+                temp_key_preview,
+            )
+            raise HTTPException(status_code=500, detail=detail)
 
     logger.info("Returning login response with credits: %s", user_credits)
 
