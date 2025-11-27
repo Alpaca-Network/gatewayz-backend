@@ -467,6 +467,7 @@ def test_streaming_response(
     assert "[DONE]" in content
 
 
+@patch('src.services.model_availability.availability_service')
 @patch('src.services.model_transformations.detect_provider_from_model_id')
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
@@ -482,10 +483,13 @@ def test_streaming_response(
 def test_provider_failover_to_huggingface(
     mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
     mock_process_hf, mock_make_hf, mock_make_featherless,
-    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider,
+    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider, mock_availability,
     client, payload_basic, auth_headers
 ):
     """Test provider failover from featherless to huggingface"""
+    # Mock availability service to allow all providers
+    mock_availability.is_model_available.return_value = True
+
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
@@ -521,6 +525,7 @@ def test_provider_failover_to_huggingface(
     assert mock_make_hf.call_count == 1
 
 
+@patch('src.services.model_availability.availability_service')
 @patch('src.services.model_transformations.detect_provider_from_model_id')
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
@@ -536,10 +541,13 @@ def test_provider_failover_to_huggingface(
 def test_provider_failover_on_404_to_huggingface(
     mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
     mock_process_hf, mock_make_hf, mock_make_featherless,
-    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider,
+    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider, mock_availability,
     client, payload_basic, auth_headers
 ):
     """Test provider failover on 404 from featherless to huggingface"""
+    # Mock availability service to allow all providers
+    mock_availability.is_model_available.return_value = True
+
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
