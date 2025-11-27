@@ -78,6 +78,7 @@ def _handle_existing_user(
     auth_method: AuthMethod,
     display_name: str | None,
     email: str | None,
+    auto_create_api_key: bool = True,
 ) -> PrivyAuthResponse:
     """Build a consistent response for existing users."""
     logger.info(f"Existing Privy user found: {existing_user['id']}")
@@ -147,6 +148,31 @@ def _handle_existing_user(
             key_error,
         )
 
+    # Validate that we're not returning a temporary key pattern
+    # Temporary keys created during user registration: gw_live_{token_urlsafe(16)}
+    #   - Format: "gw_live_" (8 chars) + token_urlsafe(16) (22 chars) = 30 chars total
+    # Proper keys from create_api_key: gw_live_{token_urlsafe(32)}
+    #   - Format: "gw_live_" (8 chars) + token_urlsafe(32) (43 chars) = 51 chars total
+    # Note: token_urlsafe() can contain underscores, so we check total length, not split by _
+    if api_key_to_return and api_key_to_return.startswith("gw_live_"):
+        key_length = len(api_key_to_return)
+        # Threshold: midpoint between 30 (temp) and 51 (proper) = 40
+        # Any gw_live_ key shorter than 40 chars is a temp key
+        if key_length < 40:
+            logger.error(
+                "Detected temporary API key pattern for user %s: %s (length: %d). "
+                "This key should have been replaced during user creation.",
+                existing_user["id"],
+                api_key_to_return[:15] + "...",
+                key_length,
+            )
+            # Don't return temporary keys - force key recreation by setting to None
+            api_key_to_return = None
+            logger.warning(
+                "Nullified temporary key for user %s to force proper key recreation",
+                existing_user["id"],
+            )
+
     user_credits = existing_user.get("credits")
     try:
         if user_credits is None:
@@ -192,6 +218,54 @@ def _handle_existing_user(
         privy_user_id=request.user.id,
         is_new_user=False,
     )
+
+    # Handle case where no valid API key exists
+    if not api_key_to_return:
+        if auto_create_api_key:
+            logger.info(
+                "No valid API key found for user %s, creating new primary key (auto_create_api_key=True)",
+                existing_user["id"],
+            )
+            try:
+                from src.db.api_keys import create_api_key
+
+                # Create a new primary key for this user
+                primary_key, _ = create_api_key(
+                    user_id=existing_user["id"],
+                    key_name="Primary Key (Auto-created)",
+                    environment_tag="live",
+                    is_primary=True,
+                )
+                api_key_to_return = primary_key
+
+                # Update the users table with the new key
+                try:
+                    client.table("users").update({"api_key": primary_key}).eq(
+                        "id", existing_user["id"]
+                    ).execute()
+                    logger.info(
+                        "Successfully created and set new primary key for user %s",
+                        existing_user["id"],
+                    )
+                except Exception as update_error:
+                    logger.warning(
+                        "Failed to update users.api_key for user %s: %s",
+                        existing_user["id"],
+                        update_error,
+                    )
+            except Exception as create_error:
+                logger.error(
+                    "Failed to create new API key for user %s: %s",
+                    existing_user["id"],
+                    create_error,
+                )
+                # Continue without a key - frontend will need to handle this
+        else:
+            logger.warning(
+                "No valid API key found for user %s and auto_create_api_key=False, returning None",
+                existing_user["id"],
+            )
+            # Return None as api_key - frontend should handle this case
 
     logger.info("Returning login response with credits: %s", user_credits)
 
@@ -588,6 +662,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 auth_method=auth_method,
                 display_name=display_name,
                 email=email,
+                auto_create_api_key=request.auto_create_api_key
+                if request.auto_create_api_key is not None
+                else True,
             )
         else:
             # New user - create account
@@ -633,6 +710,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         auth_method=auth_method,
                         display_name=display_name,
                         email=email,
+                        auto_create_api_key=request.auto_create_api_key
+                        if request.auto_create_api_key is not None
+                        else True,
                     )
 
                 fallback_email = email or f"{request.user.id}@privy.user"
