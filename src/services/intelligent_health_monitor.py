@@ -394,17 +394,16 @@ class IntelligentHealthMonitor:
 
         headers = {}
 
-        # Map gateways to their API keys
+        # Map gateways to their API keys (using getattr for safety)
         key_mapping = {
-            "openrouter": Config.OPENROUTER_KEY,
-            "featherless": Config.FEATHERLESS_KEY,
-            "deepinfra": Config.DEEPINFRA_KEY,
-            "groq": Config.GROQ_KEY,
-            "fireworks": Config.FIREWORKS_KEY,
-            "together": Config.TOGETHER_KEY,
-            "xai": Config.XAI_KEY,
-            "cerebras": Config.CEREBRAS_KEY,
-            "portkey": Config.PORTKEY_KEY,
+            "openrouter": getattr(Config, "OPENROUTER_API_KEY", None),
+            "featherless": getattr(Config, "FEATHERLESS_API_KEY", None),
+            "deepinfra": getattr(Config, "DEEPINFRA_API_KEY", None),
+            "groq": getattr(Config, "GROQ_API_KEY", None),
+            "fireworks": getattr(Config, "FIREWORKS_API_KEY", None),
+            "together": getattr(Config, "TOGETHER_API_KEY", None),
+            "xai": getattr(Config, "XAI_API_KEY", None),
+            "cerebras": getattr(Config, "CEREBRAS_API_KEY", None),
         }
 
         api_key = key_mapping.get(gateway)
