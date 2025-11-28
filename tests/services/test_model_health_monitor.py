@@ -8,6 +8,7 @@ Covers:
 - Recovery detection
 - Health metrics storage
 - Alert triggering
+- Sentry error capture for non-functional models
 """
 
 import pytest
@@ -401,3 +402,108 @@ class TestPerformanceMetrics:
 
         error_rate = failed_requests / total_requests
         assert error_rate == 0.05
+
+
+class TestSentryErrorCapture:
+    """Test Sentry error capture for model failures"""
+
+    @pytest.mark.asyncio
+    @patch('src.utils.sentry_context.capture_exception')
+    async def test_sentry_capture_on_model_failure(self, mock_capture):
+        """Test that Sentry captures errors when models fail health checks"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Mock model data
+        model = {
+            'id': 'gpt-3.5-turbo',
+            'provider': 'openai',
+            'gateway': 'openrouter',
+            'name': 'GPT-3.5 Turbo'
+        }
+
+        # Mock the health check to fail
+        with patch.object(monitor, '_perform_model_request') as mock_request:
+            mock_request.return_value = {
+                'success': False,
+                'error': 'Connection timeout',
+                'status_code': 408,
+                'response_time': 5000
+            }
+
+            # Perform health check
+            result = await monitor._check_model_health(model)
+
+            # Verify result shows unhealthy status
+            assert result is not None
+            assert result.status.value == 'unhealthy'
+            assert result.error_message == 'Connection timeout'
+
+            # Verify Sentry capture was called
+            assert mock_capture.called, "Sentry capture_exception should be called for model failures"
+
+    @pytest.mark.asyncio
+    @patch('src.utils.sentry_context.capture_exception')
+    async def test_sentry_capture_on_exception(self, mock_capture):
+        """Test that Sentry captures exceptions during health checks"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Mock model data
+        model = {
+            'id': 'claude-3-opus',
+            'provider': 'anthropic',
+            'gateway': 'openrouter',
+            'name': 'Claude 3 Opus'
+        }
+
+        # Mock the health check to raise an exception
+        with patch.object(monitor, '_perform_model_request') as mock_request:
+            mock_request.side_effect = Exception("Network error")
+
+            # Perform health check
+            result = await monitor._check_model_health(model)
+
+            # Verify result shows unhealthy status
+            assert result is not None
+            assert result.status.value == 'unhealthy'
+            assert 'Network error' in result.error_message
+
+            # Verify Sentry capture was called
+            assert mock_capture.called, "Sentry capture_exception should be called for exceptions"
+
+    @pytest.mark.asyncio
+    @patch('src.utils.sentry_context.capture_exception')
+    async def test_sentry_not_captured_on_success(self, mock_capture):
+        """Test that Sentry does not capture errors when models are healthy"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Mock model data
+        model = {
+            'id': 'gpt-4',
+            'provider': 'openai',
+            'gateway': 'openrouter',
+            'name': 'GPT-4'
+        }
+
+        # Mock the health check to succeed
+        with patch.object(monitor, '_perform_model_request') as mock_request:
+            mock_request.return_value = {
+                'success': True,
+                'status_code': 200,
+                'response_time': 1200
+            }
+
+            # Perform health check
+            result = await monitor._check_model_health(model)
+
+            # Verify result shows healthy status
+            assert result is not None
+            assert result.status.value == 'healthy'
+
+            # Verify Sentry capture was NOT called
+            assert not mock_capture.called, "Sentry should not capture errors for healthy models"

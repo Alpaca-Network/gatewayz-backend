@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from src.utils.sentry_context import capture_model_health_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -270,10 +272,39 @@ class ModelHealthMonitor:
                 status = HealthStatus.UNHEALTHY
                 error_message = health_check_result.get("error", "Unknown error")
 
+                # Capture non-functional model to Sentry
+                error = Exception(f"Model health check failed: {error_message}")
+                capture_model_health_error(
+                    error,
+                    model_id=model_id,
+                    provider=provider,
+                    gateway=gateway,
+                    operation='health_check',
+                    status='unhealthy',
+                    response_time_ms=health_check_result.get("response_time"),
+                    details={
+                        'status_code': health_check_result.get('status_code'),
+                        'error_message': error_message,
+                    }
+                )
+
         except Exception as e:
             status = HealthStatus.UNHEALTHY
             error_message = str(e)
             logger.warning(f"Health check failed for {model_id}: {e}")
+
+            # Capture exception to Sentry
+            capture_model_health_error(
+                e,
+                model_id=model_id,
+                provider=provider,
+                gateway=gateway,
+                operation='health_check',
+                status='unhealthy',
+                details={
+                    'error_message': error_message,
+                }
+            )
 
         # Create health metrics
         health_metrics = ModelHealthMetrics(

@@ -366,5 +366,57 @@ def capture_cache_error(
     )
 
 
+def capture_model_health_error(
+    exception: Exception,
+    model_id: str,
+    provider: str,
+    gateway: str,
+    operation: str = 'health_check',
+    status: str | None = None,
+    response_time_ms: float | None = None,
+    details: dict[str, Any] | None = None,
+) -> str | None:
+    """
+    Capture a model health/availability error with standard context.
+
+    Args:
+        exception: The exception to capture
+        model_id: Model identifier
+        provider: Provider name (e.g., 'openai', 'anthropic')
+        gateway: Gateway name (e.g., 'openrouter', 'portkey')
+        operation: Health check operation (default: 'health_check')
+        status: Health status when error occurred (e.g., 'unhealthy', 'degraded')
+        response_time_ms: Response time in milliseconds if available
+        details: Additional details (error_count, success_rate, etc.)
+
+    Returns:
+        Event ID if captured, None if Sentry is disabled
+    """
+    context_data = {
+        'model_id': model_id,
+        'provider': provider,
+        'gateway': gateway,
+        'operation': operation,
+    }
+    if status:
+        context_data['status'] = status
+    if response_time_ms is not None:
+        context_data['response_time_ms'] = response_time_ms
+    if details:
+        context_data.update(details)
+
+    return capture_error(
+        exception,
+        context_type='model_health',
+        context_data=context_data,
+        tags={
+            'provider': provider,
+            'gateway': gateway,
+            'model_id': model_id,
+            'operation': operation,
+        }
+    )
+
+
 # Import asyncio for async detection
 import asyncio
