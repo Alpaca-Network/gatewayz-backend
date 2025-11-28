@@ -1,7 +1,9 @@
 import logging
+import httpx
 
 from src.config.config import Config
 from supabase import Client, create_client
+from supabase.client import ClientOptions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,9 +20,34 @@ def get_supabase_client() -> Client:
     try:
         Config.validate()
 
-        _supabase_client = create_client(
-            supabase_url=Config.SUPABASE_URL, supabase_key=Config.SUPABASE_KEY
+        # Configure HTTP client with better connection pooling for HTTP/2
+        # This helps prevent connection resets under high concurrency
+        httpx_client = httpx.Client(
+            timeout=httpx.Timeout(120.0, connect=10.0),  # 120s total, 10s connect timeout
+            limits=httpx.Limits(
+                max_connections=100,  # Maximum total connections in the pool
+                max_keepalive_connections=20,  # Keep alive connections to reuse
+                keepalive_expiry=30.0,  # Keep connections alive for 30 seconds
+            ),
+            http2=True,  # Enable HTTP/2 explicitly
         )
+
+        _supabase_client = create_client(
+            supabase_url=Config.SUPABASE_URL,
+            supabase_key=Config.SUPABASE_KEY,
+            options=ClientOptions(
+                postgrest_client_timeout=120,  # 120 second timeout for database operations
+                storage_client_timeout=120,
+                schema="public",
+                headers={"X-Client-Info": "gatewayz-backend/1.0"},
+            ),
+        )
+        
+        # Inject the configured httpx client into the postgrest client
+        # This ensures all database operations use our optimized connection pool
+        if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+            _supabase_client.postgrest.session = httpx_client
+            logger.info("Configured Supabase client with optimized HTTP/2 connection pooling")
 
         test_connection()
 

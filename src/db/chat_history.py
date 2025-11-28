@@ -1,10 +1,71 @@
 import logging
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeVar
 
+from httpx import RemoteProtocolError, ConnectError, ReadTimeout
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _execute_with_connection_retry(
+    operation: Callable[[], T],
+    operation_name: str,
+    max_retries: int = 3,
+    initial_delay: float = 0.1,
+) -> T:
+    """
+    Execute a Supabase operation with retry logic for transient connection errors.
+    
+    Handles HTTP/2 connection resets, server disconnects, and other transient network issues
+    that can occur when reusing connections in high-concurrency scenarios.
+    
+    Args:
+        operation: The operation to execute
+        operation_name: Name of the operation for logging
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds before first retry (default: 0.1)
+        
+    Returns:
+        The result of the operation
+        
+    Raises:
+        The last exception encountered if all retries fail
+    """
+    last_exception = None
+    delay = initial_delay
+    
+    for attempt in range(max_retries + 1):
+        try:
+            return operation()
+        except (RemoteProtocolError, ConnectError, ReadTimeout) as e:
+            last_exception = e
+            error_type = type(e).__name__
+            
+            if attempt < max_retries:
+                logger.warning(
+                    f"{operation_name} failed with {error_type}: {e}. "
+                    f"Retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})"
+                )
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                logger.error(
+                    f"{operation_name} failed after {max_retries} retries with {error_type}: {e}"
+                )
+        except Exception as e:
+            # For non-transient errors, fail immediately
+            logger.error(f"{operation_name} failed with non-retryable error: {e}")
+            raise
+    
+    # If we get here, all retries failed
+    if last_exception:
+        raise last_exception
+    raise RuntimeError(f"{operation_name} failed without exception details")
 
 
 def create_chat_session(user_id: int, title: str = None, model: str = None) -> dict[str, Any]:
@@ -25,7 +86,13 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
             "is_active": True,
         }
 
-        result = client.table("chat_sessions").insert(session_data).execute()
+        def insert_session():
+            return client.table("chat_sessions").insert(session_data).execute()
+        
+        result = _execute_with_connection_retry(
+            insert_session,
+            f"create_chat_session(user={user_id})"
+        )
 
         if not result.data:
             raise ValueError("Failed to create chat session")
@@ -60,7 +127,14 @@ def save_chat_message(
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        result = client.table("chat_messages").insert(message_data).execute()
+        # Insert message with retry logic for connection errors
+        def insert_message():
+            return client.table("chat_messages").insert(message_data).execute()
+        
+        result = _execute_with_connection_retry(
+            insert_message,
+            f"save_chat_message(session={session_id}, role={role})"
+        )
 
         if not result.data:
             raise ValueError("Failed to save chat message")
@@ -75,15 +149,22 @@ def save_chat_message(
         if model:
             update_data["model"] = model
 
-        session_update_query = (
-            client.table("chat_sessions").update(update_data).eq("id", session_id)
+        # Update session with retry logic for connection errors
+        def update_session():
+            session_update_query = (
+                client.table("chat_sessions").update(update_data).eq("id", session_id)
+            )
+            
+            # Add user_id check if provided for additional security
+            if user_id is not None:
+                session_update_query = session_update_query.eq("user_id", user_id)
+            
+            return session_update_query.execute()
+        
+        session_update_result = _execute_with_connection_retry(
+            update_session,
+            f"update_chat_session_timestamp(session={session_id})"
         )
-
-        # Add user_id check if provided for additional security
-        if user_id is not None:
-            session_update_query = session_update_query.eq("user_id", user_id)
-
-        session_update_result = session_update_query.execute()
 
         if not session_update_result.data:
             logger.warning(f"Failed to update session {session_id} timestamp after saving message")
@@ -103,14 +184,20 @@ def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> li
     try:
         client = get_supabase_client()
 
-        result = (
-            client.table("chat_sessions")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .order("updated_at", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
+        def query_sessions():
+            return (
+                client.table("chat_sessions")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .order("updated_at", desc=True)
+                .range(offset, offset + limit - 1)
+                .execute()
+            )
+        
+        result = _execute_with_connection_retry(
+            query_sessions,
+            f"get_user_chat_sessions(user={user_id})"
         )
 
         sessions = result.data or []
@@ -128,13 +215,19 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         client = get_supabase_client()
 
         # Get session
-        session_result = (
-            client.table("chat_sessions")
-            .select("*")
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .execute()
+        def query_session():
+            return (
+                client.table("chat_sessions")
+                .select("*")
+                .eq("id", session_id)
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .execute()
+            )
+        
+        session_result = _execute_with_connection_retry(
+            query_session,
+            f"get_chat_session(session={session_id}, user={user_id})"
         )
 
         if not session_result.data:
@@ -144,12 +237,18 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         session = session_result.data[0]
 
         # Get messages for this session
-        messages_result = (
-            client.table("chat_messages")
-            .select("*")
-            .eq("session_id", session_id)
-            .order("created_at", desc=False)
-            .execute()
+        def query_messages():
+            return (
+                client.table("chat_messages")
+                .select("*")
+                .eq("session_id", session_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+        
+        messages_result = _execute_with_connection_retry(
+            query_messages,
+            f"get_chat_messages(session={session_id})"
         )
 
         session["messages"] = messages_result.data or []
@@ -175,12 +274,18 @@ def update_chat_session(
         if model:
             update_data["model"] = model
 
-        result = (
-            client.table("chat_sessions")
-            .update(update_data)
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .execute()
+        def update_session():
+            return (
+                client.table("chat_sessions")
+                .update(update_data)
+                .eq("id", session_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        
+        result = _execute_with_connection_retry(
+            update_session,
+            f"update_chat_session(session={session_id})"
         )
 
         if not result.data:
@@ -201,12 +306,18 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
         client = get_supabase_client()
 
         # Soft delete - mark as inactive
-        result = (
-            client.table("chat_sessions")
-            .update({"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()})
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .execute()
+        def soft_delete_session():
+            return (
+                client.table("chat_sessions")
+                .update({"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", session_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        
+        result = _execute_with_connection_retry(
+            soft_delete_session,
+            f"delete_chat_session(session={session_id})"
         )
 
         if not result.data:
@@ -227,34 +338,52 @@ def get_chat_session_stats(user_id: int) -> dict[str, Any]:
         client = get_supabase_client()
 
         # Get total sessions
-        sessions_result = (
-            client.table("chat_sessions")
-            .select("id")
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .execute()
+        def query_sessions_count():
+            return (
+                client.table("chat_sessions")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .execute()
+            )
+        
+        sessions_result = _execute_with_connection_retry(
+            query_sessions_count,
+            f"get_chat_session_stats_sessions(user={user_id})"
         )
         total_sessions = len(sessions_result.data) if sessions_result.data else 0
 
         # Get total messages
-        messages_result = (
-            client.table("chat_messages")
-            .select("id")
-            .join("chat_sessions", "session_id", "id")
-            .eq("chat_sessions.user_id", user_id)
-            .eq("chat_sessions.is_active", True)
-            .execute()
+        def query_messages_count():
+            return (
+                client.table("chat_messages")
+                .select("id")
+                .join("chat_sessions", "session_id", "id")
+                .eq("chat_sessions.user_id", user_id)
+                .eq("chat_sessions.is_active", True)
+                .execute()
+            )
+        
+        messages_result = _execute_with_connection_retry(
+            query_messages_count,
+            f"get_chat_session_stats_messages(user={user_id})"
         )
         total_messages = len(messages_result.data) if messages_result.data else 0
 
         # Get total tokens
-        tokens_result = (
-            client.table("chat_messages")
-            .select("tokens")
-            .join("chat_sessions", "session_id", "id")
-            .eq("chat_sessions.user_id", user_id)
-            .eq("chat_sessions.is_active", True)
-            .execute()
+        def query_tokens():
+            return (
+                client.table("chat_messages")
+                .select("tokens")
+                .join("chat_sessions", "session_id", "id")
+                .eq("chat_sessions.user_id", user_id)
+                .eq("chat_sessions.is_active", True)
+                .execute()
+            )
+        
+        tokens_result = _execute_with_connection_retry(
+            query_tokens,
+            f"get_chat_session_stats_tokens(user={user_id})"
         )
         total_tokens = (
             sum(msg.get("tokens", 0) for msg in tokens_result.data) if tokens_result.data else 0
@@ -280,21 +409,33 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
         client = get_supabase_client()
 
         # Search in session titles
-        title_result = (
-            client.table("chat_sessions")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .ilike("title", f"%{query}%")
-            .execute()
+        def search_titles():
+            return (
+                client.table("chat_sessions")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .ilike("title", f"%{query}%")
+                .execute()
+            )
+        
+        title_result = _execute_with_connection_retry(
+            search_titles,
+            f"search_chat_sessions_titles(user={user_id})"
         )
 
         # Search in message content
-        message_result = (
-            client.table("chat_messages")
-            .select("session_id")
-            .ilike("content", f"%{query}%")
-            .execute()
+        def search_messages():
+            return (
+                client.table("chat_messages")
+                .select("session_id")
+                .ilike("content", f"%{query}%")
+                .execute()
+            )
+        
+        message_result = _execute_with_connection_retry(
+            search_messages,
+            f"search_chat_sessions_messages(user={user_id})"
         )
 
         session_ids = set()
@@ -304,13 +445,19 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
         # Get sessions from message search
         message_sessions = []
         if session_ids:
-            message_sessions_result = (
-                client.table("chat_sessions")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("is_active", True)
-                .in_("id", list(session_ids))
-                .execute()
+            def query_message_sessions():
+                return (
+                    client.table("chat_sessions")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("is_active", True)
+                    .in_("id", list(session_ids))
+                    .execute()
+                )
+            
+            message_sessions_result = _execute_with_connection_retry(
+                query_message_sessions,
+                f"search_chat_sessions_by_message_ids(user={user_id})"
             )
             message_sessions = message_sessions_result.data or []
 
