@@ -111,9 +111,13 @@ async def test_map_status_to_incident_type(health_monitor):
 
 
 @pytest.mark.asyncio
+@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_success(mock_client, health_monitor):
+async def test_check_model_health_success(mock_client, mock_config, health_monitor):
     """Test successful health check"""
+    # Mock Config attributes
+    mock_config.OPENROUTER_API_KEY = "test-key"
+
     # Mock successful HTTP response
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -144,9 +148,13 @@ async def test_check_model_health_success(mock_client, health_monitor):
 
 
 @pytest.mark.asyncio
+@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_rate_limited(mock_client, health_monitor):
+async def test_check_model_health_rate_limited(mock_client, mock_config, health_monitor):
     """Test health check with rate limit response"""
+    # Mock Config attributes
+    mock_config.OPENROUTER_API_KEY = "test-key"
+
     mock_response = MagicMock()
     mock_response.status_code = 429
     mock_response.text = "Rate limit exceeded"
@@ -202,9 +210,13 @@ async def test_check_model_health_timeout(mock_client, mock_config, health_monit
 
 
 @pytest.mark.asyncio
+@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_unauthorized(mock_client, health_monitor):
+async def test_check_model_health_unauthorized(mock_client, mock_config, health_monitor):
     """Test health check with unauthorized response"""
+    # Mock Config attributes
+    mock_config.OPENROUTER_API_KEY = "test-key"
+
     mock_response = MagicMock()
     mock_response.status_code = 401
     mock_response.text = "Unauthorized"
