@@ -173,10 +173,14 @@ async def test_check_model_health_rate_limited(mock_client, health_monitor):
 
 @pytest.mark.asyncio
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_timeout(mock_client, health_monitor):
+@patch("src.services.intelligent_health_monitor.IntelligentHealthMonitor._get_auth_headers")
+async def test_check_model_health_timeout(mock_auth_headers, mock_client, health_monitor):
     """Test health check with timeout"""
     # Import the same httpx module used in the implementation
     from src.services.intelligent_health_monitor import httpx
+
+    # Mock auth headers to return async
+    mock_auth_headers.return_value = {"Authorization": "Bearer test-key"}
 
     mock_client_instance = MagicMock()
     mock_client_instance.post = AsyncMock(side_effect=httpx.TimeoutException("Request timeout"))
