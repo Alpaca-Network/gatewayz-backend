@@ -300,6 +300,7 @@ def create_app() -> FastAPI:
     # IMPORTANT: chat & messages must be before catalog to avoid /v1/* being caught by /model/{provider}/{model}
     routes_to_load = [
         ("health", "Health Check"),
+        ("status_page", "Public Status Page"),  # Public status page (no auth required)
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
@@ -566,18 +567,38 @@ def create_app() -> FastAPI:
             asyncio.create_task(warm_caches_async())
             logger.info("  🔥 Cache warming started in background (non-blocking)")
 
+            # Initialize intelligent health monitoring
+            try:
+                logger.info("   Starting intelligent health monitoring...")
+                from src.services.intelligent_health_monitor import intelligent_health_monitor
+
+                await intelligent_health_monitor.start_monitoring()
+                logger.info("   Intelligent health monitoring started")
+            except Exception as health_e:
+                logger.warning(f"    Health monitoring initialization warning: {health_e}")
+
         except Exception as e:
             logger.error(f"   Startup initialization failed: {e}")
 
         logger.info("\n🎉 Application startup complete!")
         logger.info(" API Documentation: http://localhost:8000/docs")
-        logger.info(" Health Check: http://localhost:8000/health\n")
+        logger.info(" Health Check: http://localhost:8000/health")
+        logger.info(" Public Status Page: http://localhost:8000/v1/status\n")
 
     # ==================== Shutdown Event ====================
 
     @app.on_event("shutdown")
     async def on_shutdown():
         logger.info("🛑 Shutting down application...")
+
+        # Shutdown health monitoring
+        try:
+            from src.services.intelligent_health_monitor import intelligent_health_monitor
+
+            await intelligent_health_monitor.stop_monitoring()
+            logger.info("   Health monitoring stopped")
+        except Exception as e:
+            logger.warning(f"    Health monitoring shutdown warning: {e}")
 
         # Shutdown OpenTelemetry
         try:
