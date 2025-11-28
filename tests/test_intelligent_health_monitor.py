@@ -175,7 +175,8 @@ async def test_check_model_health_rate_limited(mock_client, health_monitor):
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
 async def test_check_model_health_timeout(mock_client, health_monitor):
     """Test health check with timeout"""
-    import httpx
+    # Import the same httpx module used in the implementation
+    from src.services.intelligent_health_monitor import httpx
 
     mock_client_instance = MagicMock()
     mock_client_instance.post = AsyncMock(side_effect=httpx.TimeoutException("Request timeout"))
