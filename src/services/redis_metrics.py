@@ -16,7 +16,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -243,8 +243,7 @@ class RedisMetrics:
             now = datetime.now(timezone.utc)
 
             for hour_offset in range(hours):
-                hour_time = now.replace(
-                    hour=now.hour - hour_offset,
+                hour_time = (now - timedelta(hours=hour_offset)).replace(
                     minute=0,
                     second=0,
                     microsecond=0
@@ -385,8 +384,7 @@ class RedisMetrics:
         try:
             # Calculate cutoff time
             now = datetime.now(timezone.utc)
-            cutoff_time = now.replace(
-                hour=now.hour - hours,
+            cutoff_time = (now - timedelta(hours=hours)).replace(
                 minute=0,
                 second=0,
                 microsecond=0

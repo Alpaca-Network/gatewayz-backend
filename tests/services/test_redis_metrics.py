@@ -36,11 +36,11 @@ def mock_redis_client():
 
     client.pipeline = Mock(return_value=pipeline)
 
-    # Mock get operations
+    # Mock get operations (with decode_responses=True behavior - string keys/values)
     client.zscore = Mock(return_value=85.0)
     client.zrevrange = Mock(return_value=[
-        (b"openrouter", 95.0),
-        (b"portkey", 85.0)
+        ("openrouter", 95.0),
+        ("portkey", 85.0)
     ])
     client.lrange = Mock(return_value=[
         json.dumps({
@@ -48,20 +48,20 @@ def mock_redis_client():
             "error": "Rate limit exceeded",
             "timestamp": time.time(),
             "latency_ms": 1500
-        }).encode()
+        })
     ])
     client.hgetall = Mock(return_value={
-        b"total_requests": b"1000",
-        b"successful_requests": b"950",
-        b"failed_requests": b"50",
-        b"tokens_input": b"50000",
-        b"tokens_output": b"25000",
-        b"total_cost": b"12.5"
+        "total_requests": "1000",
+        "successful_requests": "950",
+        "failed_requests": "50",
+        "tokens_input": "50000",
+        "tokens_output": "25000",
+        "total_cost": "12.5"
     })
-    client.zrange = Mock(return_value=[b"500", b"550", b"600", b"800"])
+    client.zrange = Mock(return_value=["500", "550", "600", "800"])
     client.scan_iter = Mock(return_value=iter([
-        b"metrics:openrouter:2025-11-27:14",
-        b"metrics:openrouter:2025-11-27:13"
+        "metrics:openrouter:2025-11-27:14",
+        "metrics:openrouter:2025-11-27:13"
     ]))
     client.delete = Mock(return_value=1)
 
