@@ -343,34 +343,23 @@ class TestWithAsyncRetry:
     @pytest.mark.asyncio
     async def test_async_respects_max_attempts(self):
         """Test that async function fails after max_attempts"""
+        call_count = 0
+
         async def async_func():
+            nonlocal call_count
+            call_count += 1
             raise ConnectionError("timeout error")
 
         decorated = with_async_retry(
             max_attempts=3,
-            initial_delay=0.01,
+            initial_delay=0.001,
             exceptions=(ConnectionError,)
         )(async_func)
 
-        call_count = 0
-        original_func = async_func
+        with pytest.raises(ConnectionError, match="timeout error"):
+            await decorated()
 
-        async def counting_func():
-            nonlocal call_count
-            call_count += 1
-            await original_func()
-
-        decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(ConnectionError,)
-        )(counting_func)
-
-        with patch('asyncio.sleep', new_callable=lambda: Mock(side_effect=lambda x: asyncio.sleep(0))):
-            with pytest.raises(ConnectionError, match="timeout error"):
-                await decorated()
-
-            assert call_count == 3
+        assert call_count == 3
 
     @pytest.mark.asyncio
     async def test_async_exponential_backoff(self):
