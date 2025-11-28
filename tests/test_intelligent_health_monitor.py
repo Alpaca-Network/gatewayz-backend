@@ -279,7 +279,7 @@ async def test_circuit_breaker_state_enum():
 
 
 @pytest.mark.asyncio
-@patch("src.services.intelligent_health_monitor.supabase")
+@patch("src.config.supabase_config.supabase")
 async def test_get_models_for_checking_empty(mock_supabase, health_monitor):
     """Test getting models for checking when none are due"""
     mock_response = MagicMock()

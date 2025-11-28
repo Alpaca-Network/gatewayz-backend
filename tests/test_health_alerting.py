@@ -219,7 +219,7 @@ def test_format_metrics_html_empty(alerting_service):
 
 
 @pytest.mark.asyncio
-@patch("src.services.health_alerting.send_email")
+@patch("src.services.notification.send_email")
 async def test_send_email_alert(mock_send_email, alerting_service):
     """Test sending email alert"""
     mock_send_email.return_value = AsyncMock()
