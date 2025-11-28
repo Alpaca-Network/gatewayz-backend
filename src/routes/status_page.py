@@ -395,10 +395,14 @@ async def search_models(
     Public endpoint - no authentication required.
     """
     try:
+        # Sanitize search query to prevent PostgREST filter injection
+        # Remove special characters that have meaning in PostgREST syntax
+        sanitized_q = q.replace(",", "").replace("(", "").replace(")", "").replace(".", "")
+
         query = (
             supabase.table("model_status_current")
             .select("*")
-            .or_(f"model.ilike.%{q}%,provider.ilike.%{q}%")
+            .or_(f"model.ilike.%{sanitized_q}%,provider.ilike.%{sanitized_q}%")
             .limit(limit)
         )
 

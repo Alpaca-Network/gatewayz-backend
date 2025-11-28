@@ -293,7 +293,9 @@ class IntelligentHealthMonitor:
         provider = model["provider"]
         model_id = model["model"]
         gateway = model["gateway"]
-        tier = MonitoringTier(model.get("monitoring_tier", "standard"))
+        # Handle None values from database - use "standard" as fallback
+        tier_value = model.get("monitoring_tier") or "standard"
+        tier = MonitoringTier(tier_value)
 
         tier_settings = self.tier_config[tier]
         timeout = tier_settings["timeout_seconds"]

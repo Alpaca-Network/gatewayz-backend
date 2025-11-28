@@ -291,6 +291,7 @@ BEGIN
     ) AND monitoring_tier != 'popular';
 
     -- Update to standard tier (remaining with some usage)
+    -- Allow demotion from higher tiers when usage drops below threshold
     UPDATE model_health_tracking
     SET monitoring_tier = 'standard',
         check_interval_seconds = 7200 -- 2 hours
@@ -299,7 +300,7 @@ BEGIN
         SELECT PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY usage_count_24h)
         FROM model_health_tracking
         WHERE usage_count_24h > 0
-    ) AND monitoring_tier NOT IN ('critical', 'popular');
+    ) AND monitoring_tier != 'standard';
 
     -- Update to on_demand tier (no recent usage)
     UPDATE model_health_tracking
@@ -417,6 +418,8 @@ GRANT SELECT ON model_status_current TO anon;
 GRANT SELECT ON provider_health_current TO anon;
 
 -- Create initial data and set reasonable defaults
+-- Update existing rows to set default values for all NULL columns
+-- This ensures compatibility with the health monitoring system
 UPDATE model_health_tracking
 SET
     gateway = COALESCE(gateway, 'unknown'),
@@ -428,4 +431,13 @@ SET
     uptime_percentage_24h = COALESCE(uptime_percentage_24h, 100.0),
     uptime_percentage_7d = COALESCE(uptime_percentage_7d, 100.0),
     uptime_percentage_30d = COALESCE(uptime_percentage_30d, 100.0)
-WHERE gateway IS NULL OR next_check_at IS NULL;
+WHERE
+    gateway IS NULL
+    OR next_check_at IS NULL
+    OR check_interval_seconds IS NULL
+    OR monitoring_tier IS NULL
+    OR circuit_breaker_state IS NULL
+    OR is_enabled IS NULL
+    OR uptime_percentage_24h IS NULL
+    OR uptime_percentage_7d IS NULL
+    OR uptime_percentage_30d IS NULL;
