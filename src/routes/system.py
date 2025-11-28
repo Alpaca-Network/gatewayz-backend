@@ -300,10 +300,11 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
             cache_details += f" (models: {cache_count})"
 
         # Recalculate final_status based on endpoint and cache test results
-        # Final status is only "healthy" if BOTH tests pass
+        # Final status is "healthy" if EITHER endpoint OR cache test passes
+        # This allows cache-only gateways (like Fal.ai) and gateways with empty caches but working endpoints
         if not data.get("configured"):
             final_status = "unconfigured"
-        elif endpoint_test.get("success") and cache_test.get("success"):
+        elif endpoint_test.get("success") or cache_test.get("success"):
             final_status = "healthy"
         else:
             final_status = "unhealthy"
