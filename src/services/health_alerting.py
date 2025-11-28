@@ -173,16 +173,24 @@ class HealthAlertingService:
     async def _send_email_alert(self, alert: Alert):
         """Send alert via email"""
         try:
-            from src.services.notification import send_email
-
-            # Get admin email from config
+            import resend
             from src.config import Config
 
+            # Get admin email from config
             to_email = getattr(Config, "ADMIN_EMAIL", None) or getattr(Config, "SUPPORT_EMAIL", None)
+            from_email = getattr(Config, "FROM_EMAIL", "noreply@gatewayz.ai")
+            resend_api_key = getattr(Config, "RESEND_API_KEY", None)
 
             if not to_email:
                 logger.warning("No admin email configured for alerts")
                 return
+
+            if not resend_api_key:
+                logger.warning("No Resend API key configured for email alerts")
+                return
+
+            # Set Resend API key
+            resend.api_key = resend_api_key
 
             # Format email
             subject = f"[{alert.severity.value.upper()}] {alert.title}"
@@ -209,11 +217,13 @@ class HealthAlertingService:
             </p>
             """
 
-            await send_email(
-                to_email=to_email,
-                subject=subject,
-                html_content=html_body,
-            )
+            # Send email using Resend
+            resend.Emails.send({
+                "from": from_email,
+                "to": to_email,
+                "subject": subject,
+                "html": html_body,
+            })
 
         except Exception as e:
             logger.error(f"Failed to send email alert: {e}")

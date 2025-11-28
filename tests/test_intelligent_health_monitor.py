@@ -172,10 +172,14 @@ async def test_check_model_health_rate_limited(mock_client, health_monitor):
 
 
 @pytest.mark.asyncio
+@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_timeout(mock_client, health_monitor):
+async def test_check_model_health_timeout(mock_client, mock_config, health_monitor):
     """Test health check with timeout"""
     import httpx
+
+    # Mock Config attributes
+    mock_config.OPENROUTER_API_KEY = "test-key"
 
     mock_client_instance = MagicMock()
     mock_client_instance.post = AsyncMock(side_effect=httpx.TimeoutException("Request timeout"))

@@ -219,13 +219,15 @@ def test_format_metrics_html_empty(alerting_service):
 
 
 @pytest.mark.asyncio
-@patch("src.services.notification.send_email")
+@patch("resend.Emails.send")
 async def test_send_email_alert(mock_send_email, alerting_service):
     """Test sending email alert"""
-    mock_send_email.return_value = AsyncMock()
+    mock_send_email.return_value = None  # Resend returns None on success
 
     with patch("src.services.health_alerting.Config") as mock_config:
         mock_config.ADMIN_EMAIL = "admin@example.com"
+        mock_config.RESEND_API_KEY = "re_test_key"
+        mock_config.FROM_EMAIL = "noreply@test.com"
         alerting_service.enabled_channels = [AlertChannel.EMAIL]
 
         alert = Alert(
@@ -237,7 +239,8 @@ async def test_send_email_alert(mock_send_email, alerting_service):
         )
 
         await alerting_service._send_email_alert(alert)
-        # Email sending is attempted (may not actually send in test)
+        # Verify email was sent
+        assert mock_send_email.called
 
 
 @pytest.mark.asyncio
