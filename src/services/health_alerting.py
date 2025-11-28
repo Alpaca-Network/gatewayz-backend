@@ -85,11 +85,11 @@ class HealthAlertingService:
         from src.config import Config
 
         # Determine which channels are configured
-        if Config.RESEND_API_KEY:
+        if getattr(Config, "RESEND_API_KEY", None):
             self.enabled_channels.append(AlertChannel.EMAIL)
 
         # Add other channels as configured
-        # if Config.SLACK_WEBHOOK_URL:
+        # if getattr(Config, "SLACK_WEBHOOK_URL", None):
         #     self.enabled_channels.append(AlertChannel.SLACK)
 
         logger.info(f"Health alerting enabled for channels: {self.enabled_channels}")
@@ -178,7 +178,7 @@ class HealthAlertingService:
             # Get admin email from config
             from src.config import Config
 
-            to_email = Config.ADMIN_EMAIL or Config.SUPPORT_EMAIL
+            to_email = getattr(Config, "ADMIN_EMAIL", None) or getattr(Config, "SUPPORT_EMAIL", None)
 
             if not to_email:
                 logger.warning("No admin email configured for alerts")
