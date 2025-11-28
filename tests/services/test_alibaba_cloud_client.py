@@ -44,6 +44,8 @@ def test_chat_request_prefers_cached_region(monkeypatch):
     """Subsequent requests should re-use the inferred working region to avoid extra failures."""
 
     monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None, raising=False)
     _reset_region_state(monkeypatch)
     monkeypatch.setattr(acc, "_inferred_region", "china", raising=False)
 
@@ -68,3 +70,39 @@ def test_chat_request_prefers_cached_region(monkeypatch):
     assert result == {"ok": True}
     assert captured_regions == ["china"], "should use inferred region without retry"
     fake_client.chat.completions.create.assert_called_once()
+
+
+def test_get_client_uses_region_specific_keys(monkeypatch):
+    """Ensure region-specific API keys override the default key."""
+
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "default-key")
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", "china-key")
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", "intl-key")
+
+    captured_keys: list[str] = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured_keys.append(kwargs["api_key"])
+
+    monkeypatch.setattr(acc, "OpenAI", FakeOpenAI)
+
+    acc.get_alibaba_cloud_client(region_override="china")
+    acc.get_alibaba_cloud_client(region_override="international")
+
+    assert captured_keys == ["china-key", "intl-key"]
+
+
+def test_region_attempt_order_skips_missing_keys(monkeypatch):
+    """Only attempt regions that have an API key configured."""
+
+    _reset_region_state(monkeypatch)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", "intl-key", raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_REGION", "china", raising=False)
+    monkeypatch.setattr(acc, "_inferred_region", None, raising=False)
+
+    attempts = acc._region_attempt_order()
+
+    assert attempts == ["international"], "should only include regions with keys"
