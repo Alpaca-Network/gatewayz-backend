@@ -220,30 +220,31 @@ def test_format_metrics_html_empty(alerting_service):
 
 @pytest.mark.asyncio
 @patch("resend.Emails.send")
-@patch("src.config.config.Config")
-async def test_send_email_alert(mock_config, mock_send_email, alerting_service):
+async def test_send_email_alert(mock_send_email, alerting_service):
     """Test sending email alert"""
-    from unittest.mock import PropertyMock
-
     mock_send_email.return_value = None  # Resend returns None on success
 
-    # Mock Config attributes using PropertyMock to work with getattr
-    type(mock_config).ADMIN_EMAIL = PropertyMock(return_value="admin@example.com")
-    type(mock_config).RESEND_API_KEY = PropertyMock(return_value="re_test_key")
-    type(mock_config).FROM_EMAIL = PropertyMock(return_value="noreply@test.com")
-    alerting_service.enabled_channels = [AlertChannel.EMAIL]
+    # Patch Config where it's imported from
+    with patch("src.config.Config") as mock_config:
+        # Set attributes that getattr will access
+        mock_config.ADMIN_EMAIL = "admin@example.com"
+        mock_config.RESEND_API_KEY = "re_test_key"
+        mock_config.FROM_EMAIL = "noreply@test.com"
+        mock_config.SUPPORT_EMAIL = None
 
-    alert = Alert(
-        alert_type=AlertType.PROVIDER_DOWN,
-        severity=AlertSeverity.CRITICAL,
-        title="Provider Down",
-        message="OpenAI provider is offline",
-        provider="openai",
-    )
+        alerting_service.enabled_channels = [AlertChannel.EMAIL]
 
-    await alerting_service._send_email_alert(alert)
-    # Verify email was sent
-    assert mock_send_email.called
+        alert = Alert(
+            alert_type=AlertType.PROVIDER_DOWN,
+            severity=AlertSeverity.CRITICAL,
+            title="Provider Down",
+            message="OpenAI provider is offline",
+            provider="openai",
+        )
+
+        await alerting_service._send_email_alert(alert)
+        # Verify email was sent
+        assert mock_send_email.called
 
 
 @pytest.mark.asyncio

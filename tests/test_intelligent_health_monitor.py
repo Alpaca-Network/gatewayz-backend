@@ -6,7 +6,7 @@ Tests the tiered monitoring, scheduling, and health check functionality.
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -111,13 +111,9 @@ async def test_map_status_to_incident_type(health_monitor):
 
 
 @pytest.mark.asyncio
-@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_success(mock_config, mock_client, health_monitor):
+async def test_check_model_health_success(mock_client, health_monitor):
     """Test successful health check"""
-    # Mock Config attributes
-    type(mock_config).OPENROUTER_API_KEY = PropertyMock(return_value="test-key")
-
     # Mock successful HTTP response
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -148,13 +144,9 @@ async def test_check_model_health_success(mock_config, mock_client, health_monit
 
 
 @pytest.mark.asyncio
-@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_rate_limited(mock_config, mock_client, health_monitor):
+async def test_check_model_health_rate_limited(mock_client, health_monitor):
     """Test health check with rate limit response"""
-    # Mock Config attributes
-    type(mock_config).OPENROUTER_API_KEY = PropertyMock(return_value="test-key")
-
     mock_response = MagicMock()
     mock_response.status_code = 429
     mock_response.text = "Rate limit exceeded"
@@ -180,14 +172,10 @@ async def test_check_model_health_rate_limited(mock_config, mock_client, health_
 
 
 @pytest.mark.asyncio
-@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_timeout(mock_config, mock_client, health_monitor):
+async def test_check_model_health_timeout(mock_client, health_monitor):
     """Test health check with timeout"""
     import httpx
-
-    # Mock Config attributes - use getattr to match actual implementation
-    type(mock_config).OPENROUTER_API_KEY = PropertyMock(return_value="test-key")
 
     mock_client_instance = MagicMock()
     mock_client_instance.post = AsyncMock(side_effect=httpx.TimeoutException("Request timeout"))
@@ -210,13 +198,9 @@ async def test_check_model_health_timeout(mock_config, mock_client, health_monit
 
 
 @pytest.mark.asyncio
-@patch("src.config.config.Config")
 @patch("src.services.intelligent_health_monitor.httpx.AsyncClient")
-async def test_check_model_health_unauthorized(mock_config, mock_client, health_monitor):
+async def test_check_model_health_unauthorized(mock_client, health_monitor):
     """Test health check with unauthorized response"""
-    # Mock Config attributes
-    type(mock_config).OPENROUTER_API_KEY = PropertyMock(return_value="test-key")
-
     mock_response = MagicMock()
     mock_response.status_code = 401
     mock_response.text = "Unauthorized"
