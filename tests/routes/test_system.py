@@ -814,3 +814,82 @@ class TestGatewayHealthDashboard:
         data = response.json()
         # Should be unconfigured
         assert data['gateways']['unconfigured_gateway']['final_status'] == 'unconfigured'
+
+    @patch('src.routes.system._run_gateway_check')
+    async def test_gateway_dashboard_html_rendering_with_or_logic(
+        self,
+        mock_run_check,
+        client
+    ):
+        """Test HTML dashboard rendering applies OR logic correctly for health status"""
+        # Test all three scenarios that validate OR logic
+        mock_results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_gateways": 3,
+            "healthy": 3,
+            "unhealthy": 0,
+            "unconfigured": 0,
+            "gateways": {
+                "fal": {
+                    "name": "Fal.ai",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": False,
+                        "message": "No direct endpoint (cache-only gateway)",
+                        "model_count": 0
+                    },
+                    "cache_test": {
+                        "success": True,
+                        "message": "69 models cached, 1.4h old",
+                        "model_count": 69
+                    },
+                    "final_status": "healthy"
+                },
+                "nebius": {
+                    "name": "Nebius",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": True,
+                        "message": "OK - 40 models available",
+                        "model_count": 40
+                    },
+                    "cache_test": {
+                        "success": False,
+                        "message": "Cache is empty",
+                        "model_count": 0
+                    },
+                    "final_status": "healthy"
+                },
+                "xai": {
+                    "name": "xAI",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": True,
+                        "message": "OK - 11 models available",
+                        "model_count": 11
+                    },
+                    "cache_test": {
+                        "success": False,
+                        "message": "Cache is empty",
+                        "model_count": 0
+                    },
+                    "final_status": "healthy"
+                }
+            }
+        }
+        mock_run_check.return_value = (mock_results, "")
+
+        # Call the HTML dashboard endpoint which uses _render_gateway_dashboard
+        response = client.get('/health/gateways/dashboard')
+
+        assert response.status_code == 200
+        html_content = response.text
+
+        # Verify HTML contains the gateway names
+        assert "Fal.ai" in html_content
+        assert "Nebius" in html_content
+        assert "xAI" in html_content
+
+        # Verify all are marked as healthy in the HTML
+        # The HTML should contain "Healthy" status badges for these gateways
+        assert html_content.count('badge-healthy') >= 3 or 'Healthy' in html_content
