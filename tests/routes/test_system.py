@@ -615,3 +615,202 @@ class TestSystemIntegration:
         assert 'cache' in data['data']
         assert data['data']['cache']['models_cached'] == 3
         assert data['data']['cache']['has_data'] is True
+
+
+# ============================================================
+# TEST CLASS: Gateway Health Dashboard
+# ============================================================
+
+class TestGatewayHealthDashboard:
+    """Test gateway health dashboard status calculations"""
+
+    @patch('src.routes.system._run_gateway_check')
+    async def test_gateway_dashboard_endpoint_and_cache_pass(
+        self,
+        mock_run_check,
+        client
+    ):
+        """Test gateway marked healthy when both endpoint and cache pass"""
+        mock_results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_gateways": 1,
+            "healthy": 1,
+            "unhealthy": 0,
+            "unconfigured": 0,
+            "gateways": {
+                "test_gateway": {
+                    "name": "Test Gateway",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": True,
+                        "message": "OK - 100 models available",
+                        "model_count": 100
+                    },
+                    "cache_test": {
+                        "success": True,
+                        "message": "100 models cached",
+                        "model_count": 100
+                    },
+                    "final_status": "healthy"
+                }
+            }
+        }
+        mock_run_check.return_value = (mock_results, "")
+
+        response = client.get('/health/gateways/dashboard/data')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['gateways']['test_gateway']['final_status'] == 'healthy'
+
+    @patch('src.routes.system._run_gateway_check')
+    async def test_gateway_dashboard_endpoint_pass_cache_fail(
+        self,
+        mock_run_check,
+        client
+    ):
+        """Test gateway marked healthy when endpoint passes but cache fails (OR logic)"""
+        mock_results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_gateways": 1,
+            "healthy": 1,
+            "unhealthy": 0,
+            "unconfigured": 0,
+            "gateways": {
+                "nebius": {
+                    "name": "Nebius",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": True,
+                        "message": "OK - 40 models available",
+                        "model_count": 40
+                    },
+                    "cache_test": {
+                        "success": False,
+                        "message": "Cache is empty",
+                        "model_count": 0
+                    },
+                    "final_status": "healthy"
+                }
+            }
+        }
+        mock_run_check.return_value = (mock_results, "")
+
+        response = client.get('/health/gateways/dashboard/data')
+
+        assert response.status_code == 200
+        data = response.json()
+        # Should be healthy because endpoint passes (OR logic)
+        assert data['gateways']['nebius']['final_status'] == 'healthy'
+
+    @patch('src.routes.system._run_gateway_check')
+    async def test_gateway_dashboard_endpoint_fail_cache_pass(
+        self,
+        mock_run_check,
+        client
+    ):
+        """Test gateway marked healthy when cache passes but endpoint fails (cache-only gateway)"""
+        mock_results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_gateways": 1,
+            "healthy": 1,
+            "unhealthy": 0,
+            "unconfigured": 0,
+            "gateways": {
+                "fal": {
+                    "name": "Fal.ai",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": False,
+                        "message": "No direct endpoint (cache-only gateway)",
+                        "model_count": 0
+                    },
+                    "cache_test": {
+                        "success": True,
+                        "message": "69 models cached",
+                        "model_count": 69
+                    },
+                    "final_status": "healthy"
+                }
+            }
+        }
+        mock_run_check.return_value = (mock_results, "")
+
+        response = client.get('/health/gateways/dashboard/data')
+
+        assert response.status_code == 200
+        data = response.json()
+        # Should be healthy because cache passes (OR logic)
+        assert data['gateways']['fal']['final_status'] == 'healthy'
+
+    @patch('src.routes.system._run_gateway_check')
+    async def test_gateway_dashboard_both_fail(
+        self,
+        mock_run_check,
+        client
+    ):
+        """Test gateway marked unhealthy when both endpoint and cache fail"""
+        mock_results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_gateways": 1,
+            "healthy": 0,
+            "unhealthy": 1,
+            "unconfigured": 0,
+            "gateways": {
+                "broken_gateway": {
+                    "name": "Broken Gateway",
+                    "configured": True,
+                    "endpoint_test": {
+                        "success": False,
+                        "message": "HTTP 500: Internal Server Error",
+                        "model_count": 0
+                    },
+                    "cache_test": {
+                        "success": False,
+                        "message": "Cache is empty",
+                        "model_count": 0
+                    },
+                    "final_status": "unhealthy"
+                }
+            }
+        }
+        mock_run_check.return_value = (mock_results, "")
+
+        response = client.get('/health/gateways/dashboard/data')
+
+        assert response.status_code == 200
+        data = response.json()
+        # Should be unhealthy because both fail
+        assert data['gateways']['broken_gateway']['final_status'] == 'unhealthy'
+
+    @patch('src.routes.system._run_gateway_check')
+    async def test_gateway_dashboard_unconfigured(
+        self,
+        mock_run_check,
+        client
+    ):
+        """Test gateway marked unconfigured when no API key is configured"""
+        mock_results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_gateways": 1,
+            "healthy": 0,
+            "unhealthy": 0,
+            "unconfigured": 1,
+            "gateways": {
+                "unconfigured_gateway": {
+                    "name": "Unconfigured Gateway",
+                    "configured": False,
+                    "endpoint_test": {},
+                    "cache_test": {},
+                    "final_status": "unconfigured"
+                }
+            }
+        }
+        mock_run_check.return_value = (mock_results, "")
+
+        response = client.get('/health/gateways/dashboard/data')
+
+        assert response.status_code == 200
+        data = response.json()
+        # Should be unconfigured
+        assert data['gateways']['unconfigured_gateway']['final_status'] == 'unconfigured'
