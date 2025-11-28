@@ -2,6 +2,23 @@
 -- Description: Add tiered monitoring, historical uptime, and incident tracking
 -- Created: 2025-11-28
 
+-- Ensure model_health_tracking table exists (created in earlier migration)
+CREATE TABLE IF NOT EXISTS model_health_tracking (
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    last_response_time_ms NUMERIC,
+    last_status TEXT NOT NULL,
+    last_called_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    call_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    average_response_time_ms NUMERIC,
+    last_error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (provider, model)
+);
+
 -- Add new columns to model_health_tracking for enhanced monitoring
 ALTER TABLE model_health_tracking
 ADD COLUMN IF NOT EXISTS gateway TEXT,
