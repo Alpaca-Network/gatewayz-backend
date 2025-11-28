@@ -42,6 +42,7 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
 _OPENROUTER_SUFFIX_LOCKS = {"exacto", "free", "extended"}
+_OPENROUTER_PREFIX_LOCKS = ("openrouter/", "openai/", "anthropic/")
 
 
 def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
@@ -80,9 +81,11 @@ def enforce_model_failover_rules(model_id: str | None, provider_chain: list[str]
     """
     Restrict the provider chain when a model is provider-specific.
 
-    Currently we only lock models that use the OpenRouter namespace or special OpenRouter
-    suffixes (e.g. openrouter/auto, z-ai/glm-4.6:exacto). These identifiers are not
-    recognized by other providers, so attempting failover creates noisy upstream errors.
+    Currently we only lock models that use the OpenRouter namespace or OpenAI/Anthropic
+    aliases that are exclusively served through OpenRouter (e.g. openai/gpt-4o, anthropic/claude),
+    along with special OpenRouter suffixes (e.g. openrouter/auto, z-ai/glm-4.6:exacto).
+    These identifiers are not recognized by other providers, so attempting failover only
+    creates noisy upstream errors.
     """
     if not model_id:
         return provider_chain
@@ -90,7 +93,7 @@ def enforce_model_failover_rules(model_id: str | None, provider_chain: list[str]
     normalized = model_id.lower()
     locked_provider = None
 
-    if normalized.startswith("openrouter/"):
+    if normalized.startswith(_OPENROUTER_PREFIX_LOCKS):
         locked_provider = "openrouter"
     elif ":" in normalized:
         suffix = normalized.split(":", 1)[1]

@@ -178,6 +178,18 @@ class TestEnforceModelFailoverRules:
 
         assert filtered == ["openrouter"]
 
+    def test_openai_prefix_locked(self):
+        chain = ["openrouter", "cerebras", "huggingface"]
+        filtered = enforce_model_failover_rules("openai/gpt-5.1", chain)
+
+        assert filtered == ["openrouter"]
+
+    def test_anthropic_prefix_locked(self):
+        chain = ["openrouter", "huggingface"]
+        filtered = enforce_model_failover_rules("anthropic/claude-3.5-sonnet", chain)
+
+        assert filtered == ["openrouter"]
+
     def test_non_locked_model_noop(self):
         chain = ["openrouter", "cerebras"]
         filtered = enforce_model_failover_rules("deepseek-ai/deepseek-v3", chain)
