@@ -272,8 +272,8 @@ async def main():
     try:
         from src.services.statsig_service import statsig_service
         await statsig_service.shutdown()
-    except:
-        pass
+    except Exception as e:
+        print(f"Warning: Failed to shutdown statsig_service cleanly: {e}")
 
     return 0 if all_passed else 1
 
