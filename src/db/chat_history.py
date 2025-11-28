@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 from httpx import RemoteProtocolError, ConnectError, ReadTimeout
 from src.config.supabase_config import get_supabase_client
+from src.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,18 @@ def _execute_with_connection_retry(
     raise RuntimeError(f"{operation_name} failed without exception details")
 
 
+@with_retry(
+    max_attempts=3,
+    initial_delay=0.1,
+    max_delay=2.0,
+    exceptions=(Exception,)
+)
 def create_chat_session(user_id: int, title: str = None, model: str = None) -> dict[str, Any]:
-    """Create a new chat session for a user"""
+    """
+    Create a new chat session for a user.
+    
+    This function is decorated with retry logic to handle transient connection errors.
+    """
     try:
         client = get_supabase_client()
 
@@ -106,6 +117,12 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
         raise RuntimeError(f"Failed to create chat session: {e}") from e
 
 
+@with_retry(
+    max_attempts=3,
+    initial_delay=0.1,
+    max_delay=2.0,
+    exceptions=(Exception,)
+)
 def save_chat_message(
     session_id: int,
     role: str,
@@ -114,7 +131,12 @@ def save_chat_message(
     tokens: int = 0,
     user_id: int = None,
 ) -> dict[str, Any]:
-    """Save a chat message to a session and update session's updated_at timestamp"""
+    """
+    Save a chat message to a session and update session's updated_at timestamp.
+    
+    This function is decorated with retry logic to handle transient connection errors
+    that may occur when called from background tasks after HTTP responses are sent.
+    """
     try:
         client = get_supabase_client()
 
@@ -260,10 +282,20 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         raise RuntimeError(f"Failed to get chat session: {e}") from e
 
 
+@with_retry(
+    max_attempts=3,
+    initial_delay=0.1,
+    max_delay=2.0,
+    exceptions=(Exception,)
+)
 def update_chat_session(
     session_id: int, user_id: int, title: str = None, model: str = None
 ) -> bool:
-    """Update a chat session"""
+    """
+    Update a chat session.
+    
+    This function is decorated with retry logic to handle transient connection errors.
+    """
     try:
         client = get_supabase_client()
 
@@ -300,8 +332,18 @@ def update_chat_session(
         raise RuntimeError(f"Failed to update chat session: {e}") from e
 
 
+@with_retry(
+    max_attempts=3,
+    initial_delay=0.1,
+    max_delay=2.0,
+    exceptions=(Exception,)
+)
 def delete_chat_session(session_id: int, user_id: int) -> bool:
-    """Delete a chat session (soft delete)"""
+    """
+    Delete a chat session (soft delete).
+    
+    This function is decorated with retry logic to handle transient connection errors.
+    """
     try:
         client = get_supabase_client()
 
