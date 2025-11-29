@@ -20,6 +20,28 @@ def get_supabase_client() -> Client:
     try:
         Config.validate()
 
+        # Additional runtime validation for SUPABASE_URL
+        # Log the URL (masked) for debugging configuration issues
+        url_value = Config.SUPABASE_URL
+        if url_value:
+            # Mask the URL for logging (show protocol and domain structure only)
+            masked_url = url_value[:30] + "..." if len(url_value) > 30 else url_value
+            logger.info(f"Initializing Supabase client with URL: {masked_url}")
+        else:
+            logger.error("SUPABASE_URL is not set or empty")
+
+        if not Config.SUPABASE_URL:
+            raise RuntimeError(
+                "SUPABASE_URL environment variable is not set. "
+                "Please configure it with your Supabase project URL (e.g., https://xxxxx.supabase.co)"
+            )
+        if not Config.SUPABASE_URL.startswith(("http://", "https://")):
+            raise RuntimeError(
+                f"SUPABASE_URL must start with 'http://' or 'https://'. "
+                f"Current value: '{Config.SUPABASE_URL}'. "
+                f"Expected: 'https://{Config.SUPABASE_URL}'"
+            )
+
         # Configure HTTP client with better connection pooling for HTTP/2
         # This helps prevent connection resets under high concurrency
         httpx_client = httpx.Client(
