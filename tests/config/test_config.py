@@ -434,6 +434,66 @@ class TestConfigValidation:
         assert is_valid is True
         assert missing == []
 
+    def test_validate_raises_on_supabase_url_missing_protocol(self, monkeypatch):
+        """Test validate raises error when SUPABASE_URL lacks http:// or https:// protocol"""
+        monkeypatch.delenv("VERCEL", raising=False)
+        monkeypatch.setenv("SUPABASE_URL", "test.supabase.co")  # Missing protocol
+        monkeypatch.setenv("SUPABASE_KEY", "test_key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            config_mod.Config.validate()
+
+        error_message = str(exc_info.value)
+        assert "SUPABASE_URL must start with 'http://' or 'https://'" in error_message
+
+    def test_validate_accepts_http_protocol(self, monkeypatch):
+        """Test validate accepts SUPABASE_URL with http:// protocol"""
+        monkeypatch.delenv("VERCEL", raising=False)
+        monkeypatch.setenv("SUPABASE_URL", "http://localhost:54321")
+        monkeypatch.setenv("SUPABASE_KEY", "test_key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        result = config_mod.Config.validate()
+        assert result is True
+
+    def test_validate_accepts_https_protocol(self, monkeypatch):
+        """Test validate accepts SUPABASE_URL with https:// protocol"""
+        monkeypatch.delenv("VERCEL", raising=False)
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        monkeypatch.setenv("SUPABASE_KEY", "test_key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        result = config_mod.Config.validate()
+        assert result is True
+
+    def test_validate_critical_env_vars_detects_missing_protocol(self, monkeypatch):
+        """Test validate_critical_env_vars detects SUPABASE_URL without protocol"""
+        monkeypatch.delenv("VERCEL", raising=False)
+        monkeypatch.setenv("SUPABASE_URL", "test.supabase.co")  # Missing protocol
+        monkeypatch.setenv("SUPABASE_KEY", "test_key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        is_valid, issues = config_mod.Config.validate_critical_env_vars()
+        assert is_valid is False
+        assert any("SUPABASE_URL" in issue and "protocol" in issue for issue in issues)
+
 
 class TestConfigGetSupabaseConfig:
     """Test get_supabase_config method"""

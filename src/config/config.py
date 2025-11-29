@@ -323,16 +323,23 @@ class Config:
             return True
 
         missing_vars = []
+        invalid_vars = []
 
         if not cls.SUPABASE_URL:
             missing_vars.append("SUPABASE_URL")
+        elif not cls.SUPABASE_URL.startswith(("http://", "https://")):
+            url_preview = cls.SUPABASE_URL[:50] + "..." if len(cls.SUPABASE_URL) > 50 else cls.SUPABASE_URL
+            invalid_vars.append(
+                f"SUPABASE_URL must start with 'http://' or 'https://' (got: '{url_preview}')"
+            )
         if not cls.SUPABASE_KEY:
             missing_vars.append("SUPABASE_KEY")
         if not cls.OPENROUTER_API_KEY:
             missing_vars.append("OPENROUTER_API_KEY")
 
+        error_messages = []
         if missing_vars:
-            raise RuntimeError(
+            error_messages.append(
                 f"Missing required environment variables: {', '.join(missing_vars)}\n"
                 "Please create a .env file with the following variables:\n"
                 "SUPABASE_URL=your_supabase_project_url\n"
@@ -341,6 +348,13 @@ class Config:
                 "OPENROUTER_SITE_URL=your_site_url (optional)\n"
                 "OPENROUTER_SITE_NAME=your_site_name (optional)"
             )
+        if invalid_vars:
+            error_messages.append(
+                f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+            )
+
+        if error_messages:
+            raise RuntimeError("\n\n".join(error_messages))
 
         return True
 
@@ -352,12 +366,12 @@ class Config:
     @classmethod
     def validate_critical_env_vars(cls) -> tuple[bool, list[str]]:
         """
-        Validate that all critical environment variables are set.
+        Validate that all critical environment variables are set and valid.
 
         Returns:
-            tuple: (is_valid, missing_vars)
-                - is_valid: bool indicating if all critical vars are present
-                - missing_vars: list of missing variable names
+            tuple: (is_valid, issues)
+                - is_valid: bool indicating if all critical vars are present and valid
+                - issues: list of missing or invalid variable descriptions
         """
         # Skip validation in Vercel environment to prevent startup failures
         if os.environ.get("VERCEL"):
@@ -369,7 +383,12 @@ class Config:
             "OPENROUTER_API_KEY": cls.OPENROUTER_API_KEY,
         }
 
-        missing = [name for name, value in critical_vars.items() if not value]
-        is_valid = len(missing) == 0
+        issues = [name for name, value in critical_vars.items() if not value]
 
-        return is_valid, missing
+        # Validate SUPABASE_URL has proper protocol
+        if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
+            issues.append("SUPABASE_URL (missing http:// or https:// protocol)")
+
+        is_valid = len(issues) == 0
+
+        return is_valid, issues
