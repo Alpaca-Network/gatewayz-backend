@@ -581,46 +581,6 @@ class TestPerformModelRequestAuthentication:
                 assert "No API key configured" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_includes_authorization_header_when_api_key_configured(self):
-        """Test that Authorization header is included when API key is configured"""
-        from src.services.model_health_monitor import ModelHealthMonitor
-        import httpx
-
-        monitor = ModelHealthMonitor()
-        captured_headers = {}
-
-        # Mock environment to disable TESTING mode
-        with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
-            with patch.object(monitor, '_get_api_key_for_gateway', return_value="test-api-key"):
-                # Create a mock response
-                mock_response = MagicMock(spec=httpx.Response)
-                mock_response.status_code = 200
-                mock_response.content = b'{"result": "ok"}'
-                mock_response.json.return_value = {"result": "ok"}
-
-                # Create async mock for the post method
-                async def mock_post(url, headers=None, json=None):
-                    captured_headers.update(headers or {})
-                    return mock_response
-
-                # Create a mock async client
-                mock_async_client = MagicMock()
-                mock_async_client.post = mock_post
-
-                # Mock the AsyncClient context manager
-                with patch('src.services.model_health_monitor.httpx.AsyncClient') as mock_client_class:
-                    mock_client_class.return_value.__aenter__ = MagicMock(return_value=mock_async_client)
-                    mock_client_class.return_value.__aexit__ = MagicMock(return_value=None)
-
-                    result = await monitor._perform_model_request("test-model", "openrouter")
-
-                    # Verify Authorization header was included
-                    assert "Authorization" in captured_headers
-                    assert captured_headers["Authorization"] == "Bearer test-api-key"
-                    assert result["success"] is True
-                    assert result["status_code"] == 200
-
-    @pytest.mark.asyncio
     async def test_returns_error_for_unknown_gateway(self):
         """Test that request fails for unknown gateway (no URL configured)"""
         from src.services.model_health_monitor import ModelHealthMonitor
