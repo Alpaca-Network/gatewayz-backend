@@ -318,20 +318,30 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate that all required environment variables are set"""
-        # Skip validation in Vercel environment to prevent startup failures
-        if os.environ.get("VERCEL"):
-            return True
+        # In Vercel environment, only validate URL format (not presence of keys)
+        # to prevent startup failures while still catching configuration errors
+        is_vercel = os.environ.get("VERCEL")
 
         missing_vars = []
         invalid_vars = []
 
-        if not cls.SUPABASE_URL:
-            missing_vars.append("SUPABASE_URL")
-        elif not cls.SUPABASE_URL.startswith(("http://", "https://")):
+        # Always validate URL format, even in Vercel
+        if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
             url_preview = cls.SUPABASE_URL[:50] + "..." if len(cls.SUPABASE_URL) > 50 else cls.SUPABASE_URL
             invalid_vars.append(
                 f"SUPABASE_URL must start with 'http://' or 'https://' (got: '{url_preview}')"
             )
+
+        # Skip presence validation in Vercel environment
+        if is_vercel:
+            if invalid_vars:
+                raise RuntimeError(
+                    f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+                )
+            return True
+
+        if not cls.SUPABASE_URL:
+            missing_vars.append("SUPABASE_URL")
         if not cls.SUPABASE_KEY:
             missing_vars.append("SUPABASE_KEY")
         if not cls.OPENROUTER_API_KEY:
@@ -373,9 +383,17 @@ class Config:
                 - is_valid: bool indicating if all critical vars are present and valid
                 - issues: list of missing or invalid variable descriptions
         """
-        # Skip validation in Vercel environment to prevent startup failures
-        if os.environ.get("VERCEL"):
-            return True, []
+        is_vercel = os.environ.get("VERCEL")
+        issues = []
+
+        # Always validate SUPABASE_URL format, even in Vercel
+        if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
+            issues.append("SUPABASE_URL (missing http:// or https:// protocol)")
+
+        # Skip presence validation in Vercel environment to prevent startup failures
+        if is_vercel:
+            is_valid = len(issues) == 0
+            return is_valid, issues
 
         critical_vars = {
             "SUPABASE_URL": cls.SUPABASE_URL,
@@ -383,11 +401,7 @@ class Config:
             "OPENROUTER_API_KEY": cls.OPENROUTER_API_KEY,
         }
 
-        issues = [name for name, value in critical_vars.items() if not value]
-
-        # Validate SUPABASE_URL has proper protocol
-        if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
-            issues.append("SUPABASE_URL (missing http:// or https:// protocol)")
+        issues.extend([name for name, value in critical_vars.items() if not value])
 
         is_valid = len(issues) == 0
 

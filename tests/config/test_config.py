@@ -494,6 +494,52 @@ class TestConfigValidation:
         assert is_valid is False
         assert any("SUPABASE_URL" in issue and "protocol" in issue for issue in issues)
 
+    def test_validate_raises_in_vercel_when_url_missing_protocol(self, monkeypatch):
+        """Test validate raises error in Vercel env when SUPABASE_URL lacks protocol"""
+        monkeypatch.setenv("VERCEL", "1")
+        monkeypatch.setenv("SUPABASE_URL", "test.supabase.co")  # Missing protocol
+        monkeypatch.setenv("SUPABASE_KEY", "test_key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            config_mod.Config.validate()
+
+        error_message = str(exc_info.value)
+        assert "SUPABASE_URL must start with 'http://' or 'https://'" in error_message
+
+    def test_validate_critical_env_vars_detects_missing_protocol_in_vercel(self, monkeypatch):
+        """Test validate_critical_env_vars detects SUPABASE_URL without protocol in Vercel"""
+        monkeypatch.setenv("VERCEL", "1")
+        monkeypatch.setenv("SUPABASE_URL", "test.supabase.co")  # Missing protocol
+        monkeypatch.setenv("SUPABASE_KEY", "test_key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        is_valid, issues = config_mod.Config.validate_critical_env_vars()
+        assert is_valid is False
+        assert any("SUPABASE_URL" in issue and "protocol" in issue for issue in issues)
+
+    def test_validate_skips_presence_check_in_vercel(self, monkeypatch):
+        """Test validate skips checking presence of keys in Vercel env (but validates URL format)"""
+        monkeypatch.setenv("VERCEL", "1")
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")  # Valid protocol
+        monkeypatch.delenv("SUPABASE_KEY", raising=False)  # Missing key - should be skipped in Vercel
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)  # Missing key
+
+        import importlib
+        import src.config.config as config_mod
+        importlib.reload(config_mod)
+
+        result = config_mod.Config.validate()
+        assert result is True  # Should pass in Vercel despite missing keys
+
 
 class TestConfigGetSupabaseConfig:
     """Test get_supabase_config method"""
