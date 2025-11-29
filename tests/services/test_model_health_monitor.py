@@ -507,3 +507,90 @@ class TestSentryErrorCapture:
 
             # Verify Sentry capture was NOT called
             assert not mock_capture.called, "Sentry should not capture errors for healthy models"
+
+
+class TestApiKeyForGateway:
+    """Test API key retrieval for different gateways"""
+
+    def test_get_api_key_for_known_gateway(self):
+        """Test that API key is returned for known gateways"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Test with mock config values
+        with patch('src.services.model_health_monitor.Config') as mock_config:
+            mock_config.OPENROUTER_API_KEY = "test-openrouter-key"
+            mock_config.FEATHERLESS_API_KEY = "test-featherless-key"
+            mock_config.DEEPINFRA_API_KEY = "test-deepinfra-key"
+            mock_config.HUG_API_KEY = "test-huggingface-key"
+            mock_config.GROQ_API_KEY = "test-groq-key"
+            mock_config.FIREWORKS_API_KEY = "test-fireworks-key"
+            mock_config.TOGETHER_API_KEY = "test-together-key"
+            mock_config.XAI_API_KEY = "test-xai-key"
+            mock_config.NOVITA_API_KEY = "test-novita-key"
+            mock_config.CHUTES_API_KEY = "test-chutes-key"
+            mock_config.AIMO_API_KEY = "test-aimo-key"
+            mock_config.NEBIUS_API_KEY = "test-nebius-key"
+            mock_config.CEREBRAS_API_KEY = "test-cerebras-key"
+
+            # Verify each gateway returns correct key
+            assert monitor._get_api_key_for_gateway("openrouter") == "test-openrouter-key"
+            assert monitor._get_api_key_for_gateway("featherless") == "test-featherless-key"
+            assert monitor._get_api_key_for_gateway("deepinfra") == "test-deepinfra-key"
+            assert monitor._get_api_key_for_gateway("huggingface") == "test-huggingface-key"
+            assert monitor._get_api_key_for_gateway("groq") == "test-groq-key"
+            assert monitor._get_api_key_for_gateway("fireworks") == "test-fireworks-key"
+            assert monitor._get_api_key_for_gateway("together") == "test-together-key"
+            assert monitor._get_api_key_for_gateway("xai") == "test-xai-key"
+            assert monitor._get_api_key_for_gateway("novita") == "test-novita-key"
+            assert monitor._get_api_key_for_gateway("chutes") == "test-chutes-key"
+            assert monitor._get_api_key_for_gateway("aimo") == "test-aimo-key"
+            assert monitor._get_api_key_for_gateway("nebius") == "test-nebius-key"
+            assert monitor._get_api_key_for_gateway("cerebras") == "test-cerebras-key"
+
+    def test_get_api_key_for_unknown_gateway(self):
+        """Test that None is returned for unknown gateways"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Unknown gateway should return None
+        assert monitor._get_api_key_for_gateway("unknown-gateway") is None
+        assert monitor._get_api_key_for_gateway("") is None
+        assert monitor._get_api_key_for_gateway("nonexistent") is None
+
+
+class TestPerformModelRequestAuthentication:
+    """Test authentication in _perform_model_request"""
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_no_api_key_configured(self):
+        """Test that request fails when no API key is configured for gateway"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Mock environment to disable TESTING mode, and mock _get_api_key_for_gateway to return None
+        with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
+            with patch.object(monitor, '_get_api_key_for_gateway', return_value=None):
+                result = await monitor._perform_model_request("test-model", "openrouter")
+
+                assert result["success"] is False
+                assert result["status_code"] == 401
+                assert "No API key configured" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_returns_error_for_unknown_gateway(self):
+        """Test that request fails for unknown gateway (no URL configured)"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Mock environment to disable TESTING mode
+        with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
+            result = await monitor._perform_model_request("test-model", "unknown-gateway")
+
+            assert result["success"] is False
+            assert result["status_code"] == 400
+            assert "Unknown gateway" in result["error"]

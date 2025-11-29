@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from src.config import Config
 from src.utils.sentry_context import capture_model_health_error
 
 logger = logging.getLogger(__name__)
@@ -319,6 +320,25 @@ class ModelHealthMonitor:
 
         return health_metrics
 
+    def _get_api_key_for_gateway(self, gateway: str) -> str | None:
+        """Get the API key for a specific gateway from configuration."""
+        api_key_mapping = {
+            "openrouter": Config.OPENROUTER_API_KEY,
+            "featherless": Config.FEATHERLESS_API_KEY,
+            "deepinfra": Config.DEEPINFRA_API_KEY,
+            "huggingface": Config.HUG_API_KEY,
+            "groq": Config.GROQ_API_KEY,
+            "fireworks": Config.FIREWORKS_API_KEY,
+            "together": Config.TOGETHER_API_KEY,
+            "xai": Config.XAI_API_KEY,
+            "novita": Config.NOVITA_API_KEY,
+            "chutes": Config.CHUTES_API_KEY,
+            "aimo": Config.AIMO_API_KEY,
+            "nebius": Config.NEBIUS_API_KEY,
+            "cerebras": Config.CEREBRAS_API_KEY,
+        }
+        return api_key_mapping.get(gateway)
+
     async def _perform_model_request(self, model_id: str, gateway: str) -> dict[str, Any]:
         """Perform a real test request to a model"""
         try:
@@ -361,8 +381,21 @@ class ModelHealthMonitor:
                     "status_code": 400,
                 }
 
-            # Set up headers based on gateway
-            headers = {"Content-Type": "application/json", "User-Agent": "HealthMonitor/1.0"}
+            # Get API key for this gateway
+            api_key = self._get_api_key_for_gateway(gateway)
+            if not api_key:
+                return {
+                    "success": False,
+                    "error": f"No API key configured for gateway: {gateway}",
+                    "status_code": 401,
+                }
+
+            # Set up headers based on gateway with authentication
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "HealthMonitor/1.0",
+                "Authorization": f"Bearer {api_key}",
+            }
 
             # For HuggingFace, use a different payload format
             if gateway == "huggingface":
