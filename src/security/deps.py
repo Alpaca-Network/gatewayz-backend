@@ -159,6 +159,32 @@ async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dic
     return user
 
 
+async def get_optional_api_key(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    request: Request = None,
+) -> str | None:
+    """
+    Get API key if provided, None otherwise
+
+    Use for endpoints that work for both auth and non-auth users
+    but need the raw API key string (not the user object).
+
+    Args:
+        credentials: Optional credentials
+        request: Request object
+
+    Returns:
+        Validated API key string if authenticated, None otherwise
+    """
+    if not credentials:
+        return None
+
+    try:
+        return await get_api_key(credentials, request)
+    except HTTPException:
+        return None
+
+
 async def get_optional_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     request: Request = None,
