@@ -88,11 +88,15 @@ class _LazySupabaseClient:
     while deferring client initialization until first use.
     """
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
+        # Don't delegate dunder attributes to avoid triggering initialization
+        # during introspection (e.g., by unittest.mock or hasattr checks)
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         return getattr(get_supabase_client(), name)
 
     def __repr__(self):
-        return f"<LazySupabaseClient proxy for {get_supabase_client()!r}>"
+        return "<LazySupabaseClient proxy>"
 
 
 supabase = _LazySupabaseClient()
