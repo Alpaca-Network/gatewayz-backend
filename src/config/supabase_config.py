@@ -80,4 +80,23 @@ def get_client() -> Client:
     return get_supabase_client()
 
 
-supabase = property(get_client)
+class _LazySupabaseClient:
+    """
+    Lazy proxy for the Supabase client.
+
+    This allows `from src.config.supabase_config import supabase` to work
+    while deferring client initialization until first use.
+    """
+
+    def __getattr__(self, name: str):
+        # Don't delegate dunder attributes to avoid triggering initialization
+        # during introspection (e.g., by unittest.mock or hasattr checks)
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return getattr(get_supabase_client(), name)
+
+    def __repr__(self):
+        return "<LazySupabaseClient proxy>"
+
+
+supabase = _LazySupabaseClient()
