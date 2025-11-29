@@ -80,4 +80,19 @@ def get_client() -> Client:
     return get_supabase_client()
 
 
-supabase = property(get_client)
+class _LazySupabaseClient:
+    """
+    Lazy proxy for the Supabase client.
+
+    This allows `from src.config.supabase_config import supabase` to work
+    while deferring client initialization until first use.
+    """
+
+    def __getattr__(self, name):
+        return getattr(get_supabase_client(), name)
+
+    def __repr__(self):
+        return f"<LazySupabaseClient proxy for {get_supabase_client()!r}>"
+
+
+supabase = _LazySupabaseClient()
