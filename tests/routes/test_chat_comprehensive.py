@@ -530,47 +530,17 @@ def client(sb, monkeypatch):
 
 def test_chat_completions_no_api_key(client):
     """Test chat endpoint without API key - anonymous access is now allowed"""
-    with patch("src.routes.chat.get_provider_with_failover") as mock_failover, \
-         patch("src.routes.chat.get_provider_client") as mock_client:
-        # Mock the provider failover
-        mock_failover.return_value = ("openrouter", "openai/gpt-3.5-turbo")
-
-        # Mock the provider client
-        mock_provider = MagicMock()
-        mock_provider.create_chat_completion = AsyncMock(return_value={
-            "id": "test-id",
-            "object": "chat.completion",
-            "created": 1234567890,
+    response = client.post(
+        "/v1/chat/completions",
+        json={
             "model": "gpt-3.5-turbo",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "Hello! How can I help you?"
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 10,
-                "total_tokens": 20
-            }
-        })
-        mock_client.return_value = mock_provider
-
-        response = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "gpt-3.5-turbo",
-                "messages": [{"role": "user", "content": "Hello"}]
-            }
-        )
-        # Anonymous access is now allowed - should return 200
-        assert response.status_code == 200
-        data = response.json()
-        assert "choices" in data
+            "messages": [{"role": "user", "content": "Hello"}]
+        }
+    )
+    # Anonymous access is now allowed - should return 200
+    assert response.status_code == 200
+    data = response.json()
+    assert "choices" in data
 
 
 def test_chat_completions_invalid_api_key(client, sb):
