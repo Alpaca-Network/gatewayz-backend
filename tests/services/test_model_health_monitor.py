@@ -571,13 +571,14 @@ class TestPerformModelRequestAuthentication:
 
         monitor = ModelHealthMonitor()
 
-        # Mock _get_api_key_for_gateway to return None
-        with patch.object(monitor, '_get_api_key_for_gateway', return_value=None):
-            result = await monitor._perform_model_request("test-model", "openrouter")
+        # Mock environment to disable TESTING mode, and mock _get_api_key_for_gateway to return None
+        with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
+            with patch.object(monitor, '_get_api_key_for_gateway', return_value=None):
+                result = await monitor._perform_model_request("test-model", "openrouter")
 
-            assert result["success"] is False
-            assert result["status_code"] == 401
-            assert "No API key configured" in result["error"]
+                assert result["success"] is False
+                assert result["status_code"] == 401
+                assert "No API key configured" in result["error"]
 
     @pytest.mark.asyncio
     async def test_includes_authorization_header_when_api_key_configured(self):
@@ -586,37 +587,39 @@ class TestPerformModelRequestAuthentication:
 
         monitor = ModelHealthMonitor()
 
-        with patch.object(monitor, '_get_api_key_for_gateway', return_value="test-api-key"):
-            with patch('httpx.AsyncClient') as mock_client:
-                # Set up the mock to capture the headers
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.content = b'{"result": "ok"}'
-                mock_response.json.return_value = {"result": "ok"}
+        # Mock environment to disable TESTING mode
+        with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
+            with patch.object(monitor, '_get_api_key_for_gateway', return_value="test-api-key"):
+                with patch('httpx.AsyncClient') as mock_client:
+                    # Set up the mock to capture the headers
+                    mock_response = MagicMock()
+                    mock_response.status_code = 200
+                    mock_response.content = b'{"result": "ok"}'
+                    mock_response.json.return_value = {"result": "ok"}
 
-                mock_context = MagicMock()
-                mock_context.__aenter__ = MagicMock(return_value=MagicMock())
-                mock_context.__aenter__.return_value.post = MagicMock(return_value=mock_response)
+                    mock_context = MagicMock()
+                    mock_context.__aenter__ = MagicMock(return_value=MagicMock())
+                    mock_context.__aenter__.return_value.post = MagicMock(return_value=mock_response)
 
-                # Make the async context manager work
-                async def mock_aenter(*args, **kwargs):
-                    mock_instance = MagicMock()
-                    async def mock_post(url, headers=None, json=None):
-                        # Verify Authorization header is present
-                        assert headers is not None
-                        assert "Authorization" in headers
-                        assert headers["Authorization"] == "Bearer test-api-key"
-                        return mock_response
-                    mock_instance.post = mock_post
-                    return mock_instance
+                    # Make the async context manager work
+                    async def mock_aenter(*args, **kwargs):
+                        mock_instance = MagicMock()
+                        async def mock_post(url, headers=None, json=None):
+                            # Verify Authorization header is present
+                            assert headers is not None
+                            assert "Authorization" in headers
+                            assert headers["Authorization"] == "Bearer test-api-key"
+                            return mock_response
+                        mock_instance.post = mock_post
+                        return mock_instance
 
-                mock_client.return_value.__aenter__ = mock_aenter
-                mock_client.return_value.__aexit__ = MagicMock(return_value=None)
+                    mock_client.return_value.__aenter__ = mock_aenter
+                    mock_client.return_value.__aexit__ = MagicMock(return_value=None)
 
-                result = await monitor._perform_model_request("test-model", "openrouter")
+                    result = await monitor._perform_model_request("test-model", "openrouter")
 
-                assert result["success"] is True
-                assert result["status_code"] == 200
+                    assert result["success"] is True
+                    assert result["status_code"] == 200
 
     @pytest.mark.asyncio
     async def test_returns_error_for_unknown_gateway(self):
@@ -625,8 +628,10 @@ class TestPerformModelRequestAuthentication:
 
         monitor = ModelHealthMonitor()
 
-        result = await monitor._perform_model_request("test-model", "unknown-gateway")
+        # Mock environment to disable TESTING mode
+        with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
+            result = await monitor._perform_model_request("test-model", "unknown-gateway")
 
-        assert result["success"] is False
-        assert result["status_code"] == 400
-        assert "Unknown gateway" in result["error"]
+            assert result["success"] is False
+            assert result["status_code"] == 400
+            assert "Unknown gateway" in result["error"]
