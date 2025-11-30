@@ -681,9 +681,13 @@ async def database_health():
     This is critical for startup diagnostics in Railway.
     """
     try:
-        from src.config.supabase_config import supabase
+        from src.config.supabase_config import get_initialization_status, supabase
 
         logger.info("Checking database connectivity...")
+
+        # Get initialization status
+        init_status = get_initialization_status()
+
         # Try a simple query to verify connection
         supabase.table("users").limit(1).execute()
 
@@ -692,15 +696,29 @@ async def database_health():
             "status": "healthy",
             "database": "supabase",
             "connection": "verified",
+            "initialization": init_status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
+        from src.config.supabase_config import get_initialization_status
+
         logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
+
+        # Capture to Sentry
+        try:
+            import sentry_sdk
+
+            sentry_sdk.capture_exception(e)
+        except (ImportError, Exception):
+            pass
+
         return {
             "status": "unhealthy",
             "database": "supabase",
             "connection": "failed",
             "error": str(e),
+            "error_type": type(e).__name__,
+            "initialization": get_initialization_status(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

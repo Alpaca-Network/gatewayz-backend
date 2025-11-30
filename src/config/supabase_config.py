@@ -9,13 +9,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _supabase_client: Client | None = None
+_initialization_error: Exception | None = None  # Track last initialization error
 
 
 def get_supabase_client() -> Client:
-    global _supabase_client
+    global _supabase_client, _initialization_error
 
     if _supabase_client is not None:
         return _supabase_client
+
+    # If previous initialization failed, re-raise the error with context
+    if _initialization_error is not None:
+        logger.error(
+            f"Supabase client initialization previously failed. "
+            f"Last error: {_initialization_error}"
+        )
+        # Capture to Sentry if available
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(_initialization_error)
+        except ImportError:
+            pass
+        raise RuntimeError(
+            f"Supabase client is unavailable due to previous initialization failure: "
+            f"{_initialization_error}"
+        ) from _initialization_error
 
     try:
         Config.validate()
@@ -91,7 +109,35 @@ def get_supabase_client() -> Client:
         return _supabase_client
 
     except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {e}")
+        # Store the error for future reference
+        _initialization_error = e
+
+        # Log detailed error information
+        logger.error(
+            f"❌ Failed to initialize Supabase client: {type(e).__name__}: {e}",
+            exc_info=True  # Include full traceback in logs
+        )
+
+        # Capture to Sentry with additional context
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_context("supabase_config", {
+                    "supabase_url_set": bool(Config.SUPABASE_URL),
+                    "supabase_key_set": bool(Config.SUPABASE_KEY),
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                })
+                scope.set_tag("component", "supabase_client")
+                scope.set_tag("initialization_phase", "get_supabase_client")
+                scope.level = "error"
+                sentry_sdk.capture_exception(e)
+                logger.info("Error captured to Sentry for monitoring")
+        except ImportError:
+            logger.warning("Sentry not available, error not tracked remotely")
+        except Exception as sentry_error:
+            logger.warning(f"Failed to capture error to Sentry: {sentry_error}")
+
         raise RuntimeError(f"Supabase client initialization failed: {e}") from e
 
 
@@ -116,7 +162,24 @@ def _test_connection_internal(client: Client) -> bool:
         logger.info("✅ Database connection test successful")
         return True
     except Exception as e:
-        logger.error(f"❌ Database connection test failed: {e}")
+        logger.error(f"❌ Database connection test failed: {type(e).__name__}: {e}", exc_info=True)
+
+        # Capture to Sentry with context
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_context("connection_test", {
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "test_table": "users",
+                })
+                scope.set_tag("component", "supabase_client")
+                scope.set_tag("initialization_phase", "connection_test")
+                scope.level = "error"
+                sentry_sdk.capture_exception(e)
+        except (ImportError, Exception):
+            pass  # Silently ignore Sentry errors during connection test
+
         raise RuntimeError(f"Database connection failed: {e}") from e
 
 
@@ -151,6 +214,32 @@ def init_db():
 
 def get_client() -> Client:
     return get_supabase_client()
+
+
+def get_initialization_status() -> dict:
+    """
+    Get the current Supabase client initialization status.
+
+    Returns detailed information about the client state for monitoring
+    and debugging purposes.
+
+    Returns:
+        dict with keys:
+            - initialized: bool - Whether client is initialized
+            - has_error: bool - Whether initialization failed
+            - error_message: str | None - Last error message if any
+            - error_type: str | None - Last error type if any
+    """
+    global _supabase_client, _initialization_error
+
+    status = {
+        "initialized": _supabase_client is not None,
+        "has_error": _initialization_error is not None,
+        "error_message": str(_initialization_error) if _initialization_error else None,
+        "error_type": type(_initialization_error).__name__ if _initialization_error else None,
+    }
+
+    return status
 
 
 class _LazySupabaseClient:

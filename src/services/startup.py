@@ -40,6 +40,33 @@ async def lifespan(app):
     else:
         logger.info("✅ All critical environment variables validated")
 
+    # Eagerly initialize Supabase client during startup (hybrid lazy-loading approach)
+    # This ensures the database is ready before accepting requests, preventing
+    # initialization from happening during critical user requests
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        logger.info("🔄 Initializing Supabase database client...")
+        get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
+        logger.info("✅ Supabase client initialized and connection verified")
+    except Exception as e:
+        logger.error(f"❌ CRITICAL: Supabase client initialization failed: {e}")
+        # Capture to Sentry with startup context
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_context("startup", {
+                    "phase": "supabase_initialization",
+                    "error_type": type(e).__name__,
+                })
+                scope.set_tag("component", "startup")
+                scope.level = "fatal"
+                sentry_sdk.capture_exception(e)
+        except (ImportError, Exception):
+            pass
+        # Fail fast: Don't start the application if database is unavailable
+        raise RuntimeError(f"Cannot start application: Database initialization failed: {e}") from e
+
     try:
         # Initialize Fal.ai model cache from static catalog
         try:
