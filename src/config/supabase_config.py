@@ -20,9 +20,14 @@ def get_supabase_client() -> Client:
     try:
         Config.validate()
 
+        # Build the PostgREST base URL from the Supabase URL
+        postgrest_base_url = f"{Config.SUPABASE_URL}/rest/v1"
+
         # Configure HTTP client with better connection pooling for HTTP/2
         # This helps prevent connection resets under high concurrency
+        # IMPORTANT: base_url must be set so postgrest relative paths resolve correctly
         httpx_client = httpx.Client(
+            base_url=postgrest_base_url,
             timeout=httpx.Timeout(120.0, connect=10.0),  # 120s total, 10s connect timeout
             limits=httpx.Limits(
                 max_connections=100,  # Maximum total connections in the pool
@@ -42,12 +47,15 @@ def get_supabase_client() -> Client:
                 headers={"X-Client-Info": "gatewayz-backend/1.0"},
             ),
         )
-        
+
         # Inject the configured httpx client into the postgrest client
         # This ensures all database operations use our optimized connection pool
         if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
             _supabase_client.postgrest.session = httpx_client
-            logger.info("Configured Supabase client with optimized HTTP/2 connection pooling")
+            logger.info(
+                "Configured Supabase client with optimized HTTP/2 connection pooling (base_url: %s)",
+                postgrest_base_url,
+            )
 
         test_connection()
 
