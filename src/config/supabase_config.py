@@ -45,31 +45,31 @@ def get_supabase_client() -> Client:
         # Build the PostgREST base URL from the Supabase URL
         postgrest_base_url = f"{Config.SUPABASE_URL}/rest/v1"
 
-        # Configure HTTP client with better connection pooling for HTTP/2
-        # This helps prevent connection resets under high concurrency
+        # Configure HTTP client optimized for serverless/async environments
         # IMPORTANT: base_url must be set so postgrest relative paths resolve correctly
         # IMPORTANT: headers must include apikey and Authorization for Supabase auth
+        # IMPORTANT: Using sync Client (not AsyncClient) as Supabase SDK requires it
         httpx_client = httpx.Client(
             base_url=postgrest_base_url,
             headers={
                 "apikey": Config.SUPABASE_KEY,
                 "Authorization": f"Bearer {Config.SUPABASE_KEY}",
             },
-            timeout=httpx.Timeout(120.0, connect=10.0),  # 120s total, 10s connect timeout
+            timeout=httpx.Timeout(30.0, connect=5.0),  # 30s total, 5s connect (reduced from 120s)
             limits=httpx.Limits(
-                max_connections=100,  # Maximum total connections in the pool
-                max_keepalive_connections=20,  # Keep alive connections to reuse
-                keepalive_expiry=30.0,  # Keep connections alive for 30 seconds
+                max_connections=30,  # Reduced from 100 for serverless
+                max_keepalive_connections=10,  # Reduced from 20
+                keepalive_expiry=60.0,  # Increased from 30s to reduce connection churn
             ),
-            http2=True,  # Enable HTTP/2 explicitly
+            http2=True,  # Enable HTTP/2 for connection multiplexing
         )
 
         _supabase_client = create_client(
             supabase_url=Config.SUPABASE_URL,
             supabase_key=Config.SUPABASE_KEY,
             options=ClientOptions(
-                postgrest_client_timeout=120,  # 120 second timeout for database operations
-                storage_client_timeout=120,
+                postgrest_client_timeout=30,  # 30 second timeout (reduced from 120s)
+                storage_client_timeout=30,  # Consistent with httpx timeout
                 schema="public",
                 headers={"X-Client-Info": "gatewayz-backend/1.0"},
             ),
