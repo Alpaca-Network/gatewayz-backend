@@ -1,8 +1,8 @@
 name: Claude on CI failure
 
 concurrency:
-  group: claude-failure-${{ github.event.workflow_run.head_sha || github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  group: claude-failure-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
 
 on:
   workflow_run:
