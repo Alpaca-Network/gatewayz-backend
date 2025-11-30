@@ -44,18 +44,21 @@ async def lifespan(app):
     # This ensures the database is ready before accepting requests, preventing
     # initialization from happening during critical user requests
     # Retry logic handles transient network issues during deployment
+    # However, we allow the app to start in degraded mode if DB is unavailable after retries
     from src.config.supabase_config import get_supabase_client
     import time
 
     max_retries = 3
     retry_delay = 2.0  # seconds
     last_error = None
+    db_initialized = False
 
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(f"🔄 Initializing Supabase database client (attempt {attempt}/{max_retries})...")
             get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
             logger.info("✅ Supabase client initialized and connection verified")
+            db_initialized = True
             break  # Success, exit retry loop
         except Exception as e:
             last_error = e
@@ -66,27 +69,29 @@ async def lifespan(app):
                 wait_time = retry_delay * (2 ** (attempt - 1))
                 logger.info(f"⏳ Retrying in {wait_time}s...")
                 time.sleep(wait_time)
-            else:
-                # Final attempt failed
-                logger.error(f"❌ CRITICAL: Supabase client initialization failed after {max_retries} attempts")
-                # Capture to Sentry with startup context
-                try:
-                    import sentry_sdk
-                    with sentry_sdk.push_scope() as scope:
-                        scope.set_context("startup", {
-                            "phase": "supabase_initialization",
-                            "error_type": type(e).__name__,
-                            "attempts": max_retries,
-                        })
-                        scope.set_tag("component", "startup")
-                        scope.level = "fatal"
-                        sentry_sdk.capture_exception(e)
-                except (ImportError, Exception):
-                    pass
-                # Fail fast: Don't start the application if database is unavailable
-                raise RuntimeError(
-                    f"Cannot start application: Database initialization failed after {max_retries} attempts: {last_error}"
-                ) from last_error
+
+    # If all retries failed, log warning and start in degraded mode
+    if not db_initialized and last_error:
+        logger.warning(f"⚠️  Supabase client initialization failed after {max_retries} attempts: {last_error}")
+        logger.warning("Application will start in DEGRADED MODE - database-dependent endpoints may fail")
+        # Capture to Sentry with startup context
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_context("startup", {
+                    "phase": "supabase_initialization",
+                    "error_type": type(last_error).__name__,
+                    "attempts": max_retries,
+                    "degraded_mode": True,  # Flag that app is running in degraded mode
+                })
+                scope.set_tag("component", "startup")
+                scope.set_tag("degraded_mode", "true")
+                scope.level = "warning"  # Warning, not fatal - app can still start
+                sentry_sdk.capture_exception(last_error)
+        except (ImportError, Exception):
+            pass
+        # Allow app to start in degraded mode - health endpoints will report DB status
+        # The lazy proxy will retry connection on first actual database access
 
     try:
         # Initialize Fal.ai model cache from static catalog
