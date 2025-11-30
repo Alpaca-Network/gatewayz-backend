@@ -26,7 +26,7 @@ class TestStartup:
         mock_app = MagicMock()
 
         with patch('src.config.Config') as mock_config, \
-             patch('src.services.startup.get_supabase_client') as mock_get_supabase, \
+             patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
              patch('src.services.startup.initialize_fal_cache_from_catalog') as mock_fal_cache, \
              patch('src.services.startup.init_tempo_otlp') as mock_tempo, \
              patch('src.services.startup.init_tempo_otlp_fastapi') as mock_tempo_fastapi, \
@@ -98,8 +98,8 @@ class TestStartup:
         mock_app = MagicMock()
 
         with patch('src.config.Config') as mock_config, \
-             patch('src.services.startup.get_supabase_client') as mock_get_supabase, \
-             patch('src.services.startup.sentry_sdk'):
+             patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
+             patch('sentry_sdk'):
 
             mock_config.validate_critical_env_vars.return_value = (True, [])
             mock_get_supabase.side_effect = Exception("Connection refused")
@@ -117,7 +117,7 @@ class TestStartup:
         mock_app = MagicMock()
 
         with patch('src.config.Config') as mock_config, \
-             patch('src.services.startup.get_supabase_client') as mock_get_supabase, \
+             patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
              patch('src.services.startup.initialize_fal_cache_from_catalog') as mock_fal_cache, \
              patch('src.services.startup.health_monitor') as mock_health_monitor, \
              patch('src.services.startup.availability_service') as mock_availability, \

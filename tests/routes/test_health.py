@@ -611,7 +611,7 @@ class TestDatabaseHealth:
 
         with patch('src.config.supabase_config.supabase') as mock_supabase, \
              patch('src.config.supabase_config.get_initialization_status') as mock_get_status, \
-             patch('src.routes.health.sentry_sdk'):
+             patch('sentry_sdk'):
 
             # Mock query failure
             mock_supabase.table.return_value.limit.return_value.execute.side_effect = Exception("Connection timeout")
@@ -642,7 +642,7 @@ class TestDatabaseHealth:
 
         with patch('src.config.supabase_config.supabase') as mock_supabase, \
              patch('src.config.supabase_config.get_initialization_status') as mock_get_status, \
-             patch('src.routes.health.sentry_sdk') as mock_sentry:
+             patch('sentry_sdk') as mock_sentry:
 
             # Mock query failure
             test_error = Exception("Database unreachable")
