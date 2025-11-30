@@ -143,70 +143,245 @@ class TestGetSupabaseClientValidation:
 
 
 class TestHttpxClientConfiguration:
-    """Test the httpx client is configured with proper authentication headers"""
+    """Test the httpx client is configured with proper authentication headers.
+
+    These tests verify that when we inject a custom httpx client into the Supabase
+    postgrest session, it includes the required authentication headers. Without these
+    headers, all database operations fail with "No API key found in request" errors.
+    """
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_httpx_client_includes_auth_headers(self, mock_httpx_client, mock_create_client):
-        """Test that httpx client is created with apikey and Authorization headers"""
+    def test_httpx_client_includes_apikey_header(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with apikey header.
+
+        The apikey header is required by Supabase PostgREST API for authentication.
+        Without this header, requests fail with:
+        {'message': 'No API key found in request', 'hint': 'No `apikey` request header or url param was found.'}
+        """
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
         supabase_config_mod._supabase_client = None
 
-        # Mock the Supabase client
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
             MagicMock(data=[])
         )
         mock_create_client.return_value = mock_client
 
-        test_key = "test_supabase_key"
+        test_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test_key"
 
-        # Patch Config with valid URL and key
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
             with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", test_key):
                 with patch.object(supabase_config_mod.Config, "validate", return_value=True):
                     supabase_config_mod.get_supabase_client()
 
-        # Verify httpx.Client was called with the correct headers
         mock_httpx_client.assert_called_once()
         call_kwargs = mock_httpx_client.call_args[1]
 
-        assert "headers" in call_kwargs
+        assert "headers" in call_kwargs, "httpx.Client must be created with headers"
+        assert "apikey" in call_kwargs["headers"], "headers must include 'apikey'"
         assert call_kwargs["headers"]["apikey"] == test_key
-        assert call_kwargs["headers"]["Authorization"] == f"Bearer {test_key}"
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_httpx_client_includes_base_url(self, mock_httpx_client, mock_create_client):
-        """Test that httpx client is created with correct base_url"""
+    def test_httpx_client_includes_authorization_header(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with Authorization Bearer header.
+
+        The Authorization header with Bearer token is required for authenticated
+        Supabase operations beyond anonymous access.
+        """
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
         supabase_config_mod._supabase_client = None
 
-        # Mock the Supabase client
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
             MagicMock(data=[])
         )
         mock_create_client.return_value = mock_client
 
-        test_url = "https://test.supabase.co"
+        test_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test_key"
 
-        # Patch Config with valid URL
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", test_key):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        mock_httpx_client.assert_called_once()
+        call_kwargs = mock_httpx_client.call_args[1]
+
+        assert "headers" in call_kwargs, "httpx.Client must be created with headers"
+        assert "Authorization" in call_kwargs["headers"], "headers must include 'Authorization'"
+        assert call_kwargs["headers"]["Authorization"] == f"Bearer {test_key}"
+        assert call_kwargs["headers"]["Authorization"].startswith("Bearer "), "Authorization must use Bearer scheme"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_auth_headers_match_supabase_key(self, mock_httpx_client, mock_create_client):
+        """Test that both auth headers use the same SUPABASE_KEY value.
+
+        Both apikey and Authorization headers must use the exact same key value
+        to ensure consistent authentication across all request types.
+        """
+        import src.config.supabase_config as supabase_config_mod
+
+        supabase_config_mod._supabase_client = None
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        # Use a realistic JWT-like key
+        test_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRlc3QifQ.signature"
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", test_key):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        call_kwargs = mock_httpx_client.call_args[1]
+        headers = call_kwargs["headers"]
+
+        # Extract key from Authorization header
+        auth_key = headers["Authorization"].replace("Bearer ", "")
+
+        assert headers["apikey"] == auth_key, "apikey and Authorization Bearer token must match"
+        assert headers["apikey"] == test_key, "Both must match the configured SUPABASE_KEY"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_includes_base_url(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with correct PostgREST base_url.
+
+        The base_url must point to the PostgREST endpoint (/rest/v1) so that
+        relative paths in database queries resolve correctly.
+        """
+        import src.config.supabase_config as supabase_config_mod
+
+        supabase_config_mod._supabase_client = None
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        test_url = "https://myproject.supabase.co"
+
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", test_url):
             with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
                 with patch.object(supabase_config_mod.Config, "validate", return_value=True):
                     supabase_config_mod.get_supabase_client()
 
-        # Verify httpx.Client was called with the correct base_url
         mock_httpx_client.assert_called_once()
         call_kwargs = mock_httpx_client.call_args[1]
 
-        assert "base_url" in call_kwargs
+        assert "base_url" in call_kwargs, "httpx.Client must be created with base_url"
         assert call_kwargs["base_url"] == f"{test_url}/rest/v1"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_injected_into_postgrest_session(self, mock_httpx_client, mock_create_client):
+        """Test that the configured httpx client is injected into postgrest.session.
+
+        The custom httpx client with auth headers must replace the postgrest session
+        so all database operations use the authenticated client.
+        """
+        import src.config.supabase_config as supabase_config_mod
+
+        supabase_config_mod._supabase_client = None
+
+        # Create a mock that has postgrest.session attribute
+        mock_postgrest = MagicMock()
+        mock_postgrest.session = MagicMock()  # Original session to be replaced
+
+        mock_client = MagicMock()
+        mock_client.postgrest = mock_postgrest
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        mock_httpx_instance = MagicMock()
+        mock_httpx_client.return_value = mock_httpx_instance
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        # Verify the httpx client was injected into postgrest.session
+        assert mock_client.postgrest.session == mock_httpx_instance, \
+            "Custom httpx client must be injected into postgrest.session"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_has_http2_enabled(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with HTTP/2 enabled for better performance."""
+        import src.config.supabase_config as supabase_config_mod
+
+        supabase_config_mod._supabase_client = None
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        call_kwargs = mock_httpx_client.call_args[1]
+        assert call_kwargs.get("http2") is True, "HTTP/2 must be enabled"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_has_connection_pooling(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with connection pooling limits."""
+        import src.config.supabase_config as supabase_config_mod
+
+        supabase_config_mod._supabase_client = None
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        call_kwargs = mock_httpx_client.call_args[1]
+        assert "limits" in call_kwargs, "httpx.Client must be created with connection limits"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_has_timeout_configured(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with appropriate timeout settings."""
+        import src.config.supabase_config as supabase_config_mod
+
+        supabase_config_mod._supabase_client = None
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        call_kwargs = mock_httpx_client.call_args[1]
+        assert "timeout" in call_kwargs, "httpx.Client must be created with timeout"
 
 
 class TestLazySupabaseClient:
