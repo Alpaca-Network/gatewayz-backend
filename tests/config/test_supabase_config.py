@@ -16,8 +16,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client raises RuntimeError when SUPABASE_URL is not set"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Patch Config to simulate missing SUPABASE_URL
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", None):
@@ -33,8 +34,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client raises RuntimeError when SUPABASE_URL lacks protocol"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Patch Config to simulate missing protocol
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "test.supabase.co"):
@@ -49,8 +51,9 @@ class TestGetSupabaseClientValidation:
         """Test that error message for missing protocol includes example of correct format"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Patch Config to simulate missing protocol
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "myproject.supabase.co"):
@@ -68,8 +71,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client accepts valid https:// URL"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -93,8 +97,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client accepts valid http:// URL for local development"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -119,8 +124,9 @@ class TestGetSupabaseClientValidation:
         """Test that initialization logs a masked version of the URL"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -151,8 +157,9 @@ class TestHttpxClientConfiguration:
         """Test that httpx client is created with apikey and Authorization headers"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -183,8 +190,9 @@ class TestHttpxClientConfiguration:
         """Test that httpx client is created with correct base_url"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
