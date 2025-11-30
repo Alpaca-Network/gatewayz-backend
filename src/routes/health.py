@@ -37,9 +37,35 @@ async def health_check():
     """
     Simple health check endpoint
 
-    Returns basic health status for monitoring and load balancing
+    Returns basic health status for monitoring and load balancing.
+
+    This endpoint always returns HTTP 200 to indicate the application is running,
+    even if the database is unavailable (degraded mode). Check the response body
+    for detailed status including database connectivity.
     """
-    return {"status": "healthy"}
+    from src.config.supabase_config import get_initialization_status
+
+    # Get database initialization status
+    db_status = get_initialization_status()
+
+    # Application is always "healthy" if it's running (responds to requests)
+    # Degraded mode means DB is unavailable but app is still serving traffic
+    response = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Add database status if there are issues
+    if db_status["has_error"]:
+        response["database"] = "unavailable"
+        response["mode"] = "degraded"
+        response["database_error"] = db_status["error_type"]
+    elif db_status["initialized"]:
+        response["database"] = "connected"
+    else:
+        response["database"] = "not_initialized"
+
+    return response
 
 
 @router.get("/health/system", response_model=SystemHealthResponse, tags=["health"])
