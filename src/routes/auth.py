@@ -1014,7 +1014,23 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
     except Exception as e:
         logger.error(f"Privy authentication failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}") from e
+        error_message = str(e)
+        # Provide clearer error message for common configuration issues
+        if (
+            "missing an 'http://' or 'https://' protocol" in error_message.lower()
+            or "supabase_url must start with" in error_message.lower()
+            or "supabase_url environment variable is not set" in error_message.lower()
+        ):
+            logger.error(
+                "SUPABASE_URL environment variable is missing or misconfigured. "
+                "Please update your environment configuration with a valid URL "
+                "(e.g., https://xxxxx.supabase.co)"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Service configuration error: Database URL is misconfigured. Please contact support.",
+            ) from e
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {error_message}") from e
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])

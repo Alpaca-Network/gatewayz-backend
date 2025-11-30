@@ -329,7 +329,8 @@ class Config:
         if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
             url_preview = cls.SUPABASE_URL[:50] + "..." if len(cls.SUPABASE_URL) > 50 else cls.SUPABASE_URL
             invalid_vars.append(
-                f"SUPABASE_URL must start with 'http://' or 'https://' (got: '{url_preview}')"
+                f"SUPABASE_URL must start with 'http://' or 'https://' (got: '{url_preview}'). "
+                f"Example: https://{url_preview}"
             )
 
         # Skip presence validation in Vercel environment
@@ -388,7 +389,9 @@ class Config:
 
         # Always validate SUPABASE_URL format, even in Vercel
         if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
-            issues.append("SUPABASE_URL (missing http:// or https:// protocol)")
+            issues.append(
+                f"SUPABASE_URL (missing http:// or https:// protocol - should be https://{cls.SUPABASE_URL})"
+            )
 
         # Skip presence validation in Vercel environment to prevent startup failures
         if is_vercel:
