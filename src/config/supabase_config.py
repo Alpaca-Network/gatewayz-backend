@@ -1,4 +1,5 @@
 import logging
+import os
 import httpx
 
 from src.config.config import Config
@@ -63,21 +64,34 @@ def get_supabase_client() -> Client:
         # Build the PostgREST base URL from the Supabase URL
         postgrest_base_url = f"{Config.SUPABASE_URL}/rest/v1"
 
-        # Configure HTTP client optimized for serverless/async environments
+        # Determine deployment environment for optimal connection pool settings
+        is_serverless = os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+
+        # Configure HTTP client with environment-specific connection pool settings
         # IMPORTANT: base_url must be set so postgrest relative paths resolve correctly
         # IMPORTANT: headers must include apikey and Authorization for Supabase auth
         # IMPORTANT: Using sync Client (not AsyncClient) as Supabase SDK requires it
+
+        if is_serverless:
+            # Serverless: Conservative limits to prevent connection exhaustion
+            max_conn, keepalive_conn = 30, 10
+            logger.info("Using serverless-optimized connection pool settings")
+        else:
+            # Container/Railway: Higher limits for better concurrent request handling
+            max_conn, keepalive_conn = 100, 30
+            logger.info("Using container-optimized connection pool settings")
+
         httpx_client = httpx.Client(
             base_url=postgrest_base_url,
             headers={
                 "apikey": Config.SUPABASE_KEY,
                 "Authorization": f"Bearer {Config.SUPABASE_KEY}",
             },
-            timeout=httpx.Timeout(30.0, connect=5.0),  # 30s total, 5s connect (reduced from 120s)
+            timeout=httpx.Timeout(45.0, connect=10.0),  # Increased from 30s to 45s for complex queries
             limits=httpx.Limits(
-                max_connections=30,  # Reduced from 100 for serverless
-                max_keepalive_connections=10,  # Reduced from 20
-                keepalive_expiry=60.0,  # Increased from 30s to reduce connection churn
+                max_connections=max_conn,
+                max_keepalive_connections=keepalive_conn,
+                keepalive_expiry=60.0,  # 60s to reduce connection churn
             ),
             http2=True,  # Enable HTTP/2 for connection multiplexing
         )
@@ -86,8 +100,8 @@ def get_supabase_client() -> Client:
             supabase_url=Config.SUPABASE_URL,
             supabase_key=Config.SUPABASE_KEY,
             options=ClientOptions(
-                postgrest_client_timeout=30,  # 30 second timeout (reduced from 120s)
-                storage_client_timeout=30,  # Consistent with httpx timeout
+                postgrest_client_timeout=45,  # 45 second timeout (increased for complex queries)
+                storage_client_timeout=45,  # Consistent with httpx timeout
                 schema="public",
                 headers={"X-Client-Info": "gatewayz-backend/1.0"},
             ),
@@ -240,6 +254,30 @@ def get_initialization_status() -> dict:
     }
 
     return status
+
+
+def cleanup_supabase_client():
+    """
+    Cleanup the Supabase client and close httpx connections.
+
+    This should be called during application shutdown to ensure
+    all connections are properly closed and resources are released.
+    """
+    global _supabase_client
+
+    try:
+        if _supabase_client is not None:
+            # Close httpx client if it was injected
+            if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+                session = _supabase_client.postgrest.session
+                if hasattr(session, 'close'):
+                    session.close()
+                    logger.info("✅ Supabase httpx client closed successfully")
+
+            _supabase_client = None
+            logger.info("✅ Supabase client cleanup completed")
+    except Exception as e:
+        logger.warning(f"Error during Supabase client cleanup: {e}")
 
 
 class _LazySupabaseClient:

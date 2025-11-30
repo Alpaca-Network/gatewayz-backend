@@ -40,32 +40,53 @@ async def lifespan(app):
     else:
         logger.info("✅ All critical environment variables validated")
 
-    # Eagerly initialize Supabase client during startup (hybrid lazy-loading approach)
+    # Eagerly initialize Supabase client during startup with retry logic
     # This ensures the database is ready before accepting requests, preventing
     # initialization from happening during critical user requests
-    try:
-        from src.config.supabase_config import get_supabase_client
+    # Retry logic handles transient network issues during deployment
+    from src.config.supabase_config import get_supabase_client
+    import time
 
-        logger.info("🔄 Initializing Supabase database client...")
-        get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
-        logger.info("✅ Supabase client initialized and connection verified")
-    except Exception as e:
-        logger.error(f"❌ CRITICAL: Supabase client initialization failed: {e}")
-        # Capture to Sentry with startup context
+    max_retries = 3
+    retry_delay = 2.0  # seconds
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
         try:
-            import sentry_sdk
-            with sentry_sdk.push_scope() as scope:
-                scope.set_context("startup", {
-                    "phase": "supabase_initialization",
-                    "error_type": type(e).__name__,
-                })
-                scope.set_tag("component", "startup")
-                scope.level = "fatal"
-                sentry_sdk.capture_exception(e)
-        except (ImportError, Exception):
-            pass
-        # Fail fast: Don't start the application if database is unavailable
-        raise RuntimeError(f"Cannot start application: Database initialization failed: {e}") from e
+            logger.info(f"🔄 Initializing Supabase database client (attempt {attempt}/{max_retries})...")
+            get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
+            logger.info("✅ Supabase client initialized and connection verified")
+            break  # Success, exit retry loop
+        except Exception as e:
+            last_error = e
+            logger.warning(f"⚠️  Supabase initialization attempt {attempt}/{max_retries} failed: {e}")
+
+            if attempt < max_retries:
+                # Exponential backoff
+                wait_time = retry_delay * (2 ** (attempt - 1))
+                logger.info(f"⏳ Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                # Final attempt failed
+                logger.error(f"❌ CRITICAL: Supabase client initialization failed after {max_retries} attempts")
+                # Capture to Sentry with startup context
+                try:
+                    import sentry_sdk
+                    with sentry_sdk.push_scope() as scope:
+                        scope.set_context("startup", {
+                            "phase": "supabase_initialization",
+                            "error_type": type(e).__name__,
+                            "attempts": max_retries,
+                        })
+                        scope.set_tag("component", "startup")
+                        scope.level = "fatal"
+                        sentry_sdk.capture_exception(e)
+                except (ImportError, Exception):
+                    pass
+                # Fail fast: Don't start the application if database is unavailable
+                raise RuntimeError(
+                    f"Cannot start application: Database initialization failed after {max_retries} attempts: {last_error}"
+                ) from last_error
 
     try:
         # Initialize Fal.ai model cache from static catalog
@@ -172,6 +193,13 @@ async def lifespan(app):
         # Clear connection pools
         clear_connection_pools()
         logger.info("Connection pools cleared")
+
+        # Cleanup Supabase client and close httpx connections
+        try:
+            from src.config.supabase_config import cleanup_supabase_client
+            cleanup_supabase_client()
+        except Exception as e:
+            logger.warning(f"Supabase cleanup warning: {e}")
 
         logger.info("All monitoring and health services stopped successfully")
 
