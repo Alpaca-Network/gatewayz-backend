@@ -229,7 +229,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
                     failed_notifications=0,
                     pending_notifications=0,
                     delivery_rate=0.0,
-                    recent_notifications=[],
+                    last_24h_notifications=0,
                 )
             else:
                 raise table_error from table_error
@@ -244,6 +244,7 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
         )
 
         # Get last 24-hour notifications - use a simpler approach
+        last_24h_notifications = 0
         logger.info("Fetching recent notifications...")
         try:
             yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
@@ -265,8 +266,6 @@ async def get_notification_stats(admin_user: dict = Depends(require_admin)):
                         >= yesterday_dt
                     ]
                 )
-            else:
-                last_24h_notifications = 0
 
         logger.info(
             f"Notification stats calculated: total={total_notifications}, sent={sent_notifications}, failed={failed_notifications}, pending={pending_notifications}"

@@ -11,32 +11,11 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
+from src.models.health_models import HealthStatus, ProviderStatus
+
 logger = logging.getLogger(__name__)
-
-
-class HealthStatus(str, Enum):
-    """Health status enumeration"""
-
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    UNHEALTHY = "unhealthy"
-    UNKNOWN = "unknown"
-    MAINTENANCE = "maintenance"
-
-
-class ProviderStatus(str, Enum):
-    """Provider status enumeration"""
-
-    ONLINE = "online"
-    OFFLINE = "offline"
-    DEGRADED = "degraded"
-    MAINTENANCE = "maintenance"
-    UNKNOWN = "unknown"
-
-
 @dataclass
 class ModelHealthMetrics:
     """Health metrics for a specific model"""
