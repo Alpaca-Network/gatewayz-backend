@@ -94,20 +94,27 @@ class TestStartup:
     async def test_lifespan_startup_supabase_init_fails(self):
         """Test lifespan startup fails when Supabase init fails"""
         from src.services.startup import lifespan
+        import sys
 
-        mock_app = MagicMock()
+        # Create a mock sentry_sdk module
+        mock_sentry = MagicMock()
+        sys.modules['sentry_sdk'] = mock_sentry
 
-        with patch('src.config.Config') as mock_config, \
-             patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
-             patch('sentry_sdk'):
+        try:
+            with patch('src.config.Config') as mock_config, \
+                 patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase:
 
-            mock_config.validate_critical_env_vars.return_value = (True, [])
-            mock_get_supabase.side_effect = Exception("Connection refused")
+                mock_config.validate_critical_env_vars.return_value = (True, [])
+                mock_get_supabase.side_effect = Exception("Connection refused")
 
-            # Should raise RuntimeError
-            with pytest.raises(RuntimeError, match="Cannot start application: Database initialization failed"):
-                async with lifespan(mock_app):
-                    pass
+                # Should raise RuntimeError
+                with pytest.raises(RuntimeError, match="Cannot start application: Database initialization failed"):
+                    async with lifespan(mock_app):
+                        pass
+        finally:
+            # Clean up
+            if 'sentry_sdk' in sys.modules:
+                del sys.modules['sentry_sdk']
 
     @pytest.mark.asyncio
     async def test_lifespan_startup_continues_if_monitoring_fails(self):

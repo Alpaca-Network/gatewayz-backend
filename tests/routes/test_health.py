@@ -610,8 +610,7 @@ class TestDatabaseHealth:
         from src.routes.health import database_health
 
         with patch('src.config.supabase_config.supabase') as mock_supabase, \
-             patch('src.config.supabase_config.get_initialization_status') as mock_get_status, \
-             patch('sentry_sdk'):
+             patch('src.config.supabase_config.get_initialization_status') as mock_get_status:
 
             # Mock query failure
             mock_supabase.table.return_value.limit.return_value.execute.side_effect = Exception("Connection timeout")
@@ -639,24 +638,34 @@ class TestDatabaseHealth:
     async def test_database_health_captures_to_sentry(self):
         """Test database health errors are captured to Sentry"""
         from src.routes.health import database_health
+        from unittest.mock import MagicMock
+        import sys
 
-        with patch('src.config.supabase_config.supabase') as mock_supabase, \
-             patch('src.config.supabase_config.get_initialization_status') as mock_get_status, \
-             patch('sentry_sdk') as mock_sentry:
+        # Create a mock sentry_sdk module
+        mock_sentry = MagicMock()
+        sys.modules['sentry_sdk'] = mock_sentry
 
-            # Mock query failure
-            test_error = Exception("Database unreachable")
-            mock_supabase.table.return_value.limit.return_value.execute.side_effect = test_error
+        try:
+            with patch('src.config.supabase_config.supabase') as mock_supabase, \
+                 patch('src.config.supabase_config.get_initialization_status') as mock_get_status:
 
-            mock_get_status.return_value = {
-                "initialized": False,
-                "has_error": True,
-                "error_message": "Database unreachable",
-                "error_type": "Exception",
-            }
+                # Mock query failure
+                test_error = Exception("Database unreachable")
+                mock_supabase.table.return_value.limit.return_value.execute.side_effect = test_error
 
-            result = await database_health()
+                mock_get_status.return_value = {
+                    "initialized": False,
+                    "has_error": True,
+                    "error_message": "Database unreachable",
+                    "error_type": "Exception",
+                }
 
-            # Verify Sentry was called
-            mock_sentry.capture_exception.assert_called_once_with(test_error)
-            assert result["status"] == "unhealthy"
+                result = await database_health()
+
+                # Verify Sentry was called
+                mock_sentry.capture_exception.assert_called_once_with(test_error)
+                assert result["status"] == "unhealthy"
+        finally:
+            # Clean up
+            if 'sentry_sdk' in sys.modules:
+                del sys.modules['sentry_sdk']
