@@ -893,3 +893,153 @@ class TestGatewayHealthDashboard:
         # Verify all are marked as healthy in the HTML
         # The HTML should contain "Healthy" status badges for these gateways
         assert html_content.count('badge-healthy') >= 3 or 'Healthy' in html_content
+
+
+# ============================================================
+# TEST CLASS: Cache Invalidation
+# ============================================================
+
+class TestCacheInvalidation:
+    """Test cache invalidation endpoint"""
+
+    @patch('src.routes.system.clear_models_cache')
+    def test_invalidate_cache_specific_gateway(
+        self,
+        mock_clear_models,
+        client
+    ):
+        """Test invalidating cache for a specific gateway"""
+        response = client.post('/api/cache/invalidate?gateway=openrouter')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert 'models:openrouter' in data['invalidated']
+        assert 'timestamp' in data
+
+        mock_clear_models.assert_called_once_with('openrouter')
+
+    @patch('src.routes.system.clear_models_cache')
+    def test_invalidate_cache_gateway_case_insensitive(
+        self,
+        mock_clear_models,
+        client
+    ):
+        """Test that gateway name is converted to lowercase"""
+        response = client.post('/api/cache/invalidate?gateway=OpenRouter')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'models:openrouter' in data['invalidated']
+
+        mock_clear_models.assert_called_once_with('openrouter')
+
+    @patch('src.routes.system.clear_models_cache')
+    @patch('src.routes.system.get_all_gateway_names')
+    def test_invalidate_cache_type_models(
+        self,
+        mock_get_gateways,
+        mock_clear_models,
+        client
+    ):
+        """Test invalidating all model caches"""
+        mock_get_gateways.return_value = ['openrouter', 'together', 'fireworks']
+
+        response = client.post('/api/cache/invalidate?cache_type=models')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert 'models:openrouter' in data['invalidated']
+        assert 'models:together' in data['invalidated']
+        assert 'models:fireworks' in data['invalidated']
+
+        assert mock_clear_models.call_count == 3
+
+    @patch('src.routes.system.clear_providers_cache')
+    def test_invalidate_cache_type_providers(
+        self,
+        mock_clear_providers,
+        client
+    ):
+        """Test invalidating providers cache"""
+        response = client.post('/api/cache/invalidate?cache_type=providers')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert 'providers' in data['invalidated']
+
+        mock_clear_providers.assert_called_once()
+
+    @patch('src.routes.system.refresh_pricing_cache')
+    def test_invalidate_cache_type_pricing(
+        self,
+        mock_refresh_pricing,
+        client
+    ):
+        """Test invalidating pricing cache"""
+        response = client.post('/api/cache/invalidate?cache_type=pricing')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert 'pricing' in data['invalidated']
+
+        mock_refresh_pricing.assert_called_once()
+
+    @patch('src.routes.system.clear_models_cache')
+    @patch('src.routes.system.clear_providers_cache')
+    @patch('src.routes.system.refresh_pricing_cache')
+    @patch('src.routes.system.get_all_gateway_names')
+    def test_invalidate_cache_all(
+        self,
+        mock_get_gateways,
+        mock_refresh_pricing,
+        mock_clear_providers,
+        mock_clear_models,
+        client
+    ):
+        """Test invalidating all caches when no parameters provided"""
+        mock_get_gateways.return_value = ['openrouter', 'together']
+
+        response = client.post('/api/cache/invalidate')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert 'models:openrouter' in data['invalidated']
+        assert 'models:together' in data['invalidated']
+        assert 'providers' in data['invalidated']
+        assert 'pricing' in data['invalidated']
+
+        assert mock_clear_models.call_count == 2
+        mock_clear_providers.assert_called_once()
+        mock_refresh_pricing.assert_called_once()
+
+    @patch('src.routes.system.clear_models_cache')
+    def test_invalidate_cache_error_handling(
+        self,
+        mock_clear_models,
+        client
+    ):
+        """Test error handling in cache invalidation"""
+        mock_clear_models.side_effect = Exception("Cache clear failed")
+
+        response = client.post('/api/cache/invalidate?gateway=openrouter')
+
+        assert response.status_code == 500
+        assert 'failed' in response.json()['detail'].lower()
+
+    def test_invalidate_cache_response_format(self, client):
+        """Test that response has correct format"""
+        with patch('src.routes.system.clear_models_cache'):
+            response = client.post('/api/cache/invalidate?gateway=test')
+
+            assert response.status_code == 200
+            data = response.json()
+            assert 'success' in data
+            assert 'message' in data
+            assert 'invalidated' in data
+            assert 'timestamp' in data
+            assert isinstance(data['invalidated'], list)
