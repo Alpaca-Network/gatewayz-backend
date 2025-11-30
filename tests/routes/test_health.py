@@ -571,3 +571,101 @@ class TestModelHealthMonitorScheduling:
             key for key in monitor.health_data.keys() if key.startswith("openrouter:")
         ]
         assert len(openrouter_keys) == len(sample_models)
+
+
+class TestDatabaseHealth:
+    """Test database health endpoint with initialization status"""
+
+    @pytest.mark.asyncio
+    async def test_database_health_success(self):
+        """Test database health returns success with initialization status"""
+        from src.routes.health import database_health
+
+        with patch('src.config.supabase_config.supabase') as mock_supabase, \
+             patch('src.config.supabase_config.get_initialization_status') as mock_get_status:
+
+            # Mock successful query
+            mock_supabase.table.return_value.limit.return_value.execute.return_value = MagicMock()
+
+            # Mock initialization status
+            mock_get_status.return_value = {
+                "initialized": True,
+                "has_error": False,
+                "error_message": None,
+                "error_type": None,
+            }
+
+            result = await database_health()
+
+            assert result["status"] == "healthy"
+            assert result["database"] == "supabase"
+            assert result["connection"] == "verified"
+            assert "initialization" in result
+            assert result["initialization"]["initialized"] is True
+            assert result["initialization"]["has_error"] is False
+
+    @pytest.mark.asyncio
+    async def test_database_health_failure(self):
+        """Test database health returns failure with error details"""
+        from src.routes.health import database_health
+
+        with patch('src.config.supabase_config.supabase') as mock_supabase, \
+             patch('src.config.supabase_config.get_initialization_status') as mock_get_status:
+
+            # Mock query failure
+            mock_supabase.table.return_value.limit.return_value.execute.side_effect = Exception("Connection timeout")
+
+            # Mock initialization status showing error
+            mock_get_status.return_value = {
+                "initialized": False,
+                "has_error": True,
+                "error_message": "Connection timeout",
+                "error_type": "Exception",
+            }
+
+            result = await database_health()
+
+            assert result["status"] == "unhealthy"
+            assert result["database"] == "supabase"
+            assert result["connection"] == "failed"
+            assert "error" in result
+            assert "Connection timeout" in result["error"]
+            assert result["error_type"] == "Exception"
+            assert "initialization" in result
+            assert result["initialization"]["has_error"] is True
+
+    @pytest.mark.asyncio
+    async def test_database_health_captures_to_sentry(self):
+        """Test database health errors are captured to Sentry"""
+        from src.routes.health import database_health
+        from unittest.mock import MagicMock
+        import sys
+
+        # Create a mock sentry_sdk module
+        mock_sentry = MagicMock()
+        sys.modules['sentry_sdk'] = mock_sentry
+
+        try:
+            with patch('src.config.supabase_config.supabase') as mock_supabase, \
+                 patch('src.config.supabase_config.get_initialization_status') as mock_get_status:
+
+                # Mock query failure
+                test_error = Exception("Database unreachable")
+                mock_supabase.table.return_value.limit.return_value.execute.side_effect = test_error
+
+                mock_get_status.return_value = {
+                    "initialized": False,
+                    "has_error": True,
+                    "error_message": "Database unreachable",
+                    "error_type": "Exception",
+                }
+
+                result = await database_health()
+
+                # Verify Sentry was called
+                mock_sentry.capture_exception.assert_called_once_with(test_error)
+                assert result["status"] == "unhealthy"
+        finally:
+            # Clean up
+            if 'sentry_sdk' in sys.modules:
+                del sys.modules['sentry_sdk']

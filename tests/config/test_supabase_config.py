@@ -16,8 +16,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client raises RuntimeError when SUPABASE_URL is not set"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Patch Config to simulate missing SUPABASE_URL
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", None):
@@ -33,8 +34,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client raises RuntimeError when SUPABASE_URL lacks protocol"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Patch Config to simulate missing protocol
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "test.supabase.co"):
@@ -49,8 +51,9 @@ class TestGetSupabaseClientValidation:
         """Test that error message for missing protocol includes example of correct format"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Patch Config to simulate missing protocol
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "myproject.supabase.co"):
@@ -68,8 +71,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client accepts valid https:// URL"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -93,8 +97,9 @@ class TestGetSupabaseClientValidation:
         """Test that get_supabase_client accepts valid http:// URL for local development"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -119,8 +124,9 @@ class TestGetSupabaseClientValidation:
         """Test that initialization logs a masked version of the URL"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset the cached client
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -161,7 +167,9 @@ class TestHttpxClientConfiguration:
         """
         import src.config.supabase_config as supabase_config_mod
 
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
@@ -193,7 +201,9 @@ class TestHttpxClientConfiguration:
         """
         import src.config.supabase_config as supabase_config_mod
 
+        # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
 
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
@@ -405,3 +415,153 @@ class TestLazySupabaseClient:
 
         with pytest.raises(AttributeError):
             _ = lazy_client.__some_dunder__
+
+
+class TestGetInitializationStatus:
+    """Test the get_initialization_status function"""
+
+    def test_get_initialization_status_when_not_initialized(self):
+        """Test initialization status when client is not yet initialized"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset state
+        supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
+
+        status = supabase_config_mod.get_initialization_status()
+
+        assert status["initialized"] is False
+        assert status["has_error"] is False
+        assert status["error_message"] is None
+        assert status["error_type"] is None
+
+    def test_get_initialization_status_when_initialized(self):
+        """Test initialization status when client is successfully initialized"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset state
+        supabase_config_mod._supabase_client = MagicMock()
+        supabase_config_mod._initialization_error = None
+
+        status = supabase_config_mod.get_initialization_status()
+
+        assert status["initialized"] is True
+        assert status["has_error"] is False
+        assert status["error_message"] is None
+        assert status["error_type"] is None
+
+    def test_get_initialization_status_when_error_occurred(self):
+        """Test initialization status when initialization failed"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset state
+        supabase_config_mod._supabase_client = None
+        test_error = RuntimeError("Database connection failed")
+        supabase_config_mod._initialization_error = test_error
+
+        status = supabase_config_mod.get_initialization_status()
+
+        assert status["initialized"] is False
+        assert status["has_error"] is True
+        assert "Database connection failed" in status["error_message"]
+        assert status["error_type"] == "RuntimeError"
+
+
+class TestErrorPersistence:
+    """Test error persistence and re-raising behavior"""
+
+    def test_get_supabase_client_reraises_previous_error(self):
+        """Test that get_supabase_client re-raises previous initialization errors"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Simulate a previous initialization failure
+        test_error = RuntimeError("Previous initialization failed")
+        supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = test_error
+
+        # Trying to get the client again should raise the cached error
+        with pytest.raises(RuntimeError) as exc_info:
+            supabase_config_mod.get_supabase_client()
+
+        assert "previous initialization failure" in str(exc_info.value).lower()
+
+    def test_initialization_error_captured_on_failure(self):
+        """Test that initialization errors are captured for future reference"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset state
+        supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", None):
+            with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                with pytest.raises(RuntimeError):
+                    supabase_config_mod.get_supabase_client()
+
+        # Error should be captured
+        assert supabase_config_mod._initialization_error is not None
+
+
+class TestTestConnectionInternal:
+    """Test the _test_connection_internal function"""
+
+    def test_test_connection_internal_success(self):
+        """Test successful connection test"""
+        import src.config.supabase_config as supabase_config_mod
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+
+        result = supabase_config_mod._test_connection_internal(mock_client)
+
+        assert result is True
+        mock_client.table.assert_called_once_with("users")
+
+    def test_test_connection_internal_failure(self):
+        """Test connection test failure"""
+        import src.config.supabase_config as supabase_config_mod
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.side_effect = Exception(
+            "Connection timeout"
+        )
+
+        with pytest.raises(RuntimeError, match="Database connection failed"):
+            supabase_config_mod._test_connection_internal(mock_client)
+
+
+class TestTestConnection:
+    """Test the public test_connection function"""
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_test_connection_uses_cached_client(self, mock_httpx_client, mock_create_client):
+        """Test that test_connection uses the cached client"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset state
+        supabase_config_mod._supabase_client = None
+        supabase_config_mod._initialization_error = None
+
+        # Setup mock
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    # First call initializes
+                    result = supabase_config_mod.test_connection()
+                    assert result is True
+
+                    # Second call should use cached client
+                    result2 = supabase_config_mod.test_connection()
+                    assert result2 is True
+
+                    # create_client should only be called once
+                    assert mock_create_client.call_count == 1

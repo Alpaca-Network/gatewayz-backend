@@ -17,7 +17,13 @@ from src.config.db_config import (
 )
 
 # Re-export Supabase configuration
-from src.config.supabase_config import get_client, get_supabase_client, init_db, test_connection
+from src.config.supabase_config import (
+    get_client,
+    get_initialization_status,
+    get_supabase_client,
+    init_db,
+    test_connection,
+)
 
 # Re-export Redis configuration (if needed)
 # from src.config.redis_config import ...
@@ -37,4 +43,5 @@ __all__ = [
     "get_client",
     "init_db",
     "test_connection",
+    "get_initialization_status",
 ]
