@@ -142,6 +142,73 @@ class TestGetSupabaseClientValidation:
         assert any("Initializing Supabase client" in record.message for record in caplog.records)
 
 
+class TestHttpxClientConfiguration:
+    """Test the httpx client is configured with proper authentication headers"""
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_includes_auth_headers(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with apikey and Authorization headers"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset the cached client
+        supabase_config_mod._supabase_client = None
+
+        # Mock the Supabase client
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        test_key = "test_supabase_key"
+
+        # Patch Config with valid URL and key
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", test_key):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        # Verify httpx.Client was called with the correct headers
+        mock_httpx_client.assert_called_once()
+        call_kwargs = mock_httpx_client.call_args[1]
+
+        assert "headers" in call_kwargs
+        assert call_kwargs["headers"]["apikey"] == test_key
+        assert call_kwargs["headers"]["Authorization"] == f"Bearer {test_key}"
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_httpx_client_includes_base_url(self, mock_httpx_client, mock_create_client):
+        """Test that httpx client is created with correct base_url"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Reset the cached client
+        supabase_config_mod._supabase_client = None
+
+        # Mock the Supabase client
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+        mock_create_client.return_value = mock_client
+
+        test_url = "https://test.supabase.co"
+
+        # Patch Config with valid URL
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", test_url):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    supabase_config_mod.get_supabase_client()
+
+        # Verify httpx.Client was called with the correct base_url
+        mock_httpx_client.assert_called_once()
+        call_kwargs = mock_httpx_client.call_args[1]
+
+        assert "base_url" in call_kwargs
+        assert call_kwargs["base_url"] == f"{test_url}/rest/v1"
+
+
 class TestLazySupabaseClient:
     """Test the _LazySupabaseClient proxy class"""
 

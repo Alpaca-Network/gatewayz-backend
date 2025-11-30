@@ -48,8 +48,13 @@ def get_supabase_client() -> Client:
         # Configure HTTP client with better connection pooling for HTTP/2
         # This helps prevent connection resets under high concurrency
         # IMPORTANT: base_url must be set so postgrest relative paths resolve correctly
+        # IMPORTANT: headers must include apikey and Authorization for Supabase auth
         httpx_client = httpx.Client(
             base_url=postgrest_base_url,
+            headers={
+                "apikey": Config.SUPABASE_KEY,
+                "Authorization": f"Bearer {Config.SUPABASE_KEY}",
+            },
             timeout=httpx.Timeout(120.0, connect=10.0),  # 120s total, 10s connect timeout
             limits=httpx.Limits(
                 max_connections=100,  # Maximum total connections in the pool
