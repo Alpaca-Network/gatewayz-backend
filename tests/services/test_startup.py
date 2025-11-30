@@ -92,7 +92,7 @@ class TestStartup:
 
     @pytest.mark.asyncio
     async def test_lifespan_startup_supabase_init_fails(self):
-        """Test lifespan startup fails when Supabase init fails"""
+        """Test lifespan startup continues in degraded mode when Supabase init fails"""
         from src.services.startup import lifespan
         import sys
 
@@ -104,15 +104,31 @@ class TestStartup:
 
         try:
             with patch('src.config.Config') as mock_config, \
-                 patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase:
+                 patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
+                 patch('src.services.startup.health_monitor'), \
+                 patch('src.services.startup.availability_service'), \
+                 patch('src.services.startup.get_pool_stats'), \
+                 patch('src.services.startup.get_cache'), \
+                 patch('src.services.startup.initialize_fal_cache_from_catalog'), \
+                 patch('src.services.startup.init_tempo_otlp'), \
+                 patch('src.services.startup.init_tempo_otlp_fastapi'), \
+                 patch('src.services.startup.init_prometheus_remote_write'), \
+                 patch('src.services.startup.initialize_autonomous_monitor'), \
+                 patch('src.services.startup.get_autonomous_monitor'), \
+                 patch('src.services.startup.shutdown_prometheus_remote_write'), \
+                 patch('src.services.startup.clear_connection_pools'):
 
                 mock_config.validate_critical_env_vars.return_value = (True, [])
                 mock_get_supabase.side_effect = Exception("Connection refused")
 
-                # Should raise RuntimeError
-                with pytest.raises(RuntimeError, match="Cannot start application: Database initialization failed"):
-                    async with lifespan(mock_app):
-                        pass
+                # Should NOT raise RuntimeError - app starts in degraded mode
+                # The context manager should complete successfully
+                async with lifespan(mock_app):
+                    # App should be running even with DB failure
+                    pass
+
+                # Verify Sentry was called to report the degraded state
+                assert mock_sentry.capture_exception.called
         finally:
             # Clean up
             if 'sentry_sdk' in sys.modules:

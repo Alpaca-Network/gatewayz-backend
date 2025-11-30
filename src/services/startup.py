@@ -43,6 +43,7 @@ async def lifespan(app):
     # Eagerly initialize Supabase client during startup (hybrid lazy-loading approach)
     # This ensures the database is ready before accepting requests, preventing
     # initialization from happening during critical user requests
+    # However, we allow the app to start even if DB is temporarily unavailable
     try:
         from src.config.supabase_config import get_supabase_client
 
@@ -50,7 +51,8 @@ async def lifespan(app):
         get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
         logger.info("✅ Supabase client initialized and connection verified")
     except Exception as e:
-        logger.error(f"❌ CRITICAL: Supabase client initialization failed: {e}")
+        logger.warning(f"⚠️  Supabase client initialization failed during startup: {e}")
+        logger.warning("Application will start but database-dependent endpoints may fail")
         # Capture to Sentry with startup context
         try:
             import sentry_sdk
@@ -58,14 +60,16 @@ async def lifespan(app):
                 scope.set_context("startup", {
                     "phase": "supabase_initialization",
                     "error_type": type(e).__name__,
+                    "degraded_mode": True,  # Flag that app is running in degraded mode
                 })
                 scope.set_tag("component", "startup")
-                scope.level = "fatal"
+                scope.set_tag("degraded_mode", "true")
+                scope.level = "warning"  # Changed from 'fatal' to 'warning'
                 sentry_sdk.capture_exception(e)
         except (ImportError, Exception):
             pass
-        # Fail fast: Don't start the application if database is unavailable
-        raise RuntimeError(f"Cannot start application: Database initialization failed: {e}") from e
+        # Allow app to start in degraded mode - health endpoints will report DB status
+        # The lazy proxy will retry connection on first actual database access
 
     try:
         # Initialize Fal.ai model cache from static catalog
