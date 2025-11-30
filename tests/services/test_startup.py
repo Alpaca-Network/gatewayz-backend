@@ -96,6 +96,8 @@ class TestStartup:
         from src.services.startup import lifespan
         import sys
 
+        mock_app = MagicMock()
+
         # Create a mock sentry_sdk module
         mock_sentry = MagicMock()
         sys.modules['sentry_sdk'] = mock_sentry
