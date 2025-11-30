@@ -25,7 +25,7 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.services.startup.Config') as mock_config, \
+        with patch('src.config.Config') as mock_config, \
              patch('src.services.startup.get_supabase_client') as mock_get_supabase, \
              patch('src.services.startup.initialize_fal_cache_from_catalog') as mock_fal_cache, \
              patch('src.services.startup.init_tempo_otlp') as mock_tempo, \
@@ -82,7 +82,7 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.services.startup.Config') as mock_config:
+        with patch('src.config.Config') as mock_config:
             mock_config.validate_critical_env_vars.return_value = (False, ["SUPABASE_URL", "SUPABASE_KEY"])
 
             # Should raise RuntimeError
@@ -97,7 +97,7 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.services.startup.Config') as mock_config, \
+        with patch('src.config.Config') as mock_config, \
              patch('src.services.startup.get_supabase_client') as mock_get_supabase, \
              patch('src.services.startup.sentry_sdk'):
 
@@ -116,7 +116,7 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.services.startup.Config') as mock_config, \
+        with patch('src.config.Config') as mock_config, \
              patch('src.services.startup.get_supabase_client') as mock_get_supabase, \
              patch('src.services.startup.initialize_fal_cache_from_catalog') as mock_fal_cache, \
              patch('src.services.startup.health_monitor') as mock_health_monitor, \

@@ -581,8 +581,8 @@ class TestDatabaseHealth:
         """Test database health returns success with initialization status"""
         from src.routes.health import database_health
 
-        with patch('src.routes.health.supabase') as mock_supabase, \
-             patch('src.routes.health.get_initialization_status') as mock_get_status:
+        with patch('src.config.supabase_config.supabase') as mock_supabase, \
+             patch('src.config.supabase_config.get_initialization_status') as mock_get_status:
 
             # Mock successful query
             mock_supabase.table.return_value.limit.return_value.execute.return_value = MagicMock()
@@ -609,8 +609,8 @@ class TestDatabaseHealth:
         """Test database health returns failure with error details"""
         from src.routes.health import database_health
 
-        with patch('src.routes.health.supabase') as mock_supabase, \
-             patch('src.routes.health.get_initialization_status') as mock_get_status, \
+        with patch('src.config.supabase_config.supabase') as mock_supabase, \
+             patch('src.config.supabase_config.get_initialization_status') as mock_get_status, \
              patch('src.routes.health.sentry_sdk'):
 
             # Mock query failure
@@ -640,8 +640,8 @@ class TestDatabaseHealth:
         """Test database health errors are captured to Sentry"""
         from src.routes.health import database_health
 
-        with patch('src.routes.health.supabase') as mock_supabase, \
-             patch('src.routes.health.get_initialization_status') as mock_get_status, \
+        with patch('src.config.supabase_config.supabase') as mock_supabase, \
+             patch('src.config.supabase_config.get_initialization_status') as mock_get_status, \
              patch('src.routes.health.sentry_sdk') as mock_sentry:
 
             # Mock query failure
