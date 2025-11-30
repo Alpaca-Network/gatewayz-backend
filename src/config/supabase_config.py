@@ -84,7 +84,9 @@ def get_supabase_client() -> Client:
                 postgrest_base_url,
             )
 
-        test_connection()
+        # Test connection using the client directly to avoid circular dependency
+        # (calling test_connection() would recursively call get_supabase_client())
+        _test_connection_internal(_supabase_client)
 
         return _supabase_client
 
@@ -93,11 +95,47 @@ def get_supabase_client() -> Client:
         raise RuntimeError(f"Supabase client initialization failed: {e}") from e
 
 
+def _test_connection_internal(client: Client) -> bool:
+    """
+    Test database connection using the provided client directly.
+
+    This internal function accepts the client as a parameter to avoid
+    circular dependency during initialization.
+
+    Args:
+        client: The Supabase client instance to test
+
+    Returns:
+        True if connection is successful
+
+    Raises:
+        RuntimeError: If connection test fails
+    """
+    try:
+        client.table("users").select("*").limit(1).execute()
+        logger.info("✅ Database connection test successful")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Database connection test failed: {e}")
+        raise RuntimeError(f"Database connection failed: {e}") from e
+
+
 def test_connection() -> bool:
+    """
+    Test database connection using the cached or newly created client.
+
+    This public function retrieves the client via get_supabase_client(),
+    which will use the cached client if already initialized.
+
+    Returns:
+        True if connection is successful
+
+    Raises:
+        RuntimeError: If connection test fails
+    """
     try:
         client = get_supabase_client()
-        client.table("users").select("*").limit(1).execute()
-        return True
+        return _test_connection_internal(client)
     except Exception as e:
         logger.error(f"Database connection test failed: {e}")
         raise RuntimeError(f"Database connection failed: {e}") from e
