@@ -1,3 +1,4 @@
+import errno
 import os
 from pathlib import Path
 
@@ -58,6 +59,9 @@ _default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query
 _project_root = Path(__file__).resolve().parents[2]
 _src_root = Path(__file__).resolve().parents[1]
 _default_data_dir = _src_root / "data"
+_writable_fallback_root = Path(
+    os.environ.get("GATEWAYZ_WRITABLE_ROOT", "/tmp/gatewayz")
+).expanduser().resolve()
 
 
 def _resolve_path_env(var_name: str, default: Path) -> Path:
@@ -69,9 +73,25 @@ def _resolve_path_env(var_name: str, default: Path) -> Path:
 
 
 def _ensure_directory(path: Path) -> Path:
-    """Ensure a directory exists and return the path."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """Ensure a directory exists, falling back when the filesystem is read-only."""
+
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except OSError as exc:
+        if exc.errno != errno.EROFS:
+            raise
+
+        # Use a writable temp directory (e.g., /tmp on serverless platforms)
+        _writable_fallback_root.mkdir(parents=True, exist_ok=True)
+        if path.is_absolute() and len(path.parts) > 1:
+            relative_path = Path(*path.parts[1:])
+        else:
+            relative_path = path
+
+        fallback_path = _writable_fallback_root / relative_path
+        fallback_path.mkdir(parents=True, exist_ok=True)
+        return fallback_path
 
 
 _data_dir = _ensure_directory(_resolve_path_env("GATEWAYZ_DATA_DIR", _default_data_dir))
@@ -84,7 +104,7 @@ _pricing_backup_dir = _ensure_directory(
 _pricing_sync_log_file = _resolve_path_env(
     "PRICING_SYNC_LOG_FILE", _data_dir / "pricing_sync.log"
 )
-_pricing_sync_log_file.parent.mkdir(parents=True, exist_ok=True)
+_ensure_directory(_pricing_sync_log_file.parent)
 _manual_pricing_file = _resolve_path_env(
     "MANUAL_PRICING_FILE", _data_dir / "manual_pricing.json"
 )
@@ -99,6 +119,13 @@ class Config:
     IS_STAGING = APP_ENV == "staging"
     IS_DEVELOPMENT = APP_ENV == "development"
     IS_TESTING = APP_ENV in {"testing", "test"} or os.environ.get("TESTING", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    # Feature flags / local testing toggles
+    HEALTH_AUTH_DISABLED = os.environ.get("HEALTH_AUTH_DISABLED", "false").lower() in {
         "1",
         "true",
         "yes",
