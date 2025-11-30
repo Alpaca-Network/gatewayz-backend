@@ -40,32 +40,54 @@ async def lifespan(app):
     else:
         logger.info("✅ All critical environment variables validated")
 
-    # Eagerly initialize Supabase client during startup (hybrid lazy-loading approach)
+    # Eagerly initialize Supabase client during startup with retry logic
     # This ensures the database is ready before accepting requests, preventing
     # initialization from happening during critical user requests
-    # However, we allow the app to start even if DB is temporarily unavailable
-    try:
-        from src.config.supabase_config import get_supabase_client
+    # Retry logic handles transient network issues during deployment
+    # However, we allow the app to start in degraded mode if DB is unavailable after retries
+    from src.config.supabase_config import get_supabase_client
+    import time
 
-        logger.info("🔄 Initializing Supabase database client...")
-        get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
-        logger.info("✅ Supabase client initialized and connection verified")
-    except Exception as e:
-        logger.warning(f"⚠️  Supabase client initialization failed during startup: {e}")
-        logger.warning("Application will start but database-dependent endpoints may fail")
+    max_retries = 3
+    retry_delay = 2.0  # seconds
+    last_error = None
+    db_initialized = False
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"🔄 Initializing Supabase database client (attempt {attempt}/{max_retries})...")
+            get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
+            logger.info("✅ Supabase client initialized and connection verified")
+            db_initialized = True
+            break  # Success, exit retry loop
+        except Exception as e:
+            last_error = e
+            logger.warning(f"⚠️  Supabase initialization attempt {attempt}/{max_retries} failed: {e}")
+
+            if attempt < max_retries:
+                # Exponential backoff
+                wait_time = retry_delay * (2 ** (attempt - 1))
+                logger.info(f"⏳ Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+
+    # If all retries failed, log warning and start in degraded mode
+    if not db_initialized and last_error:
+        logger.warning(f"⚠️  Supabase client initialization failed after {max_retries} attempts: {last_error}")
+        logger.warning("Application will start in DEGRADED MODE - database-dependent endpoints may fail")
         # Capture to Sentry with startup context
         try:
             import sentry_sdk
             with sentry_sdk.push_scope() as scope:
                 scope.set_context("startup", {
                     "phase": "supabase_initialization",
-                    "error_type": type(e).__name__,
+                    "error_type": type(last_error).__name__,
+                    "attempts": max_retries,
                     "degraded_mode": True,  # Flag that app is running in degraded mode
                 })
                 scope.set_tag("component", "startup")
                 scope.set_tag("degraded_mode", "true")
-                scope.level = "warning"  # Changed from 'fatal' to 'warning'
-                sentry_sdk.capture_exception(e)
+                scope.level = "warning"  # Warning, not fatal - app can still start
+                sentry_sdk.capture_exception(last_error)
         except (ImportError, Exception):
             pass
         # Allow app to start in degraded mode - health endpoints will report DB status
@@ -176,6 +198,13 @@ async def lifespan(app):
         # Clear connection pools
         clear_connection_pools()
         logger.info("Connection pools cleared")
+
+        # Cleanup Supabase client and close httpx connections
+        try:
+            from src.config.supabase_config import cleanup_supabase_client
+            cleanup_supabase_client()
+        except Exception as e:
+            logger.warning(f"Supabase cleanup warning: {e}")
 
         logger.info("All monitoring and health services stopped successfully")
 
