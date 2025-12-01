@@ -83,7 +83,23 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
     try:
         system_health = health_monitor.get_system_health()
         if not system_health:
-            raise HTTPException(status_code=503, detail="System health data not available")
+            # Return default/degraded health status instead of failing
+            logger.warning("System health data not available - monitoring may not be started")
+            from src.models.health_models import HealthStatus
+
+            return SystemHealthResponse(
+                overall_status=HealthStatus.UNKNOWN,
+                total_providers=0,
+                healthy_providers=0,
+                degraded_providers=0,
+                unhealthy_providers=0,
+                total_models=0,
+                healthy_models=0,
+                degraded_models=0,
+                unhealthy_models=0,
+                system_uptime=0.0,
+                last_updated=datetime.now(timezone.utc),
+            )
 
         return system_health
     except Exception as e:
@@ -94,7 +110,22 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
             context_data={'endpoint': '/health/system', 'operation': 'get_system_health'},
             tags={'endpoint': 'system_health', 'error_type': type(e).__name__}
         )
-        raise HTTPException(status_code=500, detail="Failed to retrieve system health") from e
+        # Return degraded status instead of failing
+        from src.models.health_models import HealthStatus
+
+        return SystemHealthResponse(
+            overall_status=HealthStatus.UNKNOWN,
+            total_providers=0,
+            healthy_providers=0,
+            degraded_providers=0,
+            unhealthy_providers=0,
+            total_models=0,
+            healthy_models=0,
+            degraded_models=0,
+            unhealthy_models=0,
+            system_uptime=0.0,
+            last_updated=datetime.now(timezone.utc),
+        )
 
 
 @router.get("/health/providers", response_model=list[ProviderHealthResponse], tags=["health"])
@@ -304,7 +335,19 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
     try:
         system_health = health_monitor.get_system_health()
         if not system_health:
-            raise HTTPException(status_code=503, detail="Uptime metrics not available")
+            # Return default metrics instead of failing
+            logger.warning("Uptime metrics not available - returning defaults")
+            return UptimeMetricsResponse(
+                status="unknown",
+                uptime_percentage=0.0,
+                response_time_avg=None,
+                last_incident=None,
+                total_requests=0,
+                successful_requests=0,
+                failed_requests=0,
+                error_rate=0.0,
+                last_updated=datetime.now(timezone.utc),
+            )
 
         # Calculate uptime metrics
         total_requests = sum(m.total_requests for m in health_monitor.get_all_models_health())

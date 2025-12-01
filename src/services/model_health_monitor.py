@@ -272,22 +272,27 @@ class ModelHealthMonitor:
             else:
                 status = HealthStatus.UNHEALTHY
                 error_message = health_check_result.get("error", "Unknown error")
+                status_code = health_check_result.get("status_code")
 
-                # Capture non-functional model to Sentry
-                error = Exception(f"Model health check failed: {error_message}")
-                capture_model_health_error(
-                    error,
-                    model_id=model_id,
-                    provider=provider,
-                    gateway=gateway,
-                    operation='health_check',
-                    status='unhealthy',
-                    response_time_ms=health_check_result.get("response_time"),
-                    details={
-                        'status_code': health_check_result.get('status_code'),
-                        'error_message': error_message,
-                    }
-                )
+                # Only capture specific error types to Sentry (not rate limits or expected failures)
+                should_capture = self._should_capture_error(status_code, error_message)
+
+                if should_capture:
+                    # Capture non-functional model to Sentry
+                    error = Exception(f"Model health check failed: {error_message}")
+                    capture_model_health_error(
+                        error,
+                        model_id=model_id,
+                        provider=provider,
+                        gateway=gateway,
+                        operation='health_check',
+                        status='unhealthy',
+                        response_time_ms=health_check_result.get("response_time"),
+                        details={
+                            'status_code': status_code,
+                            'error_message': error_message,
+                        }
+                    )
 
         except Exception as e:
             status = HealthStatus.UNHEALTHY
@@ -319,6 +324,47 @@ class ModelHealthMonitor:
         )
 
         return health_metrics
+
+    def _should_capture_error(self, status_code: int | None, error_message: str | None) -> bool:
+        """
+        Determine if an error should be captured to Sentry.
+
+        Filter out expected/transient errors like:
+        - Rate limits (429)
+        - Data policy restrictions (404 with policy message)
+        - Invalid parameters for specific models (400 with known issues)
+        - Temporary service unavailability (503)
+        """
+        if not status_code:
+            return True  # Capture unknown errors
+
+        # Don't capture rate limits - these are expected for free tier models
+        if status_code == 429:
+            return False
+
+        # Don't capture data policy restrictions - user configuration issue
+        if status_code == 404 and error_message and "data policy" in error_message.lower():
+            return False
+
+        # Don't capture temporary service unavailability
+        if status_code == 503 and error_message and "service unavailable" in error_message.lower():
+            return False
+
+        # Don't capture known parameter validation issues for specific providers
+        if status_code == 400 and error_message:
+            # Google Vertex AI max_output_tokens validation
+            if "max_output_tokens" in error_message.lower() and "minimum value" in error_message.lower():
+                return False
+            # Audio-only model requirements
+            if "audio" in error_message.lower() and "modality" in error_message.lower():
+                return False
+
+        # Don't capture authentication issues - configuration problem
+        if status_code == 403 and error_message and "key" in error_message.lower():
+            return False
+
+        # Capture all other errors
+        return True
 
     def _get_api_key_for_gateway(self, gateway: str) -> str | None:
         """Get the API key for a specific gateway from configuration."""
