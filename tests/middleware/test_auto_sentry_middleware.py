@@ -231,6 +231,112 @@ class TestAutoSentryMiddleware:
         # (it's an intentional, user-facing error, not a bug)
         mock_sentry.capture_exception.assert_not_called()
 
+    @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
+    @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
+    async def test_http_exception_filtering_in_middleware(self, mock_sentry):
+        """Test that HTTPException is filtered in middleware exception handler"""
+        from fastapi import Request, Response
+        from unittest.mock import AsyncMock
+
+        mock_scope = MagicMock()
+        mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
+
+        # Create middleware instance
+        app = FastAPI()
+        middleware = AutoSentryMiddleware(app)
+
+        # Create mock request
+        mock_request = Mock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_request.query_params = {}
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = {}
+        mock_request.scope = {"route": Mock(path="/test")}
+
+        # Create call_next that raises HTTPException
+        async def call_next_raises_http_exception(request):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Test that HTTPException is caught and NOT sent to Sentry
+        with pytest.raises(HTTPException) as exc_info:
+            await middleware.dispatch(mock_request, call_next_raises_http_exception)
+
+        # Verify HTTPException was raised
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Not found"
+
+        # Verify Sentry capture was NOT called
+        mock_sentry.capture_exception.assert_not_called()
+
+    @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
+    @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
+    async def test_http_exception_various_status_codes(self, mock_sentry):
+        """Test that various HTTPException status codes are filtered"""
+        from fastapi import Request
+        from unittest.mock import AsyncMock
+
+        mock_scope = MagicMock()
+        mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
+
+        app = FastAPI()
+        middleware = AutoSentryMiddleware(app)
+
+        mock_request = Mock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_request.query_params = {}
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = {}
+        mock_request.scope = {"route": Mock(path="/test")}
+
+        # Test common HTTP exception status codes
+        status_codes = [401, 403, 404, 422, 500]
+
+        for status_code in status_codes:
+            mock_sentry.reset_mock()
+
+            async def call_next_raises(request):
+                raise HTTPException(status_code=status_code, detail=f"Error {status_code}")
+
+            with pytest.raises(HTTPException) as exc_info:
+                await middleware.dispatch(mock_request, call_next_raises)
+
+            assert exc_info.value.status_code == status_code
+            # HTTPException should NEVER be captured, regardless of status code
+            mock_sentry.capture_exception.assert_not_called()
+
+    @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
+    @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
+    async def test_regular_exception_still_captured(self, mock_sentry):
+        """Test that non-HTTPException errors are still captured"""
+        from fastapi import Request
+
+        mock_scope = MagicMock()
+        mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
+
+        app = FastAPI()
+        middleware = AutoSentryMiddleware(app)
+
+        mock_request = Mock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_request.query_params = {}
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = {}
+        mock_request.scope = {"route": Mock(path="/test")}
+
+        # Create call_next that raises a regular exception
+        async def call_next_raises_value_error(request):
+            raise ValueError("Something went wrong")
+
+        # Test that regular exception IS captured
+        with pytest.raises(ValueError):
+            await middleware.dispatch(mock_request, call_next_raises_value_error)
+
+        # Verify Sentry capture WAS called for regular exception
+        mock_sentry.capture_exception.assert_called_once()
+
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", False)
     def test_sentry_unavailable_no_error(self, client):
         """Test that middleware works even when Sentry is unavailable"""
