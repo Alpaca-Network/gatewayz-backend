@@ -27,6 +27,7 @@ from src.models.health_models import (
 from src.security.deps import get_api_key
 from src.services.model_availability import availability_service
 from src.services.model_health_monitor import health_monitor
+from src.utils.sentry_context import capture_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -87,6 +88,12 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
         return system_health
     except Exception as e:
         logger.error(f"Failed to get system health: {e}")
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/system', 'operation': 'get_system_health'},
+            tags={'endpoint': 'system_health', 'error_type': type(e).__name__}
+        )
         raise HTTPException(status_code=500, detail="Failed to retrieve system health") from e
 
 
@@ -337,6 +344,12 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/uptime', 'operation': 'get_uptime_metrics'},
+            tags={'endpoint': 'uptime', 'error_type': type(e).__name__}
+        )
         raise HTTPException(status_code=500, detail="Failed to retrieve uptime metrics") from e
 
 
@@ -533,6 +546,12 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
         return response
     except Exception as e:
         logger.error(f"Failed to get health dashboard: {e}")
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/dashboard', 'operation': 'get_health_dashboard'},
+            tags={'endpoint': 'dashboard', 'error_type': type(e).__name__}
+        )
         import traceback
 
         logger.error(f"Full traceback: {traceback.format_exc()}")
