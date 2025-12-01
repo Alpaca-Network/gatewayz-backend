@@ -77,6 +77,9 @@ class _Insert:
             if "id" not in row:
                 row["id"] = next_id
                 next_id += 1
+            # Ensure created_at is set if not provided
+            if "created_at" not in row:
+                row["created_at"] = datetime.now(timezone.utc).isoformat()
             self.store[self.table].append(row)
             inserted.append(row.copy())
         return _Result(inserted)
@@ -128,6 +131,9 @@ def test_save_message_no_duplicate_normal_path(sb):
     """Test normal save when no duplicate exists"""
     import src.db.chat_history as ch
 
+    # Create session first
+    ch.create_chat_session(user_id=1, title="Test")
+
     # Save a message
     msg = ch.save_chat_message(
         session_id=1,
@@ -154,6 +160,9 @@ def test_save_message_duplicate_detected_returns_existing(sb):
     """Test that duplicate message returns existing instead of creating new"""
     import src.db.chat_history as ch
 
+    # Create a session first (required for session update to work)
+    ch.create_chat_session(user_id=1, title="Test Session")
+
     # Save first message
     msg1 = ch.save_chat_message(
         session_id=1,
@@ -176,7 +185,7 @@ def test_save_message_duplicate_detected_returns_existing(sb):
     )
 
     # Should return the existing message
-    assert msg2['id'] == first_id
+    assert msg2['id'] == first_id, f"Expected same ID {first_id}, got {msg2['id']}. Messages in DB: {len(sb.tables['chat_messages'])}"
     assert msg2['content'] == 'Duplicate test'
 
     # Verify only one message in database
@@ -187,6 +196,9 @@ def test_save_message_duplicate_detected_returns_existing(sb):
 def test_save_message_skip_duplicate_check_creates_new(sb):
     """Test that skip_duplicate_check=True bypasses duplicate detection"""
     import src.db.chat_history as ch
+
+    # Create session first
+    ch.create_chat_session(user_id=1, title="Test")
 
     # Save first message
     msg1 = ch.save_chat_message(
@@ -222,6 +234,9 @@ def test_save_message_empty_content_allowed(sb):
     """Test that empty content is allowed and saved"""
     import src.db.chat_history as ch
 
+    # Create session first
+    ch.create_chat_session(user_id=1, title="Test")
+
     # Save message with empty content
     msg = ch.save_chat_message(
         session_id=1,
@@ -245,6 +260,10 @@ def test_save_message_empty_content_allowed(sb):
 def test_save_message_different_sessions_not_duplicate(sb):
     """Test that same content in different sessions is not considered duplicate"""
     import src.db.chat_history as ch
+
+    # Create two sessions
+    ch.create_chat_session(user_id=1, title="Session 1")
+    ch.create_chat_session(user_id=1, title="Session 2")
 
     # Save message to session 1
     msg1 = ch.save_chat_message(
@@ -279,6 +298,9 @@ def test_save_message_different_sessions_not_duplicate(sb):
 def test_save_message_different_roles_not_duplicate(sb):
     """Test that same content with different roles is not considered duplicate"""
     import src.db.chat_history as ch
+
+    # Create session first
+    ch.create_chat_session(user_id=1, title="Test")
 
     # Save user message
     msg1 = ch.save_chat_message(
