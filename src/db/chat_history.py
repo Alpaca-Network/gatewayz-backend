@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, TypeVar
 
 from httpx import RemoteProtocolError, ConnectError, ReadTimeout
