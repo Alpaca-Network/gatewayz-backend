@@ -2,6 +2,7 @@
 Startup service for initializing health monitoring, availability services, and connection pools
 """
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -68,7 +69,7 @@ async def lifespan(app):
                 # Exponential backoff
                 wait_time = retry_delay * (2 ** (attempt - 1))
                 logger.info(f"⏳ Retrying in {wait_time}s...")
-                time.sleep(wait_time)
+                await asyncio.sleep(wait_time)
 
     # If all retries failed, log warning and start in degraded mode
     if not db_initialized and last_error:

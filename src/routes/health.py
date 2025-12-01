@@ -5,6 +5,7 @@ Provides comprehensive monitoring of model availability, performance,
 and health status across all providers and gateways.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -81,27 +82,48 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
     - System uptime percentage
     """
     try:
-        system_health = health_monitor.get_system_health()
-        if not system_health:
-            # Return default/degraded health status instead of failing
-            logger.warning("System health data not available - monitoring may not be started")
-            from src.models.health_models import HealthStatus
+        # Use asyncio.wait_for for Python 3.10 compatibility
+        async def _get_health():
+            system_health = health_monitor.get_system_health()
+            if not system_health:
+                # Return default/degraded health status instead of failing
+                logger.warning("System health data not available - monitoring may not be started")
+                from src.models.health_models import HealthStatus
 
-            return SystemHealthResponse(
-                overall_status=HealthStatus.UNKNOWN,
-                total_providers=0,
-                healthy_providers=0,
-                degraded_providers=0,
-                unhealthy_providers=0,
-                total_models=0,
-                healthy_models=0,
-                degraded_models=0,
-                unhealthy_models=0,
-                system_uptime=0.0,
-                last_updated=datetime.now(timezone.utc),
-            )
+                return SystemHealthResponse(
+                    overall_status=HealthStatus.UNKNOWN,
+                    total_providers=0,
+                    healthy_providers=0,
+                    degraded_providers=0,
+                    unhealthy_providers=0,
+                    total_models=0,
+                    healthy_models=0,
+                    degraded_models=0,
+                    unhealthy_models=0,
+                    system_uptime=0.0,
+                    last_updated=datetime.now(timezone.utc),
+                )
 
-        return system_health
+            return system_health
+
+        return await asyncio.wait_for(_get_health(), timeout=5.0)
+    except asyncio.TimeoutError:
+        logger.warning("System health check timed out after 5 seconds")
+        from src.models.health_models import HealthStatus
+
+        return SystemHealthResponse(
+            overall_status=HealthStatus.DEGRADED,
+            total_providers=0,
+            healthy_providers=0,
+            degraded_providers=0,
+            unhealthy_providers=0,
+            total_models=0,
+            healthy_models=0,
+            degraded_models=0,
+            unhealthy_models=0,
+            system_uptime=0.0,
+            last_updated=datetime.now(timezone.utc),
+        )
     except Exception as e:
         logger.error(f"Failed to get system health: {e}")
         capture_error(
@@ -143,11 +165,17 @@ async def get_providers_health(
     - Error information
     """
     try:
-        providers_health = health_monitor.get_all_providers_health(gateway)
-        return providers_health
+        # Use asyncio.wait_for for Python 3.10 compatibility
+        async def _get_providers():
+            return health_monitor.get_all_providers_health(gateway)
+
+        return await asyncio.wait_for(_get_providers(), timeout=5.0)
+    except asyncio.TimeoutError:
+        logger.warning("Providers health check timed out after 5 seconds")
+        return []  # Return empty list on timeout
     except Exception as e:
         logger.error(f"Failed to get providers health: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve providers health") from e
+        return []  # Return empty list instead of 500 error
 
 
 @router.get("/health/models", response_model=list[ModelHealthResponse], tags=["health"])
@@ -167,19 +195,26 @@ async def get_models_health(
     - Last check timestamps
     """
     try:
-        models_health = health_monitor.get_all_models_health(gateway)
+        # Use asyncio.wait_for for Python 3.10 compatibility
+        async def _get_models():
+            models_health = health_monitor.get_all_models_health(gateway)
 
-        # Apply filters
-        if provider:
-            models_health = [m for m in models_health if m.provider == provider]
+            # Apply filters
+            if provider:
+                models_health = [m for m in models_health if m.provider == provider]
 
-        if status:
-            models_health = [m for m in models_health if m.status == status]
+            if status:
+                models_health = [m for m in models_health if m.status == status]
 
-        return models_health
+            return models_health
+
+        return await asyncio.wait_for(_get_models(), timeout=5.0)
+    except asyncio.TimeoutError:
+        logger.warning("Models health check timed out after 5 seconds")
+        return []  # Return empty list on timeout
     except Exception as e:
         logger.error(f"Failed to get models health: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve models health") from e
+        return []  # Return empty list instead of 500 error
 
 
 @router.get("/health/model/{model_id}", response_model=ModelHealthResponse, tags=["health"])
