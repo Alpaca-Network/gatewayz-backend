@@ -31,6 +31,16 @@ def test_openrouter_auto_transforms_for_cerebras():
     assert result == "llama-3.3-70b"
 
 
+def test_cerebras_prefix_is_stripped():
+    result = transform_model_id("cerebras/llama-3.3-70b", "cerebras")
+    assert result == "llama-3.3-70b"
+
+
+def test_cerebras_meta_llama_format_is_normalized():
+    result = transform_model_id("meta-llama/llama-3.3-70b", "cerebras")
+    assert result == "llama-3.3-70b"
+
+
 def test_detect_provider_from_model_id_fal_ai():
     """Test that fal-ai models are detected as 'fal' provider"""
     result = detect_provider_from_model_id("fal-ai/stable-diffusion-v15")
