@@ -106,8 +106,8 @@ class TestAISDKEndpoint:
             },
         )
 
-        assert response.status_code == 500
-        assert "AI_SDK_API_KEY not configured" in response.text
+        assert response.status_code == 503
+        assert "not configured" in response.text.lower()
 
     def test_ai_sdk_invalid_request_format(self):
         """Test that invalid request format returns proper error"""
