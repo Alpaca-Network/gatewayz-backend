@@ -40,10 +40,13 @@ RETURNS TRIGGER AS $$
 BEGIN
   -- Auto-assign sequence number if not provided
   IF NEW.sequence_number IS NULL THEN
+    -- Use FOR UPDATE to lock the row and prevent race conditions
+    -- This ensures concurrent inserts get unique sequence numbers
     SELECT COALESCE(MAX(sequence_number), 0) + 1
     INTO NEW.sequence_number
     FROM chat_messages
-    WHERE session_id = NEW.session_id;
+    WHERE session_id = NEW.session_id
+    FOR UPDATE;
   END IF;
 
   RETURN NEW;

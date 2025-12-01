@@ -165,7 +165,7 @@ def save_chat_message(
                 def check_duplicate():
                     return (
                         client.table("chat_messages")
-                        .select("id, created_at, tokens")
+                        .select("*")  # Select all fields to return complete message object
                         .eq("session_id", session_id)
                         .eq("role", role)
                         .eq("content", content)
@@ -188,6 +188,7 @@ def save_chat_message(
                         f"Content preview: {content[:50]}..."
                     )
                     # Return existing message instead of creating duplicate
+                    # This ensures consistent return value with all expected fields
                     return existing
 
             except Exception as e:
