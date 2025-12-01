@@ -100,23 +100,21 @@ class AutoSentryMiddleware(BaseHTTPMiddleware):
             except Exception as exc:
                 from fastapi import HTTPException
 
-                # Filter HTTPException based on status code:
-                # - 4xx errors are intentional user-facing errors (401, 403, 404, 422) - don't send to Sentry
-                # - 5xx errors are server errors and should be captured for investigation
+                # Don't capture HTTPException to Sentry - these are intentional user-facing errors
+                # Route handlers should capture the underlying exception before wrapping in HTTPException
+                # (401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Validation Error, 500 Internal Error, etc.)
                 if isinstance(exc, HTTPException):
-                    if exc.status_code < 500:
-                        # Client error - log for debugging but don't send to Sentry
-                        logger.debug(
-                            f"HTTP exception in {request_context['path']}: {exc.status_code} - {exc.detail}",
-                            extra={
-                                "status_code": exc.status_code,
-                                "detail": exc.detail,
-                                "request_context": request_context,
-                            },
-                        )
-                        # Re-raise without Sentry capture
-                        raise
-                    # For 5xx errors, continue to Sentry capture below
+                    # Log for debugging but don't send to Sentry
+                    logger.debug(
+                        f"HTTP exception in {request_context['path']}: {exc.status_code} - {exc.detail}",
+                        extra={
+                            "status_code": exc.status_code,
+                            "detail": exc.detail,
+                            "request_context": request_context,
+                        },
+                    )
+                    # Re-raise without Sentry capture
+                    raise
 
                 # Exception occurred - capture to Sentry with full context
                 duration_ms = (time.time() - start_time) * 1000
