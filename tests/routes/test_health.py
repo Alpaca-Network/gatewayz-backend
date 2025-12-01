@@ -187,7 +187,7 @@ class TestSystemHealth:
         response = client.get('/health/system', headers=auth_headers)
         assert response.status_code in [503, 500]
 
-    @patch('src.utils.sentry_context.capture_error')
+    @patch('src.routes.health.capture_error')
     @patch('src.services.model_health_monitor.health_monitor.get_system_health')
     def test_system_health_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
         """Test that system health errors are captured to Sentry"""
@@ -392,7 +392,7 @@ class TestUptimeMetrics:
             assert 'status' in data
             assert 'uptime_percentage' in data
 
-    @patch('src.utils.sentry_context.capture_error')
+    @patch('src.routes.health.capture_error')
     @patch('src.services.model_health_monitor.health_monitor.get_system_health')
     def test_get_uptime_metrics_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
         """Test that uptime metrics errors are captured to Sentry"""
@@ -433,7 +433,7 @@ class TestHealthDashboard:
             assert 'providers' in data
             assert 'models' in data
 
-    @patch('src.utils.sentry_context.capture_error')
+    @patch('src.routes.health.capture_error')
     @patch('src.services.model_health_monitor.health_monitor.get_system_health')
     def test_get_health_dashboard_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
         """Test that dashboard errors are captured to Sentry"""
