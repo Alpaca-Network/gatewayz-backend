@@ -11,6 +11,7 @@ Requires-Dist: python-multipart==0.0.6
 Requires-Dist: anyio<4.0.0,>=3.7.1
 Requires-Dist: supabase==2.12.0
 Requires-Dist: redis==5.0.1
+Requires-Dist: psycopg[binary]==3.1.18
 Requires-Dist: python-dotenv==1.0.0
 Requires-Dist: cryptography==41.0.7
 Requires-Dist: email-validator==2.1.0
@@ -47,5 +48,6 @@ Requires-Dist: pytest-split>=0.9.0; extra == "test"
 Requires-Dist: pytest-timeout>=2.2.0; extra == "test"
 Requires-Dist: pytest-mock>=3.12.0; extra == "test"
 Requires-Dist: flask-sqlalchemy; extra == "test"
+Requires-Dist: playwright>=1.40.0; extra == "test"
 Provides-Extra: full
 Requires-Dist: gatewayz-backend[providers]; extra == "full"
