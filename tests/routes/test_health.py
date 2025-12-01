@@ -187,6 +187,26 @@ class TestSystemHealth:
         response = client.get('/health/system', headers=auth_headers)
         assert response.status_code in [503, 500]
 
+    @patch('src.utils.sentry_context.capture_error')
+    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
+    def test_system_health_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
+        """Test that system health errors are captured to Sentry"""
+        # Simulate an error
+        mock_get_health.side_effect = Exception("Service unavailable")
+
+        response = client.get('/health/system', headers=auth_headers)
+
+        # Should return 500 error
+        assert response.status_code == 500
+
+        # Verify Sentry capture was called
+        assert mock_capture_error.called
+        call_args = mock_capture_error.call_args
+        assert call_args[0][0].args[0] == "Service unavailable"
+        assert call_args[1]['context_type'] == 'health_endpoint'
+        assert call_args[1]['context_data']['endpoint'] == '/health/system'
+        assert call_args[1]['tags']['endpoint'] == 'system_health'
+
 
 class TestProvidersHealth:
     """Test providers health endpoint"""
@@ -372,6 +392,26 @@ class TestUptimeMetrics:
             assert 'status' in data
             assert 'uptime_percentage' in data
 
+    @patch('src.utils.sentry_context.capture_error')
+    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
+    def test_get_uptime_metrics_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
+        """Test that uptime metrics errors are captured to Sentry"""
+        # Simulate an error
+        mock_get_health.side_effect = Exception("Database connection failed")
+
+        response = client.get('/health/uptime', headers=auth_headers)
+
+        # Should return 500 error
+        assert response.status_code == 500
+
+        # Verify Sentry capture was called
+        assert mock_capture_error.called
+        call_args = mock_capture_error.call_args
+        assert call_args[0][0].args[0] == "Database connection failed"
+        assert call_args[1]['context_type'] == 'health_endpoint'
+        assert call_args[1]['context_data']['endpoint'] == '/health/uptime'
+        assert call_args[1]['tags']['endpoint'] == 'uptime'
+
 
 class TestHealthDashboard:
     """Test health dashboard endpoint"""
@@ -392,6 +432,26 @@ class TestHealthDashboard:
             assert 'system_status' in data
             assert 'providers' in data
             assert 'models' in data
+
+    @patch('src.utils.sentry_context.capture_error')
+    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
+    def test_get_health_dashboard_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
+        """Test that dashboard errors are captured to Sentry"""
+        # Simulate an error
+        mock_get_health.side_effect = Exception("Dashboard data error")
+
+        response = client.get('/health/dashboard', headers=auth_headers)
+
+        # Should return 500 error
+        assert response.status_code == 500
+
+        # Verify Sentry capture was called
+        assert mock_capture_error.called
+        call_args = mock_capture_error.call_args
+        assert call_args[0][0].args[0] == "Dashboard data error"
+        assert call_args[1]['context_type'] == 'health_endpoint'
+        assert call_args[1]['context_data']['endpoint'] == '/health/dashboard'
+        assert call_args[1]['tags']['endpoint'] == 'dashboard'
 
 
 class TestHealthStatus:
