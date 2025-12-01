@@ -82,7 +82,8 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
     - System uptime percentage
     """
     try:
-        async with asyncio.timeout(5.0):  # 5 second timeout
+        # Use asyncio.wait_for for Python 3.10 compatibility
+        async def _get_health():
             system_health = health_monitor.get_system_health()
             if not system_health:
                 # Return default/degraded health status instead of failing
@@ -104,7 +105,9 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
                 )
 
             return system_health
-    except TimeoutError:
+
+        return await asyncio.wait_for(_get_health(), timeout=5.0)
+    except asyncio.TimeoutError:
         logger.warning("System health check timed out after 5 seconds")
         from src.models.health_models import HealthStatus
 
@@ -162,10 +165,12 @@ async def get_providers_health(
     - Error information
     """
     try:
-        async with asyncio.timeout(5.0):  # 5 second timeout
-            providers_health = health_monitor.get_all_providers_health(gateway)
-            return providers_health
-    except TimeoutError:
+        # Use asyncio.wait_for for Python 3.10 compatibility
+        async def _get_providers():
+            return health_monitor.get_all_providers_health(gateway)
+
+        return await asyncio.wait_for(_get_providers(), timeout=5.0)
+    except asyncio.TimeoutError:
         logger.warning("Providers health check timed out after 5 seconds")
         return []  # Return empty list on timeout
     except Exception as e:
@@ -190,7 +195,8 @@ async def get_models_health(
     - Last check timestamps
     """
     try:
-        async with asyncio.timeout(5.0):  # 5 second timeout
+        # Use asyncio.wait_for for Python 3.10 compatibility
+        async def _get_models():
             models_health = health_monitor.get_all_models_health(gateway)
 
             # Apply filters
@@ -201,7 +207,9 @@ async def get_models_health(
                 models_health = [m for m in models_health if m.status == status]
 
             return models_health
-    except TimeoutError:
+
+        return await asyncio.wait_for(_get_models(), timeout=5.0)
+    except asyncio.TimeoutError:
         logger.warning("Models health check timed out after 5 seconds")
         return []  # Return empty list on timeout
     except Exception as e:
