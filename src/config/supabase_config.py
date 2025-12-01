@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import httpx
 
 from src.config.config import Config
@@ -10,31 +11,35 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _supabase_client: Client | None = None
-_initialization_error: Exception | None = None  # Track last initialization error
+_last_error: Exception | None = None  # Track last initialization error
+_last_error_time: float = 0  # Timestamp of last error
+ERROR_CACHE_TTL = 60.0  # Retry after 60 seconds
 
 
 def get_supabase_client() -> Client:
-    global _supabase_client, _initialization_error
+    global _supabase_client, _last_error, _last_error_time
 
     if _supabase_client is not None:
         return _supabase_client
 
-    # If previous initialization failed, re-raise the error with context
-    if _initialization_error is not None:
-        logger.error(
-            f"Supabase client initialization previously failed. "
-            f"Last error: {_initialization_error}"
-        )
-        # Capture to Sentry if available
-        try:
-            import sentry_sdk
-            sentry_sdk.capture_exception(_initialization_error)
-        except ImportError:
-            pass
-        raise RuntimeError(
-            f"Supabase client is unavailable due to previous initialization failure: "
-            f"{_initialization_error}"
-        ) from _initialization_error
+    # Check if error is stale (>60s old), retry if so
+    if _last_error is not None:
+        time_since_error = time.time() - _last_error_time
+        if time_since_error < ERROR_CACHE_TTL:
+            # Error is still fresh, don't retry yet
+            retry_in = int(ERROR_CACHE_TTL - time_since_error)
+            logger.debug(
+                f"Supabase client unavailable (retry in {retry_in}s). "
+                f"Last error: {_last_error}"
+            )
+            raise RuntimeError(
+                f"Supabase unavailable (retry in {retry_in}s): {_last_error}"
+            ) from _last_error
+        else:
+            # Error is stale, clear it and retry
+            logger.info("Error cache expired, retrying Supabase initialization...")
+            _last_error = None
+            _last_error_time = 0
 
     try:
         Config.validate()
@@ -123,8 +128,9 @@ def get_supabase_client() -> Client:
         return _supabase_client
 
     except Exception as e:
-        # Store the error for future reference
-        _initialization_error = e
+        # Store the error with timestamp for time-based retry
+        _last_error = e
+        _last_error_time = time.time()
 
         # Log detailed error information
         logger.error(
@@ -244,13 +250,13 @@ def get_initialization_status() -> dict:
             - error_message: str | None - Last error message if any
             - error_type: str | None - Last error type if any
     """
-    global _supabase_client, _initialization_error
+    global _supabase_client, _last_error
 
     status = {
         "initialized": _supabase_client is not None,
-        "has_error": _initialization_error is not None,
-        "error_message": str(_initialization_error) if _initialization_error else None,
-        "error_type": type(_initialization_error).__name__ if _initialization_error else None,
+        "has_error": _last_error is not None,
+        "error_message": str(_last_error) if _last_error else None,
+        "error_type": type(_last_error).__name__ if _last_error else None,
     }
 
     return status
