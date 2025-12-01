@@ -51,6 +51,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def auto_capture_errors(
+    func: F | None = None,
+    *,
     context_type: str | None = None,
     reraise: bool = True,
     capture_locals: bool = False,
@@ -62,6 +64,7 @@ def auto_capture_errors(
     determine the appropriate Sentry capture function and context.
 
     Args:
+        func: Function to wrap (used when decorator is called without parentheses)
         context_type: Optional explicit context type (provider, database, payment, auth, cache)
         reraise: Whether to re-raise the exception after capturing (default: True)
         capture_locals: Whether to capture local variables (default: False for security)
@@ -83,44 +86,50 @@ def auto_capture_errors(
             ...
     """
 
-    def decorator(func: F) -> F:
-        @functools.wraps(func)
+    def decorator(func_to_wrap: F) -> F:
+        @functools.wraps(func_to_wrap)
         async def async_wrapper(*args, **kwargs):
             if not SENTRY_AVAILABLE:
-                return await func(*args, **kwargs)
+                return await func_to_wrap(*args, **kwargs)
 
             try:
-                return await func(*args, **kwargs)
+                return await func_to_wrap(*args, **kwargs)
             except Exception as e:
                 # Automatically capture with intelligent context detection
                 _auto_capture_exception(
-                    e, func, args, kwargs, context_type, capture_locals
+                    e, func_to_wrap, args, kwargs, context_type, capture_locals
                 )
                 if reraise:
                     raise
 
-        @functools.wraps(func)
+        @functools.wraps(func_to_wrap)
         def sync_wrapper(*args, **kwargs):
             if not SENTRY_AVAILABLE:
-                return func(*args, **kwargs)
+                return func_to_wrap(*args, **kwargs)
 
             try:
-                return func(*args, **kwargs)
+                return func_to_wrap(*args, **kwargs)
             except Exception as e:
                 # Automatically capture with intelligent context detection
                 _auto_capture_exception(
-                    e, func, args, kwargs, context_type, capture_locals
+                    e, func_to_wrap, args, kwargs, context_type, capture_locals
                 )
                 if reraise:
                     raise
 
         # Return appropriate wrapper based on function type
-        if asyncio.iscoroutinefunction(func):
+        if asyncio.iscoroutinefunction(func_to_wrap):
             return async_wrapper  # type: ignore
         else:
             return sync_wrapper  # type: ignore
 
-    return decorator
+    # Handle both @decorator and @decorator() syntax
+    if func is None:
+        # Called with arguments: @auto_capture_errors(context_type="provider")
+        return decorator
+    else:
+        # Called without arguments: @auto_capture_errors
+        return decorator(func)
 
 
 def _auto_capture_exception(
@@ -250,8 +259,8 @@ def _detect_context_type(
     if "services" in module_lower and "_client" in module_lower:
         return "provider"
 
-    # Database detection
-    if "/db/" in module_name or "\\db\\" in module_name:
+    # Database detection (check for .db., /db/, or \db\)
+    if ".db." in module_name or "/db/" in module_name or "\\db\\" in module_name:
         return "database"
     if any(
         keyword in func_lower

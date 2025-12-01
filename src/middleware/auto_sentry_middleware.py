@@ -238,13 +238,13 @@ class AutoSentryMiddleware(BaseHTTPMiddleware):
         elif "/api/keys" in path_lower or "/api-keys" in path_lower:
             return "api_key_management"
 
+        # Admin endpoints (check before /users to catch /admin/users)
+        elif "/admin" in path_lower:
+            return "admin"
+
         # User management
         elif "/users" in path_lower:
             return "user_management"
-
-        # Admin endpoints
-        elif "/admin" in path_lower:
-            return "admin"
 
         # Catalog/discovery
         elif "/catalog" in path_lower or "/models" in path_lower:
