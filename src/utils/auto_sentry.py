@@ -228,9 +228,9 @@ def _auto_capture_exception(
                 context_data=context_data,
                 tags={"function": func_name, "module": module_name},
             )
-    except Exception as capture_error:
+    except Exception as capture_err:
         # Fallback to basic Sentry capture if our smart capture fails
-        logger.warning(f"Smart capture failed: {capture_error}, using basic capture")
+        logger.warning(f"Smart capture failed: {capture_err}, using basic capture")
         sentry_sdk.capture_exception(exception)
 
 
