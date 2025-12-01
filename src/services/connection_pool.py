@@ -78,9 +78,10 @@ def _evict_sync_clients(prefix: str):
     """Remove (and close) cached sync clients that match the prefix."""
     stale_keys = [key for key in _client_pool if key.startswith(prefix)]
     for stale_key in stale_keys:
-        client = _client_pool.pop(stale_key, None)
-        if client:
+        client_tuple = _client_pool.pop(stale_key, None)
+        if client_tuple:
             try:
+                client, _ = client_tuple  # Unpack the (client, timestamp) tuple
                 client.close()
             except Exception as exc:
                 logger.warning(f"Error closing client for {prefix}: {exc}")
