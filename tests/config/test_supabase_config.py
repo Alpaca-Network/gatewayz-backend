@@ -18,7 +18,8 @@ class TestGetSupabaseClientValidation:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Patch Config to simulate missing SUPABASE_URL
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", None):
@@ -36,7 +37,8 @@ class TestGetSupabaseClientValidation:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Patch Config to simulate missing protocol
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "test.supabase.co"):
@@ -53,7 +55,8 @@ class TestGetSupabaseClientValidation:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Patch Config to simulate missing protocol
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "myproject.supabase.co"):
@@ -73,7 +76,8 @@ class TestGetSupabaseClientValidation:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -99,7 +103,8 @@ class TestGetSupabaseClientValidation:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -126,7 +131,8 @@ class TestGetSupabaseClientValidation:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Mock the Supabase client
         mock_client = MagicMock()
@@ -169,7 +175,8 @@ class TestHttpxClientConfiguration:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
@@ -203,7 +210,8 @@ class TestHttpxClientConfiguration:
 
         # Reset the cached client and error state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
@@ -426,7 +434,8 @@ class TestGetInitializationStatus:
 
         # Reset state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         status = supabase_config_mod.get_initialization_status()
 
@@ -441,7 +450,8 @@ class TestGetInitializationStatus:
 
         # Reset state
         supabase_config_mod._supabase_client = MagicMock()
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         status = supabase_config_mod.get_initialization_status()
 
@@ -457,7 +467,8 @@ class TestGetInitializationStatus:
         # Reset state
         supabase_config_mod._supabase_client = None
         test_error = RuntimeError("Database connection failed")
-        supabase_config_mod._initialization_error = test_error
+        supabase_config_mod._last_error = test_error
+        supabase_config_mod._last_error_time = 0
 
         status = supabase_config_mod.get_initialization_status()
 
@@ -471,19 +482,21 @@ class TestErrorPersistence:
     """Test error persistence and re-raising behavior"""
 
     def test_get_supabase_client_reraises_previous_error(self):
-        """Test that get_supabase_client re-raises previous initialization errors"""
+        """Test that get_supabase_client re-raises previous initialization errors within TTL"""
         import src.config.supabase_config as supabase_config_mod
+        import time
 
         # Simulate a previous initialization failure
         test_error = RuntimeError("Previous initialization failed")
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = test_error
+        supabase_config_mod._last_error = test_error
+        supabase_config_mod._last_error_time = time.time()  # Fresh error
 
-        # Trying to get the client again should raise the cached error
+        # Trying to get the client again should raise the cached error (within TTL)
         with pytest.raises(RuntimeError) as exc_info:
             supabase_config_mod.get_supabase_client()
 
-        assert "previous initialization failure" in str(exc_info.value).lower()
+        assert "unavailable" in str(exc_info.value).lower() or "retry" in str(exc_info.value).lower()
 
     def test_initialization_error_captured_on_failure(self):
         """Test that initialization errors are captured for future reference"""
@@ -491,7 +504,8 @@ class TestErrorPersistence:
 
         # Reset state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", None):
             with patch.object(supabase_config_mod.Config, "validate", return_value=True):
@@ -499,7 +513,7 @@ class TestErrorPersistence:
                     supabase_config_mod.get_supabase_client()
 
         # Error should be captured
-        assert supabase_config_mod._initialization_error is not None
+        assert supabase_config_mod._last_error is not None
 
 
 class TestTestConnectionInternal:
@@ -543,7 +557,8 @@ class TestTestConnection:
 
         # Reset state
         supabase_config_mod._supabase_client = None
-        supabase_config_mod._initialization_error = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
 
         # Setup mock
         mock_client = MagicMock()
