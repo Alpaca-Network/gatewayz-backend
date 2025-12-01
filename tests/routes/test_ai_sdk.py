@@ -93,9 +93,11 @@ class TestAISDKEndpoint:
         assert "usage" in data
         assert data["choices"][0]["message"]["content"] == "Hello!"
 
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", True)
+    @patch("src.routes.ai_sdk.sentry_sdk")
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
-    def test_ai_sdk_missing_api_key(self, mock_validate):
-        """Test that missing API key returns proper error"""
+    def test_ai_sdk_missing_api_key(self, mock_validate, mock_sentry):
+        """Test that missing API key returns proper error and captures to Sentry"""
         mock_validate.side_effect = ValueError("AI_SDK_API_KEY not configured")
 
         response = client.post(
@@ -106,8 +108,10 @@ class TestAISDKEndpoint:
             },
         )
 
-        assert response.status_code == 500
-        assert "AI_SDK_API_KEY not configured" in response.text
+        assert response.status_code == 503
+        assert "not configured" in response.text.lower()
+        # Verify error was captured to Sentry
+        mock_sentry.capture_exception.assert_called_once()
 
     def test_ai_sdk_invalid_request_format(self):
         """Test that invalid request format returns proper error"""
@@ -286,3 +290,71 @@ class TestAISDKConfiguration:
         assert Config.AI_SDK_API_KEY is not None
         assert isinstance(Config.AI_SDK_API_KEY, str)
         assert len(Config.AI_SDK_API_KEY) > 0
+
+
+class TestAISDKSentryIntegration:
+    """Tests for Sentry error capture in AI SDK endpoint"""
+
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", True)
+    @patch("src.routes.ai_sdk.sentry_sdk")
+    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
+    def test_general_error_captured_to_sentry(
+        self, mock_request, mock_validate, mock_sentry
+    ):
+        """Test that general errors are captured to Sentry"""
+        mock_validate.return_value = "test-api-key"
+        mock_request.side_effect = RuntimeError("API request failed")
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 500
+        # Verify error was captured to Sentry
+        mock_sentry.capture_exception.assert_called_once()
+
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", False)
+    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    def test_error_when_sentry_unavailable(self, mock_validate):
+        """Test that errors still work when Sentry is unavailable"""
+        mock_validate.side_effect = ValueError("AI_SDK_API_KEY not configured")
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        # Should still return proper error response
+        assert response.status_code == 503
+        assert "not configured" in response.text.lower()
+
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", True)
+    @patch("src.routes.ai_sdk.sentry_sdk")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream")
+    def test_streaming_error_captured_to_sentry(self, mock_stream, mock_sentry):
+        """Test that streaming errors are captured to Sentry"""
+        mock_stream.side_effect = RuntimeError("Streaming failed")
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200  # SSE response starts
+        # Read the streaming response
+        content = b"".join(response.iter_bytes()).decode()
+        assert "error" in content.lower()
+        # Verify error was captured to Sentry
+        mock_sentry.capture_exception.assert_called_once()

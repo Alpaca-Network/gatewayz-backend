@@ -218,23 +218,24 @@ class TestAutoSentryMiddleware:
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
     def test_http_exception_handling(self, mock_sentry, client):
-        """Test that HTTPExceptions are handled by FastAPI (not captured to Sentry)"""
+        """Test that HTTPExceptions are not captured by middleware to avoid duplicates"""
         mock_scope = MagicMock()
         mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
 
         # HTTPException gets converted to HTTP response by FastAPI's exception handler
-        # It doesn't propagate to the middleware's exception handler
+        # It doesn't propagate to the middleware's exception handler, so middleware
+        # never sees it as an exception - it only sees the response
         response = client.get("/test-http-exception")
         assert response.status_code == 500
 
-        # HTTPException should NOT be captured to Sentry
-        # (it's an intentional, user-facing error, not a bug)
+        # Middleware should NOT capture HTTPException (neither 4xx nor 5xx)
+        # Route handlers are responsible for capturing the original exception before wrapping
         mock_sentry.capture_exception.assert_not_called()
 
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
     async def test_http_exception_filtering_in_middleware(self, mock_sentry):
-        """Test that HTTPException is filtered in middleware exception handler"""
+        """Test that 4xx HTTPException is filtered in middleware exception handler"""
         from fastapi import Request, Response
         from unittest.mock import AsyncMock
 
@@ -254,11 +255,11 @@ class TestAutoSentryMiddleware:
         mock_request.headers = {}
         mock_request.scope = {"route": Mock(path="/test")}
 
-        # Create call_next that raises HTTPException
+        # Create call_next that raises 4xx HTTPException
         async def call_next_raises_http_exception(request):
             raise HTTPException(status_code=404, detail="Not found")
 
-        # Test that HTTPException is caught and NOT sent to Sentry
+        # Test that 4xx HTTPException is caught and NOT sent to Sentry
         with pytest.raises(HTTPException) as exc_info:
             await middleware.dispatch(mock_request, call_next_raises_http_exception)
 
@@ -266,13 +267,13 @@ class TestAutoSentryMiddleware:
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail == "Not found"
 
-        # Verify Sentry capture was NOT called
+        # Verify Sentry capture was NOT called for 4xx
         mock_sentry.capture_exception.assert_not_called()
 
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
     async def test_http_exception_various_status_codes(self, mock_sentry):
-        """Test that various HTTPException status codes are filtered"""
+        """Test that all HTTPExceptions (4xx and 5xx) are filtered to avoid duplicates"""
         from fastapi import Request
         from unittest.mock import AsyncMock
 
@@ -290,20 +291,19 @@ class TestAutoSentryMiddleware:
         mock_request.headers = {}
         mock_request.scope = {"route": Mock(path="/test")}
 
-        # Test common HTTP exception status codes
-        status_codes = [401, 403, 404, 422, 500]
-
-        for status_code in status_codes:
+        # Test both 4xx and 5xx status codes (all should NOT be captured)
+        # Route handlers should capture the original exception before wrapping
+        for status_code in [401, 403, 404, 422, 500, 502, 503]:
             mock_sentry.reset_mock()
 
-            async def call_next_raises(request):
+            async def call_next_raises_http(request):
                 raise HTTPException(status_code=status_code, detail=f"Error {status_code}")
 
             with pytest.raises(HTTPException) as exc_info:
-                await middleware.dispatch(mock_request, call_next_raises)
+                await middleware.dispatch(mock_request, call_next_raises_http)
 
             assert exc_info.value.status_code == status_code
-            # HTTPException should NEVER be captured, regardless of status code
+            # HTTPException should NOT be captured (route handlers capture the original error)
             mock_sentry.capture_exception.assert_not_called()
 
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)

@@ -28,6 +28,14 @@ from src.services.ai_sdk_client import (
 # Initialize logging
 logger = logging.getLogger(__name__)
 
+# Try to import sentry_sdk for error tracking
+try:
+    import sentry_sdk
+
+    SENTRY_AVAILABLE = True
+except ImportError:
+    SENTRY_AVAILABLE = False
+
 # Create router
 router = APIRouter()
 
@@ -180,11 +188,22 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         return processed
 
     except ValueError as e:
-        logger.error(f"AI SDK configuration error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"AI SDK configuration error: {e}", exc_info=True)
+        # Capture configuration errors to Sentry (503 errors)
+        if SENTRY_AVAILABLE:
+            sentry_sdk.capture_exception(e)
+        raise HTTPException(
+            status_code=503,
+            detail="AI SDK service is not configured. Please contact support.",
+        )
     except Exception as e:
-        logger.error(f"AI SDK chat completion error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process AI SDK request")
+        logger.error(f"AI SDK chat completion error: {e}", exc_info=True)
+        # Capture all other errors to Sentry (500 errors)
+        if SENTRY_AVAILABLE:
+            sentry_sdk.capture_exception(e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process AI SDK request: {str(e)}"
+        )
 
 
 async def _handle_ai_sdk_stream(request: AISDKChatRequest):
@@ -199,6 +218,9 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
 
     async def stream_response():
         try:
+            # Validate API key is configured
+            validate_ai_sdk_api_key()
+
             # Build kwargs for API request
             kwargs = _build_request_kwargs(request)
 
@@ -226,9 +248,19 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
             yield f"data: {json.dumps(completion_data)}\n\n"
             yield "data: [DONE]\n\n"
 
+        except ValueError as e:
+            logger.error(f"AI SDK configuration error: {e}", exc_info=True)
+            # Capture configuration errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": "AI SDK service is not configured. Please contact support."}
+            yield f"data: {json.dumps(error_data)}\n\n"
         except Exception as e:
-            logger.error(f"AI SDK streaming error: {e}")
-            error_data = {"error": str(e)}
+            logger.error(f"AI SDK streaming error: {e}", exc_info=True)
+            # Capture streaming errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": f"Failed to process streaming request: {str(e)}"}
             yield f"data: {json.dumps(error_data)}\n\n"
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
