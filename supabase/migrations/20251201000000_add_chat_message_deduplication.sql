@@ -10,21 +10,15 @@ ADD COLUMN IF NOT EXISTS sequence_number INTEGER;
 CREATE INDEX IF NOT EXISTS idx_chat_messages_sequence
 ON chat_messages(session_id, sequence_number);
 
--- Add partial unique index to prevent exact duplicates within recent time window
--- This prevents accidental duplicate saves (e.g., from retries) while still allowing
--- the same content in different conversation contexts or after sufficient time
-CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_messages_unique_recent
-ON chat_messages (session_id, role, md5(content), DATE_TRUNC('minute', created_at))
-WHERE created_at > NOW() - INTERVAL '5 minutes';
-
--- Create index for duplicate detection queries
+-- Add composite index to help with duplicate detection
+-- Note: We can't use a partial index with NOW() since it's not IMMUTABLE
+-- Instead, we rely on application-level duplicate detection within time windows
 CREATE INDEX IF NOT EXISTS idx_chat_messages_duplicate_check
-ON chat_messages (session_id, role, created_at DESC)
-WHERE created_at > NOW() - INTERVAL '1 hour';
+ON chat_messages (session_id, role, content, created_at DESC);
 
--- Add comment to explain the deduplication strategy
-COMMENT ON INDEX idx_chat_messages_unique_recent IS
-'Prevents duplicate messages within 5-minute window. Uses MD5 hash of content to work around PostgreSQL text comparison limits in unique indexes.';
+-- Add index on session_id and created_at for efficient history queries
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session_created
+ON chat_messages (session_id, created_at DESC);
 
 -- Backfill sequence numbers for existing messages
 -- Order by created_at to maintain chronological sequence
