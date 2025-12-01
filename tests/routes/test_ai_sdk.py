@@ -31,6 +31,12 @@ class TestAISDKEndpoint:
         # OPTIONS should be allowed or return method not allowed
         assert response.status_code in [200, 405]
 
+    def test_ai_sdk_completions_endpoint_exists(self):
+        """Test that the AI SDK completions endpoint is registered"""
+        response = client.options("/api/chat/ai-sdk-completions")
+        # OPTIONS should be allowed or return method not allowed
+        assert response.status_code in [200, 405]
+
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
     @patch("src.routes.ai_sdk.process_ai_sdk_response")
@@ -203,6 +209,62 @@ class TestAISDKEndpoint:
         data = response.json()
         assert "choices" in data
         assert "usage" in data
+
+    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
+    @patch("src.routes.ai_sdk.process_ai_sdk_response")
+    def test_ai_sdk_completions_endpoint_works(
+        self, mock_process, mock_request, mock_validate
+    ):
+        """Test that the -completions variant endpoint works identically"""
+        # Setup mocks
+        mock_validate.return_value = "test-api-key"
+
+        # Mock response from OpenAI client
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(role="assistant", content="Hello from completions!"),
+                finish_reason="stop",
+            )
+        ]
+        mock_response.usage = MagicMock(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15
+        )
+        mock_request.return_value = mock_response
+
+        # Mock processed response
+        mock_process.return_value = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello from completions!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+        # Make request to the -completions endpoint
+        response = client.post(
+            "/api/chat/ai-sdk-completions",
+            json={
+                "model": "openai/gpt-5",
+                "messages": [{"role": "user", "content": "Hello!"}],
+                "temperature": 0.7,
+                "max_tokens": 100,
+            },
+        )
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert "choices" in data
+        assert "usage" in data
+        assert data["choices"][0]["message"]["content"] == "Hello from completions!"
 
 
 class TestAISDKConfiguration:

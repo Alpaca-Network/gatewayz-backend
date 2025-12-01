@@ -5,7 +5,9 @@ This route provides a dedicated endpoint for Vercel AI SDK requests.
 The endpoint is compatible with the AI SDK client interface and routes
 requests through the Vercel AI Gateway for actual model execution.
 
-Endpoint: POST /api/chat/ai-sdk
+Endpoints:
+- POST /api/chat/ai-sdk
+- POST /api/chat/ai-sdk-completions (alias)
 """
 
 import asyncio
@@ -93,6 +95,7 @@ def _build_request_kwargs(request: AISDKChatRequest) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+@router.post("/api/chat/ai-sdk-completions", tags=["ai-sdk"], response_model=AISDKChatResponse)
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
 async def ai_sdk_chat_completion(request: AISDKChatRequest):
     """
