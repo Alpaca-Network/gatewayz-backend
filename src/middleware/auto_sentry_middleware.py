@@ -98,6 +98,23 @@ class AutoSentryMiddleware(BaseHTTPMiddleware):
                 return response
 
             except Exception as exc:
+                from fastapi import HTTPException
+
+                # Don't capture HTTPException to Sentry - these are intentional user-facing errors
+                # (401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Validation Error, etc.)
+                if isinstance(exc, HTTPException):
+                    # Log for debugging but don't send to Sentry
+                    logger.debug(
+                        f"HTTP exception in {request_context['path']}: {exc.status_code} - {exc.detail}",
+                        extra={
+                            "status_code": exc.status_code,
+                            "detail": exc.detail,
+                            "request_context": request_context,
+                        },
+                    )
+                    # Re-raise without Sentry capture
+                    raise
+
                 # Exception occurred - capture to Sentry with full context
                 duration_ms = (time.time() - start_time) * 1000
 
