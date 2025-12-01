@@ -218,18 +218,19 @@ class TestAutoSentryMiddleware:
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
     def test_http_exception_handling(self, mock_sentry, client):
-        """Test that 5xx HTTPExceptions are captured to Sentry"""
+        """Test that HTTPExceptions are handled by FastAPI (not middleware)"""
         mock_scope = MagicMock()
         mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
 
         # HTTPException gets converted to HTTP response by FastAPI's exception handler
-        # It doesn't propagate to the middleware's exception handler
+        # It doesn't propagate to the middleware's exception handler, so middleware
+        # never sees it as an exception - it only sees the response
         response = client.get("/test-http-exception")
         assert response.status_code == 500
 
-        # 5xx HTTPException SHOULD be captured to Sentry
-        # (it's a server error that needs investigation)
-        mock_sentry.capture_exception.assert_called_once()
+        # HTTPException is handled by FastAPI before reaching middleware exception handler
+        # Therefore, middleware never captures it (neither 4xx nor 5xx)
+        mock_sentry.capture_exception.assert_not_called()
 
     @patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True)
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
