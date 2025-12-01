@@ -31,6 +31,7 @@ from src.services.prometheus_metrics import (
     credits_used,
 )
 from src.services.redis_metrics import get_redis_metrics
+from src.utils.sentry_context import capture_payment_error, capture_provider_error
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -663,6 +664,13 @@ async def _process_stream_completion_background(
                 )
             except Exception as e:
                 logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
+                # Capture to Sentry - trial tracking failure
+                capture_payment_error(
+                    e,
+                    operation="trial_usage_logging",
+                    user_id=user.get("id"),
+                    details={"model": model, "tokens": total_tokens, "is_trial": True}
+                )
         else:
             try:
                 await _to_thread(
@@ -690,6 +698,19 @@ async def _process_stream_completion_background(
                 await _to_thread(update_rate_limit_usage, api_key, total_tokens)
             except Exception as e:
                 logger.error("Usage recording error in background: %s", e)
+                # Capture to Sentry - CRITICAL revenue loss if credits not deducted!
+                capture_payment_error(
+                    e,
+                    operation="credit_deduction",
+                    user_id=user.get("id"),
+                    amount=cost,
+                    details={
+                        "model": model,
+                        "tokens": total_tokens,
+                        "cost_usd": cost,
+                        "api_key": api_key[:10] + "..." if api_key else None
+                    }
+                )
 
         # Increment API key usage counter
         await _to_thread(increment_api_key_usage, api_key)
@@ -1448,16 +1469,49 @@ async def chat_completions(
                 except Exception as exc:
                     if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
+                        # Capture timeout to Sentry
+                        capture_provider_error(
+                            exc,
+                            provider=attempt_provider,
+                            model=request_model,
+                            endpoint="/v1/chat/completions",
+                            request_id=request_id_var.get()
+                        )
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
+                        # Capture network error to Sentry
+                        capture_provider_error(
+                            exc,
+                            provider=attempt_provider,
+                            model=request_model,
+                            endpoint="/v1/chat/completions",
+                            request_id=request_id_var.get()
+                        )
                     elif isinstance(exc, httpx.HTTPStatusError):
                         logger.debug(
                             "Upstream HTTP error (%s): %s",
                             attempt_provider,
                             exc.response.status_code,
                         )
+                        # Capture HTTP errors to Sentry (except 4xx client errors)
+                        if exc.response.status_code >= 500:
+                            capture_provider_error(
+                                exc,
+                                provider=attempt_provider,
+                                model=request_model,
+                                endpoint="/v1/chat/completions",
+                                request_id=request_id_var.get()
+                            )
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
+                        # Capture unexpected errors to Sentry
+                        capture_provider_error(
+                            exc,
+                            provider=attempt_provider,
+                            model=request_model,
+                            endpoint="/v1/chat/completions",
+                            request_id=request_id_var.get()
+                        )
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                     last_http_exc = http_exc
