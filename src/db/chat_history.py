@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, TypeVar
 
 from httpx import RemoteProtocolError, ConnectError, ReadTimeout
@@ -130,15 +130,71 @@ def save_chat_message(
     model: str = None,
     tokens: int = 0,
     user_id: int = None,
+    skip_duplicate_check: bool = False,
 ) -> dict[str, Any]:
     """
     Save a chat message to a session and update session's updated_at timestamp.
-    
+
     This function is decorated with retry logic to handle transient connection errors
     that may occur when called from background tasks after HTTP responses are sent.
+
+    Args:
+        session_id: The chat session ID
+        role: Message role ('user' or 'assistant')
+        content: Message content
+        model: Model name (optional)
+        tokens: Token count (default: 0)
+        user_id: User ID for additional validation (optional)
+        skip_duplicate_check: If True, skips duplicate detection (default: False)
+
+    Returns:
+        The saved message dict
+
+    Note:
+        By default, this function checks for duplicate messages within the last 5 minutes
+        to prevent accidentally saving the same content multiple times (e.g., on retries).
     """
     try:
         client = get_supabase_client()
+
+        # Duplicate detection: Check if identical message was saved recently
+        if not skip_duplicate_check and content:
+            try:
+                five_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+
+                def check_duplicate():
+                    return (
+                        client.table("chat_messages")
+                        .select("*")  # Select all fields to return complete message object
+                        .eq("session_id", session_id)
+                        .eq("role", role)
+                        .eq("content", content)
+                        .gte("created_at", five_minutes_ago)
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+
+                duplicate_result = _execute_with_connection_retry(
+                    check_duplicate,
+                    f"check_duplicate_message(session={session_id}, role={role})"
+                )
+
+                if duplicate_result.data:
+                    existing = duplicate_result.data[0]
+                    logger.warning(
+                        f"Duplicate message detected for session {session_id}, role={role}. "
+                        f"Returning existing message {existing['id']} instead of creating duplicate. "
+                        f"Content preview: {content[:50]}..."
+                    )
+                    # Return existing message instead of creating duplicate
+                    # This ensures consistent return value with all expected fields
+                    return existing
+
+            except Exception as e:
+                # If duplicate check fails, log but continue with save
+                # (better to potentially save a duplicate than fail the request)
+                logger.warning(f"Duplicate check failed, proceeding with save: {e}")
 
         message_data = {
             "session_id": session_id,
@@ -152,7 +208,7 @@ def save_chat_message(
         # Insert message with retry logic for connection errors
         def insert_message():
             return client.table("chat_messages").insert(message_data).execute()
-        
+
         result = _execute_with_connection_retry(
             insert_message,
             f"save_chat_message(session={session_id}, role={role})"
