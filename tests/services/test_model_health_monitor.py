@@ -594,3 +594,222 @@ class TestPerformModelRequestAuthentication:
             assert result["success"] is False
             assert result["status_code"] == 400
             assert "Unknown gateway" in result["error"]
+
+
+class TestShouldCaptureError:
+    """Test _should_capture_error method for intelligent error filtering"""
+
+    def test_should_capture_unknown_errors(self):
+        """Test that unknown errors (no status code) are captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # No status code - should capture
+        assert monitor._should_capture_error(None, "Unknown error") is True
+        assert monitor._should_capture_error(None, None) is True
+
+    def test_should_not_capture_rate_limits(self):
+        """Test that rate limit errors (429) are NOT captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Rate limit errors should not be captured
+        assert monitor._should_capture_error(429, "Rate limit exceeded") is False
+        assert monitor._should_capture_error(429, None) is False
+
+    def test_should_not_capture_data_policy_errors(self):
+        """Test that data policy restriction errors (404) are NOT captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Data policy errors should not be captured
+        assert monitor._should_capture_error(404, "Data policy restriction") is False
+        assert monitor._should_capture_error(404, "Your account does not have access due to data policy") is False
+        assert monitor._should_capture_error(404, "DATA POLICY violation") is False
+
+    def test_should_capture_other_404_errors(self):
+        """Test that other 404 errors (not data policy) ARE captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Non-data-policy 404s should be captured
+        assert monitor._should_capture_error(404, "Model not found") is True
+        assert monitor._should_capture_error(404, "Endpoint not found") is True
+        assert monitor._should_capture_error(404, None) is True
+
+    def test_should_not_capture_service_unavailable(self):
+        """Test that service unavailable errors (503) are NOT captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Service unavailable errors should not be captured
+        assert monitor._should_capture_error(503, "Service unavailable") is False
+        assert monitor._should_capture_error(503, "The service is temporarily unavailable") is False
+        assert monitor._should_capture_error(503, "SERVICE UNAVAILABLE - try again") is False
+
+    def test_should_capture_other_503_errors(self):
+        """Test that other 503 errors ARE captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # 503 without service unavailable message should be captured
+        assert monitor._should_capture_error(503, "Database connection failed") is True
+        assert monitor._should_capture_error(503, None) is True
+
+    def test_should_not_capture_max_output_tokens_validation(self):
+        """Test that max_output_tokens validation errors (400) are NOT captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Google Vertex AI max_output_tokens validation errors
+        assert monitor._should_capture_error(
+            400, "max_output_tokens must be greater than minimum value of 1"
+        ) is False
+        assert monitor._should_capture_error(
+            400, "Invalid max_output_tokens: minimum value is 10"
+        ) is False
+
+    def test_should_not_capture_audio_modality_errors(self):
+        """Test that audio modality requirement errors (400) are NOT captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Audio-only model requirement errors
+        assert monitor._should_capture_error(
+            400, "This model requires audio input modality"
+        ) is False
+        assert monitor._should_capture_error(
+            400, "Audio modality is required for this model"
+        ) is False
+
+    def test_should_capture_other_400_errors(self):
+        """Test that other 400 errors ARE captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Other 400 errors should be captured
+        assert monitor._should_capture_error(400, "Invalid request format") is True
+        assert monitor._should_capture_error(400, "Missing required field") is True
+        assert monitor._should_capture_error(400, None) is True
+
+    def test_should_not_capture_auth_key_errors(self):
+        """Test that authentication key errors (403) are NOT captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Authentication key errors should not be captured
+        assert monitor._should_capture_error(403, "Invalid API key") is False
+        assert monitor._should_capture_error(403, "API key is required") is False
+        assert monitor._should_capture_error(403, "Your API KEY is invalid") is False
+
+    def test_should_capture_other_403_errors(self):
+        """Test that other 403 errors ARE captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Non-key-related 403s should be captured
+        assert monitor._should_capture_error(403, "Access denied") is True
+        assert monitor._should_capture_error(403, "Insufficient permissions") is True
+        assert monitor._should_capture_error(403, None) is True
+
+    def test_should_capture_server_errors(self):
+        """Test that server errors (500, 502, etc.) ARE captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Server errors should always be captured
+        assert monitor._should_capture_error(500, "Internal server error") is True
+        assert monitor._should_capture_error(502, "Bad gateway") is True
+        assert monitor._should_capture_error(504, "Gateway timeout") is True
+
+    def test_should_capture_client_errors(self):
+        """Test that most client errors ARE captured"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        # Most client errors should be captured
+        assert monitor._should_capture_error(401, "Unauthorized") is True
+        assert monitor._should_capture_error(402, "Payment required") is True
+        assert monitor._should_capture_error(405, "Method not allowed") is True
+        assert monitor._should_capture_error(408, "Request timeout") is True
+
+    @pytest.mark.asyncio
+    @patch('src.utils.sentry_context.capture_exception')
+    async def test_error_filtering_in_check_model_health_rate_limit(self, mock_capture):
+        """Test that rate limit errors are not sent to Sentry during health checks"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        model = {
+            'id': 'test-model',
+            'provider': 'test-provider',
+            'gateway': 'openrouter',
+            'name': 'Test Model'
+        }
+
+        # Mock health check returning rate limit error
+        with patch.object(monitor, '_perform_model_request') as mock_request:
+            mock_request.return_value = {
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'status_code': 429,
+                'response_time': 100
+            }
+
+            result = await monitor._check_model_health(model)
+
+            # Model should be marked unhealthy
+            assert result is not None
+            assert result.status.value == 'unhealthy'
+            assert result.error_message == 'Rate limit exceeded'
+
+            # But Sentry should NOT be called for rate limits
+            assert not mock_capture.called, "Rate limit errors should not be captured to Sentry"
+
+    @pytest.mark.asyncio
+    @patch('src.utils.sentry_context.capture_exception')
+    async def test_error_filtering_in_check_model_health_server_error(self, mock_capture):
+        """Test that server errors ARE sent to Sentry during health checks"""
+        from src.services.model_health_monitor import ModelHealthMonitor
+
+        monitor = ModelHealthMonitor()
+
+        model = {
+            'id': 'test-model',
+            'provider': 'test-provider',
+            'gateway': 'openrouter',
+            'name': 'Test Model'
+        }
+
+        # Mock health check returning server error
+        with patch.object(monitor, '_perform_model_request') as mock_request:
+            mock_request.return_value = {
+                'success': False,
+                'error': 'Internal server error',
+                'status_code': 500,
+                'response_time': 100
+            }
+
+            result = await monitor._check_model_health(model)
+
+            # Model should be marked unhealthy
+            assert result is not None
+            assert result.status.value == 'unhealthy'
+            assert result.error_message == 'Internal server error'
+
+            # Sentry SHOULD be called for server errors
+            assert mock_capture.called, "Server errors should be captured to Sentry"

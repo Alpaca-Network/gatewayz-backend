@@ -407,14 +407,20 @@ class TestUptimeMetrics:
     @patch('src.routes.health.capture_error')
     @patch('src.services.model_health_monitor.health_monitor.get_system_health')
     def test_get_uptime_metrics_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
-        """Test that uptime metrics errors are captured to Sentry"""
+        """Test that uptime metrics errors are captured to Sentry but return graceful degradation"""
         # Simulate an error
         mock_get_health.side_effect = Exception("Database connection failed")
 
         response = client.get('/health/uptime', headers=auth_headers)
 
-        # Should return 500 error
-        assert response.status_code == 500
+        # Now returns 200 with default data instead of 500 (graceful degradation)
+        assert response.status_code == 200
+
+        # Verify it returns default/unknown status
+        data = response.json()
+        assert data['status'] == 'unknown'
+        assert data['uptime_percentage'] == 0.0
+        assert data['total_requests'] == 0
 
         # Verify Sentry capture was called
         assert mock_capture_error.called
@@ -423,6 +429,23 @@ class TestUptimeMetrics:
         assert call_args[1]['context_type'] == 'health_endpoint'
         assert call_args[1]['context_data']['endpoint'] == '/health/uptime'
         assert call_args[1]['tags']['endpoint'] == 'uptime'
+
+    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
+    def test_get_uptime_metrics_no_data_available(self, mock_get_health, client, auth_headers):
+        """Test that uptime metrics handles no data gracefully"""
+        mock_get_health.return_value = None
+
+        response = client.get('/health/uptime', headers=auth_headers)
+
+        # Returns 200 with default data (graceful degradation)
+        assert response.status_code == 200
+
+        # Verify it returns default/unknown status
+        data = response.json()
+        assert data['status'] == 'unknown'
+        assert data['uptime_percentage'] == 0.0
+        assert data['total_requests'] == 0
+        assert data['error_rate'] == 0.0
 
 
 class TestHealthDashboard:

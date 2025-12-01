@@ -347,7 +347,7 @@ class ModelHealthMonitor:
             return False
 
         # Don't capture temporary service unavailability
-        if status_code == 503 and error_message and "service unavailable" in error_message.lower():
+        if status_code == 503 and error_message and "unavailable" in error_message.lower():
             return False
 
         # Don't capture known parameter validation issues for specific providers

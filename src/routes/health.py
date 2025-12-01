@@ -393,7 +393,18 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             context_data={'endpoint': '/health/uptime', 'operation': 'get_uptime_metrics'},
             tags={'endpoint': 'uptime', 'error_type': type(e).__name__}
         )
-        raise HTTPException(status_code=500, detail="Failed to retrieve uptime metrics") from e
+        # Return default metrics instead of failing (graceful degradation)
+        return UptimeMetricsResponse(
+            status="unknown",
+            uptime_percentage=0.0,
+            response_time_avg=None,
+            last_incident=None,
+            total_requests=0,
+            successful_requests=0,
+            failed_requests=0,
+            error_rate=0.0,
+            last_updated=datetime.now(timezone.utc),
+        )
 
 
 @router.get(
