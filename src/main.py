@@ -195,6 +195,13 @@ def create_app() -> FastAPI:
     app.add_middleware(TraceContextMiddleware)
     logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
 
+    # Add automatic Sentry error capture middleware (captures ALL route errors)
+    if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+        from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
+
+        app.add_middleware(AutoSentryMiddleware)
+        logger.info("  🎯 Auto-Sentry middleware enabled (automatic error capture for all routes)")
+
     # Add CORS middleware second (must be early for OPTIONS requests)
     app.add_middleware(
         CORSMiddleware,
