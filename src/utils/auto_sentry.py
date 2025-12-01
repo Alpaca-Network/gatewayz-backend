@@ -272,6 +272,7 @@ def _detect_context_type(
             "update",
             "delete",
             "select",
+            "create",
             "supabase",
         ]
     ):

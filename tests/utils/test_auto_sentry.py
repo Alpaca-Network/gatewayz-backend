@@ -26,7 +26,7 @@ class TestAutoCaptureSentryDecorator:
     """Test the auto_capture_errors decorator"""
 
     @patch("src.utils.auto_sentry.SENTRY_AVAILABLE", True)
-    @patch("src.utils.auto_sentry.capture_provider_error")
+    @patch("src.utils.auto_sentry.capture_error")
     @pytest.mark.asyncio
     async def test_async_function_capture(self, mock_capture):
         """Test decorator captures errors from async functions"""
