@@ -222,8 +222,9 @@ class TestAutoSentryMiddleware:
         mock_scope = MagicMock()
         mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
 
-        with pytest.raises(HTTPException):
-            client.get("/test-http-exception")
+        # HTTPException gets converted to HTTP response by FastAPI
+        response = client.get("/test-http-exception")
+        assert response.status_code == 500
 
         # Verify Sentry capture was called
         mock_sentry.capture_exception.assert_called_once()
@@ -257,9 +258,14 @@ class TestAutoSentryMiddleware:
         mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
 
         # Mock time.time to simulate slow request (>5 seconds)
-        with patch("src.middleware.auto_sentry_middleware.time.time") as mock_time:
-            mock_time.side_effect = [0, 6]  # 6 second duration
+        # Use a counter to return incrementing values
+        call_count = [0]
+        def mock_time_func():
+            result = call_count[0]
+            call_count[0] += 6  # Each call adds 6 seconds
+            return result
 
+        with patch("src.middleware.auto_sentry_middleware.time.time", side_effect=mock_time_func):
             response = client.get("/test-success")
             assert response.status_code == 200
 
