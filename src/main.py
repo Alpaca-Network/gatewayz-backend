@@ -223,6 +223,12 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=10000)
     logger.info("  🗜  GZip compression middleware enabled (threshold: 10KB, optimized)")
 
+    # Add staging security middleware (protects staging environment from unauthorized access)
+    from src.middleware.staging_security import StagingSecurityMiddleware
+
+    app.add_middleware(StagingSecurityMiddleware)
+    logger.info("  🔒 Staging security middleware enabled")
+
     # Security
     HTTPBearer()
 
