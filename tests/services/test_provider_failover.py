@@ -13,6 +13,8 @@ Tests cover:
 - Model not found errors
 """
 
+from types import SimpleNamespace
+
 import pytest
 from unittest.mock import Mock
 import asyncio
@@ -26,8 +28,10 @@ from src.services.provider_failover import (
     map_provider_error,
     FALLBACK_PROVIDER_PRIORITY,
     FALLBACK_ELIGIBLE_PROVIDERS,
-    FAILOVER_STATUS_CODES
+    FAILOVER_STATUS_CODES,
+    filter_by_circuit_breaker,
 )
+from src.services.model_availability import AvailabilityStatus, CircuitBreakerState
 
 # Try to import OpenAI SDK exceptions (same pattern as the module)
 try:
@@ -68,6 +72,92 @@ except ImportError:
         pass
     class RateLimitError(APIStatusError):
         pass
+
+
+class FakeAvailabilityService:
+    def __init__(self, states: dict[str, dict]):
+        self.states = states
+
+    def is_model_available(self, model_id: str, provider: str) -> bool:
+        return self.states.get(provider, {}).get("is_available", False)
+
+    def get_model_availability(self, model_id: str, provider: str):
+        return self.states.get(provider, {}).get("availability")
+
+
+@pytest.fixture
+def patch_availability_service(monkeypatch):
+    def _apply(states: dict[str, dict]):
+        fake_service = FakeAvailabilityService(states)
+        monkeypatch.setattr(
+            "src.services.model_availability.availability_service",
+            fake_service,
+        )
+
+    return _apply
+
+
+class TestCircuitBreakerFiltering:
+    """Targeted tests for circuit breaker filtering logic."""
+
+    def test_prefers_half_open_candidates(self, patch_availability_service):
+        patch_availability_service(
+            {
+                "fireworks": {
+                    "is_available": False,
+                    "availability": SimpleNamespace(
+                        circuit_breaker_state=CircuitBreakerState.HALF_OPEN,
+                        status=AvailabilityStatus.DEGRADED,
+                    ),
+                },
+                "openrouter": {
+                    "is_available": False,
+                    "availability": SimpleNamespace(
+                        circuit_breaker_state=CircuitBreakerState.OPEN,
+                        status=AvailabilityStatus.UNAVAILABLE,
+                    ),
+                },
+            }
+        )
+
+        result = filter_by_circuit_breaker("x-ai/grok-code-fast-1", ["fireworks", "openrouter"])
+        assert result == ["fireworks"]
+
+    def test_returns_empty_when_all_open(self, patch_availability_service):
+        patch_availability_service(
+            {
+                "fireworks": {
+                    "is_available": False,
+                    "availability": SimpleNamespace(
+                        circuit_breaker_state=CircuitBreakerState.OPEN,
+                        status=AvailabilityStatus.UNAVAILABLE,
+                    ),
+                },
+                "openrouter": {
+                    "is_available": False,
+                    "availability": SimpleNamespace(
+                        circuit_breaker_state=CircuitBreakerState.OPEN,
+                        status=AvailabilityStatus.UNAVAILABLE,
+                    ),
+                },
+            }
+        )
+
+        result = filter_by_circuit_breaker("x-ai/grok-code-fast-1", ["fireworks", "openrouter"])
+        assert result == []
+
+    def test_falls_back_to_unknown_providers(self, patch_availability_service):
+        patch_availability_service(
+            {
+                "xai": {
+                    "is_available": False,
+                    "availability": None,
+                }
+            }
+        )
+
+        result = filter_by_circuit_breaker("x-ai/grok-code-fast-1", ["xai"])
+        assert result == ["xai"]
 
 
 # ============================================================
