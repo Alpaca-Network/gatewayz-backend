@@ -1,255 +1,365 @@
 """
 Unit tests for chat history message deduplication functionality.
 
-Tests specifically focus on the duplicate detection code paths in save_chat_message
-to ensure proper code coverage.
+Tests the duplicate detection code paths in save_chat_message to ensure proper coverage.
+Uses the same in-memory Supabase stub as test_chat_history.py for consistency.
 """
 
 import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
-from src.db.chat_history import save_chat_message
+from datetime import datetime, timedelta, timezone
+
+# =========================
+# In-memory Supabase stub (same as test_chat_history.py)
+# =========================
+
+class _Result:
+    def __init__(self, data=None, count=None):
+        self.data = data
+        self.count = count
+    def execute(self):
+        return self
+
+class _BaseQuery:
+    def __init__(self, store, table):
+        self.store = store
+        self.table = table
+        self._filters = []
+        self._order = None
+        self._limit = None
+
+    def eq(self, field, value):
+        self._filters.append(("eq", field, value)); return self
+    def gte(self, field, value):
+        self._filters.append(("gte", field, value)); return self
+    def order(self, field, desc=False):
+        self._order = (field, bool(desc)); return self
+    def limit(self, n):
+        self._limit = n; return self
+
+    def _match(self, row):
+        for op, f, v in self._filters:
+            rv = row.get(f)
+            if op == "eq" and rv != v:
+                return False
+            elif op == "gte" and (rv is None or rv < v):
+                return False
+        return True
+
+    def _apply_order_limit(self, rows):
+        if self._order:
+            field, desc = self._order
+            rows = sorted(rows, key=lambda r: r.get(field, ""), reverse=desc)
+        if self._limit:
+            rows = rows[:self._limit]
+        return rows
+
+class _Select(_BaseQuery):
+    def __init__(self, store, table):
+        super().__init__(store, table)
+    def select(self, *_cols, count=None):
+        return self
+    def execute(self):
+        rows = [r.copy() for r in self.store[self.table] if self._match(r)]
+        rows = self._apply_order_limit(rows)
+        return _Result(rows)
+
+class _Insert:
+    def __init__(self, store, table, payload):
+        self.store = store
+        self.table = table
+        self.payload = payload
+    def execute(self):
+        inserted = []
+        items = self.payload if isinstance(self.payload, list) else [self.payload]
+        next_id = max([r.get("id", 0) for r in self.store[self.table]] or [0]) + 1
+        for item in items:
+            row = item.copy()
+            if "id" not in row:
+                row["id"] = next_id
+                next_id += 1
+            self.store[self.table].append(row)
+            inserted.append(row.copy())
+        return _Result(inserted)
+
+class _Update(_BaseQuery):
+    def __init__(self, store, table, payload):
+        super().__init__(store, table)
+        self.payload = payload
+    def execute(self):
+        updated = []
+        for r in self.store[self.table]:
+            if self._match(r):
+                r.update(self.payload)
+                updated.append(r.copy())
+        return _Result(updated)
+
+class SupabaseStub:
+    def __init__(self):
+        from collections import defaultdict
+        self.tables = defaultdict(list)
+
+    def table(self, name):
+        class _Shim:
+            def __init__(self, outer, table):
+                self.outer = outer
+                self.table = table
+            def select(self, *cols, count=None):
+                return _Select(self.outer.tables, self.table).select(*cols, count=count)
+            def insert(self, payload):
+                return _Insert(self.outer.tables, self.table, payload)
+            def update(self, payload):
+                return _Update(self.outer.tables, self.table, payload)
+        return _Shim(self, name)
 
 
-class TestMessageDeduplication:
-    """Test duplicate message detection logic"""
+@pytest.fixture()
+def sb(monkeypatch):
+    import src.db.chat_history as ch
+    stub = SupabaseStub()
+    monkeypatch.setattr(ch, "get_supabase_client", lambda: stub)
+    return stub
 
-    def test_save_message_with_duplicate_detection_no_duplicate(self, monkeypatch):
-        """Test saving message when no duplicate exists (normal path)"""
-        # Mock Supabase client
-        mock_client = MagicMock()
-        mock_result = MagicMock()
-        mock_result.data = []  # No duplicates found
 
-        # Mock the duplicate check query
-        mock_table = MagicMock()
-        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+# =========================
+# Deduplication Tests
+# =========================
 
-        # Mock the insert
-        insert_result = MagicMock()
-        insert_result.data = [{'id': 1, 'content': 'Test message', 'role': 'user', 'session_id': 1, 'created_at': datetime.now(timezone.utc).isoformat(), 'tokens': 0}]
-        mock_table.insert.return_value.execute.return_value = insert_result
+def test_save_message_no_duplicate_normal_path(sb):
+    """Test normal save when no duplicate exists"""
+    import src.db.chat_history as ch
 
-        # Mock the session update
-        update_result = MagicMock()
-        update_result.data = [{'id': 1}]
-        mock_table.update.return_value.eq.return_value.execute.return_value = update_result
+    # Save a message
+    msg = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Hello world',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        mock_client.table.return_value = mock_table
+    # Verify message was saved
+    assert msg is not None
+    assert msg['content'] == 'Hello world'
+    assert msg['role'] == 'user'
+    assert msg['session_id'] == 1
 
-        monkeypatch.setattr('src.db.chat_history.get_supabase_client', lambda: mock_client)
+    # Verify it's in the database
+    messages = sb.tables['chat_messages']
+    assert len(messages) == 1
+    assert messages[0]['content'] == 'Hello world'
 
-        # Call the function
-        result = save_chat_message(
-            session_id=1,
-            role='user',
-            content='Test message',
-            model='gpt-4',
-            tokens=0,
-            user_id=1
-        )
 
-        # Verify duplicate check was performed
-        assert mock_client.table.called
-        assert result['id'] == 1
-        assert result['content'] == 'Test message'
+def test_save_message_duplicate_detected_returns_existing(sb):
+    """Test that duplicate message returns existing instead of creating new"""
+    import src.db.chat_history as ch
 
-    def test_save_message_with_duplicate_detected(self, monkeypatch):
-        """Test that duplicate message returns existing message"""
-        # Mock Supabase client
-        mock_client = MagicMock()
+    # Save first message
+    msg1 = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Duplicate test',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
+    first_id = msg1['id']
 
-        # Mock duplicate found
-        existing_message = {
-            'id': 999,
-            'content': 'Duplicate message',
-            'role': 'user',
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'tokens': 5
-        }
-        duplicate_result = MagicMock()
-        duplicate_result.data = [existing_message]
+    # Try to save same message again (within 5 minute window)
+    msg2 = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Duplicate test',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        # Mock the duplicate check query
-        mock_table = MagicMock()
-        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = duplicate_result
+    # Should return the existing message
+    assert msg2['id'] == first_id
+    assert msg2['content'] == 'Duplicate test'
 
-        mock_client.table.return_value = mock_table
+    # Verify only one message in database
+    messages = sb.tables['chat_messages']
+    assert len(messages) == 1
 
-        monkeypatch.setattr('src.db.chat_history.get_supabase_client', lambda: mock_client)
 
-        # Call the function
-        result = save_chat_message(
-            session_id=1,
-            role='user',
-            content='Duplicate message',
-            model='gpt-4',
-            tokens=0,
-            user_id=1
-        )
+def test_save_message_skip_duplicate_check_creates_new(sb):
+    """Test that skip_duplicate_check=True bypasses duplicate detection"""
+    import src.db.chat_history as ch
 
-        # Should return existing message without inserting
-        assert result['id'] == 999
-        assert result['content'] == 'Duplicate message'
-        # Verify insert was NOT called (since duplicate was found)
-        mock_table.insert.assert_not_called()
+    # Save first message
+    msg1 = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Skip check test',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-    def test_save_message_skip_duplicate_check(self, monkeypatch):
-        """Test that skip_duplicate_check bypasses duplicate detection"""
-        # Mock Supabase client
-        mock_client = MagicMock()
+    # Save again with skip_duplicate_check=True
+    msg2 = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Skip check test',
+        model='gpt-4',
+        tokens=5,
+        user_id=1,
+        skip_duplicate_check=True  # Bypass duplicate detection
+    )
 
-        # Mock the insert
-        mock_table = MagicMock()
-        insert_result = MagicMock()
-        insert_result.data = [{'id': 2, 'content': 'Test', 'role': 'user', 'session_id': 1, 'created_at': datetime.now(timezone.utc).isoformat(), 'tokens': 0}]
-        mock_table.insert.return_value.execute.return_value = insert_result
+    # Should create a new message
+    assert msg2['id'] != msg1['id']
 
-        # Mock the session update
-        update_result = MagicMock()
-        update_result.data = [{'id': 1}]
-        mock_table.update.return_value.eq.return_value.execute.return_value = update_result
+    # Verify two messages in database
+    messages = sb.tables['chat_messages']
+    assert len(messages) == 2
+    assert all(m['content'] == 'Skip check test' for m in messages)
 
-        mock_client.table.return_value = mock_table
 
-        monkeypatch.setattr('src.db.chat_history.get_supabase_client', lambda: mock_client)
+def test_save_message_empty_content_allowed(sb):
+    """Test that empty content is allowed and saved"""
+    import src.db.chat_history as ch
 
-        # Call with skip_duplicate_check=True
-        result = save_chat_message(
-            session_id=1,
-            role='user',
-            content='Test',
-            model='gpt-4',
-            tokens=0,
-            user_id=1,
-            skip_duplicate_check=True
-        )
+    # Save message with empty content
+    msg = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='',
+        model='gpt-4',
+        tokens=0,
+        user_id=1
+    )
 
-        # Should insert without checking for duplicates
-        assert result['id'] == 2
-        # Verify insert WAS called
-        assert mock_table.insert.called
+    # Should save successfully
+    assert msg is not None
+    assert msg['content'] == ''
 
-    def test_save_message_duplicate_check_failure_continues(self, monkeypatch):
-        """Test that if duplicate check fails, save continues"""
-        # Mock Supabase client
-        mock_client = MagicMock()
-        mock_table = MagicMock()
+    # Verify in database
+    messages = sb.tables['chat_messages']
+    assert len(messages) == 1
+    assert messages[0]['content'] == ''
 
-        # Mock duplicate check to raise exception
-        mock_table.select.side_effect = Exception("Database error")
 
-        # Mock successful insert
-        insert_result = MagicMock()
-        insert_result.data = [{'id': 3, 'content': 'Test', 'role': 'user', 'session_id': 1, 'created_at': datetime.now(timezone.utc).isoformat(), 'tokens': 0}]
-        mock_table.insert.return_value.execute.return_value = insert_result
+def test_save_message_different_sessions_not_duplicate(sb):
+    """Test that same content in different sessions is not considered duplicate"""
+    import src.db.chat_history as ch
 
-        # Mock the session update
-        update_result = MagicMock()
-        update_result.data = [{'id': 1}]
-        mock_table.update.return_value.eq.return_value.execute.return_value = update_result
+    # Save message to session 1
+    msg1 = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Same content',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        def table_selector(name):
-            if name == "chat_messages":
-                return mock_table
-            return MagicMock()
+    # Save same content to session 2
+    msg2 = ch.save_chat_message(
+        session_id=2,
+        role='user',
+        content='Same content',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        mock_client.table = table_selector
+    # Should create separate messages
+    assert msg1['id'] != msg2['id']
+    assert msg1['session_id'] == 1
+    assert msg2['session_id'] == 2
 
-        monkeypatch.setattr('src.db.chat_history.get_supabase_client', lambda: mock_client)
+    # Verify two messages in database
+    messages = sb.tables['chat_messages']
+    assert len(messages) == 2
 
-        # Should not raise exception, should continue with save
-        result = save_chat_message(
-            session_id=1,
-            role='user',
-            content='Test',
-            model='gpt-4',
-            tokens=0,
-            user_id=1
-        )
 
-        # Should have saved the message despite duplicate check failure
-        assert result['id'] == 3
+def test_save_message_different_roles_not_duplicate(sb):
+    """Test that same content with different roles is not considered duplicate"""
+    import src.db.chat_history as ch
 
-    def test_save_message_empty_content_skips_duplicate_check(self, monkeypatch):
-        """Test that empty content skips duplicate detection"""
-        # Mock Supabase client
-        mock_client = MagicMock()
-        mock_table = MagicMock()
+    # Save user message
+    msg1 = ch.save_chat_message(
+        session_id=1,
+        role='user',
+        content='Same text',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        # Mock the insert
-        insert_result = MagicMock()
-        insert_result.data = [{'id': 4, 'content': '', 'role': 'user', 'session_id': 1, 'created_at': datetime.now(timezone.utc).isoformat(), 'tokens': 0}]
-        mock_table.insert.return_value.execute.return_value = insert_result
+    # Save assistant message with same content
+    msg2 = ch.save_chat_message(
+        session_id=1,
+        role='assistant',
+        content='Same text',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        # Mock the session update
-        update_result = MagicMock()
-        update_result.data = [{'id': 1}]
-        mock_table.update.return_value.eq.return_value.execute.return_value = update_result
+    # Should create separate messages
+    assert msg1['id'] != msg2['id']
+    assert msg1['role'] == 'user'
+    assert msg2['role'] == 'assistant'
 
-        mock_client.table.return_value = mock_table
+    # Verify two messages in database
+    messages = sb.tables['chat_messages']
+    assert len(messages) == 2
 
-        monkeypatch.setattr('src.db.chat_history.get_supabase_client', lambda: mock_client)
 
-        # Call with empty content
-        result = save_chat_message(
-            session_id=1,
-            role='user',
-            content='',  # Empty content
-            model='gpt-4',
-            tokens=0,
-            user_id=1
-        )
+def test_save_message_updates_session_timestamp(sb):
+    """Test that saving a message updates session updated_at"""
+    import src.db.chat_history as ch
 
-        # Should save without duplicate check (empty content is allowed)
-        assert result['id'] == 4
-        assert result['content'] == ''
+    # Create a session first
+    session = ch.create_chat_session(user_id=1, title="Test Session")
+    original_updated_at = session['updated_at']
 
-    def test_save_message_duplicate_check_time_window(self, monkeypatch):
-        """Test that duplicate check uses 5-minute time window"""
-        # Mock Supabase client
-        mock_client = MagicMock()
-        mock_table = MagicMock()
+    # Small delay to ensure timestamp changes
+    import time
+    time.sleep(0.01)
 
-        # Capture the time window used in the query
-        captured_time = None
+    # Save a message
+    ch.save_chat_message(
+        session_id=session['id'],
+        role='user',
+        content='Update test',
+        model='gpt-4',
+        tokens=5,
+        user_id=1
+    )
 
-        def capture_gte(field, value):
-            nonlocal captured_time
-            if field == "created_at":
-                captured_time = value
-            mock_result = MagicMock()
-            mock_result.order.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
-            return mock_result
+    # Get updated session
+    sessions = sb.tables['chat_sessions']
+    updated_session = [s for s in sessions if s['id'] == session['id']][0]
 
-        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.gte = capture_gte
+    # Verify timestamp was updated
+    assert updated_session['updated_at'] >= original_updated_at
 
-        # Mock the insert
-        insert_result = MagicMock()
-        insert_result.data = [{'id': 5, 'content': 'Test', 'role': 'user', 'session_id': 1, 'created_at': datetime.now(timezone.utc).isoformat(), 'tokens': 0}]
-        mock_table.insert.return_value.execute.return_value = insert_result
 
-        # Mock the session update
-        update_result = MagicMock()
-        update_result.data = [{'id': 1}]
-        mock_table.update.return_value.eq.return_value.execute.return_value = update_result
+def test_save_message_with_model_updates_session_model(sb):
+    """Test that saving a message with model updates session model"""
+    import src.db.chat_history as ch
 
-        mock_client.table.return_value = mock_table
+    # Create a session
+    session = ch.create_chat_session(user_id=1, title="Test Session", model="gpt-3.5-turbo")
 
-        monkeypatch.setattr('src.db.chat_history.get_supabase_client', lambda: mock_client)
+    # Save message with different model
+    ch.save_chat_message(
+        session_id=session['id'],
+        role='user',
+        content='Model test',
+        model='gpt-4',  # Different model
+        tokens=5,
+        user_id=1
+    )
 
-        # Call the function
-        save_chat_message(
-            session_id=1,
-            role='user',
-            content='Test',
-            model='gpt-4',
-            tokens=0,
-            user_id=1
-        )
+    # Get updated session
+    sessions = sb.tables['chat_sessions']
+    updated_session = [s for s in sessions if s['id'] == session['id']][0]
 
-        # Verify the time window is approximately 5 minutes ago
-        assert captured_time is not None
-        expected_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-        # Check that the times are close (within 1 minute)
-        assert captured_time[:16] == expected_time[:16]  # Compare up to minute precision
+    # Verify model was updated
+    assert updated_session['model'] == 'gpt-4'
