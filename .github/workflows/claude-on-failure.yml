@@ -6,7 +6,7 @@ concurrency:
 
 on:
   workflow_run:
-    workflows: ["CI Pipeline", "Run Tests"]  # Trigger on both CI workflows
+    workflows: ["CI Pipeline"]  # Only CI Pipeline (test.yml removed)
     types: [completed]
   # Manual trigger for explicit dispatch from CI or manual testing
   workflow_dispatch:
