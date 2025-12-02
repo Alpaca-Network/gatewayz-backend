@@ -481,15 +481,17 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     if not model_id:
                         continue
 
+                    # Use (x or {}) pattern to handle both missing keys and explicit None values
+                    properties = model.get("properties") or {}
+                    task_info = model.get("task") or {}
+
                     models.append({
                         "id": model_id,
-                        "name": model.get("description", model_id.split("/")[-1]),
-                        "description": model.get("description", ""),
-                        "context_length": model.get("properties", {}).get(
-                            "max_total_tokens", 8192
-                        ),
+                        "name": model.get("description") or model_id.split("/")[-1],
+                        "description": model.get("description") or "",
+                        "context_length": properties.get("max_total_tokens") or 8192,
                         "provider": "cloudflare-workers-ai",
-                        "task": model.get("task", {}).get("name", "Text Generation"),
+                        "task": task_info.get("name") or "Text Generation",
                     })
 
                 # Check if there are more pages
