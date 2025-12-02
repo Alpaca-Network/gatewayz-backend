@@ -31,6 +31,7 @@ from src.services.query_timeout import (
     QueryTimeoutError,
     safe_query_with_timeout,
 )
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
