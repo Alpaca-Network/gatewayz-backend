@@ -14,12 +14,11 @@ Key changes from original:
 """
 
 import sys
-import os
 import time
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List
 from pathlib import Path
 
 # Add the project root to the path
@@ -203,6 +202,7 @@ def check_critical_models_with_rate_limit(gateway_name: str, delay_seconds: int 
             except Exception as e:
                 logger.error(f"  Error checking {model_id}: {e}")
                 results['inaccessible_models'] += 1
+                results['critical_models_checked'] += 1
                 results['models'].append({
                     'id': model_id,
                     'accessible': False,

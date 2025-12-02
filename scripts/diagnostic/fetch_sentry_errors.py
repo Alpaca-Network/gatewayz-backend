@@ -3,10 +3,8 @@
 Fetch and analyze model accessibility errors from Sentry.
 """
 
-import json
 import os
 import sys
-from datetime import datetime
 import requests
 
 SENTRY_TOKEN = os.environ.get("SENTRY_ACCESS_TOKEN")

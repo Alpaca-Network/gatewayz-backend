@@ -32,15 +32,7 @@ import atexit
 
 from healthcheck_all_models import run_all_gateways_healthcheck
 
-# Import rate-limited healthcheck
-try:
-    from healthcheck_rate_limited import check_critical_models_with_rate_limit
-    RATE_LIMITED_AVAILABLE = True
-except ImportError:
-    RATE_LIMITED_AVAILABLE = False
-    logger.warning("Rate-limited healthcheck not available")
-
-# Configure logging
+# Configure logging first before any imports that might need it
 log_dir = Path('logs')
 log_dir.mkdir(exist_ok=True)
 
@@ -53,6 +45,14 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Import rate-limited healthcheck
+try:
+    from healthcheck_rate_limited import check_critical_models_with_rate_limit
+    RATE_LIMITED_AVAILABLE = True
+except ImportError:
+    RATE_LIMITED_AVAILABLE = False
+    logger.warning("Rate-limited healthcheck not available")
 
 # Results directory
 results_dir = Path('healthcheck_results')
