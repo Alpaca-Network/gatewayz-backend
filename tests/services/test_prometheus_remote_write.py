@@ -90,14 +90,17 @@ class TestPrometheusRemoteWrite:
 
         assert stats["success_rate"] == 0
 
-    @patch('src.services.prometheus_remote_write.prometheus_writer', None)
     @patch('src.services.prometheus_remote_write.Config')
-    async def test_init_prometheus_remote_write_disabled(self, mock_config, mock_writer):
+    async def test_init_prometheus_remote_write_disabled(self, mock_config):
         """Test init_prometheus_remote_write when Prometheus is disabled"""
+        import src.services.prometheus_remote_write
         from src.services.prometheus_remote_write import (
             init_prometheus_remote_write,
             get_prometheus_writer
         )
+
+        # Reset the global writer
+        src.services.prometheus_remote_write.prometheus_writer = None
 
         mock_config.PROMETHEUS_ENABLED = False
 
@@ -155,16 +158,20 @@ class TestPrometheusRemoteWrite:
         await shutdown_prometheus_remote_write()
         # Test passes if no exception is raised
 
-    @patch('src.services.prometheus_remote_write.prometheus_writer')
-    def test_get_prometheus_writer(self, mock_prometheus_writer):
+    def test_get_prometheus_writer(self):
         """Test get_prometheus_writer returns the global instance"""
+        import src.services.prometheus_remote_write
         from src.services.prometheus_remote_write import (
             get_prometheus_writer,
             PrometheusRemoteWriter
         )
 
+        # Set up a test writer as the global instance
         test_writer = PrometheusRemoteWriter(enabled=False)
-        mock_prometheus_writer.return_value = test_writer
+        src.services.prometheus_remote_write.prometheus_writer = test_writer
 
         result = get_prometheus_writer()
         assert result == test_writer
+
+        # Clean up
+        src.services.prometheus_remote_write.prometheus_writer = None
