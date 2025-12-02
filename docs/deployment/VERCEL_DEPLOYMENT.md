@@ -34,11 +34,11 @@ Make sure these are still present:
 
 | Variable Name | Current Value | Notes |
 |--------------|---------------|-------|
-| `OPENROUTER_API_KEY` | `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` | Keep as-is |
+| `OPENROUTER_API_KEY` | `sk-or-v1-xxxxx...` (use your actual key) | Keep as-is |
 | `OPENROUTER_SITE_URL` | `https://modelz.io` | Keep as-is |
 | `OPENROUTER_SITE_NAME` | `Alpaca` | Keep as-is |
-| `ADMIN_API_KEY` | `gjrxRyE-JjXwj8vR2HRTCwJ33fc5FmoDbJfRD_52UhQ` | Keep as-is |
-| `RESEND_API_KEY` | `re_8nSfCD6U_B5AqufQerhUJMi2ckUtXRefs` | Keep as-is |
+| `ADMIN_API_KEY` | `xxxxx...` (use your actual key) | Keep as-is |
+| `RESEND_API_KEY` | `re_xxxxx...` (use your actual key) | Keep as-is |
 | `FROM_EMAIL` | `support@api.gatewayz.ai` | Keep as-is |
 | `APP_NAME` | `Gatewayz` | Keep as-is |
 | `FRONTEND_URL` | `https://gatewayz.ai` | Keep as-is |
@@ -254,8 +254,8 @@ STRIPE_PUBLISHABLE_KEY=pk_live_51SAbMc... (copy from your .env file)
 STRIPE_WEBHOOK_SECRET=whsec_lEQSob... (copy from your .env file)
 
 # Other (existing - keep as-is)
-OPENROUTER_API_KEY=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
-ADMIN_API_KEY=gjrxRyE-JjXwj8vR2HRTCwJ33fc5FmoDbJfRD_52UhQ
+OPENROUTER_API_KEY=sk-or-v1-xxxxx... (use your actual key)
+ADMIN_API_KEY=xxxxx... (use your actual key)
 FRONTEND_URL=https://gatewayz.ai
 ```
 
