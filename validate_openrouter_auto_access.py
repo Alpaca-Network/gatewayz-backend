@@ -91,7 +91,7 @@ def check_openrouter_client():
 
         # Try to get the client
         try:
-            client = get_openrouter_client()
+            get_openrouter_client()
             print("✅ OpenRouter client can be instantiated")
             return True
         except ValueError as e:

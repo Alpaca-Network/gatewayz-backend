@@ -5,7 +5,6 @@ Sends a real test message to verify the endpoint is accessible
 """
 import os
 import sys
-import json
 
 def test_openrouter_auto():
     """Send a test message to openrouter/auto"""
@@ -91,18 +90,18 @@ def test_code_only():
 
         # Test transformation
         result = transform_model_id("openrouter/auto", "openrouter")
-        print(f"\n✅ Transform for OpenRouter: {result}")
         assert result == "openrouter/auto", "Should preserve openrouter/auto"
+        print(f"\n✅ Transform for OpenRouter: {result}")
 
         # Test provider detection
         provider = detect_provider_from_model_id("openrouter/auto")
-        print(f"✅ Provider detection: {provider}")
         assert provider == "openrouter", "Should detect openrouter"
+        print(f"✅ Provider detection: {provider}")
 
         # Test fallback
         fallback = transform_model_id("openrouter/auto", "cerebras")
-        print(f"✅ Fallback for Cerebras: {fallback}")
         assert fallback != "openrouter/auto", "Should map to fallback"
+        print(f"✅ Fallback for Cerebras: {fallback}")
 
         print("\n" + "=" * 80)
         print("✅ CODE VALIDATION PASSED")
