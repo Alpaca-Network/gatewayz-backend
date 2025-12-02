@@ -653,28 +653,38 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "qwen-plus-latest": "qwen-plus",
         },
         "clarifai": {
-            # Clarifai supports many models through its unified API
-            # Most models pass through directly using their standard naming
-            # Anthropic models
-            "anthropic/claude-3-opus": "claude-3-opus",
-            "anthropic/claude-3.5-sonnet": "claude-3.5-sonnet",
-            "claude-3-opus": "claude-3-opus",
-            "claude-3.5-sonnet": "claude-3.5-sonnet",
-            # OpenAI models
-            "openai/gpt-4": "gpt-4",
-            "openai/gpt-4-turbo": "gpt-4-turbo",
-            "gpt-4": "gpt-4",
-            "gpt-4-turbo": "gpt-4-turbo",
-            # Meta Llama models
-            "meta-llama/llama-3.1-70b": "llama-3.1-70b-instruct",
-            "meta-llama/llama-3-70b": "llama-3-70b-instruct",
-            "llama-3.1-70b": "llama-3.1-70b-instruct",
-            "llama-3-70b": "llama-3-70b-instruct",
-            # Mistral models
-            "mistralai/mistral-7b": "mistral-7b-instruct",
-            "mistralai/mixtral-8x7b": "mixtral-8x7b-instruct",
-            "mistral-7b": "mistral-7b-instruct",
-            "mixtral-8x7b": "mixtral-8x7b-instruct",
+            # Clarifai OpenAI-compatible API requires full model URLs or abbreviated paths
+            # Format: https://clarifai.com/{user_id}/{app_id}/models/{model_id}
+            # Or abbreviated: {user_id}/{app_id}/models/{model_id}
+            # See: https://docs.clarifai.com/compute/inference/open-ai/
+            #
+            # OpenAI models (via Clarifai)
+            "openai/gpt-4o": "openai/chat-completion/models/gpt-4o",
+            "openai/gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
+            "openai/gpt-4": "openai/chat-completion/models/gpt-4",
+            "gpt-4o": "openai/chat-completion/models/gpt-4o",
+            "gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
+            "gpt-4": "openai/chat-completion/models/gpt-4",
+            # GPT-OSS (Clarifai's open-source GPT)
+            "gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
+            "openai/gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
+            # Anthropic Claude models (via Clarifai)
+            "anthropic/claude-3-opus": "anthropic/completion/models/claude-3-opus",
+            "anthropic/claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
+            "anthropic/claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
+            "claude-3-opus": "anthropic/completion/models/claude-3-opus",
+            "claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
+            "claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
+            # Meta Llama models (via Clarifai)
+            "meta-llama/llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
+            "meta-llama/llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
+            "llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
+            "llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
+            # Mistral models (via Clarifai)
+            "mistralai/mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
+            "mistralai/mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
+            "mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
+            "mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
         },
         "xai": {
             # XAI Grok models - pass-through format

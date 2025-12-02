@@ -292,6 +292,124 @@ class TestAISDKConfiguration:
         assert len(Config.AI_SDK_API_KEY) > 0
 
 
+class TestAISDKModelRouting:
+    """Tests for AI SDK model routing (openrouter/* models go directly to OpenRouter)"""
+
+    def test_is_openrouter_model_auto(self):
+        """Test that openrouter/auto is detected correctly"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model("openrouter/auto") is True
+
+    def test_is_openrouter_model_other_openrouter_models(self):
+        """Test that other openrouter/* models are detected"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model("openrouter/quasar-alpha") is True
+        assert _is_openrouter_model("openrouter/some-model") is True
+
+    def test_is_openrouter_model_case_insensitive(self):
+        """Test that openrouter/* detection is case insensitive"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model("OpenRouter/Auto") is True
+        assert _is_openrouter_model("OPENROUTER/AUTO") is True
+        assert _is_openrouter_model("OpenRouter/Quasar-Alpha") is True
+
+    def test_is_openrouter_model_false_for_regular_models(self):
+        """Test that regular models are not detected as openrouter/*"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model("openai/gpt-4o") is False
+        assert _is_openrouter_model("anthropic/claude-3") is False
+        assert _is_openrouter_model("google/gemini-pro") is False
+
+    def test_is_openrouter_model_false_for_empty(self):
+        """Test that empty model returns False"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model("") is False
+
+    def test_is_openrouter_model_false_for_none(self):
+        """Test that None model returns False"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model(None) is False
+
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai")
+    @patch("src.routes.ai_sdk.process_openrouter_response")
+    def test_openrouter_auto_routes_to_openrouter(
+        self, mock_process, mock_request
+    ):
+        """Test that openrouter/auto is routed directly to OpenRouter"""
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(role="assistant", content="Hello from OpenRouter!"),
+                finish_reason="stop",
+            )
+        ]
+        mock_response.usage = MagicMock(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15
+        )
+        mock_request.return_value = mock_response
+
+        mock_process.return_value = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello from OpenRouter!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 200
+        # Verify that the request was made to OpenRouter with original model
+        mock_request.assert_called_once()
+        call_args = mock_request.call_args
+        assert call_args[0][1] == "openrouter/auto"
+
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai_stream")
+    def test_openrouter_auto_streaming_routes_to_openrouter(self, mock_stream):
+        """Test that openrouter/auto streaming is routed directly to OpenRouter"""
+        mock_chunk1 = MagicMock()
+        mock_chunk1.choices = [MagicMock(delta=MagicMock(content="Hello"))]
+
+        mock_chunk2 = MagicMock()
+        mock_chunk2.choices = [MagicMock(delta=MagicMock(content=" from OpenRouter!"))]
+
+        mock_stream.return_value = iter([mock_chunk1, mock_chunk2])
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+        # Verify that the request was made to OpenRouter
+        mock_stream.assert_called_once()
+        call_args = mock_stream.call_args
+        assert call_args[0][1] == "openrouter/auto"
+
+
 class TestAISDKSentryIntegration:
     """Tests for Sentry error capture in AI SDK endpoint"""
 
