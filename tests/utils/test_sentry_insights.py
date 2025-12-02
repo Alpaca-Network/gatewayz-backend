@@ -7,8 +7,7 @@ Tests cover:
 - Queue Monitoring (trace_queue_publish, trace_queue_process, QueueTracker)
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 
 class TestDatabaseQueryInsights:
@@ -286,7 +285,7 @@ class TestQueueMonitoring:
                 retry_count=2,
                 receive_latency_ms=150.5,
                 messaging_system="redis",
-            ) as span:
+            ):
                 pass
 
             call_kwargs = mock_sentry.start_span.call_args[1]
@@ -322,7 +321,7 @@ class TestQueueMonitoring:
                 "notifications",
                 message_id="msg-123",
                 trace_headers=trace_headers,
-            ) as span:
+            ):
                 pass
 
             # Verify continue_trace was called with headers
@@ -362,7 +361,7 @@ class TestQueueMonitoring:
 
             tracker = QueueTracker(messaging_system="kafka")
 
-            with tracker.process("events", message_id="evt-1", retry_count=0) as span:
+            with tracker.process("events", message_id="evt-1", retry_count=0):
                 pass
 
             mock_span.set_data.assert_any_call("messaging.system", "kafka")

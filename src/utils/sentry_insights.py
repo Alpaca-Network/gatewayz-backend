@@ -286,26 +286,26 @@ class CacheSpanTracker:
         """Track a cache get operation with automatic hit detection."""
 
         class SpanWrapper:
-            def __init__(wrapper_self, span):
-                wrapper_self.span = span
-                wrapper_self._hit = None
+            def __init__(self, span):
+                self.span = span
+                self._hit = None
 
-            def set_result(wrapper_self, value):
+            def set_result(self, value):
                 """Set hit/miss based on whether value is None/empty."""
-                wrapper_self._hit = value is not None
-                if wrapper_self.span:
-                    wrapper_self.span.set_data("cache.hit", wrapper_self._hit)
+                self._hit = value is not None
+                if self.span:
+                    self.span.set_data("cache.hit", self._hit)
 
-            def set_hit(wrapper_self, hit: bool):
+            def set_hit(self, hit: bool):
                 """Explicitly set cache hit status."""
-                wrapper_self._hit = hit
-                if wrapper_self.span:
-                    wrapper_self.span.set_data("cache.hit", hit)
+                self._hit = hit
+                if self.span:
+                    self.span.set_data("cache.hit", hit)
 
-            def set_size(wrapper_self, size: int):
+            def set_size(self, size: int):
                 """Set item size."""
-                if wrapper_self.span:
-                    wrapper_self.span.set_data("cache.item_size", size)
+                if self.span:
+                    self.span.set_data("cache.item_size", size)
 
         with trace_cache_operation(
             "cache.get",
