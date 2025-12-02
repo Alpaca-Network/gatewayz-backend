@@ -66,19 +66,25 @@ def _serialize_metrics_to_protobuf(registry=REGISTRY) -> bytes:
         )
 
     try:
-        # For now, use a simplified approach that works with the current prometheus_client
-        # In a full implementation, we'd construct the proper WriteRequest protobuf message
-        # For this implementation, we'll create a simple TimeSeries protobuf structure
-
-        from prometheus_client.openmetrics.exposition import generate_latest
-
-        # Generate metrics in OpenMetrics format (protobuf-based)
-        metrics_data = generate_latest(registry)
-
-        # Compress with Snappy
-        compressed = snappy.compress(metrics_data)
-
-        return compressed
+        # TODO: CRITICAL BUG - This implementation is INCORRECT
+        # The current code uses generate_latest() which produces OpenMetrics TEXT format,
+        # NOT the protobuf WriteRequest format required by Prometheus remote_write.
+        #
+        # This causes the "illegal wireType 7" error because Prometheus expects:
+        # - A proper protobuf WriteRequest message (defined in remote.proto)
+        # - Containing TimeSeries with Labels and Samples
+        #
+        # Proper fix options:
+        # 1. Use prometheus-remote-write library: pip install prometheus-remote-write
+        # 2. Manually construct WriteRequest protobuf (complex, requires protobuf codegen)
+        # 3. Disable remote_write and use /metrics scraping instead (CURRENT SOLUTION)
+        #
+        # For now, we raise an error to prevent incorrect data from being sent
+        raise NotImplementedError(
+            "Prometheus remote_write protobuf format not properly implemented. "
+            "Use /metrics scraping endpoint instead of remote_write. "
+            "Set PROMETHEUS_ENABLED=false to disable remote_write."
+        )
 
     except Exception as e:
         logger.error(f"Failed to serialize metrics to protobuf: {e}")
