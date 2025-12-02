@@ -24,6 +24,11 @@ from src.services.ai_sdk_client import (
     process_ai_sdk_response,
     validate_ai_sdk_api_key,
 )
+from src.services.openrouter_client import (
+    make_openrouter_request_openai,
+    make_openrouter_request_openai_stream,
+    process_openrouter_response,
+)
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -103,6 +108,29 @@ def _build_request_kwargs(request: AISDKChatRequest) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+def _is_openrouter_model(model: str) -> bool:
+    """Check if the model should be routed through OpenRouter.
+
+    Models with the 'openrouter/' prefix are OpenRouter-specific and should be
+    routed directly through OpenRouter instead of the Vercel AI Gateway.
+
+    Examples:
+        - openrouter/auto -> True (OpenRouter's automatic model selection)
+        - openrouter/quasar-alpha -> True
+        - openai/gpt-4o -> False (use Vercel AI Gateway)
+        - anthropic/claude-3 -> False (use Vercel AI Gateway)
+
+    Args:
+        model: The requested model ID
+
+    Returns:
+        bool: True if the model should be routed through OpenRouter
+    """
+    if not model:
+        return False
+    return model.lower().startswith("openrouter/")
+
+
 @router.post("/api/chat/ai-sdk-completions", tags=["ai-sdk"], response_model=AISDKChatResponse)
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
 async def ai_sdk_chat_completion(request: AISDKChatRequest):
@@ -165,18 +193,36 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         AISDKChatResponse: Chat completion response with choices and usage
     """
     try:
-        # Validate API key is configured
-        validate_ai_sdk_api_key()
-
-        # Handle streaming requests
-        if request.stream:
-            return await _handle_ai_sdk_stream(request)
-
         # Build kwargs for API request
         kwargs = _build_request_kwargs(request)
 
         # Convert messages to dict format
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+        # Check if this is an openrouter/* model - route directly through OpenRouter
+        if _is_openrouter_model(request.model):
+            logger.info(f"Routing '{request.model}' directly through OpenRouter")
+
+            # Handle streaming requests via OpenRouter
+            if request.stream:
+                return await _handle_openrouter_stream(request, messages, kwargs)
+
+            # Make request directly to OpenRouter
+            response = await asyncio.to_thread(
+                make_openrouter_request_openai, messages, request.model, **kwargs
+            )
+
+            # Process and return response
+            processed = await asyncio.to_thread(process_openrouter_response, response)
+            return processed
+
+        # Default path: Use Vercel AI Gateway
+        # Validate API key is configured
+        validate_ai_sdk_api_key()
+
+        # Handle streaming requests via AI SDK
+        if request.stream:
+            return await _handle_ai_sdk_stream(request, request.model)
 
         # Make request to AI SDK endpoint
         response = await asyncio.to_thread(
@@ -206,11 +252,58 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         )
 
 
-async def _handle_ai_sdk_stream(request: AISDKChatRequest):
+async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, kwargs: dict):
+    """Handle streaming responses routed directly through OpenRouter.
+
+    Args:
+        request: AISDKChatRequest with stream=True
+        messages: Pre-converted messages list
+        kwargs: Pre-built kwargs dictionary
+
+    Returns:
+        StreamingResponse with server-sent events
+    """
+
+    async def stream_response():
+        try:
+            # Make streaming request directly to OpenRouter
+            stream = await asyncio.to_thread(
+                make_openrouter_request_openai_stream, messages, request.model, **kwargs
+            )
+
+            # Stream response chunks
+            for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = getattr(chunk.choices[0], "delta", None)
+                    if delta and hasattr(delta, "content") and delta.content:
+                        # Format as SSE (Server-Sent Events)
+                        data = {
+                            "choices": [{"delta": {"role": "assistant", "content": delta.content}}]
+                        }
+                        yield f"data: {json.dumps(data)}\n\n"
+
+            # Send completion signal
+            completion_data = {"choices": [{"finish_reason": "stop"}]}
+            yield f"data: {json.dumps(completion_data)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        except Exception as e:
+            logger.error(f"OpenRouter streaming error: {e}", exc_info=True)
+            # Capture streaming errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": f"Failed to process streaming request: {str(e)}"}
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
+
+
+async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
     """Handle streaming responses for AI SDK endpoint.
 
     Args:
         request: AISDKChatRequest with stream=True
+        model: The transformed model ID to use
 
     Returns:
         StreamingResponse with server-sent events
@@ -229,7 +322,7 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
 
             # Make streaming request
             stream = await asyncio.to_thread(
-                make_ai_sdk_request_openai_stream, messages, request.model, **kwargs
+                make_ai_sdk_request_openai_stream, messages, model, **kwargs
             )
 
             # Stream response chunks
