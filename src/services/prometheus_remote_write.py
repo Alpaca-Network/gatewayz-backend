@@ -8,6 +8,9 @@ The Railway Grafana stack template comes with Prometheus pre-configured
 to receive metrics via:
 - HTTP remote_write endpoint: /api/v1/write
 - Internal URL: http://prometheus:9090
+
+Note: Remote write requires protobuf format. For text-based metrics export,
+use the scrape endpoint (/metrics) instead.
 """
 
 import asyncio
@@ -17,7 +20,6 @@ import time
 from typing import Any
 
 import httpx
-from prometheus_client import REGISTRY, generate_latest
 
 from src.config import Config
 
@@ -106,54 +108,26 @@ class PrometheusRemoteWriter:
         """
         Push current metrics to Prometheus remote_write endpoint.
 
+        Note: This method is currently disabled because Prometheus remote write requires
+        protobuf format (Snappy-compressed proto messages), not the text format that
+        prometheus_client generates. Implementing proper protobuf serialization would
+        require additional dependencies (snappy, prometheus_client with protobuf support).
+
+        For now, metrics are exposed via the /metrics scrape endpoint instead, which is
+        more compatible with the standard Prometheus client library.
+
         Returns:
             True if push was successful, False otherwise
         """
         if not self.enabled or not self.client:
             return False
 
-        try:
-            # Collect metrics from Prometheus client library
-            metrics_data = generate_latest(REGISTRY)
-
-            # Send to remote Prometheus
-            response = await self.client.post(
-                self.remote_write_url,
-                content=metrics_data,
-                headers={"Content-Type": "text/plain; charset=utf-8"},
-            )
-
-            self._last_push_time = time.time()
-            self._push_count += 1
-
-            if response.status_code in (200, 201, 204):
-                logger.debug(
-                    f"Successfully pushed metrics to Prometheus "
-                    f"({len(metrics_data)} bytes, status {response.status_code})"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"Prometheus remote write returned status {response.status_code}: "
-                    f"{response.text[:200]}"
-                )
-                self._push_errors += 1
-                return False
-
-        except httpx.TimeoutException:
-            logger.debug("Timeout pushing metrics to Prometheus")
-            self._push_errors += 1
-            return False
-        except (socket.gaierror, OSError) as e:
-            # DNS resolution or connection error - log at debug level since Prometheus
-            # may not be available in all environments (e.g., production without Grafana stack)
-            logger.debug(f"Cannot connect to Prometheus at {self.remote_write_url}: {e}")
-            self._push_errors += 1
-            return False
-        except Exception as e:
-            logger.debug(f"Error pushing metrics to Prometheus: {e}")
-            self._push_errors += 1
-            return False
+        # Remote write is disabled - metrics should be scraped via /metrics endpoint
+        logger.debug(
+            "Prometheus remote write is not supported with text format. "
+            "Please use Prometheus scraping via /metrics endpoint instead."
+        )
+        return False
 
     def get_stats(self) -> dict[str, Any]:
         """Get remote write statistics."""
@@ -184,14 +158,18 @@ async def init_prometheus_remote_write():
         logger.info("Prometheus monitoring is disabled")
         return
 
+    # Disable remote write by default since it requires protobuf format
+    # Metrics are exposed via /metrics scrape endpoint instead
     prometheus_writer = PrometheusRemoteWriter(
         remote_write_url=Config.PROMETHEUS_REMOTE_WRITE_URL,
         push_interval=30,  # Push every 30 seconds
-        enabled=True,
+        enabled=False,  # Disabled: use Prometheus scraping instead
     )
 
-    await prometheus_writer.start()
-    logger.info("Prometheus remote write initialized")
+    logger.info(
+        "Prometheus remote write disabled (requires protobuf format). "
+        "Metrics available via /metrics scrape endpoint."
+    )
 
 
 async def shutdown_prometheus_remote_write():
