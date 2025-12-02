@@ -22,24 +22,23 @@ from typing import Any
 import httpx
 import snappy
 from prometheus_client import REGISTRY
-from prometheus_client.core import Metric
 
 from src.config import Config
+from src.services.prometheus_pb2 import Label, Sample, TimeSeries, WriteRequest
 
 logger = logging.getLogger(__name__)
 
-# Import protobuf definitions
-try:
-    from prometheus_client.openmetrics.exposition import (
-        generate_latest as generate_protobuf,
-    )
+# Protobuf is now always available via our custom implementation
+PROTOBUF_AVAILABLE = True
 
-    PROTOBUF_AVAILABLE = True
-except ImportError:
-    PROTOBUF_AVAILABLE = False
-    logger.warning(
-        "Protobuf support not available. Install prometheus-client with protobuf support."
-    )
+
+def _get_instance_labels() -> dict[str, str]:
+    """Get instance-identifying labels for all metrics."""
+    hostname = socket.gethostname()
+    return {
+        "instance": hostname,
+        "job": "gatewayz",
+    }
 
 
 def _serialize_metrics_to_protobuf(registry=REGISTRY) -> bytes:
@@ -55,40 +54,51 @@ def _serialize_metrics_to_protobuf(registry=REGISTRY) -> bytes:
 
     Returns:
         Snappy-compressed protobuf bytes ready for remote write
-
-    Raises:
-        RuntimeError: If protobuf support is not available
     """
-    if not PROTOBUF_AVAILABLE:
-        raise RuntimeError(
-            "Protobuf support not available. "
-            "Install with: pip install prometheus-client[protobuf] python-snappy"
-        )
+    write_request = WriteRequest()
+    instance_labels = _get_instance_labels()
+    current_timestamp_ms = int(time.time() * 1000)
 
-    try:
-        # TODO: CRITICAL BUG - This implementation is INCORRECT
-        # The current code uses generate_latest() which produces OpenMetrics TEXT format,
-        # NOT the protobuf WriteRequest format required by Prometheus remote_write.
-        #
-        # This causes the "illegal wireType 7" error because Prometheus expects:
-        # - A proper protobuf WriteRequest message (defined in remote.proto)
-        # - Containing TimeSeries with Labels and Samples
-        #
-        # Proper fix options:
-        # 1. Use prometheus-remote-write library: pip install prometheus-remote-write
-        # 2. Manually construct WriteRequest protobuf (complex, requires protobuf codegen)
-        # 3. Disable remote_write and use /metrics scraping instead (CURRENT SOLUTION)
-        #
-        # For now, we raise an error to prevent incorrect data from being sent
-        raise NotImplementedError(
-            "Prometheus remote_write protobuf format not properly implemented. "
-            "Use /metrics scraping endpoint instead of remote_write. "
-            "Set PROMETHEUS_ENABLED=false to disable remote_write."
-        )
+    # Iterate over all metrics in the registry
+    for metric in registry.collect():
+        for sample in metric.samples:
+            # Create a new TimeSeries for each sample
+            ts = TimeSeries()
 
-    except Exception as e:
-        logger.error(f"Failed to serialize metrics to protobuf: {e}")
-        raise
+            # Collect all labels for this sample
+            all_labels: dict[str, str] = {}
+
+            # Add the metric name as __name__ label
+            all_labels["__name__"] = sample.name
+
+            # Add instance labels
+            for label_name, label_value in instance_labels.items():
+                all_labels[label_name] = str(label_value)
+
+            # Add sample-specific labels
+            for label_name, label_value in sample.labels.items():
+                all_labels[label_name] = str(label_value)
+
+            # Sort labels lexicographically by name as required by Prometheus
+            for label_name in sorted(all_labels.keys()):
+                ts.labels.append(Label(name=label_name, value=all_labels[label_name]))
+
+            # Add the sample value with current timestamp
+            sample_obj = Sample(
+                value=float(sample.value),
+                timestamp=current_timestamp_ms,
+            )
+            ts.samples.append(sample_obj)
+
+            write_request.timeseries.append(ts)
+
+    # Serialize to protobuf bytes
+    protobuf_data = write_request.SerializeToString()
+
+    # Compress with Snappy (block format, not framed)
+    compressed_data = snappy.compress(protobuf_data)
+
+    return compressed_data
 
 
 class PrometheusRemoteWriter:
@@ -129,7 +139,7 @@ class PrometheusRemoteWriter:
         if enabled and not PROTOBUF_AVAILABLE:
             logger.warning(
                 "Prometheus remote write requested but protobuf support not available. "
-                "Install with: pip install prometheus-client[protobuf] python-snappy"
+                "Install with: pip install python-snappy"
             )
 
         logger.info("Prometheus Remote Writer initialized")
