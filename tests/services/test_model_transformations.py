@@ -122,3 +122,44 @@ def test_openrouter_colon_suffix_variants():
     for model_id, expected_provider in test_cases:
         result = detect_provider_from_model_id(model_id)
         assert result == expected_provider, f"Expected '{expected_provider}' for {model_id}, got {result}"
+
+
+def test_detect_provider_groq_models():
+    """Test that Groq models are correctly detected as 'groq' provider"""
+    test_cases = [
+        ("groq/llama-3.3-70b-versatile", "groq"),
+        ("groq/llama-3.1-70b-versatile", "groq"),
+        ("groq/mixtral-8x7b-32768", "groq"),
+        ("groq/gemma2-9b-it", "groq"),
+        ("groq/llama-3.1-8b-instant", "groq"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_groq_model_strips_prefix():
+    """Test that groq/ prefix is stripped when transforming for Groq provider"""
+    test_cases = [
+        ("groq/llama-3.3-70b-versatile", "llama-3.3-70b-versatile"),
+        ("groq/mixtral-8x7b-32768", "mixtral-8x7b-32768"),
+        ("groq/gemma2-9b-it", "gemma2-9b-it"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "groq")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_groq_model_without_prefix():
+    """Test that Groq models without prefix pass through correctly"""
+    test_cases = [
+        ("llama-3.3-70b-versatile", "llama-3.3-70b-versatile"),
+        ("mixtral-8x7b-32768", "mixtral-8x7b-32768"),
+        ("llama3-70b-8192", "llama3-70b-8192"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "groq")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"

@@ -86,3 +86,35 @@ class TestConnectionPool:
         assert second is new_client
         old_client.close.assert_called_once()
         assert len(connection_pool._client_pool) == 1
+
+    def test_get_groq_pooled_client(self, monkeypatch):
+        """Test that Groq pooled client is configured correctly."""
+        http_client = MagicMock(name="http_client")
+        monkeypatch.setattr(
+            connection_pool,
+            "_get_http_client",
+            lambda timeout, limits: http_client,
+        )
+
+        openai_client = MagicMock(name="openai_client")
+        openai_ctor = MagicMock(return_value=openai_client)
+        monkeypatch.setattr(connection_pool, "OpenAI", openai_ctor)
+
+        # Mock the Config to have a Groq API key
+        monkeypatch.setattr(connection_pool.Config, "GROQ_API_KEY", "test-groq-key")
+
+        client = connection_pool.get_groq_pooled_client()
+
+        assert client is openai_client
+        openai_ctor.assert_called_once()
+        # Verify it was called with correct base_url
+        call_kwargs = openai_ctor.call_args[1]
+        assert call_kwargs["base_url"] == "https://api.groq.com/openai/v1"
+        assert call_kwargs["api_key"] == "test-groq-key"
+
+    def test_get_groq_pooled_client_no_key(self, monkeypatch):
+        """Test that Groq pooled client raises error without API key."""
+        monkeypatch.setattr(connection_pool.Config, "GROQ_API_KEY", None)
+
+        with pytest.raises(ValueError, match="Groq API key not configured"):
+            connection_pool.get_groq_pooled_client()
