@@ -18,7 +18,7 @@ def test_openrouter_auto():
     if not api_key:
         print("\n⚠️  OPENROUTER_API_KEY not set in environment")
         print("To test with actual API calls, set:")
-        print("  export OPENROUTER_API_KEY=sk-or-v1-your-key-here")
+        print("  export OPENROUTER_API_KEY=sk-or-v1-xxxxx-replace-with-your-key")
         print("\nWe can still test the code paths without making actual API calls.")
         return False
 
