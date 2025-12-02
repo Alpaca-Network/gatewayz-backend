@@ -173,96 +173,98 @@ class ResponseCache:
         # Try Redis first
         if self._redis_client:
             try:
-                cached_data = self._redis_client.get(cache_key)
-                if cached_data:
-                    cached_response = json.loads(cached_data)
-                    self._stats["hits"] += 1
-                    logger.debug(f"Cache HIT (Redis): {cache_key[:16]}...")
-
-                    # Record Sentry cache hit
-                    if trace_cache_operation:
-                        with trace_cache_operation(
-                            "cache.get",
-                            cache_key,
-                            cache_hit=True,
-                            item_size=len(cached_data) if cached_data else None,
-                            cache_system="redis",
-                        ):
-                            pass
-
-                    return cached_response["response"]
-                else:
-                    # Redis miss - record in Sentry
-                    if trace_cache_operation:
-                        with trace_cache_operation(
-                            "cache.get",
-                            cache_key,
-                            cache_hit=False,
-                            cache_system="redis",
-                        ):
-                            pass
-            except Exception as e:
-                logger.warning(f"Redis get failed: {e}")
-
-        # Fall back to memory cache
-        if cache_key in self._memory_cache:
-            cached = self._memory_cache[cache_key]
-
-            # Check expiration
-            if cached.is_expired():
-                del self._memory_cache[cache_key]
-                if cache_key in self._cache_order:
-                    self._cache_order.remove(cache_key)
-                self._stats["misses"] += 1
-                logger.debug(f"Cache EXPIRED: {cache_key[:16]}...")
-
-                # Record Sentry cache miss (expired)
+                # Wrap Redis get operation in Sentry span
+                cached_data = None
                 if trace_cache_operation:
                     with trace_cache_operation(
                         "cache.get",
                         cache_key,
-                        cache_hit=False,
-                        cache_system="memory",
-                    ):
-                        pass
+                        cache_system="redis",
+                    ) as span:
+                        cached_data = self._redis_client.get(cache_key)
+                        # Set cache hit/miss after we know the result
+                        if span:
+                            span.set_data("cache.hit", cached_data is not None)
+                            if cached_data:
+                                span.set_data("cache.item_size", len(cached_data))
+                else:
+                    cached_data = self._redis_client.get(cache_key)
 
-                return None
+                if cached_data:
+                    cached_response = json.loads(cached_data)
+                    self._stats["hits"] += 1
+                    logger.debug(f"Cache HIT (Redis): {cache_key[:16]}...")
+                    return cached_response["response"]
+            except Exception as e:
+                logger.warning(f"Redis get failed: {e}")
 
-            # Update LRU order
-            if cache_key in self._cache_order:
-                self._cache_order.remove(cache_key)
-            self._cache_order.append(cache_key)
+        # Fall back to memory cache - wrap lookup in Sentry span
+        cache_hit = False
+        result = None
 
-            cached.increment_hits()
-            self._stats["hits"] += 1
-            logger.debug(f"Cache HIT (memory): {cache_key[:16]}...")
-
-            # Record Sentry cache hit
-            if trace_cache_operation:
-                with trace_cache_operation(
-                    "cache.get",
-                    cache_key,
-                    cache_hit=True,
-                    cache_system="memory",
-                ):
-                    pass
-
-            return cached.response
-
-        self._stats["misses"] += 1
-        logger.debug(f"Cache MISS: {cache_key[:16]}...")
-
-        # Record Sentry cache miss
         if trace_cache_operation:
             with trace_cache_operation(
                 "cache.get",
                 cache_key,
-                cache_hit=False,
                 cache_system="memory",
-            ):
-                pass
+            ) as span:
+                if cache_key in self._memory_cache:
+                    cached = self._memory_cache[cache_key]
 
-        return None
+                    # Check expiration
+                    if cached.is_expired():
+                        del self._memory_cache[cache_key]
+                        if cache_key in self._cache_order:
+                            self._cache_order.remove(cache_key)
+                        self._stats["misses"] += 1
+                        logger.debug(f"Cache EXPIRED: {cache_key[:16]}...")
+                        cache_hit = False
+                    else:
+                        # Update LRU order
+                        if cache_key in self._cache_order:
+                            self._cache_order.remove(cache_key)
+                        self._cache_order.append(cache_key)
+
+                        cached.increment_hits()
+                        self._stats["hits"] += 1
+                        logger.debug(f"Cache HIT (memory): {cache_key[:16]}...")
+                        cache_hit = True
+                        result = cached.response
+                else:
+                    self._stats["misses"] += 1
+                    logger.debug(f"Cache MISS: {cache_key[:16]}...")
+                    cache_hit = False
+
+                # Set cache hit/miss on span
+                if span:
+                    span.set_data("cache.hit", cache_hit)
+
+            return result
+        else:
+            # No Sentry instrumentation
+            if cache_key in self._memory_cache:
+                cached = self._memory_cache[cache_key]
+
+                if cached.is_expired():
+                    del self._memory_cache[cache_key]
+                    if cache_key in self._cache_order:
+                        self._cache_order.remove(cache_key)
+                    self._stats["misses"] += 1
+                    logger.debug(f"Cache EXPIRED: {cache_key[:16]}...")
+                    return None
+
+                if cache_key in self._cache_order:
+                    self._cache_order.remove(cache_key)
+                self._cache_order.append(cache_key)
+
+                cached.increment_hits()
+                self._stats["hits"] += 1
+                logger.debug(f"Cache HIT (memory): {cache_key[:16]}...")
+                return cached.response
+
+            self._stats["misses"] += 1
+            logger.debug(f"Cache MISS: {cache_key[:16]}...")
+            return None
 
     def set(
         self,
@@ -308,15 +310,8 @@ class ResponseCache:
                     "created_at": cached_response.created_at,
                 }
                 serialized_data = json.dumps(cache_data)
-                self._redis_client.setex(
-                    cache_key,
-                    ttl,
-                    serialized_data,
-                )
-                self._stats["sets"] += 1
-                logger.debug(f"Cache SET (Redis): {cache_key[:16]}...")
 
-                # Record Sentry cache put
+                # Wrap Redis setex operation in Sentry span
                 if trace_cache_operation:
                     with trace_cache_operation(
                         "cache.put",
@@ -325,26 +320,25 @@ class ResponseCache:
                         ttl=ttl,
                         cache_system="redis",
                     ):
-                        pass
+                        self._redis_client.setex(
+                            cache_key,
+                            ttl,
+                            serialized_data,
+                        )
+                else:
+                    self._redis_client.setex(
+                        cache_key,
+                        ttl,
+                        serialized_data,
+                    )
 
+                self._stats["sets"] += 1
+                logger.debug(f"Cache SET (Redis): {cache_key[:16]}...")
                 return
             except Exception as e:
                 logger.warning(f"Redis set failed: {e}")
 
-        # Fall back to memory cache
-        # Evict if at capacity
-        if len(self._memory_cache) >= self.max_cache_size:
-            self._evict_lru()
-
-        self._memory_cache[cache_key] = cached_response
-        if cache_key in self._cache_order:
-            self._cache_order.remove(cache_key)
-        self._cache_order.append(cache_key)
-
-        self._stats["sets"] += 1
-        logger.debug(f"Cache SET (memory): {cache_key[:16]}...")
-
-        # Record Sentry cache put
+        # Fall back to memory cache - wrap in Sentry span
         if trace_cache_operation:
             with trace_cache_operation(
                 "cache.put",
@@ -352,7 +346,26 @@ class ResponseCache:
                 ttl=ttl,
                 cache_system="memory",
             ):
-                pass
+                # Evict if at capacity
+                if len(self._memory_cache) >= self.max_cache_size:
+                    self._evict_lru()
+
+                self._memory_cache[cache_key] = cached_response
+                if cache_key in self._cache_order:
+                    self._cache_order.remove(cache_key)
+                self._cache_order.append(cache_key)
+        else:
+            # Evict if at capacity
+            if len(self._memory_cache) >= self.max_cache_size:
+                self._evict_lru()
+
+            self._memory_cache[cache_key] = cached_response
+            if cache_key in self._cache_order:
+                self._cache_order.remove(cache_key)
+            self._cache_order.append(cache_key)
+
+        self._stats["sets"] += 1
+        logger.debug(f"Cache SET (memory): {cache_key[:16]}...")
 
     def should_cache(
         self,

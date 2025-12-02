@@ -386,12 +386,17 @@ def track_database_query(table: str, operation: str, query_description: str | No
         operation: Operation type (select, insert, update, delete)
         query_description: Optional parameterized query string for Sentry Insights
     """
+    # Import Sentry insights utilities (isolated try/except to avoid double yield)
+    trace_supabase_query = None
+    try:
+        from src.utils.sentry_insights import trace_supabase_query as _trace_supabase_query
+        trace_supabase_query = _trace_supabase_query
+    except ImportError:
+        pass  # Sentry insights not available
+
     start_time = time.time()
 
-    # Import Sentry insights utilities
-    try:
-        from src.utils.sentry_insights import trace_supabase_query
-
+    if trace_supabase_query:
         # Build query description if not provided
         query_desc = query_description or f"{operation.upper()} FROM {table}"
 
@@ -402,7 +407,7 @@ def track_database_query(table: str, operation: str, query_description: str | No
                 duration = time.time() - start_time
                 database_query_count.labels(table=table, operation=operation).inc()
                 database_query_duration.labels(table=table).observe(duration)
-    except ImportError:
+    else:
         # Sentry insights not available, fall back to Prometheus only
         try:
             yield
@@ -614,17 +619,23 @@ def track_queue_publish(
                 "headers": headers  # Include for trace continuity
             })
     """
+    # Import Sentry insights utilities (isolated try/except to avoid double yield)
+    _trace_queue_publish = None
     try:
-        from src.utils.sentry_insights import trace_queue_publish
+        from src.utils.sentry_insights import trace_queue_publish as _tqp
+        _trace_queue_publish = _tqp
+    except ImportError:
+        pass  # Sentry insights not available
 
-        with trace_queue_publish(
+    if _trace_queue_publish:
+        with _trace_queue_publish(
             destination,
             message_id=message_id,
             message_body_size=message_body_size,
             messaging_system=messaging_system,
         ) as (span, headers):
             yield headers
-    except ImportError:
+    else:
         # Sentry insights not available
         yield {}
 
@@ -668,9 +679,15 @@ def track_queue_process(
         ) as span:
             await process_notification(message)
     """
+    # Import Sentry insights utilities (isolated try/except to avoid double yield)
+    _trace_queue_process = None
     try:
-        from src.utils.sentry_insights import trace_queue_process as _trace_queue_process
+        from src.utils.sentry_insights import trace_queue_process as _tqp
+        _trace_queue_process = _tqp
+    except ImportError:
+        pass  # Sentry insights not available
 
+    if _trace_queue_process:
         with _trace_queue_process(
             destination,
             message_id=message_id,
@@ -681,7 +698,7 @@ def track_queue_process(
             trace_headers=trace_headers,
         ) as span:
             yield span
-    except ImportError:
+    else:
         # Sentry insights not available
         yield None
 

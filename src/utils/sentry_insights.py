@@ -96,30 +96,25 @@ def trace_database_query(
     # Determine span operation based on query or explicit operation
     span_op = f"db.{db_system}"
 
-    try:
-        with sentry_sdk.start_span(
-            op=span_op,
-            name=query,
-            origin="manual",
-        ) as span:
-            # Set required db.system attribute for Sentry Queries Insights
-            span.set_data("db.system", db_system)
+    with sentry_sdk.start_span(
+        op=span_op,
+        name=query,
+        origin="manual",
+    ) as span:
+        # Set required db.system attribute for Sentry Queries Insights
+        span.set_data("db.system", db_system)
 
-            # Set optional attributes
-            if db_name:
-                span.set_data("db.name", db_name)
+        # Set optional attributes
+        if db_name:
+            span.set_data("db.name", db_name)
 
-            if table:
-                span.set_data("db.sql.table", table)
+        if table:
+            span.set_data("db.sql.table", table)
 
-            if operation:
-                span.set_data("db.operation", operation)
+        if operation:
+            span.set_data("db.operation", operation)
 
-            yield span
-
-    except Exception as e:
-        logger.debug(f"Error creating database span: {e}")
-        yield None
+        yield span
 
 
 def trace_supabase_query(
@@ -222,37 +217,32 @@ def trace_cache_operation(
     keys = key if isinstance(key, list) else [key]
     key_description = ", ".join(keys)
 
-    try:
-        with sentry_sdk.start_span(
-            op=operation,
-            name=key_description,
-            origin="manual",
-        ) as span:
-            # Set cache.key as array (required by Sentry spec)
-            span.set_data("cache.key", keys)
+    with sentry_sdk.start_span(
+        op=operation,
+        name=key_description,
+        origin="manual",
+    ) as span:
+        # Set cache.key as array (required by Sentry spec)
+        span.set_data("cache.key", keys)
 
-            # Set cache.hit for get operations (required for cache.get)
-            if operation == "cache.get" and cache_hit is not None:
-                span.set_data("cache.hit", cache_hit)
+        # Set cache.hit for get operations (required for cache.get)
+        if operation == "cache.get" and cache_hit is not None:
+            span.set_data("cache.hit", cache_hit)
 
-            # Set optional attributes
-            if item_size is not None:
-                span.set_data("cache.item_size", item_size)
+        # Set optional attributes
+        if item_size is not None:
+            span.set_data("cache.item_size", item_size)
 
-            if ttl is not None:
-                span.set_data("cache.ttl", ttl)
+        if ttl is not None:
+            span.set_data("cache.ttl", ttl)
 
-            # Network peer information (optional)
-            if host:
-                span.set_data("network.peer.address", host)
-            if port:
-                span.set_data("network.peer.port", port)
+        # Network peer information (optional)
+        if host:
+            span.set_data("network.peer.address", host)
+        if port:
+            span.set_data("network.peer.port", port)
 
-            yield span
-
-    except Exception as e:
-        logger.debug(f"Error creating cache span: {e}")
-        yield None
+        yield span
 
 
 class CacheSpanTracker:
@@ -400,33 +390,28 @@ def trace_queue_publish(
         yield (None, {})
         return
 
-    try:
-        with sentry_sdk.start_span(
-            op="queue.publish",
-            name=destination,
-            origin="manual",
-        ) as span:
-            # Set required attributes for queue monitoring
-            span.set_data("messaging.destination.name", destination)
-            span.set_data("messaging.system", messaging_system)
+    with sentry_sdk.start_span(
+        op="queue.publish",
+        name=destination,
+        origin="manual",
+    ) as span:
+        # Set required attributes for queue monitoring
+        span.set_data("messaging.destination.name", destination)
+        span.set_data("messaging.system", messaging_system)
 
-            if message_id:
-                span.set_data("messaging.message.id", message_id)
+        if message_id:
+            span.set_data("messaging.message.id", message_id)
 
-            if message_body_size is not None:
-                span.set_data("messaging.message.body.size", message_body_size)
+        if message_body_size is not None:
+            span.set_data("messaging.message.body.size", message_body_size)
 
-            # Get trace headers for distributed tracing
-            trace_headers = {
-                "sentry-trace": sentry_sdk.get_traceparent(),
-                "baggage": sentry_sdk.get_baggage(),
-            }
+        # Get trace headers for distributed tracing
+        trace_headers = {
+            "sentry-trace": sentry_sdk.get_traceparent(),
+            "baggage": sentry_sdk.get_baggage(),
+        }
 
-            yield (span, trace_headers)
-
-    except Exception as e:
-        logger.debug(f"Error creating queue publish span: {e}")
-        yield (None, {})
+        yield (span, trace_headers)
 
 
 @contextmanager
@@ -478,34 +463,16 @@ def trace_queue_process(
         yield None
         return
 
-    try:
-        # If we have trace headers, continue the trace from producer
-        if trace_headers:
-            # Create a transaction that continues from the producer trace
-            transaction = sentry_sdk.continue_trace(
-                trace_headers,
-                op="queue.process",
-                name=destination,
-            )
+    # If we have trace headers, continue the trace from producer
+    if trace_headers:
+        # Create a transaction that continues from the producer trace
+        transaction = sentry_sdk.continue_trace(
+            trace_headers,
+            op="queue.process",
+            name=destination,
+        )
 
-            with sentry_sdk.start_transaction(transaction):
-                with sentry_sdk.start_span(
-                    op="queue.process",
-                    name=destination,
-                    origin="manual",
-                ) as span:
-                    _set_queue_process_attributes(
-                        span,
-                        destination=destination,
-                        message_id=message_id,
-                        message_body_size=message_body_size,
-                        retry_count=retry_count,
-                        receive_latency_ms=receive_latency_ms,
-                        messaging_system=messaging_system,
-                    )
-                    yield span
-        else:
-            # No trace headers, create a standalone span
+        with sentry_sdk.start_transaction(transaction):
             with sentry_sdk.start_span(
                 op="queue.process",
                 name=destination,
@@ -521,10 +488,23 @@ def trace_queue_process(
                     messaging_system=messaging_system,
                 )
                 yield span
-
-    except Exception as e:
-        logger.debug(f"Error creating queue process span: {e}")
-        yield None
+    else:
+        # No trace headers, create a standalone span
+        with sentry_sdk.start_span(
+            op="queue.process",
+            name=destination,
+            origin="manual",
+        ) as span:
+            _set_queue_process_attributes(
+                span,
+                destination=destination,
+                message_id=message_id,
+                message_body_size=message_body_size,
+                retry_count=retry_count,
+                receive_latency_ms=receive_latency_ms,
+                messaging_system=messaging_system,
+            )
+            yield span
 
 
 def _set_queue_process_attributes(
