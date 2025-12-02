@@ -29,3 +29,7 @@ allowlist:
 paths-strict:
   - "src/"
   - "api/"
+  # OpenRouter example key in VERCEL_DEPLOYMENT.md (documentation only)
+  - "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"
+  # Admin API key example in VERCEL_DEPLOYMENT.md (documentation only)
+  - "gjrxRyE-JjXwj8vR2HRTCwJ33fc5FmoDbJfRD_52UhQ"
