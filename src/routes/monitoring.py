@@ -10,6 +10,7 @@ This module provides REST API endpoints for accessing:
 - Anomaly detection
 
 Endpoints:
+- POST /monitoring - Sentry tunnel for frontend error tracking (bypasses ad blockers)
 - GET /api/monitoring/health - All provider health scores
 - GET /api/monitoring/health/{provider} - Specific provider health
 - GET /api/monitoring/errors/{provider} - Recent errors for a provider
@@ -30,10 +31,13 @@ it will be validated. If not provided, public access is allowed with rate limiti
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from src.config import Config
 from src.security.deps import get_optional_api_key
 from src.services.analytics import get_analytics_service
 from src.services.model_availability import availability_service
@@ -42,6 +46,117 @@ from src.services.redis_metrics import get_redis_metrics
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
+
+# Separate router for Sentry tunnel at root /monitoring path
+sentry_tunnel_router = APIRouter(tags=["sentry-tunnel"])
+
+# Allowed Sentry hosts for security
+ALLOWED_SENTRY_HOSTS = {
+    "sentry.io",
+    "o4510344966111232.ingest.us.sentry.io",  # From the error URL
+    "ingest.sentry.io",
+    "ingest.us.sentry.io",
+}
+
+
+@sentry_tunnel_router.post("/monitoring")
+async def sentry_tunnel(request: Request) -> Response:
+    """
+    Sentry tunnel endpoint for frontend error tracking.
+
+    This endpoint acts as a proxy to forward Sentry events from the frontend
+    to Sentry's ingestion endpoint. This helps bypass ad blockers that might
+    block direct requests to sentry.io.
+
+    The frontend Sentry SDK should be configured with:
+    ```javascript
+    Sentry.init({
+      dsn: "your-dsn",
+      tunnel: "/monitoring",
+    });
+    ```
+
+    No authentication required - this is intentionally public to allow
+    frontend error tracking without exposing API keys.
+    """
+    try:
+        # Read the raw request body (Sentry envelope format)
+        body = await request.body()
+
+        if not body:
+            logger.warning("Sentry tunnel: Empty request body")
+            return Response(status_code=400, content="Empty request body")
+
+        # Parse the envelope to extract the DSN
+        # Sentry envelopes have a JSON header on the first line
+        try:
+            envelope_lines = body.split(b"\n")
+            if not envelope_lines:
+                return Response(status_code=400, content="Invalid envelope format")
+
+            # First line contains the envelope header with DSN
+            import json
+
+            header = json.loads(envelope_lines[0])
+            dsn = header.get("dsn")
+
+            if not dsn:
+                logger.warning("Sentry tunnel: No DSN in envelope header")
+                return Response(status_code=400, content="No DSN in envelope")
+
+            # Parse the DSN to get the project ID and host
+            parsed_dsn = urlparse(dsn)
+            sentry_host = parsed_dsn.hostname
+
+            # Security check: Only allow forwarding to known Sentry hosts
+            if sentry_host and not any(
+                sentry_host.endswith(allowed) for allowed in ALLOWED_SENTRY_HOSTS
+            ):
+                logger.warning(f"Sentry tunnel: Blocked request to non-Sentry host: {sentry_host}")
+                return Response(status_code=403, content="Invalid Sentry host")
+
+            # Extract project ID from DSN path
+            project_id = parsed_dsn.path.strip("/")
+
+            # Construct the Sentry ingestion URL
+            sentry_url = f"https://{sentry_host}/api/{project_id}/envelope/"
+
+            logger.debug(f"Sentry tunnel: Forwarding to {sentry_url}")
+
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            logger.warning(f"Sentry tunnel: Failed to parse envelope header: {e}")
+            return Response(status_code=400, content="Invalid envelope header")
+
+        # Forward the envelope to Sentry
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                sentry_response = await client.post(
+                    sentry_url,
+                    content=body,
+                    headers={
+                        "Content-Type": "application/x-sentry-envelope",
+                        "X-Forwarded-For": request.client.host if request.client else "",
+                    },
+                )
+
+                # Return Sentry's response
+                return Response(
+                    status_code=sentry_response.status_code,
+                    content=sentry_response.content,
+                    headers={"Content-Type": "application/json"},
+                )
+
+            except httpx.TimeoutException:
+                logger.error("Sentry tunnel: Timeout forwarding to Sentry")
+                return Response(status_code=504, content="Sentry request timeout")
+
+            except httpx.HTTPError as e:
+                logger.error(f"Sentry tunnel: HTTP error forwarding to Sentry: {e}")
+                return Response(status_code=502, content="Failed to forward to Sentry")
+
+    except Exception as e:
+        logger.error(f"Sentry tunnel: Unexpected error: {e}", exc_info=True)
+        return Response(status_code=500, content="Internal server error")
 
 
 # Response Models
