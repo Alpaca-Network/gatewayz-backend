@@ -427,6 +427,16 @@ def create_app() -> FastAPI:
     app.include_router(v1_router)
     logger.info("  [OK] v1 router mounted at /v1")
 
+    # Add /models route at root for backwards compatibility
+    # Only mount the specific /models endpoint, not the entire catalog router
+    try:
+        from src.routes.catalog import get_all_models
+
+        app.get("/models", tags=["models"])(get_all_models)
+        logger.info("  [OK] /models route added at root (backwards compatibility)")
+    except ImportError as e:
+        logger.warning(f"  [WARN] Could not add /models route for backwards compatibility: {e}")
+
     # Load non-v1 routes (mounted directly on app)
     logger.info("Loading non-v1 routes...")
     for module_name, display_name in non_v1_routes_to_load:
