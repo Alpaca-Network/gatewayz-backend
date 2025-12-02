@@ -57,10 +57,16 @@ async def sentry_tunnel(request: Request) -> Response:
 ### Security Considerations
 
 1. **Host Validation**: Only forwards to known Sentry domains to prevent SSRF attacks
-2. **No Authentication**: Intentionally public to allow frontend error tracking
-3. **No Rate Limiting**: Should bypass any rate limiting to ensure errors are captured
-4. **Timeout Handling**: 30-second timeout for Sentry requests
-5. **Error Isolation**: Errors in the tunnel don't affect other application functionality
+   - Uses **exact matching** or **proper subdomain checking** (requires dot prefix)
+   - Blocks attacks like `evil-sentry.io` or `malicioussentry.io`
+   - Rejects null/empty hostnames from malformed DSNs
+2. **Input Validation**: Validates envelope format before processing
+   - Rejects non-dict JSON payloads (arrays, strings, numbers, null)
+   - Returns proper 400 errors for malformed requests
+3. **No Authentication**: Intentionally public to allow frontend error tracking
+4. **No Rate Limiting**: Should bypass any rate limiting to ensure errors are captured
+5. **Timeout Handling**: 30-second timeout for Sentry requests
+6. **Error Isolation**: Errors in the tunnel don't affect other application functionality
 
 ### Frontend Configuration
 
@@ -87,6 +93,13 @@ Test cases:
 - `test_sentry_tunnel_invalid_envelope` - Returns 400 for malformed envelopes
 - `test_sentry_tunnel_no_dsn` - Returns 400 when DSN is missing
 - `test_sentry_tunnel_blocked_host` - Returns 403 for non-Sentry hosts
+- `test_sentry_tunnel_ssrf_prevention_suffix_attack` - Blocks `evil-sentry.io` attacks
+- `test_sentry_tunnel_ssrf_prevention_malicious_subdomain` - Blocks `malicioussentry.io` attacks
+- `test_sentry_tunnel_null_hostname` - Rejects malformed DSN with null hostname
+- `test_sentry_tunnel_non_dict_json` - Returns 400 for array JSON
+- `test_sentry_tunnel_string_json` - Returns 400 for string JSON
+- `test_sentry_tunnel_number_json` - Returns 400 for number JSON
+- `test_sentry_tunnel_null_json` - Returns 400 for null JSON
 - `test_sentry_tunnel_valid_envelope` - Forwards valid envelopes to Sentry
 
 ### Manual Testing

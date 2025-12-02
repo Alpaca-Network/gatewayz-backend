@@ -515,6 +515,78 @@ class TestSentryTunnelEndpoint:
         assert response.status_code == 403
         assert "Invalid Sentry host" in response.text
 
+    def test_sentry_tunnel_ssrf_prevention_suffix_attack(self, client: TestClient):
+        """Test that SSRF attacks via suffix matching are blocked (e.g., evil-sentry.io)"""
+        import json
+        # This domain ends with sentry.io but is not a valid Sentry domain
+        envelope = json.dumps({
+            "dsn": "https://key@evil-sentry.io/12345",
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_ssrf_prevention_malicious_subdomain(self, client: TestClient):
+        """Test that SSRF attacks via malicious subdomains are blocked"""
+        import json
+        # This looks like a subdomain but isn't properly formed
+        envelope = json.dumps({
+            "dsn": "https://key@malicioussentry.io/12345",
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_null_hostname(self, client: TestClient):
+        """Test that malformed DSN with null hostname is rejected"""
+        import json
+        # DSN without valid hostname
+        envelope = json.dumps({
+            "dsn": "://key@/12345",  # Malformed URL with no hostname
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_non_dict_json(self, client: TestClient):
+        """Test that non-dict JSON envelope returns 400"""
+        import json
+        # Array instead of object
+        envelope = json.dumps([1, 2, 3]).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_string_json(self, client: TestClient):
+        """Test that string JSON envelope returns 400"""
+        import json
+        # String instead of object
+        envelope = json.dumps("just a string").encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_number_json(self, client: TestClient):
+        """Test that number JSON envelope returns 400"""
+        import json
+        # Number instead of object
+        envelope = json.dumps(12345).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_null_json(self, client: TestClient):
+        """Test that null JSON envelope returns 400"""
+        import json
+        # Null instead of object
+        envelope = json.dumps(None).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
     @pytest.mark.asyncio
     def test_sentry_tunnel_valid_envelope(self, client: TestClient):
         """Test that valid Sentry envelope is forwarded"""

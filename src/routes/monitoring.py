@@ -37,7 +37,6 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from src.config import Config
 from src.security.deps import get_optional_api_key
 from src.services.analytics import get_analytics_service
 from src.services.model_availability import availability_service
@@ -57,6 +56,33 @@ ALLOWED_SENTRY_HOSTS = {
     "ingest.sentry.io",
     "ingest.us.sentry.io",
 }
+
+
+def _is_valid_sentry_host(hostname: str | None) -> bool:
+    """
+    Validate that a hostname is a legitimate Sentry host.
+
+    Uses exact matching or proper subdomain checking to prevent SSRF attacks
+    via malicious domains like evil-sentry.io or malicioussentry.io.
+
+    Args:
+        hostname: The hostname to validate
+
+    Returns:
+        True if hostname is a valid Sentry host, False otherwise
+    """
+    if not hostname:
+        return False
+
+    for allowed in ALLOWED_SENTRY_HOSTS:
+        # Exact match
+        if hostname == allowed:
+            return True
+        # Valid subdomain (must have dot before the allowed domain)
+        if hostname.endswith("." + allowed):
+            return True
+
+    return False
 
 
 @sentry_tunnel_router.post("/monitoring")
@@ -98,6 +124,12 @@ async def sentry_tunnel(request: Request) -> Response:
             import json
 
             header = json.loads(envelope_lines[0])
+
+            # Ensure header is a dict (not a list, string, number, etc.)
+            if not isinstance(header, dict):
+                logger.warning("Sentry tunnel: Envelope header is not a JSON object")
+                return Response(status_code=400, content="Invalid envelope header")
+
             dsn = header.get("dsn")
 
             if not dsn:
@@ -109,9 +141,8 @@ async def sentry_tunnel(request: Request) -> Response:
             sentry_host = parsed_dsn.hostname
 
             # Security check: Only allow forwarding to known Sentry hosts
-            if sentry_host and not any(
-                sentry_host.endswith(allowed) for allowed in ALLOWED_SENTRY_HOSTS
-            ):
+            # Uses exact matching or proper subdomain checking to prevent SSRF
+            if not _is_valid_sentry_host(sentry_host):
                 logger.warning(f"Sentry tunnel: Blocked request to non-Sentry host: {sentry_host}")
                 return Response(status_code=403, content="Invalid Sentry host")
 
