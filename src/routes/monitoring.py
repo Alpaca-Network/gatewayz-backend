@@ -22,15 +22,19 @@ Endpoints:
 - GET /api/monitoring/anomalies - Detected anomalies
 - GET /api/monitoring/trial-analytics - Trial funnel metrics
 - GET /api/monitoring/cost-analysis - Cost breakdown by provider
+
+Note: These endpoints support optional authentication. If an API key is provided,
+it will be validated. If not provided, public access is allowed with rate limiting.
 """
 
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from src.security.deps import get_optional_api_key
 from src.services.analytics import get_analytics_service
 from src.services.model_availability import availability_service
 from src.services.redis_metrics import get_redis_metrics
@@ -89,11 +93,13 @@ class LatencyPercentilesResponse(BaseModel):
 
 # Endpoints
 @router.get("/health", response_model=list[HealthResponse])
-async def get_all_provider_health():
+async def get_all_provider_health(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get health scores for all providers.
 
     Returns a list of provider health scores (0-100) with status classification.
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -123,12 +129,14 @@ async def get_all_provider_health():
 
 
 @router.get("/health/{provider}", response_model=HealthResponse)
-async def get_provider_health(provider: str):
+async def get_provider_health(provider: str, api_key: str | None = Depends(get_optional_api_key)):
     """
     Get health score for a specific provider.
 
     Args:
         provider: Provider name (e.g., "openrouter", "portkey")
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -156,7 +164,8 @@ async def get_provider_health(provider: str):
 @router.get("/errors/{provider}", response_model=list[ErrorResponse])
 async def get_provider_errors(
     provider: str,
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of errors to return")
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of errors to return"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get recent errors for a specific provider.
@@ -164,6 +173,8 @@ async def get_provider_errors(
     Args:
         provider: Provider name
         limit: Maximum number of errors (default: 100, max: 1000)
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -177,13 +188,16 @@ async def get_provider_errors(
 
 @router.get("/stats/realtime", response_model=RealtimeStatsResponse)
 async def get_realtime_stats(
-    hours: int = Query(1, ge=1, le=24, description="Number of hours to look back")
+    hours: int = Query(1, ge=1, le=24, description="Number of hours to look back"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get real-time statistics from Redis for all providers.
 
     Args:
         hours: Number of hours to look back (default: 1, max: 24)
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -235,7 +249,8 @@ async def get_realtime_stats(
 @router.get("/stats/hourly/{provider}")
 async def get_hourly_stats(
     provider: str,
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to look back")
+    hours: int = Query(24, ge=1, le=168, description="Number of hours to look back"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get hourly statistics for a specific provider.
@@ -243,6 +258,8 @@ async def get_hourly_stats(
     Args:
         provider: Provider name
         hours: Number of hours to look back (default: 24, max: 168 = 1 week)
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -259,11 +276,13 @@ async def get_hourly_stats(
 
 
 @router.get("/circuit-breakers", response_model=list[CircuitBreakerResponse])
-async def get_all_circuit_breakers():
+async def get_all_circuit_breakers(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get circuit breaker states for all provider/model combinations.
 
     Returns the current circuit breaker state, availability, and failure counts.
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         # Get all models that have been tracked
@@ -292,12 +311,14 @@ async def get_all_circuit_breakers():
 
 
 @router.get("/circuit-breakers/{provider}", response_model=list[CircuitBreakerResponse])
-async def get_provider_circuit_breakers(provider: str):
+async def get_provider_circuit_breakers(provider: str, api_key: str | None = Depends(get_optional_api_key)):
     """
     Get circuit breaker states for a specific provider's models.
 
     Args:
         provider: Provider name
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         circuit_states = []
@@ -329,7 +350,7 @@ async def get_provider_circuit_breakers(provider: str):
 
 
 @router.get("/providers/comparison")
-async def get_provider_comparison():
+async def get_provider_comparison(api_key: str | None = Depends(get_optional_api_key)):
     """
     Compare all providers across key metrics.
 
@@ -339,6 +360,8 @@ async def get_provider_comparison():
     - Total cost
     - Error rates
     - Health scores
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -358,7 +381,8 @@ async def get_provider_comparison():
 async def get_latency_percentiles(
     provider: str,
     model: str,
-    percentiles: str = Query("50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)")
+    percentiles: str = Query("50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get latency percentiles for a specific provider/model combination.
@@ -367,6 +391,8 @@ async def get_latency_percentiles(
         provider: Provider name
         model: Model ID
         percentiles: Comma-separated percentiles (e.g., "50,95,99")
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         # Parse percentiles
@@ -398,7 +424,7 @@ async def get_latency_percentiles(
 
 
 @router.get("/anomalies")
-async def get_anomalies():
+async def get_anomalies(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get detected anomalies in metrics.
 
@@ -408,6 +434,8 @@ async def get_anomalies():
     - High error rates (>10%)
 
     Returns list of anomalies with severity classification.
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -426,7 +454,7 @@ async def get_anomalies():
 
 
 @router.get("/trial-analytics")
-async def get_trial_analytics():
+async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get trial funnel analytics.
 
@@ -436,6 +464,8 @@ async def get_trial_analytics():
     - Conversions to paid
     - Conversion rates
     - Average time to conversion
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -452,7 +482,8 @@ async def get_trial_analytics():
 
 @router.get("/cost-analysis")
 async def get_cost_analysis(
-    days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
+    days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get cost breakdown by provider.
@@ -465,6 +496,8 @@ async def get_cost_analysis(
     - Cost per request
     - Total requests
     - Cost trends
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         from datetime import timedelta
@@ -488,7 +521,8 @@ async def get_cost_analysis(
 @router.get("/latency-trends/{provider}")
 async def get_latency_trends(
     provider: str,
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze")
+    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get latency trends for a provider over time.
@@ -501,6 +535,8 @@ async def get_latency_trends(
     - Hourly average latency
     - P95 and P99 percentiles
     - Latency trends over time
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -517,7 +553,8 @@ async def get_latency_trends(
 
 @router.get("/error-rates")
 async def get_error_rates(
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze")
+    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get error rates broken down by model.
@@ -529,6 +566,8 @@ async def get_error_rates(
     - Error rate per model
     - Total requests and failures
     - Provider information
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -544,7 +583,7 @@ async def get_error_rates(
 
 
 @router.get("/token-efficiency/{provider}/{model}")
-async def get_token_efficiency(provider: str, model: str):
+async def get_token_efficiency(provider: str, model: str, api_key: str | None = Depends(get_optional_api_key)):
     """
     Get token efficiency metrics for a provider/model.
 
@@ -557,6 +596,8 @@ async def get_token_efficiency(provider: str, model: str):
     - Tokens per request
     - Cost per request
     - Average input/output tokens
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
