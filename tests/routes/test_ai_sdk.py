@@ -410,6 +410,67 @@ class TestAISDKModelRouting:
         assert call_args[0][1] == "openrouter/auto"
 
 
+class TestAISDKErrorMessages:
+    """Tests for proper error messages based on the service that failed"""
+
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", False)
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai")
+    def test_openrouter_missing_api_key_shows_openrouter_error(self, mock_request):
+        """Test that missing OpenRouter API key shows OpenRouter-specific error message"""
+        # Simulate the error raised by get_openrouter_client() when API key is missing
+        mock_request.side_effect = ValueError("OpenRouter API key not configured")
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 503
+        # Should mention OpenRouter, not AI SDK
+        assert "openrouter" in response.text.lower()
+        assert "ai sdk" not in response.text.lower()
+
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", False)
+    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    def test_ai_sdk_missing_api_key_shows_ai_sdk_error(self, mock_validate):
+        """Test that missing AI SDK API key shows AI SDK-specific error message"""
+        mock_validate.side_effect = ValueError("AI_SDK_API_KEY not configured")
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openai/gpt-4o",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 503
+        # Should mention AI SDK, not OpenRouter
+        assert "ai sdk" in response.text.lower()
+
+    @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", True)
+    @patch("src.routes.ai_sdk.sentry_sdk")
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai")
+    def test_openrouter_error_captured_to_sentry(self, mock_request, mock_sentry):
+        """Test that OpenRouter configuration errors are captured to Sentry"""
+        mock_request.side_effect = ValueError("OpenRouter API key not configured")
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 503
+        # Verify error was captured to Sentry
+        mock_sentry.capture_exception.assert_called_once()
+
+
 class TestAISDKSentryIntegration:
     """Tests for Sentry error capture in AI SDK endpoint"""
 
