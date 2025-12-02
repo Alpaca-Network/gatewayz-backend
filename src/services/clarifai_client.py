@@ -1,12 +1,20 @@
 """
 Clarifai client for LLM inference integration.
 
-This client uses the official Clarifai Python SDK to interact with language models
-available on the Clarifai platform. It supports both standard LLM models and
-specialized models for reasoning and multimodal tasks.
+This client uses Clarifai's OpenAI-compatible API endpoint to interact with
+language models available on the Clarifai platform. It supports both standard
+LLM models and specialized models for reasoning and multimodal tasks.
 
 Clarifai provides access to models like Claude, GPT-4, Llama, Mistral, and others
-through a unified API.
+through a unified OpenAI-compatible API.
+
+API Documentation: https://docs.clarifai.com/compute/inference/open-ai/
+
+Model ID Format:
+    Models should be specified using Clarifai's URL format:
+    - Full URL: https://clarifai.com/{user_id}/{app_id}/models/{model_id}
+    - Abbreviated: {user_id}/{app_id}/models/{model_id}
+    Example: "openai/chat-completion/models/gpt-4o"
 """
 
 import logging
@@ -37,7 +45,7 @@ def make_clarifai_request_openai(messages, model, **kwargs):
 
     Args:
         messages: List of message objects in OpenAI format
-        model: Model ID (e.g., "claude-3.5-sonnet" or with user/app prefix)
+        model: Model ID in Clarifai format (e.g., "openai/chat-completion/models/gpt-4o")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
 
     Returns:
@@ -66,7 +74,7 @@ def make_clarifai_request_openai_stream(messages, model, **kwargs):
 
     Args:
         messages: List of message objects in OpenAI format
-        model: Model ID (e.g., "claude-3.5-sonnet" or with user/app prefix)
+        model: Model ID in Clarifai format (e.g., "openai/chat-completion/models/gpt-4o")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
 
     Returns:
