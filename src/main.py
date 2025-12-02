@@ -413,6 +413,16 @@ def create_app() -> FastAPI:
         logger.warning(f"   [FAIL] Failed: {failed_count}")
     logger.info(f"   Total: {loaded_count + failed_count}")
 
+    # ==================== Sentry Tunnel Router ====================
+    # Load Sentry tunnel router separately (at root /monitoring path)
+    try:
+        from src.routes.monitoring import sentry_tunnel_router
+
+        app.include_router(sentry_tunnel_router)
+        logger.info("  [OK] Sentry Tunnel (POST /monitoring)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
+
     # ==================== Exception Handler ====================
 
     @app.exception_handler(Exception)
