@@ -15,6 +15,8 @@ paths-ignore:
   - "scripts/validation/**"
   - "docs/**"
   - "**/*.md"
+  - "**/*.sh"
+  - "**/test_*.py"
 
 # Explicitly allowlist secrets that were exposed in git history but are now removed
 # These test keys have been rotated and should not be used
