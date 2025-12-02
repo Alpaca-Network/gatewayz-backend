@@ -25,7 +25,6 @@ def test_openrouter_auto():
 
     # Try to import required modules
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from src.services.openrouter_client import make_openrouter_request_openai
         print("✅ Successfully imported OpenRouter client")
     except ImportError as e:
@@ -85,7 +84,6 @@ def test_code_only():
     print("=" * 80)
 
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from src.services.model_transformations import transform_model_id, detect_provider_from_model_id
 
         # Test transformation
