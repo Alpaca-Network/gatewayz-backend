@@ -717,6 +717,65 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "llama3.1-8b": "llama3.1-8b",
             "llama3.1-405b": "llama3.1-405b",
         },
+        "cloudflare-workers-ai": {
+            # Cloudflare Workers AI uses @cf/ prefix for model names
+            # OpenAI-compatible API: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
+            # Documentation: https://developers.cloudflare.com/workers-ai/
+            #
+            # GPT-OSS models from OpenAI
+            "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "gpt-oss/gpt-120b": "@cf/openai/gpt-oss-120b",
+            "gpt-oss/gpt-20b": "@cf/openai/gpt-oss-20b",
+            # Meta Llama models
+            "meta-llama/llama-4-scout-17b": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "meta-llama/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "meta-llama/llama-3.3-70b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "meta-llama/llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "meta-llama/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "meta-llama/llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "meta-llama/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
+            "meta-llama/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
+            "meta-llama/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+            "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.2-3b": "@cf/meta/llama-3.2-3b-instruct",
+            "llama-3.2-1b": "@cf/meta/llama-3.2-1b-instruct",
+            # Qwen models
+            "qwen/qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "qwen/qwq-32b": "@cf/qwen/qwq-32b",
+            "qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            "qwq-32b": "@cf/qwen/qwq-32b",
+            "qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            # Google Gemma models
+            "google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+            "gemma-3-12b": "@cf/google/gemma-3-12b-it",
+            # Mistral models
+            "mistralai/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "mistral-small-3.1-24b": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            # DeepSeek models
+            "deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            "deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            # Direct @cf/ model names (passthrough)
+            "@cf/openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "@cf/openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "@cf/meta/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/meta/llama-3.1-8b-instruct-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+            "@cf/meta/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/meta/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
+            "@cf/meta/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
+            "@cf/meta/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+            "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "@cf/qwen/qwq-32b": "@cf/qwen/qwq-32b",
+            "@cf/qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            "@cf/google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+            "@cf/mistral/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "@cf/deepseek/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+        },
     }
 
     return mappings.get(provider, {})
@@ -917,6 +976,11 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
             return "openrouter"
 
+    # Check for Cloudflare Workers AI models (use @cf/ prefix)
+    if model_id.startswith("@cf/"):
+        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
+        return "cloudflare-workers-ai"
+
     # Check all mappings to see if this model exists
     for provider in [
         "fireworks",
@@ -937,6 +1001,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "fal",
         "xai",
         "groq",
+        "cloudflare-workers-ai",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
