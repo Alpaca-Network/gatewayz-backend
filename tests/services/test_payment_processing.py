@@ -377,12 +377,14 @@ class TestPaymentIntents:
 class TestWebhooks:
     """Test webhook processing"""
 
+    @patch('src.services.payments.is_event_processed', return_value=False)
     @patch('stripe.Webhook.construct_event')
     @patch.object(StripeService, '_handle_checkout_completed')
     def test_handle_checkout_completed_webhook(
         self,
         mock_handle_checkout,
         mock_construct_event,
+        mock_is_processed,
         stripe_service
     ):
         """Test checkout.session.completed webhook"""
@@ -419,6 +421,7 @@ class TestWebhooks:
         with pytest.raises(ValueError, match="Invalid signature"):
             stripe_service.handle_webhook(b'payload', 'bad_signature')
 
+    @patch('src.services.payments.is_event_processed', return_value=False)
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.add_credits_to_user')
     @patch('src.services.payments.update_payment_status')
@@ -427,6 +430,7 @@ class TestWebhooks:
         mock_update_payment,
         mock_add_credits,
         mock_construct_event,
+        mock_is_processed,
         stripe_service
     ):
         """Test checkout completed webhook adds credits to user"""
@@ -731,6 +735,7 @@ class TestWebhooks:
             stripe_session_id='cs_lookup_only',
         )
 
+    @patch('src.services.payments.is_event_processed', return_value=False)
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.update_payment_status')
@@ -741,6 +746,7 @@ class TestWebhooks:
         mock_update_payment,
         mock_get_payment,
         mock_construct_event,
+        mock_is_processed,
         stripe_service
     ):
         """Test payment_intent.succeeded webhook"""
@@ -774,6 +780,7 @@ class TestWebhooks:
         )
         mock_add_credits.assert_called_once()
 
+    @patch('src.services.payments.is_event_processed', return_value=False)
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.update_payment_status')
@@ -782,6 +789,7 @@ class TestWebhooks:
         mock_update_payment,
         mock_get_payment,
         mock_construct_event,
+        mock_is_processed,
         stripe_service
     ):
         """Test payment_intent.payment_failed webhook"""
@@ -936,6 +944,7 @@ class TestSessionRetrieval:
 class TestPaymentIntegration:
     """Integration tests for complete payment flows"""
 
+    @patch('src.services.payments.is_event_processed', return_value=False)
     @patch('src.services.payments.get_user_by_id')
     @patch('src.services.payments.create_payment')
     @patch('stripe.checkout.Session.create')
@@ -950,6 +959,7 @@ class TestPaymentIntegration:
         mock_stripe_create,
         mock_create_payment,
         mock_get_user,
+        mock_is_processed,
         stripe_service,
         mock_user,
         mock_payment
