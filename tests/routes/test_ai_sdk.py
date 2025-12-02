@@ -292,57 +292,60 @@ class TestAISDKConfiguration:
         assert len(Config.AI_SDK_API_KEY) > 0
 
 
-class TestAISDKModelTransformation:
-    """Tests for AI SDK model transformation"""
+class TestAISDKModelRouting:
+    """Tests for AI SDK model routing (openrouter/* models go directly to OpenRouter)"""
 
-    def test_openrouter_auto_transforms_to_fallback(self):
-        """Test that openrouter/auto model is transformed to a valid fallback"""
-        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+    def test_is_openrouter_model_auto(self):
+        """Test that openrouter/auto is detected correctly"""
+        from src.routes.ai_sdk import _is_openrouter_model
 
-        result = _transform_model_for_ai_sdk("openrouter/auto")
-        assert result == "openai/gpt-4o-mini"
+        assert _is_openrouter_model("openrouter/auto") is True
 
-    def test_openrouter_auto_case_insensitive(self):
-        """Test that openrouter/auto transformation is case insensitive"""
-        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+    def test_is_openrouter_model_other_openrouter_models(self):
+        """Test that other openrouter/* models are detected"""
+        from src.routes.ai_sdk import _is_openrouter_model
 
-        result = _transform_model_for_ai_sdk("OpenRouter/Auto")
-        assert result == "openai/gpt-4o-mini"
+        assert _is_openrouter_model("openrouter/quasar-alpha") is True
+        assert _is_openrouter_model("openrouter/some-model") is True
 
-    def test_regular_model_unchanged(self):
-        """Test that regular models are not transformed"""
-        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+    def test_is_openrouter_model_case_insensitive(self):
+        """Test that openrouter/* detection is case insensitive"""
+        from src.routes.ai_sdk import _is_openrouter_model
 
-        result = _transform_model_for_ai_sdk("openai/gpt-4o")
-        assert result == "openai/gpt-4o"
+        assert _is_openrouter_model("OpenRouter/Auto") is True
+        assert _is_openrouter_model("OPENROUTER/AUTO") is True
+        assert _is_openrouter_model("OpenRouter/Quasar-Alpha") is True
 
-    def test_empty_model_unchanged(self):
-        """Test that empty model returns as-is"""
-        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+    def test_is_openrouter_model_false_for_regular_models(self):
+        """Test that regular models are not detected as openrouter/*"""
+        from src.routes.ai_sdk import _is_openrouter_model
 
-        result = _transform_model_for_ai_sdk("")
-        assert result == ""
+        assert _is_openrouter_model("openai/gpt-4o") is False
+        assert _is_openrouter_model("anthropic/claude-3") is False
+        assert _is_openrouter_model("google/gemini-pro") is False
 
-    def test_none_model_returns_none(self):
-        """Test that None model returns None"""
-        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+    def test_is_openrouter_model_false_for_empty(self):
+        """Test that empty model returns False"""
+        from src.routes.ai_sdk import _is_openrouter_model
 
-        result = _transform_model_for_ai_sdk(None)
-        assert result is None
+        assert _is_openrouter_model("") is False
 
-    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
-    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
-    @patch("src.routes.ai_sdk.process_ai_sdk_response")
-    def test_openrouter_auto_request_uses_fallback(
-        self, mock_process, mock_request, mock_validate
+    def test_is_openrouter_model_false_for_none(self):
+        """Test that None model returns False"""
+        from src.routes.ai_sdk import _is_openrouter_model
+
+        assert _is_openrouter_model(None) is False
+
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai")
+    @patch("src.routes.ai_sdk.process_openrouter_response")
+    def test_openrouter_auto_routes_to_openrouter(
+        self, mock_process, mock_request
     ):
-        """Test that openrouter/auto request uses the transformed model"""
-        mock_validate.return_value = "test-api-key"
-
+        """Test that openrouter/auto is routed directly to OpenRouter"""
         mock_response = MagicMock()
         mock_response.choices = [
             MagicMock(
-                message=MagicMock(role="assistant", content="Hello!"),
+                message=MagicMock(role="assistant", content="Hello from OpenRouter!"),
                 finish_reason="stop",
             )
         ]
@@ -354,7 +357,7 @@ class TestAISDKModelTransformation:
         mock_process.return_value = {
             "choices": [
                 {
-                    "message": {"role": "assistant", "content": "Hello!"},
+                    "message": {"role": "assistant", "content": "Hello from OpenRouter!"},
                     "finish_reason": "stop",
                 }
             ],
@@ -374,10 +377,37 @@ class TestAISDKModelTransformation:
         )
 
         assert response.status_code == 200
-        # Verify that the request was made with the transformed model
+        # Verify that the request was made to OpenRouter with original model
         mock_request.assert_called_once()
         call_args = mock_request.call_args
-        assert call_args[0][1] == "openai/gpt-4o-mini"
+        assert call_args[0][1] == "openrouter/auto"
+
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai_stream")
+    def test_openrouter_auto_streaming_routes_to_openrouter(self, mock_stream):
+        """Test that openrouter/auto streaming is routed directly to OpenRouter"""
+        mock_chunk1 = MagicMock()
+        mock_chunk1.choices = [MagicMock(delta=MagicMock(content="Hello"))]
+
+        mock_chunk2 = MagicMock()
+        mock_chunk2.choices = [MagicMock(delta=MagicMock(content=" from OpenRouter!"))]
+
+        mock_stream.return_value = iter([mock_chunk1, mock_chunk2])
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+        # Verify that the request was made to OpenRouter
+        mock_stream.assert_called_once()
+        call_args = mock_stream.call_args
+        assert call_args[0][1] == "openrouter/auto"
 
 
 class TestAISDKSentryIntegration:
