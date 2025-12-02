@@ -451,3 +451,19 @@ def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
         base_url=base_url,
         api_key=Config.CLOUDFLARE_API_TOKEN,
     )
+
+
+def get_akash_pooled_client() -> OpenAI:
+    """Get pooled client for Akash ML.
+
+    Akash ML provides an OpenAI-compatible API endpoint.
+    See: https://api.akashml.com/v1
+    """
+    if not Config.AKASH_API_KEY:
+        raise ValueError("Akash API key not configured")
+
+    return get_pooled_client(
+        provider="akash",
+        base_url="https://api.akashml.com/v1",
+        api_key=Config.AKASH_API_KEY,
+    )
