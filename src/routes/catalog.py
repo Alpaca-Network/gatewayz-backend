@@ -185,7 +185,7 @@ def merge_models_by_slug(*model_lists: List[dict]) -> List[dict]:
 
 
 # Provider and Models Information Endpoints
-@router.get("/v1/provider", tags=["providers"])
+@router.get("/provider", tags=["providers"])
 async def get_providers(
     moderated_only: bool = Query(False, description="Filter for moderated providers only"),
     limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
@@ -1040,7 +1040,7 @@ async def get_developer_models(
 # ==================== NEW: Gateway & Provider Statistics Endpoints ====================
 
 
-@router.get("/v1/provider/{provider_name}/stats", tags=["statistics"])
+@router.get("/provider/{provider_name}/stats", tags=["statistics"])
 async def get_provider_statistics(
     provider_name: str,
     gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
@@ -1097,7 +1097,7 @@ async def get_provider_statistics(
         raise HTTPException(status_code=500, detail=f"Failed to get provider statistics: {str(e)}")
 
 
-@router.get("/v1/gateway/{gateway}/stats", tags=["statistics"])
+@router.get("/gateway/{gateway}/stats", tags=["statistics"])
 async def get_gateway_statistics(
     gateway: str, time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL)
 ):
@@ -1225,7 +1225,7 @@ async def get_trending_models_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get trending models: {str(e)}")
 
 
-@router.get("/v1/gateways/summary", tags=["statistics"])
+@router.get("/gateways/summary", tags=["statistics"])
 async def get_all_gateways_summary_endpoint(
     time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL)
 ):
@@ -1267,7 +1267,7 @@ async def get_all_gateways_summary_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get gateways summary: {str(e)}")
 
 
-@router.get("/v1/provider/{provider_name}/top-models", tags=["statistics"])
+@router.get("/provider/{provider_name}/top-models", tags=["statistics"])
 async def get_provider_top_models_endpoint(
     provider_name: str,
     limit: int = Query(5, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=20),
@@ -1574,7 +1574,6 @@ async def batch_compare_models(
 
 
 @router.get("/models", tags=["models"])
-@router.get("/v1/models", tags=["models"])
 async def get_all_models(
     provider: Optional[str] = Query(None, description="Filter models by provider"),
     is_private: Optional[bool] = Query(
@@ -1604,7 +1603,7 @@ async def get_all_models(
     )
 
 
-@router.get("/v1/models/trending", tags=["statistics"])
+@router.get("/models/trending", tags=["statistics"])
 async def get_trending_models_api(
     gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
@@ -1631,7 +1630,7 @@ async def batch_compare_models_api(
     return await batch_compare_models(model_ids=model_ids, criteria=criteria)
 
 
-@router.get("/v1/models/{provider_name}/{model_name:path}/compare", tags=["comparison"])
+@router.get("/models/{provider_name}/{model_name:path}/compare", tags=["comparison"])
 async def compare_model_gateways_api(
     provider_name: str,
     model_name: str,
@@ -1644,7 +1643,7 @@ async def compare_model_gateways_api(
     )
 
 
-@router.get("/v1/models/{provider_name}/{model_name:path}", tags=["models"])
+@router.get("/models/{provider_name}/{model_name:path}", tags=["models"])
 async def get_specific_model_api(
     provider_name: str,
     model_name: str,
@@ -1681,7 +1680,7 @@ async def get_specific_model_api_legacy(
     )
 
 
-@router.get("/v1/models/{developer_name}", tags=["models"])
+@router.get("/models/{developer_name}", tags=["models"])
 async def get_developer_models_api(
     developer_name: str,
     limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
@@ -1698,7 +1697,7 @@ async def get_developer_models_api(
     )
 
 
-@router.get("/v1/models/search", tags=["models"])
+@router.get("/models/search", tags=["models"])
 async def search_models(
     q: Optional[str] = Query(
         None, description="Search query (searches in model name, provider, description)"
@@ -2234,7 +2233,7 @@ async def check_model_on_modelz(
 
 
 # HuggingFace Hub SDK Discovery Endpoints
-@router.get("/v1/huggingface/discovery", tags=["huggingface-discovery"])
+@router.get("/huggingface/discovery", tags=["huggingface-discovery"])
 async def discover_huggingface_models(
     task: Optional[str] = Query(
         "text-generation",
@@ -2289,7 +2288,7 @@ async def discover_huggingface_models(
         )
 
 
-@router.get("/v1/huggingface/search", tags=["huggingface-discovery"])
+@router.get("/huggingface/search", tags=["huggingface-discovery"])
 async def search_huggingface_models_endpoint(
     q: str = Query(..., description="Search query (model name, description, etc.)", min_length=1),
     task: Optional[str] = Query(None, description="Optional task filter"),
@@ -2327,7 +2326,7 @@ async def search_huggingface_models_endpoint(
         )
 
 
-@router.get("/v1/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
+@router.get("/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
 async def get_huggingface_model_details_endpoint(
     model_id: str,
 ):
@@ -2365,7 +2364,7 @@ async def get_huggingface_model_details_endpoint(
         )
 
 
-@router.get("/v1/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
+@router.get("/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
 async def get_huggingface_model_card_endpoint(
     model_id: str,
 ):
@@ -2404,7 +2403,7 @@ async def get_huggingface_model_card_endpoint(
         )
 
 
-@router.get("/v1/huggingface/author/{author}/models", tags=["huggingface-discovery"])
+@router.get("/huggingface/author/{author}/models", tags=["huggingface-discovery"])
 async def list_author_models_endpoint(
     author: str,
     limit: int = Query(50, description="Number of models to return", ge=1, le=500),
@@ -2436,7 +2435,7 @@ async def list_author_models_endpoint(
         )
 
 
-@router.get("/v1/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
+@router.get("/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
 async def get_model_files_endpoint(
     model_id: str,
 ):

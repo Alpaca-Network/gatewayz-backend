@@ -1028,10 +1028,10 @@ async def stream_generator(
 
 
 # Log route registration for debugging
-logger.info("📍 Registering /v1/chat/completions endpoint")
+logger.info("📍 Registering /chat/completions endpoint")
 
 
-@router.post("/v1/chat/completions", tags=["chat"])
+@router.post("/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
     req: ProxyRequest,
@@ -2042,7 +2042,7 @@ async def chat_completions(
         )
 
 
-@router.post("/v1/responses", tags=["chat"])
+@router.post("/responses", tags=["chat"])
 @traced(name="unified_responses", type="llm")
 async def unified_responses(
     req: ResponseRequest,

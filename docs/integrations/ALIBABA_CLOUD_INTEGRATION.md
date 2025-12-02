@@ -121,9 +121,10 @@ response = requests.post(
 ```python
 from openai import OpenAI
 
+# Both URL formats work - the SDK automatically appends /v1 to the base URL
 client = OpenAI(
     api_key="YOUR_GATEWAYZ_API_KEY",
-    base_url="http://localhost:8000/v1"
+    base_url="http://localhost:8000"  # or "http://localhost:8000/v1"
 )
 
 response = client.chat.completions.create(

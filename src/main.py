@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -135,6 +135,11 @@ def create_app() -> FastAPI:
         version="2.0.3",  # Multi-sort strategy for 1204 HuggingFace models + auto :hf-inference suffix
         lifespan=lifespan,
     )
+
+    # Create v1 router for OpenAI-compatible endpoints
+    # This allows users to use base_url="https://api.gatewayz.ai" (SDK appends /v1)
+    # or base_url="https://api.gatewayz.ai/v1" directly
+    v1_router = APIRouter(prefix="/v1")
 
     # Add CORS middleware
     # Note: When allow_credentials=True, allow_origins cannot be ["*"]
@@ -303,19 +308,25 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
-    # Define all routes to load
-    # IMPORTANT: chat & messages must be before catalog to avoid /v1/* being caught by /model/{provider}/{model}
-    routes_to_load = [
-        ("health", "Health Check"),
+    # Define v1 routes (OpenAI-compatible API endpoints)
+    # These routes are mounted under /v1 prefix via v1_router
+    # IMPORTANT: chat & messages must be before catalog to avoid /* being caught by /model/{provider}/{model}
+    v1_routes_to_load = [
+        ("chat", "Chat Completions"),
+        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
+        ("images", "Image Generation"),  # Image generation endpoints
+        ("catalog", "Model Catalog"),
+        ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
+    ]
+
+    # Define non-v1 routes (loaded directly on app without prefix)
+    non_v1_routes_to_load = [
+        ("health", "Health Check"),
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
-        ("chat", "Chat Completions"),  # Moved before catalog
-        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
-        ("images", "Image Generation"),  # Image generation endpoints
-        ("catalog", "Model Catalog"),
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
@@ -324,7 +335,6 @@ def create_app() -> FastAPI:
             "optimization_monitor",
             "Optimization Monitoring",
         ),  # Connection pool, cache, and priority stats
-        ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("error_monitor", "Error Monitoring"),  # Error detection and auto-fix system
         ("root", "Root/Home"),
         ("auth", "Authentication"),
@@ -351,7 +361,9 @@ def create_app() -> FastAPI:
     loaded_count = 0
     failed_count = 0
 
-    for module_name, display_name in routes_to_load:
+    def load_route(module_name: str, display_name: str, target_router):
+        """Load a route module and attach it to the target router."""
+        nonlocal loaded_count, failed_count
         try:
             # Import the route module
             logger.debug(f"  [LOADING] Importing src.routes.{module_name}...")
@@ -363,8 +375,8 @@ def create_app() -> FastAPI:
             router = module.router
             logger.debug(f"  [LOADING] Router found for {module_name}")
 
-            # Include the router (all routes now follow clean REST patterns)
-            app.include_router(router)
+            # Include the router
+            target_router.include_router(router)
             logger.debug(f"  [LOADING] Router included for {module_name}")
 
             # Log success
@@ -405,6 +417,20 @@ def create_app() -> FastAPI:
 
             logger.error(f"       Traceback:\n{traceback.format_exc()}")
             failed_count += 1
+
+    # Load v1 routes (mounted under /v1 prefix)
+    logger.info("Loading v1 API routes (OpenAI-compatible)...")
+    for module_name, display_name in v1_routes_to_load:
+        load_route(module_name, display_name, v1_router)
+
+    # Mount v1 router on app
+    app.include_router(v1_router)
+    logger.info("  [OK] v1 router mounted at /v1")
+
+    # Load non-v1 routes (mounted directly on app)
+    logger.info("Loading non-v1 routes...")
+    for module_name, display_name in non_v1_routes_to_load:
+        load_route(module_name, display_name, app)
 
     # Log summary
     logger.info("\nRoute Loading Summary:")

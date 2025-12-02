@@ -22,7 +22,8 @@ def client():
     from src.security.deps import get_api_key
 
     app = FastAPI()
-    app.include_router(api.router)
+    # Mount router with /v1 prefix to match production configuration
+    app.include_router(api.router, prefix="/v1")
 
     # Override the get_api_key dependency to bypass authentication
     async def mock_get_api_key() -> str:

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/v1/images/generations", response_model=ImageGenerationResponse, tags=["images"])
+@router.post("/images/generations", response_model=ImageGenerationResponse, tags=["images"])
 async def generate_images(
     req: ImageGenerationRequest,
     background_tasks: BackgroundTasks,
