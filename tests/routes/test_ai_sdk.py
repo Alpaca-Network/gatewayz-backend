@@ -292,6 +292,94 @@ class TestAISDKConfiguration:
         assert len(Config.AI_SDK_API_KEY) > 0
 
 
+class TestAISDKModelTransformation:
+    """Tests for AI SDK model transformation"""
+
+    def test_openrouter_auto_transforms_to_fallback(self):
+        """Test that openrouter/auto model is transformed to a valid fallback"""
+        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+
+        result = _transform_model_for_ai_sdk("openrouter/auto")
+        assert result == "openai/gpt-4o-mini"
+
+    def test_openrouter_auto_case_insensitive(self):
+        """Test that openrouter/auto transformation is case insensitive"""
+        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+
+        result = _transform_model_for_ai_sdk("OpenRouter/Auto")
+        assert result == "openai/gpt-4o-mini"
+
+    def test_regular_model_unchanged(self):
+        """Test that regular models are not transformed"""
+        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+
+        result = _transform_model_for_ai_sdk("openai/gpt-4o")
+        assert result == "openai/gpt-4o"
+
+    def test_empty_model_unchanged(self):
+        """Test that empty model returns as-is"""
+        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+
+        result = _transform_model_for_ai_sdk("")
+        assert result == ""
+
+    def test_none_model_returns_none(self):
+        """Test that None model returns None"""
+        from src.routes.ai_sdk import _transform_model_for_ai_sdk
+
+        result = _transform_model_for_ai_sdk(None)
+        assert result is None
+
+    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
+    @patch("src.routes.ai_sdk.process_ai_sdk_response")
+    def test_openrouter_auto_request_uses_fallback(
+        self, mock_process, mock_request, mock_validate
+    ):
+        """Test that openrouter/auto request uses the transformed model"""
+        mock_validate.return_value = "test-api-key"
+
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(role="assistant", content="Hello!"),
+                finish_reason="stop",
+            )
+        ]
+        mock_response.usage = MagicMock(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15
+        )
+        mock_request.return_value = mock_response
+
+        mock_process.return_value = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 200
+        # Verify that the request was made with the transformed model
+        mock_request.assert_called_once()
+        call_args = mock_request.call_args
+        assert call_args[0][1] == "openai/gpt-4o-mini"
+
+
 class TestAISDKSentryIntegration:
     """Tests for Sentry error capture in AI SDK endpoint"""
 

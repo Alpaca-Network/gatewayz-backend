@@ -24,6 +24,7 @@ from src.services.ai_sdk_client import (
     process_ai_sdk_response,
     validate_ai_sdk_api_key,
 )
+from src.services.model_transformations import OPENROUTER_AUTO_FALLBACKS
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -103,6 +104,32 @@ def _build_request_kwargs(request: AISDKChatRequest) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+def _transform_model_for_ai_sdk(model: str) -> str:
+    """Transform model ID for AI SDK/Vercel AI Gateway compatibility.
+
+    The Vercel AI Gateway doesn't support OpenRouter-specific models like
+    'openrouter/auto'. This function maps such models to appropriate fallbacks.
+
+    Args:
+        model: The requested model ID
+
+    Returns:
+        str: The transformed model ID suitable for Vercel AI Gateway
+    """
+    if not model:
+        return model
+
+    model_lower = model.lower()
+
+    # Handle openrouter/auto - map to vercel-ai-gateway fallback
+    if model_lower == "openrouter/auto":
+        fallback = OPENROUTER_AUTO_FALLBACKS.get("vercel-ai-gateway", "openai/gpt-4o-mini")
+        logger.info(f"Transforming 'openrouter/auto' to '{fallback}' for Vercel AI Gateway")
+        return fallback
+
+    return model
+
+
 @router.post("/api/chat/ai-sdk-completions", tags=["ai-sdk"], response_model=AISDKChatResponse)
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
 async def ai_sdk_chat_completion(request: AISDKChatRequest):
@@ -168,9 +195,12 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         # Validate API key is configured
         validate_ai_sdk_api_key()
 
+        # Transform model ID for Vercel AI Gateway compatibility
+        model = _transform_model_for_ai_sdk(request.model)
+
         # Handle streaming requests
         if request.stream:
-            return await _handle_ai_sdk_stream(request)
+            return await _handle_ai_sdk_stream(request, model)
 
         # Build kwargs for API request
         kwargs = _build_request_kwargs(request)
@@ -180,7 +210,7 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
 
         # Make request to AI SDK endpoint
         response = await asyncio.to_thread(
-            make_ai_sdk_request_openai, messages, request.model, **kwargs
+            make_ai_sdk_request_openai, messages, model, **kwargs
         )
 
         # Process and return response
@@ -206,11 +236,12 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         )
 
 
-async def _handle_ai_sdk_stream(request: AISDKChatRequest):
+async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
     """Handle streaming responses for AI SDK endpoint.
 
     Args:
         request: AISDKChatRequest with stream=True
+        model: The transformed model ID to use
 
     Returns:
         StreamingResponse with server-sent events
@@ -229,7 +260,7 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
 
             # Make streaming request
             stream = await asyncio.to_thread(
-                make_ai_sdk_request_openai_stream, messages, request.model, **kwargs
+                make_ai_sdk_request_openai_stream, messages, model, **kwargs
             )
 
             # Stream response chunks
