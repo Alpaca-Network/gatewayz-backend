@@ -25,6 +25,7 @@ from src.services.ai_sdk_client import (
     validate_ai_sdk_api_key,
 )
 from src.services.openrouter_client import (
+    get_openrouter_client,
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream,
     process_openrouter_response,
@@ -233,15 +234,22 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         processed = await asyncio.to_thread(process_ai_sdk_response, response)
         return processed
 
+    except HTTPException:
+        # Re-raise HTTPExceptions without modification (e.g., from _handle_openrouter_stream)
+        raise
     except ValueError as e:
-        logger.error(f"AI SDK configuration error: {e}", exc_info=True)
+        error_message = str(e).lower()
+        # Determine if this is an OpenRouter or AI SDK configuration error
+        if "openrouter" in error_message:
+            logger.error(f"OpenRouter configuration error: {e}", exc_info=True)
+            detail = "OpenRouter service is not configured. Please contact support."
+        else:
+            logger.error(f"AI SDK configuration error: {e}", exc_info=True)
+            detail = "AI SDK service is not configured. Please contact support."
         # Capture configuration errors to Sentry (503 errors)
         if SENTRY_AVAILABLE:
             sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=503,
-            detail="AI SDK service is not configured. Please contact support.",
-        )
+        raise HTTPException(status_code=503, detail=detail)
     except Exception as e:
         logger.error(f"AI SDK chat completion error: {e}", exc_info=True)
         # Capture all other errors to Sentry (500 errors)
@@ -262,7 +270,22 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
 
     Returns:
         StreamingResponse with server-sent events
+
+    Raises:
+        HTTPException: If OpenRouter API key is not configured (503)
     """
+    # Validate OpenRouter API key before starting the stream
+    # This ensures we return HTTP 503 instead of streaming an error
+    try:
+        get_openrouter_client()
+    except ValueError as e:
+        logger.error(f"OpenRouter configuration error: {e}", exc_info=True)
+        if SENTRY_AVAILABLE:
+            sentry_sdk.capture_exception(e)
+        raise HTTPException(
+            status_code=503,
+            detail="OpenRouter service is not configured. Please contact support.",
+        )
 
     async def stream_response():
         try:
@@ -287,6 +310,20 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
             yield f"data: {json.dumps(completion_data)}\n\n"
             yield "data: [DONE]\n\n"
 
+        except ValueError as e:
+            error_message = str(e).lower()
+            # Determine if this is an OpenRouter configuration error
+            if "openrouter" in error_message:
+                logger.error(f"OpenRouter configuration error: {e}", exc_info=True)
+                detail = "OpenRouter service is not configured. Please contact support."
+            else:
+                logger.error(f"OpenRouter streaming error: {e}", exc_info=True)
+                detail = f"Failed to process streaming request: {str(e)}"
+            # Capture errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": detail}
+            yield f"data: {json.dumps(error_data)}\n\n"
         except Exception as e:
             logger.error(f"OpenRouter streaming error: {e}", exc_info=True)
             # Capture streaming errors to Sentry
@@ -342,6 +379,7 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
             yield "data: [DONE]\n\n"
 
         except ValueError as e:
+            # This handler only processes AI SDK models (non-OpenRouter)
             logger.error(f"AI SDK configuration error: {e}", exc_info=True)
             # Capture configuration errors to Sentry
             if SENTRY_AVAILABLE:
