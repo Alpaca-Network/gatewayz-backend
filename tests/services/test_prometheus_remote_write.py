@@ -91,21 +91,28 @@ class TestPrometheusRemoteWrite:
         assert stats["success_rate"] == 0
 
     @patch('src.services.prometheus_remote_write.Config')
-    async def test_init_prometheus_remote_write_disabled(self, mock_config):
+    @patch('src.services.prometheus_remote_write.prometheus_writer', None)
+    async def test_init_prometheus_remote_write_disabled(self, mock_writer, mock_config):
         """Test init_prometheus_remote_write when Prometheus is disabled"""
-        from src.services.prometheus_remote_write import init_prometheus_remote_write
+        from src.services.prometheus_remote_write import (
+            init_prometheus_remote_write,
+            get_prometheus_writer
+        )
 
         mock_config.PROMETHEUS_ENABLED = False
 
         await init_prometheus_remote_write()
-        # Should return early without creating writer
+
+        # Verify no writer was created
+        writer = get_prometheus_writer()
+        assert writer is None
 
     @patch('src.services.prometheus_remote_write.Config')
     async def test_init_prometheus_remote_write_enabled(self, mock_config):
         """Test init_prometheus_remote_write creates writer but disabled"""
         from src.services.prometheus_remote_write import (
             init_prometheus_remote_write,
-            prometheus_writer
+            get_prometheus_writer
         )
 
         mock_config.PROMETHEUS_ENABLED = True
@@ -114,50 +121,50 @@ class TestPrometheusRemoteWrite:
         await init_prometheus_remote_write()
 
         # Writer should be created but disabled
-        from src.services.prometheus_remote_write import get_prometheus_writer
         writer = get_prometheus_writer()
         assert writer is not None
         assert writer.enabled is False
 
-    async def test_shutdown_prometheus_remote_write_with_writer(self):
+    @patch('src.services.prometheus_remote_write.prometheus_writer')
+    async def test_shutdown_prometheus_remote_write_with_writer(self, mock_prometheus_writer):
         """Test shutdown_prometheus_remote_write with active writer"""
         from src.services.prometheus_remote_write import (
             shutdown_prometheus_remote_write,
             PrometheusRemoteWriter
         )
-        import src.services.prometheus_remote_write as module
 
         # Set up a mock writer
         mock_writer = MagicMock(spec=PrometheusRemoteWriter)
         mock_writer.stop = AsyncMock()
         mock_writer.get_stats.return_value = {"test": "stats"}
-        module.prometheus_writer = mock_writer
+        mock_prometheus_writer.__bool__ = lambda self: True
+        mock_prometheus_writer.stop = mock_writer.stop
+        mock_prometheus_writer.get_stats = mock_writer.get_stats
 
         await shutdown_prometheus_remote_write()
 
         mock_writer.stop.assert_called_once()
         mock_writer.get_stats.assert_called_once()
 
-    async def test_shutdown_prometheus_remote_write_no_writer(self):
+    @patch('src.services.prometheus_remote_write.prometheus_writer', None)
+    async def test_shutdown_prometheus_remote_write_no_writer(self, mock_prometheus_writer):
         """Test shutdown_prometheus_remote_write with no writer"""
         from src.services.prometheus_remote_write import shutdown_prometheus_remote_write
-        import src.services.prometheus_remote_write as module
 
-        module.prometheus_writer = None
-
-        # Should not raise an error
+        # Should not raise an error when writer is None
         await shutdown_prometheus_remote_write()
+        # Test passes if no exception is raised
 
-    def test_get_prometheus_writer(self):
+    @patch('src.services.prometheus_remote_write.prometheus_writer')
+    def test_get_prometheus_writer(self, mock_prometheus_writer):
         """Test get_prometheus_writer returns the global instance"""
         from src.services.prometheus_remote_write import (
             get_prometheus_writer,
             PrometheusRemoteWriter
         )
-        import src.services.prometheus_remote_write as module
 
         test_writer = PrometheusRemoteWriter(enabled=False)
-        module.prometheus_writer = test_writer
+        mock_prometheus_writer.return_value = test_writer
 
         result = get_prometheus_writer()
-        assert result is test_writer
+        assert result == test_writer
