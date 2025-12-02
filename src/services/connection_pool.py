@@ -430,3 +430,24 @@ def get_groq_pooled_client() -> OpenAI:
         base_url="https://api.groq.com/openai/v1",
         api_key=Config.GROQ_API_KEY,
     )
+
+
+def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
+    """Get pooled client for Cloudflare Workers AI.
+
+    Cloudflare Workers AI provides an OpenAI-compatible API endpoint.
+    See: https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/
+    """
+    if not Config.CLOUDFLARE_API_TOKEN:
+        raise ValueError("Cloudflare API token not configured")
+    if not Config.CLOUDFLARE_ACCOUNT_ID:
+        raise ValueError("Cloudflare Account ID not configured")
+
+    # Cloudflare's OpenAI-compatible base URL includes the account ID
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{Config.CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+
+    return get_pooled_client(
+        provider="cloudflare-workers-ai",
+        base_url=base_url,
+        api_key=Config.CLOUDFLARE_API_TOKEN,
+    )

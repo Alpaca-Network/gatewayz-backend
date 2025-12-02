@@ -37,6 +37,7 @@ from src.cache import (
     _together_models_cache,
     _vercel_ai_gateway_models_cache,
     _xai_models_cache,
+    _cloudflare_workers_ai_models_cache,
     is_cache_fresh,
     should_revalidate_in_background,
     set_gateway_error,
@@ -58,6 +59,7 @@ from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.xai_client import fetch_models_from_xai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
 
@@ -817,6 +819,16 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_alibaba()
             _register_canonical_records("alibaba", result)
+            return result if result is not None else []
+
+        if gateway == "cloudflare-workers-ai":
+            cached = _get_fresh_or_stale_cached_models(
+                _cloudflare_workers_ai_models_cache, "cloudflare-workers-ai"
+            )
+            if cached is not None:
+                return cached
+            result = fetch_models_from_cloudflare_workers_ai()
+            _register_canonical_records("cloudflare-workers-ai", result)
             return result if result is not None else []
 
         if gateway == "all":

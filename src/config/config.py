@@ -191,6 +191,10 @@ class Config:
     CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
     CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
 
+    # Cloudflare Workers AI Configuration
+    CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
+    CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+
     # Google Vertex AI Configuration (for image generation & generative APIs)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
     GOOGLE_VERTEX_LOCATION = os.environ.get("GOOGLE_VERTEX_LOCATION", "us-central1")
