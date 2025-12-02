@@ -92,9 +92,10 @@ curl https://api.gatewayz.ai/v1/chat/completions \
 from openai import OpenAI
 
 # Using Gatewayz API
+# Both URL formats work - the SDK automatically appends /v1 to the base URL
 client = OpenAI(
     api_key="YOUR_GATEWAYZ_API_KEY",
-    base_url="https://api.gatewayz.ai/v1"
+    base_url="https://api.gatewayz.ai"  # or "https://api.gatewayz.ai/v1"
 )
 
 response = client.chat.completions.create(
