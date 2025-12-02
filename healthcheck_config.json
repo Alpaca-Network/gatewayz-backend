@@ -1,0 +1,22 @@
+{
+  "schedule_type": "interval",
+  "interval_minutes": 360,
+  "cron_expression": "0 */6 * * *",
+  "export_json": true,
+  "keep_history": true,
+  "max_history_files": 56,
+  "notify_on_unhealthy": true,
+  "notification_webhook": null,
+  "rate_limited_mode": true,
+  "use_critical_models_only": true,
+  "model_check_delay_seconds": 20,
+  "max_models_per_run": 30,
+  "_comments": {
+    "description": "OpenRouter rate-limit compliant healthcheck configuration",
+    "interval_minutes": "Check every 6 hours (was 60 minutes)",
+    "rate_limited_mode": "Use rate-limited healthcheck script",
+    "model_check_delay_seconds": "20 seconds between checks (3 per minute, under 4/min limit)",
+    "max_models_per_run": "Maximum 30 critical models per run (10 minutes total)",
+    "max_history_files": "Keep 8 days of 6-hourly runs (56 files)"
+  }
+}
