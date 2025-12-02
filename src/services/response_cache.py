@@ -164,6 +164,12 @@ class ResponseCache:
         """
         cache_key = self._generate_cache_key(messages, model, **kwargs)
 
+        # Import Sentry cache instrumentation
+        try:
+            from src.utils.sentry_insights import trace_cache_operation
+        except ImportError:
+            trace_cache_operation = None
+
         # Try Redis first
         if self._redis_client:
             try:
@@ -172,7 +178,29 @@ class ResponseCache:
                     cached_response = json.loads(cached_data)
                     self._stats["hits"] += 1
                     logger.debug(f"Cache HIT (Redis): {cache_key[:16]}...")
+
+                    # Record Sentry cache hit
+                    if trace_cache_operation:
+                        with trace_cache_operation(
+                            "cache.get",
+                            cache_key,
+                            cache_hit=True,
+                            item_size=len(cached_data) if cached_data else None,
+                            cache_system="redis",
+                        ):
+                            pass
+
                     return cached_response["response"]
+                else:
+                    # Redis miss - record in Sentry
+                    if trace_cache_operation:
+                        with trace_cache_operation(
+                            "cache.get",
+                            cache_key,
+                            cache_hit=False,
+                            cache_system="redis",
+                        ):
+                            pass
             except Exception as e:
                 logger.warning(f"Redis get failed: {e}")
 
@@ -187,6 +215,17 @@ class ResponseCache:
                     self._cache_order.remove(cache_key)
                 self._stats["misses"] += 1
                 logger.debug(f"Cache EXPIRED: {cache_key[:16]}...")
+
+                # Record Sentry cache miss (expired)
+                if trace_cache_operation:
+                    with trace_cache_operation(
+                        "cache.get",
+                        cache_key,
+                        cache_hit=False,
+                        cache_system="memory",
+                    ):
+                        pass
+
                 return None
 
             # Update LRU order
@@ -197,10 +236,32 @@ class ResponseCache:
             cached.increment_hits()
             self._stats["hits"] += 1
             logger.debug(f"Cache HIT (memory): {cache_key[:16]}...")
+
+            # Record Sentry cache hit
+            if trace_cache_operation:
+                with trace_cache_operation(
+                    "cache.get",
+                    cache_key,
+                    cache_hit=True,
+                    cache_system="memory",
+                ):
+                    pass
+
             return cached.response
 
         self._stats["misses"] += 1
         logger.debug(f"Cache MISS: {cache_key[:16]}...")
+
+        # Record Sentry cache miss
+        if trace_cache_operation:
+            with trace_cache_operation(
+                "cache.get",
+                cache_key,
+                cache_hit=False,
+                cache_system="memory",
+            ):
+                pass
+
         return None
 
     def set(
@@ -232,6 +293,12 @@ class ResponseCache:
             metadata=kwargs.get("metadata"),
         )
 
+        # Import Sentry cache instrumentation
+        try:
+            from src.utils.sentry_insights import trace_cache_operation
+        except ImportError:
+            trace_cache_operation = None
+
         # Try Redis first
         if self._redis_client:
             try:
@@ -240,13 +307,26 @@ class ResponseCache:
                     "model": model,
                     "created_at": cached_response.created_at,
                 }
+                serialized_data = json.dumps(cache_data)
                 self._redis_client.setex(
                     cache_key,
                     ttl,
-                    json.dumps(cache_data),
+                    serialized_data,
                 )
                 self._stats["sets"] += 1
                 logger.debug(f"Cache SET (Redis): {cache_key[:16]}...")
+
+                # Record Sentry cache put
+                if trace_cache_operation:
+                    with trace_cache_operation(
+                        "cache.put",
+                        cache_key,
+                        item_size=len(serialized_data),
+                        ttl=ttl,
+                        cache_system="redis",
+                    ):
+                        pass
+
                 return
             except Exception as e:
                 logger.warning(f"Redis set failed: {e}")
@@ -263,6 +343,16 @@ class ResponseCache:
 
         self._stats["sets"] += 1
         logger.debug(f"Cache SET (memory): {cache_key[:16]}...")
+
+        # Record Sentry cache put
+        if trace_cache_operation:
+            with trace_cache_operation(
+                "cache.put",
+                cache_key,
+                ttl=ttl,
+                cache_system="memory",
+            ):
+                pass
 
     def should_cache(
         self,
