@@ -415,3 +415,15 @@ def get_onerouter_pooled_client() -> OpenAI:
         base_url="https://llm.onerouter.pro/v1",
         api_key=Config.ONEROUTER_API_KEY,
     )
+
+
+def get_groq_pooled_client() -> OpenAI:
+    """Get pooled client for Groq."""
+    if not Config.GROQ_API_KEY:
+        raise ValueError("Groq API key not configured")
+
+    return get_pooled_client(
+        provider="groq",
+        base_url="https://api.groq.com/openai/v1",
+        api_key=Config.GROQ_API_KEY,
+    )

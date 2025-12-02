@@ -211,6 +211,13 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'aimo/' prefix: '{model_id}' -> '{stripped}' for AIMO")
         model_id = stripped
 
+    # Special handling for Groq: strip 'groq/' prefix if present
+    # Groq API expects just the model name without the provider prefix
+    if provider_lower == "groq" and model_id.startswith("groq/"):
+        stripped = model_id[len("groq/") :]
+        logger.info(f"Stripped 'groq/' prefix: '{model_id}' -> '{stripped}' for Groq")
+        model_id = stripped
+
     # Get the mapping for this provider
     mapping = get_model_id_mapping(provider_lower)
 
@@ -395,6 +402,25 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Chutes uses org/model format directly
             # Most models pass through as-is from their catalog
             # Keep the exact format from the catalog for proper routing
+        },
+        "groq": {
+            # Groq models use simple names without org prefix
+            # The groq/ prefix is stripped in transform_model_id
+            # Popular Groq models:
+            "llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
+            "llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
+            "llama-3.1-8b-instant": "llama-3.1-8b-instant",
+            "llama3-70b-8192": "llama3-70b-8192",
+            "llama3-8b-8192": "llama3-8b-8192",
+            "mixtral-8x7b-32768": "mixtral-8x7b-32768",
+            "gemma2-9b-it": "gemma2-9b-it",
+            "gemma-7b-it": "gemma-7b-it",
+            # With groq/ prefix (stripped automatically)
+            "groq/llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
+            "groq/llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
+            "groq/llama-3.1-8b-instant": "llama-3.1-8b-instant",
+            "groq/mixtral-8x7b-32768": "mixtral-8x7b-32768",
+            "groq/gemma2-9b-it": "gemma2-9b-it",
         },
         "google-vertex": {
             # Google Vertex AI models - simple names
@@ -900,6 +926,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "alibaba-cloud",
         "fal",
         "xai",
+        "groq",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -975,6 +1002,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # XAI models (e.g., "xai/grok-2")
         if org == "xai":
             return "xai"
+
+        # Groq models (e.g., "groq/llama-3.3-70b-versatile", "groq/mixtral-8x7b-32768")
+        if org == "groq":
+            return "groq"
 
     # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")
     if model_id.startswith("grok-"):
