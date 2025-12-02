@@ -90,9 +90,9 @@ class TestPrometheusRemoteWrite:
 
         assert stats["success_rate"] == 0
 
-    @patch('src.services.prometheus_remote_write.Config')
     @patch('src.services.prometheus_remote_write.prometheus_writer', None)
-    async def test_init_prometheus_remote_write_disabled(self, mock_writer, mock_config):
+    @patch('src.services.prometheus_remote_write.Config')
+    async def test_init_prometheus_remote_write_disabled(self, mock_config, mock_writer):
         """Test init_prometheus_remote_write when Prometheus is disabled"""
         from src.services.prometheus_remote_write import (
             init_prometheus_remote_write,
@@ -147,7 +147,7 @@ class TestPrometheusRemoteWrite:
         mock_writer.get_stats.assert_called_once()
 
     @patch('src.services.prometheus_remote_write.prometheus_writer', None)
-    async def test_shutdown_prometheus_remote_write_no_writer(self, mock_prometheus_writer):
+    async def test_shutdown_prometheus_remote_write_no_writer(self):
         """Test shutdown_prometheus_remote_write with no writer"""
         from src.services.prometheus_remote_write import shutdown_prometheus_remote_write
 
