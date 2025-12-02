@@ -4,9 +4,28 @@ Tests for src/config/supabase_config.py
 Tests the Supabase client initialization and URL validation.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, MagicMock, patch
 
 import pytest
+
+
+def create_mock_supabase_client_with_connection():
+    """Create a mock Supabase client configured for connection testing.
+
+    Returns a mock client with proper chainable methods that simulate
+    a successful database connection test.
+    """
+    execute_result = Mock()
+    execute_result.data = []
+
+    mock_client = Mock()
+    mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
+        execute_result
+    )
+    mock_client.postgrest = Mock()
+    mock_client.postgrest.session = Mock()
+
+    return mock_client
 
 
 class TestGetSupabaseClientValidation:
@@ -79,11 +98,8 @@ class TestGetSupabaseClientValidation:
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
-        # Mock the Supabase client
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        # Mock the Supabase client using helper
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         # Patch Config with valid URL
@@ -106,11 +122,8 @@ class TestGetSupabaseClientValidation:
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
-        # Mock the Supabase client
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        # Mock the Supabase client using helper
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         # Patch Config with valid local URL
@@ -134,11 +147,8 @@ class TestGetSupabaseClientValidation:
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
-        # Mock the Supabase client
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        # Mock the Supabase client using helper
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         # Patch Config with a long URL to test masking
@@ -178,10 +188,7 @@ class TestHttpxClientConfiguration:
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         test_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test_key"
@@ -213,10 +220,7 @@ class TestHttpxClientConfiguration:
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         test_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test_key"
@@ -246,10 +250,7 @@ class TestHttpxClientConfiguration:
 
         supabase_config_mod._supabase_client = None
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         # Use a realistic JWT-like key
@@ -281,10 +282,7 @@ class TestHttpxClientConfiguration:
 
         supabase_config_mod._supabase_client = None
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         test_url = "https://myproject.supabase.co"
@@ -313,17 +311,14 @@ class TestHttpxClientConfiguration:
         supabase_config_mod._supabase_client = None
 
         # Create a mock that has postgrest.session attribute
-        mock_postgrest = MagicMock()
-        mock_postgrest.session = MagicMock()  # Original session to be replaced
+        mock_postgrest = Mock()
+        mock_postgrest.session = Mock()  # Original session to be replaced
 
-        mock_client = MagicMock()
+        mock_client = create_mock_supabase_client_with_connection()
         mock_client.postgrest = mock_postgrest
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
         mock_create_client.return_value = mock_client
 
-        mock_httpx_instance = MagicMock()
+        mock_httpx_instance = Mock()
         mock_httpx_client.return_value = mock_httpx_instance
 
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
@@ -343,10 +338,7 @@ class TestHttpxClientConfiguration:
 
         supabase_config_mod._supabase_client = None
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
@@ -365,10 +357,7 @@ class TestHttpxClientConfiguration:
 
         supabase_config_mod._supabase_client = None
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
@@ -387,10 +376,7 @@ class TestHttpxClientConfiguration:
 
         supabase_config_mod._supabase_client = None
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
@@ -448,8 +434,8 @@ class TestGetInitializationStatus:
         """Test initialization status when client is successfully initialized"""
         import src.config.supabase_config as supabase_config_mod
 
-        # Reset state
-        supabase_config_mod._supabase_client = MagicMock()
+        # Reset state - use helper for proper mock structure
+        supabase_config_mod._supabase_client = create_mock_supabase_client_with_connection()
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
@@ -523,10 +509,7 @@ class TestTestConnectionInternal:
         """Test successful connection test"""
         import src.config.supabase_config as supabase_config_mod
 
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        mock_client = create_mock_supabase_client_with_connection()
 
         result = supabase_config_mod._test_connection_internal(mock_client)
 
@@ -537,7 +520,7 @@ class TestTestConnectionInternal:
         """Test connection test failure"""
         import src.config.supabase_config as supabase_config_mod
 
-        mock_client = MagicMock()
+        mock_client = create_mock_supabase_client_with_connection()
         mock_client.table.return_value.select.return_value.limit.return_value.execute.side_effect = Exception(
             "Connection timeout"
         )
@@ -560,11 +543,8 @@ class TestTestConnection:
         supabase_config_mod._last_error = None
         supabase_config_mod._last_error_time = 0
 
-        # Setup mock
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            MagicMock(data=[])
-        )
+        # Setup mock using helper
+        mock_client = create_mock_supabase_client_with_connection()
         mock_create_client.return_value = mock_client
 
         with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
