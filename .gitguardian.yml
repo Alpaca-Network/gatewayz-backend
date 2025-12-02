@@ -1,6 +1,7 @@
 # GitGuardian configuration file
 # This file configures GitGuardian to handle false positives and known secrets
 # Updated: 2025-12-02 - All example keys from PR are allowlisted below
+# Note: Using specific file paths instead of broad patterns to maintain security
 
 # Paths to skip entirely
 paths-ignore:
