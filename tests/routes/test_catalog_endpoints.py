@@ -198,7 +198,7 @@ class TestModelsEndpoint:
 
         mock_get_cached_models.side_effect = fake_get_cached_models
 
-        response = client.get("/models?gateway=nebius&include_huggingface=false")
+        response = client.get("/v1/models?gateway=nebius&include_huggingface=false")
 
         assert response.status_code == 200
         payload = response.json()
@@ -217,7 +217,7 @@ class TestModelsEndpoint:
 
         mock_get_cached_models.side_effect = fake_get_cached_models
 
-        response = client.get("/models?gateway=xai&include_huggingface=false")
+        response = client.get("/v1/models?gateway=xai&include_huggingface=false")
 
         assert response.status_code == 200
         payload = response.json()
@@ -274,7 +274,7 @@ class TestModelsEndpoint:
         ]
         mock_enhance_providers.side_effect = lambda providers: providers
 
-        response = client.get("/models?gateway=all&limit=5&include_huggingface=false")
+        response = client.get("/v1/models?gateway=all&limit=5&include_huggingface=false")
 
         assert response.status_code == 200
         payload = response.json()
