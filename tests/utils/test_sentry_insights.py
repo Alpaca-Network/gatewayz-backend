@@ -7,7 +7,39 @@ Tests cover:
 - Queue Monitoring (trace_queue_publish, trace_queue_process, QueueTracker)
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
+
+
+def create_mock_sentry_span():
+    """Create a mock Sentry span with proper context manager support.
+
+    Returns a mock span that can track set_data calls and behaves
+    like a real Sentry span context manager.
+    """
+    mock_span = Mock()
+    mock_span.set_data = Mock()
+    mock_span.set_status = Mock()
+    return mock_span
+
+
+def setup_mock_sentry(mock_sentry, mock_span=None):
+    """Configure a mock sentry_sdk with proper context manager behavior.
+
+    Args:
+        mock_sentry: The patched sentry_sdk module
+        mock_span: Optional pre-configured span mock
+
+    Returns:
+        The configured mock_span
+    """
+    if mock_span is None:
+        mock_span = create_mock_sentry_span()
+
+    mock_sentry.is_initialized.return_value = True
+    mock_sentry.start_span.return_value.__enter__ = Mock(return_value=mock_span)
+    mock_sentry.start_span.return_value.__exit__ = Mock(return_value=None)
+
+    return mock_span
 
 
 class TestDatabaseQueryInsights:
@@ -16,10 +48,7 @@ class TestDatabaseQueryInsights:
     def test_trace_database_query_creates_span(self):
         """Test that trace_database_query creates a Sentry span with correct attributes."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_database_query
 
@@ -40,10 +69,7 @@ class TestDatabaseQueryInsights:
     def test_trace_database_query_sets_required_attributes(self):
         """Test that db.system attribute is set for Sentry Queries Insights."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_database_query
 
@@ -64,10 +90,7 @@ class TestDatabaseQueryInsights:
     def test_trace_supabase_query_convenience_wrapper(self):
         """Test that trace_supabase_query correctly wraps trace_database_query."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_supabase_query
 
@@ -93,10 +116,7 @@ class TestCacheInsights:
     def test_trace_cache_operation_get_hit(self):
         """Test cache.get span with cache hit."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_cache_operation
 
@@ -122,10 +142,7 @@ class TestCacheInsights:
     def test_trace_cache_operation_get_miss(self):
         """Test cache.get span with cache miss."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_cache_operation
 
@@ -137,10 +154,7 @@ class TestCacheInsights:
     def test_trace_cache_operation_put_with_ttl(self):
         """Test cache.put span with TTL."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_cache_operation
 
@@ -161,10 +175,7 @@ class TestCacheInsights:
     def test_trace_cache_operation_normalizes_op(self):
         """Test that operation names are normalized to cache.* format."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_cache_operation
 
@@ -178,10 +189,7 @@ class TestCacheInsights:
     def test_trace_cache_operation_multiple_keys(self):
         """Test cache operation with multiple keys."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_cache_operation
 
@@ -200,10 +208,7 @@ class TestCacheInsights:
     def test_cache_span_tracker_get(self):
         """Test CacheSpanTracker.get() with automatic hit detection."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import CacheSpanTracker
 
@@ -218,10 +223,7 @@ class TestCacheInsights:
     def test_cache_span_tracker_get_miss(self):
         """Test CacheSpanTracker.get() with cache miss."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import CacheSpanTracker
 
@@ -240,10 +242,7 @@ class TestQueueMonitoring:
     def test_trace_queue_publish_creates_span(self):
         """Test that trace_queue_publish creates a producer span."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
             mock_sentry.get_traceparent.return_value = "00-trace-id-01"
             mock_sentry.get_baggage.return_value = "sentry-key=value"
 
@@ -271,10 +270,7 @@ class TestQueueMonitoring:
     def test_trace_queue_process_creates_span(self):
         """Test that trace_queue_process creates a consumer span."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import trace_queue_process
 
@@ -300,15 +296,15 @@ class TestQueueMonitoring:
         """Test that trace_queue_process continues trace from producer."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
             mock_sentry.is_initialized.return_value = True
-            mock_transaction = MagicMock()
-            mock_span = MagicMock()
+            mock_transaction = Mock()
+            mock_span = create_mock_sentry_span()
             mock_sentry.continue_trace.return_value = mock_transaction
-            mock_sentry.start_transaction.return_value.__enter__ = MagicMock(
+            mock_sentry.start_transaction.return_value.__enter__ = Mock(
                 return_value=mock_transaction
             )
-            mock_sentry.start_transaction.return_value.__exit__ = MagicMock(return_value=None)
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_sentry.start_transaction.return_value.__exit__ = Mock(return_value=None)
+            mock_sentry.start_span.return_value.__enter__ = Mock(return_value=mock_span)
+            mock_sentry.start_span.return_value.__exit__ = Mock(return_value=None)
 
             from src.utils.sentry_insights import trace_queue_process
 
@@ -334,10 +330,7 @@ class TestQueueMonitoring:
     def test_queue_tracker_publish(self):
         """Test QueueTracker.publish() convenience method."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
             mock_sentry.get_traceparent.return_value = "trace-header"
             mock_sentry.get_baggage.return_value = "baggage-header"
 
@@ -352,10 +345,7 @@ class TestQueueMonitoring:
     def test_queue_tracker_process(self):
         """Test QueueTracker.process() convenience method."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import QueueTracker
 
@@ -413,10 +403,7 @@ class TestDecorators:
     def test_instrument_db_operation_decorator(self):
         """Test @instrument_db_operation decorator."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import instrument_db_operation
 
@@ -434,10 +421,7 @@ class TestDecorators:
         import asyncio
 
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import instrument_db_operation
 
@@ -453,10 +437,7 @@ class TestDecorators:
     def test_instrument_cache_operation_decorator(self):
         """Test @instrument_cache_operation decorator."""
         with patch("src.utils.sentry_insights.sentry_sdk") as mock_sentry:
-            mock_sentry.is_initialized.return_value = True
-            mock_span = MagicMock()
-            mock_sentry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-            mock_sentry.start_span.return_value.__exit__ = MagicMock(return_value=None)
+            mock_span = setup_mock_sentry(mock_sentry)
 
             from src.utils.sentry_insights import instrument_cache_operation
 
