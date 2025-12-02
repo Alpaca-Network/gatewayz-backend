@@ -722,59 +722,137 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # OpenAI-compatible API: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
             # Documentation: https://developers.cloudflare.com/workers-ai/
             #
-            # GPT-OSS models from OpenAI
+            # ======== OpenAI GPT-OSS models ========
             "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
             "openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
             "gpt-oss-120b": "@cf/openai/gpt-oss-120b",
             "gpt-oss-20b": "@cf/openai/gpt-oss-20b",
             "gpt-oss/gpt-120b": "@cf/openai/gpt-oss-120b",
             "gpt-oss/gpt-20b": "@cf/openai/gpt-oss-20b",
-            # Meta Llama models
+            #
+            # ======== Meta Llama 4 models ========
             "meta-llama/llama-4-scout-17b": "@cf/meta/llama-4-scout-17b-16e-instruct",
             "meta-llama/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "llama-4-scout": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            #
+            # ======== Meta Llama 3.3 models ========
             "meta-llama/llama-3.3-70b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
             "meta-llama/llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            "meta-llama/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
-            "meta-llama/llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            #
+            # ======== Meta Llama 3.2 models ========
+            "meta-llama/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
             "meta-llama/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
             "meta-llama/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
-            "meta-llama/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
-            "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            "llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.2-11b-vision": "@cf/meta/llama-3.2-11b-vision-instruct",
             "llama-3.2-3b": "@cf/meta/llama-3.2-3b-instruct",
             "llama-3.2-1b": "@cf/meta/llama-3.2-1b-instruct",
-            # Qwen models
+            #
+            # ======== Meta Llama 3.1 models ========
+            "meta-llama/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
+            "meta-llama/llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
+            "meta-llama/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "meta-llama/llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
+            "llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.1-8b-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+            #
+            # ======== Meta Llama 3 models ========
+            "meta-llama/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
+            "meta-llama/llama-3-8b": "@cf/meta/llama-3-8b-instruct",
+            "llama-3-8b": "@cf/meta/llama-3-8b-instruct",
+            #
+            # ======== Meta Llama 2 models (Legacy) ========
+            "meta-llama/llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
+            "llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
+            "llama-2-7b": "@cf/meta/llama-2-7b-chat-fp16",
+            #
+            # ======== Meta Llama Guard ========
+            "meta-llama/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
+            "llama-guard-3": "@cf/meta/llama-guard-3-8b",
+            #
+            # ======== Qwen models ========
             "qwen/qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
             "qwen/qwq-32b": "@cf/qwen/qwq-32b",
             "qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            "qwen/qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
             "qwq-32b": "@cf/qwen/qwq-32b",
             "qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
             "qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
-            # Google Gemma models
+            #
+            # ======== Google Gemma models ========
             "google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+            "google/gemma-7b-it": "@cf/google/gemma-7b-it",
+            "google/gemma-2b-it": "@cf/google/gemma-2b-it-lora",
             "gemma-3-12b": "@cf/google/gemma-3-12b-it",
-            # Mistral models
+            "gemma-7b": "@cf/google/gemma-7b-it",
+            "gemma-2b": "@cf/google/gemma-2b-it-lora",
+            #
+            # ======== Mistral models ========
             "mistralai/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            "mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
             "mistral-small-3.1-24b": "@cf/mistral/mistral-small-3.1-24b-instruct",
-            # DeepSeek models
+            "mistral-7b-instruct": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            "mistral-7b": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            #
+            # ======== DeepSeek models ========
             "deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
             "deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
-            # Direct @cf/ model names (passthrough)
+            "deepseek-r1-distill": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            #
+            # ======== IBM Granite models ========
+            "ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
+            "granite-4.0-micro": "@cf/ibm/granite-4.0-h-micro",
+            #
+            # ======== AI Singapore models ========
+            "aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+            "sea-lion-27b": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+            #
+            # ======== NousResearch models ========
+            "nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+            "hermes-2-pro": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+            #
+            # ======== Microsoft models ========
+            "microsoft/phi-2": "@cf/microsoft/phi-2",
+            "phi-2": "@cf/microsoft/phi-2",
+            #
+            # ======== Direct @cf/ model names (passthrough) ========
             "@cf/openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
             "@cf/openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
             "@cf/meta/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
             "@cf/meta/llama-3.3-70b-instruct-fp8-fast": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            "@cf/meta/llama-3.1-8b-instruct-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
-            "@cf/meta/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/meta/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
             "@cf/meta/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
             "@cf/meta/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
-            "@cf/meta/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+            "@cf/meta/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+            "@cf/meta/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct-fp8": "@cf/meta/llama-3.1-8b-instruct-fp8",
+            "@cf/meta/llama-3.1-8b-instruct-awq": "@cf/meta/llama-3.1-8b-instruct-awq",
+            "@cf/meta/meta-llama-3-8b-instruct": "@cf/meta/meta-llama-3-8b-instruct",
+            "@cf/meta/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
+            "@cf/meta/llama-3-8b-instruct-awq": "@cf/meta/llama-3-8b-instruct-awq",
+            "@cf/meta/llama-2-7b-chat-fp16": "@cf/meta/llama-2-7b-chat-fp16",
+            "@cf/meta/llama-2-7b-chat-int8": "@cf/meta/llama-2-7b-chat-int8",
+            "@cf/meta-llama/llama-2-7b-chat-hf-lora": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+            "@cf/meta/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
             "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3-30b-a3b-fp8",
             "@cf/qwen/qwq-32b": "@cf/qwen/qwq-32b",
             "@cf/qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
             "@cf/google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+            "@cf/google/gemma-7b-it": "@cf/google/gemma-7b-it",
+            "@cf/google/gemma-7b-it-lora": "@cf/google/gemma-7b-it-lora",
+            "@cf/google/gemma-2b-it-lora": "@cf/google/gemma-2b-it-lora",
             "@cf/mistral/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "@cf/mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            "@cf/mistralai/mistral-7b-instruct-v0.2-lora": "@cf/mistralai/mistral-7b-instruct-v0.2-lora",
+            "@cf/mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
             "@cf/deepseek/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            "@cf/ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
+            "@cf/aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+            "@cf/nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+            "@cf/microsoft/phi-2": "@cf/microsoft/phi-2",
         },
     }
 
