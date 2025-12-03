@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import secrets
 import time
 import uuid
 from contextvars import ContextVar
@@ -2430,7 +2431,29 @@ async def unified_responses(
                         )
 
                     async def response_stream_generator(stream=stream, request_model=request_model):
-                        """Transform chat/completions stream to responses format with usage tracking"""
+                        """Transform chat/completions stream to OpenAI Responses API format.
+
+                        OpenAI Responses API uses SSE with event: and data: fields.
+                        Events emitted:
+                        - response.created: Initial response object
+                        - response.output_item.added: New output item started
+                        - response.output_text.delta: Text content delta
+                        - response.output_item.done: Output item completed
+                        - response.completed: Final response with usage
+                        """
+                        sequence_number = 0
+                        response_id = None
+                        created_timestamp = None
+                        model_name = request_model
+                        accumulated_content = ""
+                        item_id = None
+                        output_index = 0
+                        content_index = 0
+                        has_sent_created = False
+                        has_sent_item_added = False
+                        finish_reason = None
+                        usage_data = None
+
                         async for chunk_data in stream_generator(
                             stream,
                             user,
@@ -2447,37 +2470,141 @@ async def unified_responses(
                             if chunk_data.startswith("data: "):
                                 data_str = chunk_data[6:].strip()
                                 if data_str == "[DONE]":
-                                    yield chunk_data
+                                    # Emit response.output_item.done
+                                    if has_sent_item_added and item_id:
+                                        done_event = {
+                                            "type": "response.output_text.done",
+                                            "sequence_number": sequence_number,
+                                            "item_id": item_id,
+                                            "output_index": output_index,
+                                            "content_index": content_index,
+                                            "text": accumulated_content,
+                                        }
+                                        yield f"event: response.output_text.done\ndata: {json.dumps(done_event)}\n\n"
+                                        sequence_number += 1
+
+                                        # Emit response.output_item.done
+                                        item_done_event = {
+                                            "type": "response.output_item.done",
+                                            "sequence_number": sequence_number,
+                                            "output_index": output_index,
+                                            "item": {
+                                                "id": item_id,
+                                                "type": "message",
+                                                "role": "assistant",
+                                                "status": "completed",
+                                                "content": [{"type": "output_text", "text": accumulated_content}],
+                                            },
+                                        }
+                                        yield f"event: response.output_item.done\ndata: {json.dumps(item_done_event)}\n\n"
+                                        sequence_number += 1
+
+                                    # Emit response.completed
+                                    completed_event = {
+                                        "type": "response.completed",
+                                        "sequence_number": sequence_number,
+                                        "response": {
+                                            "id": response_id or f"resp_{secrets.token_hex(12)}",
+                                            "object": "response",
+                                            "created_at": created_timestamp or int(time.time()),
+                                            "model": model_name,
+                                            "status": "completed",
+                                            "output": [
+                                                {
+                                                    "id": item_id or f"item_{secrets.token_hex(8)}",
+                                                    "type": "message",
+                                                    "role": "assistant",
+                                                    "status": "completed",
+                                                    "content": [{"type": "output_text", "text": accumulated_content}],
+                                                }
+                                            ] if accumulated_content else [],
+                                        },
+                                    }
+                                    # Add usage if available
+                                    if usage_data:
+                                        completed_event["response"]["usage"] = usage_data
+                                    yield f"event: response.completed\ndata: {json.dumps(completed_event)}\n\n"
                                     continue
 
                                 try:
                                     chunk_json = json.loads(data_str)
-                                    if "choices" in chunk_json:
-                                        output = []
-                                        for choice in chunk_json["choices"]:
-                                            output_item = {"index": choice.get("index", 0)}
-                                            if "delta" in choice:
-                                                if "role" in choice["delta"]:
-                                                    output_item["role"] = choice["delta"]["role"]
-                                                if "content" in choice["delta"]:
-                                                    output_item["content"] = choice["delta"][
-                                                        "content"
-                                                    ]
-                                            if choice.get("finish_reason"):
-                                                output_item["finish_reason"] = choice[
-                                                    "finish_reason"
-                                                ]
-                                            output.append(output_item)
 
-                                        transformed_chunk = {
-                                            "id": chunk_json.get("id"),
-                                            "object": "response.chunk",
-                                            "created": chunk_json.get("created"),
-                                            "model": chunk_json.get("model"),
-                                            "output": output,
-                                        }
-                                        yield f"data: {json.dumps(transformed_chunk)}\n\n"
+                                    # Extract response metadata from first chunk
+                                    if not response_id and chunk_json.get("id"):
+                                        response_id = chunk_json["id"]
+                                    if not created_timestamp and chunk_json.get("created"):
+                                        created_timestamp = chunk_json["created"]
+                                    if chunk_json.get("model"):
+                                        model_name = chunk_json["model"]
+
+                                    # Extract usage if present (some providers include it in final chunk)
+                                    if chunk_json.get("usage"):
+                                        usage_data = chunk_json["usage"]
+
+                                    if "choices" in chunk_json:
+                                        for choice in chunk_json["choices"]:
+                                            choice_index = choice.get("index", 0)
+
+                                            # Emit response.created on first chunk
+                                            if not has_sent_created:
+                                                if not item_id:
+                                                    item_id = f"item_{secrets.token_hex(8)}"
+                                                created_event = {
+                                                    "type": "response.created",
+                                                    "sequence_number": sequence_number,
+                                                    "response": {
+                                                        "id": response_id or f"resp_{secrets.token_hex(12)}",
+                                                        "object": "response",
+                                                        "created_at": created_timestamp or int(time.time()),
+                                                        "model": model_name,
+                                                        "status": "in_progress",
+                                                        "output": [],
+                                                    },
+                                                }
+                                                yield f"event: response.created\ndata: {json.dumps(created_event)}\n\n"
+                                                sequence_number += 1
+                                                has_sent_created = True
+
+                                            # Emit response.output_item.added on first content
+                                            if not has_sent_item_added and "delta" in choice:
+                                                item_added_event = {
+                                                    "type": "response.output_item.added",
+                                                    "sequence_number": sequence_number,
+                                                    "output_index": choice_index,
+                                                    "item": {
+                                                        "id": item_id,
+                                                        "type": "message",
+                                                        "role": choice["delta"].get("role", "assistant"),
+                                                        "status": "in_progress",
+                                                        "content": [],
+                                                    },
+                                                }
+                                                yield f"event: response.output_item.added\ndata: {json.dumps(item_added_event)}\n\n"
+                                                sequence_number += 1
+                                                output_index = choice_index
+                                                has_sent_item_added = True
+
+                                            # Emit response.output_text.delta for content
+                                            if "delta" in choice and "content" in choice["delta"]:
+                                                delta_content = choice["delta"]["content"]
+                                                if delta_content:
+                                                    accumulated_content += delta_content
+                                                    delta_event = {
+                                                        "type": "response.output_text.delta",
+                                                        "sequence_number": sequence_number,
+                                                        "item_id": item_id,
+                                                        "output_index": output_index,
+                                                        "content_index": content_index,
+                                                        "delta": delta_content,
+                                                    }
+                                                    yield f"event: response.output_text.delta\ndata: {json.dumps(delta_event)}\n\n"
+                                                    sequence_number += 1
+
+                                            # Track finish reason
+                                            if choice.get("finish_reason"):
+                                                finish_reason = choice["finish_reason"]
                                     else:
+                                        # Pass through non-choices data
                                         yield chunk_data
                                 except json.JSONDecodeError:
                                     yield chunk_data
