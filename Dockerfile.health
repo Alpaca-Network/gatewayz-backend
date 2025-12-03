@@ -1,6 +1,7 @@
 # Health Monitoring Service Dockerfile
 # Lightweight container for running health checks independently
 # Build from repo root: docker build -f Dockerfile.health -t health-service .
+# Uses health-service/requirements.txt for minimal dependencies
 
 FROM python:3.12-slim
 
@@ -13,11 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY requirements.txt /app/requirements.txt
+# Copy health-service requirements first for caching
+COPY health-service/requirements.txt /app/health-service/requirements.txt
 
-# Install Python dependencies (using main requirements for full compatibility)
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# Install Python dependencies from health-service specific requirements
+RUN pip install --no-cache-dir -r /app/health-service/requirements.txt
 
 # Copy the entire project (needed for shared modules)
 COPY . /app

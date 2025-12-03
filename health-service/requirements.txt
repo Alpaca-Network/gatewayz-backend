@@ -1,6 +1,5 @@
 # Health Monitoring Service - Minimal Requirements
 # This file lists only the dependencies needed for health monitoring
-# Falls back to main requirements.txt if this doesn't have everything
 
 # Web framework
 fastapi>=0.104.0
@@ -19,7 +18,7 @@ supabase>=2.0.0
 # Redis for caching
 redis>=5.0.0
 
-# Logging
+# Environment and logging
 python-dotenv>=1.0.0
 
 # Async support
@@ -27,3 +26,9 @@ anyio>=3.7.0
 
 # Type hints
 typing_extensions>=4.0.0
+
+# Error tracking (optional, gracefully handled if missing)
+sentry-sdk>=1.0.0
+
+# Cryptography (needed by some supabase/auth dependencies)
+cryptography>=41.0.0
