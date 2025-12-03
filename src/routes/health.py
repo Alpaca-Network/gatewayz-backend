@@ -204,9 +204,15 @@ async def get_providers_health(
 
         # Use asyncio.wait_for for Python 3.10 compatibility
         async def _get_providers():
-            return health_monitor.get_all_providers_health(gateway)
+            providers = health_monitor.get_all_providers_health(gateway)
+            logger.debug(f"Health monitor returned {len(providers)} providers (gateway={gateway})")
+            return providers
 
         result = await asyncio.wait_for(_get_providers(), timeout=5.0)
+        
+        # If result is empty, log debug info and return empty (health monitor hasn't run yet)
+        if not result:
+            logger.debug(f"No providers health data from monitor (monitoring_active={health_monitor.monitoring_active}, provider_data_size={len(health_monitor.provider_data)})")
         
         # Cache only if no gateway filter
         if not gateway:
