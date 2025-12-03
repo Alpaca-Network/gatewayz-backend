@@ -133,6 +133,14 @@ class ModelHealthMonitor:
         self.monitoring_active = True
         logger.info("Starting model health monitoring service")
 
+        # Perform initial health check immediately
+        try:
+            logger.info("Performing initial health check...")
+            await self._perform_health_checks()
+            logger.info("Initial health check completed")
+        except Exception as e:
+            logger.warning(f"Initial health check failed: {e}")
+
         # Start monitoring loop
         asyncio.create_task(self._monitoring_loop())
 
@@ -222,7 +230,9 @@ class ModelHealthMonitor:
 
             for gateway in gateways:
                 try:
+                    logger.debug(f"Fetching models from {gateway}...")
                     gateway_models = get_cached_models(gateway)
+                    logger.debug(f"Got {len(gateway_models) if gateway_models else 0} models from {gateway}")
                     if gateway_models:
                         for chunk in self._chunk_list(gateway_models, self.fetch_chunk_size):
                             for model in chunk:
@@ -240,6 +250,7 @@ class ModelHealthMonitor:
         except Exception as e:
             logger.error(f"Failed to get models for health checking: {e}")
 
+        logger.info(f"Total models collected for health checking: {len(models)}")
         return models
 
 
