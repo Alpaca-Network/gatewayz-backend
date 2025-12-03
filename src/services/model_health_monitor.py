@@ -336,7 +336,7 @@ class ModelHealthMonitor:
         - Invalid parameters for specific models (400 with known issues)
         - Temporary service unavailability (503)
         - Non-serverless model access errors (400)
-        - Model not found/no access errors (404)
+        - Model access permission errors (404 with specific patterns)
         """
         if not status_code:
             return True  # Capture unknown errors
@@ -345,13 +345,16 @@ class ModelHealthMonitor:
         if status_code == 429:
             return False
 
-        # Don't capture data policy restrictions - user configuration issue
+        # Don't capture data policy restrictions or specific model access permission errors
         if status_code == 404 and error_message:
             lower_msg = error_message.lower()
+            # Data policy restrictions - user configuration issue
             if "data policy" in lower_msg:
                 return False
-            # Don't capture model not found/no access errors - configuration/plan issue
-            if "does not exist" in lower_msg or "no access" in lower_msg or "not found" in lower_msg:
+            # Model access permission errors - only filter specific access/permission patterns
+            # Don't filter generic "not found" errors which could be genuine issues
+            if ("does not exist" in lower_msg and ("team" in lower_msg or "access" in lower_msg)) or \
+               ("no access" in lower_msg and "model" in lower_msg):
                 return False
 
         # Don't capture temporary service unavailability
@@ -375,13 +378,7 @@ class ModelHealthMonitor:
         if status_code == 403 and error_message and "key" in error_message.lower():
             return False
 
-        # Don't capture internal server errors from providers (500) - transient issue
-        if status_code == 500 and error_message:
-            lower_msg = error_message.lower()
-            if "internal server error" in lower_msg:
-                return False
-
-        # Capture all other errors
+        # Capture all other errors (including generic 500 errors and most 404s)
         return True
 
     def _get_api_key_for_gateway(self, gateway: str) -> str | None:
