@@ -87,10 +87,13 @@ async def lifespan(app: FastAPI):
             logger.error(f"Failed to start intelligent health monitor: {e}")
             # Fall back to simple monitor
             logger.info("Falling back to simple health monitor...")
-            from src.services.model_health_monitor import health_monitor
-            await health_monitor.start_monitoring()
-            _active_monitor_type = "simple"
-            logger.info("Simple health monitoring started (fallback)")
+            try:
+                from src.services.model_health_monitor import health_monitor
+                await health_monitor.start_monitoring()
+                _active_monitor_type = "simple"
+                logger.info("Simple health monitoring started (fallback)")
+            except Exception as fallback_error:
+                logger.error(f"Failed to start fallback health monitor: {fallback_error}")
     else:
         logger.info("Starting Simple Health Monitor")
         try:
