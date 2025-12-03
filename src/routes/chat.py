@@ -2447,6 +2447,7 @@ async def unified_responses(
                         created_timestamp = int(time.time())
                         model_name = request_model
                         has_sent_created = False
+                        has_error = False  # Track if any errors occurred during streaming
                         usage_data = None
                         # Track multiple choices (n > 1) separately by index
                         # Each choice gets its own item_id, accumulated_content, etc.
@@ -2533,7 +2534,8 @@ async def unified_responses(
                                         if items_by_index[idx]["item_added_sent"]
                                     ]
 
-                                    # Emit response.completed
+                                    # Emit response.completed with appropriate status
+                                    response_status = "failed" if has_error else "completed"
                                     completed_event = {
                                         "type": "response.completed",
                                         "sequence_number": sequence_number,
@@ -2542,7 +2544,7 @@ async def unified_responses(
                                             "object": "response",
                                             "created_at": created_timestamp,
                                             "model": model_name,
-                                            "status": "completed",
+                                            "status": response_status,
                                             "output": output_list,
                                         },
                                     }
@@ -2582,6 +2584,7 @@ async def unified_responses(
                                         }
                                         yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
                                         sequence_number += 1
+                                        has_error = True
                                     elif "choices" in chunk_json and chunk_json["choices"]:
                                         for choice in chunk_json["choices"]:
                                             choice_index = choice.get("index", 0)
@@ -2661,6 +2664,7 @@ async def unified_responses(
                                     }
                                     yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
                                     sequence_number += 1
+                                    has_error = True
                             elif chunk_data.startswith("event:") or chunk_data.strip() == "":
                                 # Pass through SSE event lines and empty lines (SSE formatting)
                                 yield chunk_data
@@ -2676,6 +2680,7 @@ async def unified_responses(
                                 }
                                 yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
                                 sequence_number += 1
+                                has_error = True
 
                     stream_release_handled = True
                     provider = attempt_provider
