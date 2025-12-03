@@ -189,9 +189,10 @@ jobs:
       - name: Apply migrations
         run: |
           echo "Applying migrations..."
+          set -o pipefail  # Ensure pipeline returns the exit code of the first failed command
           set +e  # Don't exit on error, we'll check the exit code
           supabase db reset --debug 2>&1 | tee migration_output.txt
-          EXIT_CODE=$?
+          EXIT_CODE=${PIPESTATUS[0]}  # Get exit code of supabase command, not tee
           set -e
 
           # Check exit code first - this is the most reliable indicator

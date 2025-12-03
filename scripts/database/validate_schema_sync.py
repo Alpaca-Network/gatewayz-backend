@@ -453,19 +453,19 @@ def compare_schema_to_snapshot(current: SchemaInfo, snapshot: SchemaInfo) -> Val
     current_tables = set(current.tables.keys())
     snapshot_tables = set(snapshot.tables.keys())
 
-    # Missing tables (in snapshot but not current)
+    # Missing tables (in snapshot but not in current - current is missing these)
     missing = snapshot_tables - current_tables
     if missing:
         result.missing_tables = list(missing)
         for table in missing:
-            result.add_error(f"Table missing from snapshot: {table}")
+            result.add_error(f"Missing table: {table} (exists in snapshot but not in current schema)")
 
-    # Extra tables (in current but not snapshot)
+    # Extra tables (in current but not in snapshot - current has extra)
     extra = current_tables - snapshot_tables
     if extra:
         result.extra_tables = list(extra)
         for table in extra:
-            result.add_warning(f"Extra table not in snapshot: {table}")
+            result.add_warning(f"Extra table: {table} (exists in current schema but not in snapshot)")
 
     # Compare columns for common tables
     common_tables = current_tables & snapshot_tables
@@ -473,17 +473,19 @@ def compare_schema_to_snapshot(current: SchemaInfo, snapshot: SchemaInfo) -> Val
         current_cols = set(current.tables[table].get("columns", {}).keys())
         snapshot_cols = set(snapshot.tables[table].get("columns", {}).keys())
 
+        # Missing columns (in snapshot but not in current)
         missing_cols = snapshot_cols - current_cols
         if missing_cols:
             result.missing_columns[table] = list(missing_cols)
             for col in missing_cols:
-                result.add_error(f"Column missing from snapshot: {table}.{col}")
+                result.add_error(f"Missing column: {table}.{col} (exists in snapshot but not in current schema)")
 
+        # Extra columns (in current but not in snapshot)
         extra_cols = current_cols - snapshot_cols
         if extra_cols:
             result.extra_columns[table] = list(extra_cols)
             for col in extra_cols:
-                result.add_warning(f"Extra column not in snapshot: {table}.{col}")
+                result.add_warning(f"Extra column: {table}.{col} (exists in current schema but not in snapshot)")
 
     return result
 
