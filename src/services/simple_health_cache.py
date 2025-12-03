@@ -141,8 +141,7 @@ class SimpleHealthCache:
 
     def get_providers_health(self) -> Optional[list]:
         """Retrieve cached providers health data"""
-        cached = self.get_cache(CACHE_PREFIX_PROVIDERS)
-        return cached.get("providers") if cached else None
+return cached.get("providers") if cached and isinstance(cached, dict) else None
 
     def cache_models_health(self, data: list, ttl: int = DEFAULT_TTL_MODELS) -> bool:
         """Cache models health data"""
