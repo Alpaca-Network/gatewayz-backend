@@ -1305,3 +1305,147 @@ async def reset_password(token: str):
     except Exception as e:
         logger.error(f"Error resetting password: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.get("/auth/health", tags=["authentication", "health"])
+async def auth_health_check():
+    """
+    Dedicated health check endpoint for authentication service.
+
+    Returns comprehensive health status including:
+    - Database connectivity (Supabase)
+    - Redis cache availability
+    - Auth cache statistics
+    - Query timeout configuration
+    - Overall auth service status
+
+    This endpoint does not require authentication and is suitable for
+    load balancer health checks and monitoring systems.
+    """
+    import time
+
+    from src.config.redis_config import get_redis_client
+    from src.services.auth_cache import get_auth_cache_stats
+
+    start_time = time.time()
+    health_status = {
+        "service": "auth",
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {},
+        "latency_ms": 0,
+    }
+
+    issues = []
+
+    # Check 1: Database connectivity
+    db_check_start = time.time()
+    try:
+        client = supabase_config.get_supabase_client()
+        # Simple query to verify connection - use timeout
+        result = safe_query_with_timeout(
+            client,
+            "users",
+            lambda: client.table("users").select("id").limit(1).execute(),
+            timeout_seconds=3,
+            operation_name="auth health check",
+            fallback_value=None,
+            log_errors=False,
+        )
+        db_latency = (time.time() - db_check_start) * 1000
+
+        if result is not None:
+            health_status["checks"]["database"] = {
+                "status": "healthy",
+                "latency_ms": round(db_latency, 2),
+            }
+        else:
+            health_status["checks"]["database"] = {
+                "status": "timeout",
+                "latency_ms": round(db_latency, 2),
+                "error": "Query timed out after 3 seconds",
+            }
+            issues.append("database_timeout")
+    except QueryTimeoutError as e:
+        db_latency = (time.time() - db_check_start) * 1000
+        health_status["checks"]["database"] = {
+            "status": "timeout",
+            "latency_ms": round(db_latency, 2),
+            "error": str(e),
+        }
+        issues.append("database_timeout")
+    except Exception as e:
+        db_latency = (time.time() - db_check_start) * 1000
+        health_status["checks"]["database"] = {
+            "status": "unhealthy",
+            "latency_ms": round(db_latency, 2),
+            "error": str(e),
+        }
+        issues.append("database_error")
+
+    # Check 2: Redis cache availability
+    redis_check_start = time.time()
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            # Ping Redis
+            redis_client.ping()
+            redis_latency = (time.time() - redis_check_start) * 1000
+            health_status["checks"]["redis"] = {
+                "status": "healthy",
+                "latency_ms": round(redis_latency, 2),
+            }
+        else:
+            redis_latency = (time.time() - redis_check_start) * 1000
+            health_status["checks"]["redis"] = {
+                "status": "unavailable",
+                "latency_ms": round(redis_latency, 2),
+                "note": "Redis client not configured - using fallback caching",
+            }
+            # Redis being unavailable is not critical - we have in-memory fallback
+    except Exception as e:
+        redis_latency = (time.time() - redis_check_start) * 1000
+        health_status["checks"]["redis"] = {
+            "status": "unhealthy",
+            "latency_ms": round(redis_latency, 2),
+            "error": str(e),
+        }
+        issues.append("redis_error")
+
+    # Check 3: Auth cache statistics
+    try:
+        cache_stats = get_auth_cache_stats()
+        health_status["checks"]["auth_cache"] = {
+            "status": "healthy" if cache_stats.get("redis_available", False) else "degraded",
+            "stats": cache_stats,
+        }
+    except Exception as e:
+        health_status["checks"]["auth_cache"] = {
+            "status": "error",
+            "error": str(e),
+        }
+
+    # Check 4: Query timeout configuration
+    health_status["checks"]["timeouts"] = {
+        "auth_query_timeout_seconds": AUTH_QUERY_TIMEOUT,
+        "user_lookup_timeout_seconds": USER_LOOKUP_TIMEOUT,
+    }
+
+    # Calculate total latency
+    total_latency = (time.time() - start_time) * 1000
+    health_status["latency_ms"] = round(total_latency, 2)
+
+    # Determine overall status
+    if "database_error" in issues:
+        health_status["status"] = "unhealthy"
+    elif "database_timeout" in issues or "redis_error" in issues:
+        health_status["status"] = "degraded"
+    elif total_latency > 5000:  # > 5 seconds is concerning
+        health_status["status"] = "degraded"
+        health_status["warning"] = f"High latency detected: {total_latency:.0f}ms"
+
+    # Add issues list if any
+    if issues:
+        health_status["issues"] = issues
+
+    return health_status
