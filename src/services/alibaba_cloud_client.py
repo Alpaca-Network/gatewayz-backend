@@ -41,10 +41,32 @@ def _region_specific_api_key(region: str | None) -> str | None:
 
 
 def _get_region_api_key(region: str | None) -> str | None:
+    """Get the API key for a specific region.
+
+    Priority order:
+    1. Region-specific key (e.g., ALIBABA_CLOUD_API_KEY_CHINA)
+    2. Generic key (ALIBABA_CLOUD_API_KEY) as fallback
+    3. Any other region's key as last resort (enables failover when user
+       misconfigured which key goes with which region)
+
+    Returns the key for the region, or None if no key is configured.
+    """
     region_specific = _region_specific_api_key(region)
     if region_specific:
         return region_specific
-    return getattr(Config, "ALIBABA_CLOUD_API_KEY", None)
+
+    generic_key = getattr(Config, "ALIBABA_CLOUD_API_KEY", None)
+    if generic_key:
+        return generic_key
+
+    # Last resort: use any available key to enable failover
+    # This handles the case where user set the wrong region-specific key
+    for other_region in _VALID_REGIONS:
+        other_key = _region_specific_api_key(other_region)
+        if other_key:
+            return other_key
+
+    return None
 
 
 def _any_api_key_configured() -> bool:
@@ -120,6 +142,15 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
             "Alibaba Cloud API key not configured for any region. "
             "Set ALIBABA_CLOUD_API_KEY or a region-specific key."
         )
+
+    if len(attempts) > 1:
+        logger.debug(
+            "Alibaba Cloud %s will attempt %d regions in order: %s",
+            operation_name,
+            len(attempts),
+            ", ".join(_describe_region(r) for r in attempts),
+        )
+
     last_error: Exception | None = None
 
     for idx, region in enumerate(attempts):
@@ -136,7 +167,9 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
             return result
         except Exception as exc:  # noqa: PERF203 - clarity over premature micro-opt
             last_error = exc
-            should_retry = _is_auth_error(exc) and idx < len(attempts) - 1
+            is_auth = _is_auth_error(exc)
+            has_more_regions = idx < len(attempts) - 1
+            should_retry = is_auth and has_more_regions
 
             if should_retry:
                 next_region = attempts[idx + 1]
@@ -150,12 +183,32 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
                 )
                 continue
 
-            logger.error(
-                "Alibaba Cloud %s failed for %s (error: %s)",
-                operation_name,
-                _describe_region(region),
-                exc,
-            )
+            # Log why we're not retrying for debugging
+            if is_auth and not has_more_regions:
+                logger.error(
+                    "Alibaba Cloud %s failed for %s (error: %s). "
+                    "No more regions to try (attempted %d of %d regions).",
+                    operation_name,
+                    _describe_region(region),
+                    exc,
+                    idx + 1,
+                    len(attempts),
+                )
+            elif not is_auth:
+                logger.error(
+                    "Alibaba Cloud %s failed for %s (error: %s). "
+                    "Error is not an auth error, not retrying with other regions.",
+                    operation_name,
+                    _describe_region(region),
+                    exc,
+                )
+            else:
+                logger.error(
+                    "Alibaba Cloud %s failed for %s (error: %s)",
+                    operation_name,
+                    _describe_region(region),
+                    exc,
+                )
             raise
 
     if last_error:

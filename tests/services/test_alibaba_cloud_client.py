@@ -93,8 +93,11 @@ def test_get_client_uses_region_specific_keys(monkeypatch):
     assert captured_keys == ["china-key", "intl-key"]
 
 
-def test_region_attempt_order_skips_missing_keys(monkeypatch):
-    """Only attempt regions that have an API key configured."""
+def test_region_attempt_order_uses_available_key_for_all_regions(monkeypatch):
+    """When only one region-specific key is set, all regions should still be attempted.
+
+    This enables failover when the user has misconfigured which key goes with which region.
+    """
 
     _reset_region_state(monkeypatch)
     monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", None, raising=False)
@@ -105,4 +108,45 @@ def test_region_attempt_order_skips_missing_keys(monkeypatch):
 
     attempts = acc._region_attempt_order()
 
-    assert attempts == ["international"], "should only include regions with keys"
+    # Both regions should be included because the intl-key will be used as fallback for china
+    # This enables failover if user misconfigured which key goes with which region
+    assert attempts == ["china", "international"], "should include all regions with fallback key"
+
+
+def test_failover_with_misconfigured_region_key(monkeypatch):
+    """Test that failover works when user sets international key but it only works for China.
+
+    This is the scenario from the bug report: user sets ALIBABA_CLOUD_API_KEY_INTERNATIONAL
+    with a key that actually only works for the China endpoint.
+    """
+
+    _reset_region_state(monkeypatch)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None, raising=False)
+    # User mistakenly put their China key in the INTERNATIONAL variable
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", "china-key-in-wrong-var", raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_REGION", "international", raising=False)
+
+    call_order: list[str] = []
+
+    def fake_get_client(region_override=None):
+        region = region_override or "international"
+        call_order.append(region)
+
+        failing = MagicMock()
+        failing.models.list.side_effect = Exception("Error code: 401 - Incorrect API key provided")
+
+        success_response = types.SimpleNamespace(data=[{"id": "qwen-max"}])
+        succeeding = MagicMock()
+        succeeding.models.list.return_value = success_response
+
+        # The key only works for China, not international
+        return failing if region == "international" else succeeding
+
+    monkeypatch.setattr(acc, "get_alibaba_cloud_client", fake_get_client)
+
+    response = acc.list_alibaba_models()
+
+    assert response.data[0]["id"] == "qwen-max"
+    assert call_order == ["international", "china"], "should failover from international to china"
+    assert acc._inferred_region == "china"
