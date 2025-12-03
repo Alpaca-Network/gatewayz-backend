@@ -133,6 +133,9 @@ class ModelHealthMonitor:
         self.monitoring_active = True
         logger.info("Starting model health monitoring service")
 
+        # Initialize provider data from available gateways
+        await self._initialize_provider_data()
+
         # Start monitoring loop
         asyncio.create_task(self._monitoring_loop())
 
@@ -241,6 +244,45 @@ class ModelHealthMonitor:
             logger.error(f"Failed to get models for health checking: {e}")
 
         return models
+
+    async def _initialize_provider_data(self):
+        """Initialize provider data from available gateways"""
+        try:
+            logger.info("Initializing provider data from gateways")
+            
+            gateways = [
+                "openrouter", "featherless", "deepinfra", "huggingface",
+                "groq", "fireworks", "together", "xai", "novita", "chutes",
+                "aimo", "near", "fal", "google-vertex", "cerebras", "nebius", "helicone",
+            ]
+
+            for gateway in gateways:
+                try:
+                    # Create a default provider entry for each gateway
+                    provider_key = f"{gateway}:default"
+                    if provider_key not in self.provider_data:
+                        self.provider_data[provider_key] = ProviderHealthMetrics(
+                            provider=gateway,
+                            gateway=gateway,
+                            status=ProviderStatus.UNKNOWN,
+                            total_models=0,
+                            healthy_models=0,
+                            degraded_models=0,
+                            unhealthy_models=0,
+                            avg_response_time_ms=None,
+                            overall_uptime=0.0,
+                            last_checked=datetime.now(timezone.utc),
+                            error_message="Initializing...",
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to initialize provider data for {gateway}: {e}")
+
+            # Update system metrics with initialized data
+            await self._update_system_metrics()
+            logger.info(f"Initialized provider data for {len(self.provider_data)} gateways")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize provider data: {e}")
 
     @staticmethod
     def _chunk_list(items: list[dict[str, Any]], size: int):
