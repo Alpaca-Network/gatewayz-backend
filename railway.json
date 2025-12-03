@@ -56,7 +56,7 @@
       "name": "health-service",
       "build": {
         "builder": "DOCKERFILE",
-        "dockerfilePath": "health-service/Dockerfile"
+        "dockerfilePath": "Dockerfile.health"
       },
       "deploy": {
         "restartPolicyType": "ON_FAILURE",
