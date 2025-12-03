@@ -334,7 +334,7 @@ async def get_health_summary(
     - Monitoring status
 
     Note: Health data is provided by the dedicated health-service container
-    via Redis cache. If cache is empty, default values are returned.
+    via Redis cache. If cache is empty, a default summary is returned.
 
     Query Parameters:
     - force_refresh: Currently ignored (data comes from health-service cache)
@@ -346,14 +346,37 @@ async def get_health_summary(
             logger.debug("Returning cached health summary from health-service")
             return HealthSummaryResponse(**cached)
 
-        # No cached data available
-        logger.warning("Health summary not in cache - health-service may not be running")
-        raise HTTPException(
-            status_code=503,
-            detail="Health data not available - health-service may not be running"
+        # No cached summary, build from individual cache entries (same as dashboard)
+        logger.debug("Building health summary from cached components")
+        cached_system = simple_health_cache.get_system_health()
+        cached_providers = simple_health_cache.get_providers_health() or []
+        cached_models = simple_health_cache.get_models_health() or []
+
+        # Build system health response
+        if cached_system:
+            system_health = SystemHealthResponse(**cached_system)
+        else:
+            system_health = SystemHealthResponse(
+                overall_status=HealthStatus.UNKNOWN,
+                total_providers=0,
+                healthy_providers=0,
+                degraded_providers=0,
+                unhealthy_providers=0,
+                total_models=0,
+                healthy_models=0,
+                degraded_models=0,
+                unhealthy_models=0,
+                system_uptime=0.0,
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        return HealthSummaryResponse(
+            system_health=system_health,
+            providers=[ProviderHealthResponse(**p) for p in cached_providers] if cached_providers else [],
+            models=[ModelHealthResponse(**m) for m in cached_models] if cached_models else [],
+            monitoring_active=cached_system is not None,
+            last_updated=datetime.now(timezone.utc),
         )
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to get health summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve health summary") from e
