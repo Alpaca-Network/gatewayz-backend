@@ -650,11 +650,22 @@ def track_referral_signup(
         )
 
         if existing_referral.data:
-            # User already has a referral record, just ensure referred_by_code is set
+            # User already has a referral record - use the ORIGINAL referral code
+            # to maintain data consistency (don't let them switch referrers)
+            original_code = existing_referral.data[0].get("referral_code")
+            if original_code != referral_code:
+                logger.warning(
+                    f"User {referred_user_id} already referred by code {original_code}, "
+                    f"ignoring new code {referral_code}"
+                )
+                return False, "You have already been referred by another user", None
+
+            # Same code, just ensure referred_by_code is set (idempotent)
             logger.info(
-                f"Referral record already exists for user {referred_user_id}, "
-                f"updating referred_by_code"
+                f"Referral record already exists for user {referred_user_id} with same code, "
+                f"ensuring referred_by_code is set"
             )
+            code_to_set = original_code
         else:
             # Create pending referral record (will be completed when they make first purchase)
             referral_data = {
@@ -671,23 +682,26 @@ def track_referral_signup(
             if not referral_result.data:
                 return False, "Failed to create referral record", None
 
+            code_to_set = referral_code
+
         # CRITICAL: Set referred_by_code on the user record so they appear in referral stats
         # This must be done here to ensure the user appears on the referrer's page
         update_result = (
             client.table("users")
-            .update({"referred_by_code": referral_code})
+            .update({"referred_by_code": code_to_set})
             .eq("id", referred_user_id)
             .execute()
         )
 
         if not update_result.data:
-            logger.warning(
+            logger.error(
                 f"Failed to set referred_by_code for user {referred_user_id}, "
-                f"they may not appear in referral stats"
+                f"they will not appear in referral stats"
             )
+            return False, "Failed to update user referral information", None
 
         logger.info(
-            f"Tracked referral signup: user {referred_user_id} used code {referral_code} "
+            f"Tracked referral signup: user {referred_user_id} used code {code_to_set} "
             f"from user {referrer['id']}"
         )
 
