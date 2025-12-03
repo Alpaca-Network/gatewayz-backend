@@ -11,6 +11,88 @@ from src.utils.security_validators import sanitize_for_logging
 logger = logging.getLogger(__name__)
 
 
+def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
+    """Migrate a legacy API key from users.api_key to api_keys_new table.
+
+    This function is called automatically when a legacy key is detected during
+    authentication. It creates a corresponding entry in api_keys_new with
+    appropriate defaults, allowing the user to benefit from the new key features.
+
+    Args:
+        client: Supabase client instance
+        user: User dictionary containing at least 'id' and optionally 'created_at'
+        api_key: The legacy API key to migrate
+
+    Returns:
+        True if migration succeeded, False otherwise
+    """
+    try:
+        user_id = user.get("id")
+        if not user_id:
+            logger.error("Cannot migrate legacy key: user has no ID")
+            return False
+
+        # Check if key already exists in api_keys_new (race condition protection)
+        with track_database_query(table="api_keys_new", operation="select"):
+            existing = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+
+        if existing.data:
+            logger.debug("Legacy key already exists in api_keys_new, skipping migration")
+            return True  # Already migrated
+
+        # Determine environment tag from key prefix
+        if api_key.startswith("gw_test_"):
+            environment_tag = "test"
+        elif api_key.startswith("gw_staging_"):
+            environment_tag = "staging"
+        elif api_key.startswith("gw_dev_"):
+            environment_tag = "development"
+        else:
+            environment_tag = "live"
+
+        # Prepare migration payload matching the SQL migration
+        migration_payload = {
+            "user_id": user_id,
+            "api_key": api_key,
+            "key_name": "Legacy Primary Key (auto-migrated)",
+            "environment_tag": environment_tag,
+            "is_primary": True,
+            "is_active": True,
+            "scope_permissions": {"read": ["*"], "write": ["*"], "admin": ["*"]},
+            "ip_allowlist": [],
+            "domain_referrers": [],
+            "created_at": user.get("created_at", datetime.now(timezone.utc).isoformat()),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Insert the migrated key
+        with track_database_query(table="api_keys_new", operation="insert"):
+            result = client.table("api_keys_new").insert(migration_payload).execute()
+
+        if result.data:
+            logger.info(
+                "Auto-migrated legacy API key for user %s to api_keys_new (env: %s)",
+                sanitize_for_logging(str(user_id)),
+                environment_tag,
+            )
+            return True
+        else:
+            logger.warning(
+                "Migration insert returned no data for user %s",
+                sanitize_for_logging(str(user_id)),
+            )
+            return False
+
+    except Exception as e:
+        # Log but don't raise - migration failure shouldn't block authentication
+        logger.error(
+            "Failed to auto-migrate legacy API key for user %s: %s",
+            sanitize_for_logging(str(user.get("id", "unknown"))),
+            sanitize_for_logging(str(e)),
+        )
+        return False
+
+
 def create_enhanced_user(
     username: str,
     email: str,
@@ -123,11 +205,27 @@ def get_user(api_key: str) -> dict[str, Any] | None:
         with track_database_query(table="users", operation="select"):
             legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
         if legacy_result.data:
+            user = legacy_result.data[0]
             logger.warning(
-                "Legacy API key %s detected - should be migrated",
+                "Legacy API key %s detected for user %s - attempting automatic migration",
                 sanitize_for_logging(api_key[:20] + "..."),
+                user.get("id"),
             )
-            return legacy_result.data[0]
+
+            # Attempt automatic migration of the legacy key to api_keys_new
+            migrated = _migrate_legacy_api_key(client, user, api_key)
+            if migrated:
+                logger.info(
+                    "Successfully migrated legacy API key for user %s to api_keys_new",
+                    user.get("id"),
+                )
+            else:
+                logger.warning(
+                    "Could not migrate legacy API key for user %s - manual migration required",
+                    user.get("id"),
+                )
+
+            return user
 
         return None
 
