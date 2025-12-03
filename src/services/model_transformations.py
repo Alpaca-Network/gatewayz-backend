@@ -273,6 +273,11 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
+            # Alternative "deepseek/" org prefix (common user input format)
+            "deepseek/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             # Llama models
             "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "meta-llama/llama-3.3-70b-instruct": "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -1131,7 +1136,8 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "alibaba-cloud"
 
         # DeepSeek models are primarily on Fireworks in this system
-        if org == "deepseek-ai" and "deepseek" in model_name.lower():
+        # Support both "deepseek-ai/" and "deepseek/" org prefixes
+        if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
             return "fireworks"
 
         # OpenAI models go to OpenRouter
