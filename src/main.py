@@ -620,15 +620,10 @@ def create_app() -> FastAPI:
             asyncio.create_task(warm_caches_async())
             logger.info("  🔥 Cache warming started in background (non-blocking)")
 
-            # Initialize intelligent health monitoring
-            try:
-                logger.info("   Starting intelligent health monitoring...")
-                from src.services.intelligent_health_monitor import intelligent_health_monitor
-
-                await intelligent_health_monitor.start_monitoring()
-                logger.info("   Intelligent health monitoring started")
-            except Exception as health_e:
-                logger.warning(f"    Health monitoring initialization warning: {health_e}")
+            # NOTE: Health monitoring is handled by the dedicated health-service container
+            # The main API reads health data from Redis cache populated by health-service
+            # See: health-service/main.py and DISABLE_ACTIVE_HEALTH_MONITORING env var
+            logger.info("   Health monitoring handled by dedicated health-service container")
 
         except Exception as e:
             logger.error(f"   Startup initialization failed: {e}")
@@ -644,14 +639,9 @@ def create_app() -> FastAPI:
     async def on_shutdown():
         logger.info("🛑 Shutting down application...")
 
-        # Shutdown health monitoring
-        try:
-            from src.services.intelligent_health_monitor import intelligent_health_monitor
-
-            await intelligent_health_monitor.stop_monitoring()
-            logger.info("   Health monitoring stopped")
-        except Exception as e:
-            logger.warning(f"    Health monitoring shutdown warning: {e}")
+        # NOTE: Health monitoring is handled by the dedicated health-service container
+        # No health monitor shutdown needed in main API
+        logger.info("   Health monitoring handled by health-service (no shutdown needed)")
 
         # Shutdown OpenTelemetry
         try:

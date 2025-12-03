@@ -217,6 +217,9 @@ class IntelligentHealthMonitor:
                     # Small delay between batches to avoid overwhelming the system
                     await asyncio.sleep(1)
 
+                # Publish health data to Redis cache for main API consumption
+                await self._publish_health_to_cache()
+
                 # Sleep before next iteration
                 await asyncio.sleep(30)
 
@@ -674,6 +677,127 @@ class IntelligentHealthMonitor:
             HealthCheckStatus.NOT_FOUND: "unavailable",
         }
         return mapping.get(status, "unknown")
+
+    async def _publish_health_to_cache(self):
+        """Publish aggregated health data to Redis cache for main API consumption"""
+        try:
+            from src.config.supabase_config import supabase
+            from src.services.simple_health_cache import simple_health_cache
+
+            # Query aggregated health data from database
+            # Get model health data
+            models_response = (
+                supabase.table("model_health_tracking")
+                .select("provider, model, gateway, last_status, last_response_time_ms, uptime_percentage_24h, error_count, call_count, last_called_at")
+                .eq("is_enabled", True)
+                .order("last_called_at", desc=True)
+                .limit(500)  # Limit for cache size
+                .execute()
+            )
+
+            models_data = []
+            for m in models_response.data or []:
+                models_data.append({
+                    "model_id": m.get("model"),
+                    "provider": m.get("provider"),
+                    "gateway": m.get("gateway"),
+                    "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
+                    "response_time_ms": m.get("last_response_time_ms"),
+                    "avg_response_time_ms": m.get("last_response_time_ms"),
+                    "uptime_percentage": m.get("uptime_percentage_24h", 0.0),
+                    "error_count": m.get("error_count", 0),
+                    "total_requests": m.get("call_count", 0),
+                    "last_checked": m.get("last_called_at"),
+                })
+
+            if models_data:
+                simple_health_cache.cache_models_health(models_data)
+                logger.debug(f"Published {len(models_data)} models health to Redis cache")
+
+            # Aggregate provider data
+            providers_map = {}
+            for m in models_data:
+                provider = m.get("provider", "unknown")
+                gateway = m.get("gateway", "unknown")
+                key = f"{gateway}:{provider}"
+                if key not in providers_map:
+                    providers_map[key] = {
+                        "provider": provider,
+                        "gateway": gateway,
+                        "status": "online",
+                        "total_models": 0,
+                        "healthy_models": 0,
+                        "degraded_models": 0,
+                        "unhealthy_models": 0,
+                        "avg_response_time_ms": 0,
+                        "overall_uptime": 0,
+                        "response_times": [],
+                    }
+                p = providers_map[key]
+                p["total_models"] += 1
+                if m.get("status") == "healthy":
+                    p["healthy_models"] += 1
+                else:
+                    p["unhealthy_models"] += 1
+                if m.get("response_time_ms"):
+                    p["response_times"].append(m["response_time_ms"])
+
+            # Calculate averages and status
+            providers_data = []
+            for p in providers_map.values():
+                if p["response_times"]:
+                    p["avg_response_time_ms"] = sum(p["response_times"]) / len(p["response_times"])
+                if p["total_models"] > 0:
+                    p["overall_uptime"] = (p["healthy_models"] / p["total_models"]) * 100
+                if p["unhealthy_models"] > p["total_models"] * 0.5:
+                    p["status"] = "offline"
+                elif p["unhealthy_models"] > 0:
+                    p["status"] = "degraded"
+                del p["response_times"]  # Remove temp data
+                providers_data.append(p)
+
+            if providers_data:
+                simple_health_cache.cache_providers_health(providers_data)
+                logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
+
+            # Calculate system health
+            total_models = len(models_data)
+            healthy_models = sum(1 for m in models_data if m.get("status") == "healthy")
+            unhealthy_models = total_models - healthy_models
+            total_providers = len(providers_data)
+            healthy_providers = sum(1 for p in providers_data if p.get("status") == "online")
+            degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
+            unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
+
+            if unhealthy_providers == 0:
+                overall_status = "healthy"
+            elif unhealthy_providers < total_providers * 0.5:
+                overall_status = "degraded"
+            else:
+                overall_status = "unhealthy"
+
+            system_uptime = (healthy_models / total_models * 100) if total_models > 0 else 0.0
+
+            system_data = {
+                "overall_status": overall_status,
+                "total_providers": total_providers,
+                "healthy_providers": healthy_providers,
+                "degraded_providers": degraded_providers,
+                "unhealthy_providers": unhealthy_providers,
+                "total_models": total_models,
+                "healthy_models": healthy_models,
+                "degraded_models": 0,  # Would need more complex calculation
+                "unhealthy_models": unhealthy_models,
+                "system_uptime": system_uptime,
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            }
+
+            simple_health_cache.cache_system_health(system_data)
+            logger.info(f"Published health data to Redis cache: {total_models} models, {total_providers} providers")
+
+        except Exception as e:
+            logger.warning(f"Failed to publish health data to Redis cache: {e}")
+            # Don't fail the monitoring if cache publish fails
 
     async def _tier_update_loop(self):
         """Periodically update model tiers based on usage patterns"""
