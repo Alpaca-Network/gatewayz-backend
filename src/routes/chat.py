@@ -2486,9 +2486,12 @@ async def unified_responses(
                                         sequence_number += 1
                                         has_sent_created = True
 
-                                    # Emit done events for each tracked item (supports n > 1)
+                                    # Emit done events only for items that were announced as added
                                     for idx in sorted(items_by_index.keys()):
                                         item_state = items_by_index[idx]
+                                        # Only emit done events for items that had item_added sent
+                                        if not item_state["item_added_sent"]:
+                                            continue
                                         done_event = {
                                             "type": "response.output_text.done",
                                             "sequence_number": sequence_number,
@@ -2517,7 +2520,7 @@ async def unified_responses(
                                         yield f"event: response.output_item.done\ndata: {json.dumps(item_done_event)}\n\n"
                                         sequence_number += 1
 
-                                    # Build output list from all tracked items
+                                    # Build output list only from items that were announced
                                     output_list = [
                                         {
                                             "id": items_by_index[idx]["item_id"],
@@ -2527,6 +2530,7 @@ async def unified_responses(
                                             "content": [{"type": "output_text", "text": items_by_index[idx]["content"]}],
                                         }
                                         for idx in sorted(items_by_index.keys())
+                                        if items_by_index[idx]["item_added_sent"]
                                     ]
 
                                     # Emit response.completed
