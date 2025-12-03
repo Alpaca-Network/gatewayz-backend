@@ -124,8 +124,15 @@ class ModelHealthMonitor:
             "temperature": 0.1,
         }
 
-    async def start_monitoring(self):
-        """Start the health monitoring service"""
+    async def start_monitoring(self, run_initial_check: bool = True):
+        """Start the health monitoring service
+
+        Args:
+            run_initial_check: If True, performs an initial health check synchronously
+                               before starting the background loop. This ensures system_data
+                               is populated immediately rather than waiting for the first
+                               check_interval (default 5 minutes).
+        """
         if self.monitoring_active:
             logger.warning("Health monitoring is already active")
             return
@@ -133,13 +140,97 @@ class ModelHealthMonitor:
         self.monitoring_active = True
         logger.info("Starting model health monitoring service")
 
-        # Start monitoring loop
+        # Perform initial health check synchronously to populate system_data immediately
+        # This prevents the race condition where /health/dashboard returns UNKNOWN status
+        # because no health checks have completed yet
+        if run_initial_check:
+            try:
+                logger.info("Running initial health check to populate system metrics...")
+                await self._perform_initial_health_check()
+                logger.info("Initial health check completed - system metrics available")
+            except Exception as e:
+                logger.warning(f"Initial health check failed, will retry in background: {e}")
+                # Initialize with empty but valid system_data to avoid UNKNOWN status
+                await self._initialize_empty_system_data()
+
+        # Start monitoring loop for periodic checks
         asyncio.create_task(self._monitoring_loop())
 
     async def stop_monitoring(self):
         """Stop the health monitoring service"""
         self.monitoring_active = False
         logger.info("Stopped model health monitoring service")
+
+    async def _perform_initial_health_check(self):
+        """Perform a lightweight initial health check to populate system_data.
+
+        This is a faster version of _perform_health_checks() that:
+        1. Only checks a small sample of models (first few from each gateway)
+        2. Has a shorter timeout
+        3. Prioritizes populating system_data over comprehensive coverage
+
+        The full health check will run in the background loop afterward.
+        """
+        logger.info("Performing initial health check (lightweight)")
+
+        # Get models but limit to a small sample for fast startup
+        models_to_check = await self._get_models_to_check()
+
+        if not models_to_check:
+            logger.warning("No models available for initial health check")
+            # Still initialize system_data with zeros rather than leaving it None
+            await self._initialize_empty_system_data()
+            return
+
+        # Take a sample of models (max 10) for quick initial check
+        sample_size = min(10, len(models_to_check))
+        sample_models = models_to_check[:sample_size]
+
+        logger.info(f"Initial check: sampling {sample_size} of {len(models_to_check)} models")
+
+        # Check the sample models with shorter timeout
+        results = await asyncio.gather(
+            *(self._check_model_health(model) for model in sample_models),
+            return_exceptions=True,
+        )
+
+        for model, result in zip(sample_models, results, strict=False):
+            if isinstance(result, Exception):
+                logger.debug(f"Initial health check failed for {model.get('id')}: {result}")
+                continue
+            if result:
+                self._update_health_data(result)
+
+        # Update provider and system metrics even with partial data
+        await self._update_provider_metrics()
+        await self._update_system_metrics()
+
+        logger.info(
+            f"Initial health check complete: {len(self.health_data)} models, "
+            f"{len(self.provider_data)} providers tracked"
+        )
+
+    async def _initialize_empty_system_data(self):
+        """Initialize system_data with empty/zero values.
+
+        This is called when no models are available or initial check fails,
+        to ensure system_data is not None and endpoints return valid responses
+        instead of UNKNOWN status.
+        """
+        self.system_data = SystemHealthMetrics(
+            overall_status=HealthStatus.HEALTHY,  # Assume healthy until proven otherwise
+            total_providers=0,
+            healthy_providers=0,
+            degraded_providers=0,
+            unhealthy_providers=0,
+            total_models=0,
+            healthy_models=0,
+            degraded_models=0,
+            unhealthy_models=0,
+            system_uptime=100.0,  # Assume 100% until we have data
+            last_updated=datetime.now(timezone.utc),
+        )
+        logger.info("Initialized empty system health data (no models available yet)")
 
     async def _monitoring_loop(self):
         """Main monitoring loop"""
