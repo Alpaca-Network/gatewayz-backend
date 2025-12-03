@@ -252,7 +252,16 @@ async def _get_intelligent_monitor_summary() -> dict:
     try:
         from src.config.supabase_config import supabase
 
-        # Get recent health data from database
+        # Get accurate total count of tracked models
+        count_response = (
+            supabase.table("model_health_tracking")
+            .select("id", count="exact")
+            .eq("is_enabled", True)
+            .execute()
+        )
+        total_models = count_response.count or 0
+
+        # Get recent health data sample from database
         models_response = (
             supabase.table("model_health_tracking")
             .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
@@ -273,7 +282,7 @@ async def _get_intelligent_monitor_summary() -> dict:
         )
         incidents = incidents_response.data or []
 
-        # Calculate summary stats
+        # Calculate summary stats from sample (note: this is from the 100 most recent)
         status_counts = {}
         for model in models_data:
             status = model.get("current_status", "unknown")
@@ -283,8 +292,8 @@ async def _get_intelligent_monitor_summary() -> dict:
             "monitoring_active": True,
             "monitor_type": "intelligent",
             "models_sample": models_data[:20],  # Return sample of recent models
-            "total_models_tracked": len(models_data),
-            "status_distribution": status_counts,
+            "total_models_tracked": total_models,  # Accurate count from database
+            "status_distribution": status_counts,  # Distribution from recent 100 models
             "active_incidents": len(incidents),
             "last_check": datetime.now(timezone.utc).isoformat(),
         }
