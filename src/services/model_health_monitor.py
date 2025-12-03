@@ -218,7 +218,7 @@ class ModelHealthMonitor:
         instead of UNKNOWN status.
         """
         self.system_data = SystemHealthMetrics(
-            overall_status=HealthStatus.HEALTHY,  # Assume healthy until proven otherwise
+            overall_status=HealthStatus.UNKNOWN,  # No checks performed yet
             total_providers=0,
             healthy_providers=0,
             degraded_providers=0,
@@ -227,10 +227,10 @@ class ModelHealthMonitor:
             healthy_models=0,
             degraded_models=0,
             unhealthy_models=0,
-            system_uptime=100.0,  # Assume 100% until we have data
+            system_uptime=0.0,  # No data yet
             last_updated=datetime.now(timezone.utc),
         )
-        logger.info("Initialized empty system health data (no models available yet)")
+        logger.info("Initialized empty system health data (no models checked yet)")
 
     async def _monitoring_loop(self):
         """Main monitoring loop"""
