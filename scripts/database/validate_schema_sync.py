@@ -26,11 +26,11 @@ Usage:
 
 import argparse
 import json
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -219,8 +219,8 @@ class SchemaValidator:
                 {"name": r["indexname"], "table": r["tablename"], "definition": r["indexdef"]}
                 for r in (result.data or [])
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Failed to retrieve indexes from database: {e}")
 
         # Get functions
         try:
@@ -232,8 +232,8 @@ class SchemaValidator:
             """
             result = self.client.rpc("exec_sql", {"query": functions_query}).execute()
             schema.functions = [r["routine_name"] for r in (result.data or [])]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Failed to retrieve functions from database: {e}")
 
         # Get enums
         try:
@@ -252,8 +252,8 @@ class SchemaValidator:
                     enums[r["typname"]] = []
                 enums[r["typname"]].append(r["enumlabel"])
             schema.enums = [{"name": k, "values": v} for k, v in enums.items()]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Failed to retrieve enums from database: {e}")
 
         return schema
 
@@ -264,10 +264,10 @@ class SchemaValidator:
         for table_name in EXPECTED_TABLES:
             try:
                 # Try to select from table to verify it exists
-                result = self.client.table(table_name).select("*").limit(0).execute()
+                self.client.table(table_name).select("*").limit(0).execute()
                 tables[table_name] = {"columns": {}, "exists": True}
             except Exception:
-                # Table doesn't exist or error
+                # Table doesn't exist or error - this is expected for missing tables
                 pass
 
         return tables
