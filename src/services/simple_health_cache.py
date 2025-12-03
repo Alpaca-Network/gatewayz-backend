@@ -150,8 +150,7 @@ class SimpleHealthCache:
 
     def get_models_health(self) -> Optional[list]:
         """Retrieve cached models health data"""
-        cached = self.get_cache(CACHE_PREFIX_MODELS)
-        return cached.get("models") if cached else None
+return cached.get("models") if cached and isinstance(cached, dict) else None
 
     def cache_health_summary(self, data: Any, ttl: int = DEFAULT_TTL_SUMMARY) -> bool:
         """Cache complete health summary"""
