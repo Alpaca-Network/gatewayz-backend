@@ -172,6 +172,36 @@ async def health_check():
     }
 
 
+async def _get_intelligent_monitor_counts() -> tuple[int, int]:
+    """Get model and provider counts from database for intelligent monitor."""
+    try:
+        from src.config.supabase_config import supabase
+
+        # Get count of tracked models
+        models_response = (
+            supabase.table("model_health_tracking")
+            .select("id", count="exact")
+            .eq("is_enabled", True)
+            .execute()
+        )
+        models_count = models_response.count or 0
+
+        # Get distinct provider count
+        providers_response = (
+            supabase.table("model_health_tracking")
+            .select("provider")
+            .eq("is_enabled", True)
+            .execute()
+        )
+        providers = set(row.get("provider") for row in (providers_response.data or []))
+        providers_count = len(providers)
+
+        return models_count, providers_count
+    except Exception as e:
+        logger.warning(f"Failed to get intelligent monitor counts: {e}")
+        return 0, 0
+
+
 @app.get("/status")
 async def get_status():
     """
@@ -182,9 +212,14 @@ async def get_status():
         if _active_monitor_type == "intelligent":
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             monitor = intelligent_health_monitor
+            # Intelligent monitor stores data in database, not memory
+            models_count, providers_count = await _get_intelligent_monitor_counts()
         else:
             from src.services.model_health_monitor import health_monitor
             monitor = health_monitor
+            # Simple monitor stores data in memory
+            models_count = len(getattr(monitor, "health_data", {}))
+            providers_count = len(getattr(monitor, "provider_data", {}))
 
         from src.services.model_availability import availability_service
 
@@ -194,8 +229,8 @@ async def get_status():
             "monitor_type": _active_monitor_type,
             "health_monitoring_active": monitor.monitoring_active,
             "availability_monitoring_active": availability_service.monitoring_active,
-            "models_tracked": len(getattr(monitor, "health_data", {})),
-            "providers_tracked": len(getattr(monitor, "provider_data", {})),
+            "models_tracked": models_count,
+            "providers_tracked": providers_count,
             "availability_cache_size": len(availability_service.availability_cache),
             "health_check_interval": HEALTH_CHECK_INTERVAL,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -212,6 +247,56 @@ async def get_status():
         )
 
 
+async def _get_intelligent_monitor_summary() -> dict:
+    """Get health summary from database for intelligent monitor."""
+    try:
+        from src.config.supabase_config import supabase
+
+        # Get recent health data from database
+        models_response = (
+            supabase.table("model_health_tracking")
+            .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
+            .eq("is_enabled", True)
+            .order("last_check_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+
+        models_data = models_response.data or []
+
+        # Get active incidents
+        incidents_response = (
+            supabase.table("model_health_incidents")
+            .select("*")
+            .eq("resolved", False)
+            .execute()
+        )
+        incidents = incidents_response.data or []
+
+        # Calculate summary stats
+        status_counts = {}
+        for model in models_data:
+            status = model.get("current_status", "unknown")
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+        return {
+            "monitoring_active": True,
+            "monitor_type": "intelligent",
+            "models_sample": models_data[:20],  # Return sample of recent models
+            "total_models_tracked": len(models_data),
+            "status_distribution": status_counts,
+            "active_incidents": len(incidents),
+            "last_check": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.warning(f"Failed to get intelligent monitor summary: {e}")
+        return {
+            "monitoring_active": False,
+            "error": str(e),
+            "last_check": datetime.now(timezone.utc).isoformat(),
+        }
+
+
 @app.get("/metrics")
 async def get_metrics():
     """
@@ -221,8 +306,8 @@ async def get_metrics():
     try:
         # Use actual running monitor type, not config
         if _active_monitor_type == "intelligent":
-            from src.services.intelligent_health_monitor import intelligent_health_monitor
-            summary = intelligent_health_monitor.get_health_summary()
+            # Intelligent monitor doesn't have get_health_summary(), query database
+            summary = await _get_intelligent_monitor_summary()
         else:
             from src.services.model_health_monitor import health_monitor
             summary = health_monitor.get_health_summary()
