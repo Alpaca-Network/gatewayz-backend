@@ -1,0 +1,172 @@
+"""
+Simple Health Cache Service
+
+Provides basic Redis caching for health monitoring endpoints.
+Compression can be added later.
+"""
+
+import json
+import logging
+from typing import Any, Optional
+
+from src.config.redis_config import get_redis_client
+
+logger = logging.getLogger(__name__)
+
+# Cache key prefixes
+CACHE_PREFIX_SYSTEM = "health:system"
+CACHE_PREFIX_PROVIDERS = "health:providers"
+CACHE_PREFIX_MODELS = "health:models"
+CACHE_PREFIX_SUMMARY = "health:summary"
+CACHE_PREFIX_DASHBOARD = "health:dashboard"
+
+# Default TTLs (in seconds)
+DEFAULT_TTL_SYSTEM = 60
+DEFAULT_TTL_PROVIDERS = 60
+DEFAULT_TTL_MODELS = 120
+DEFAULT_TTL_SUMMARY = 60
+DEFAULT_TTL_DASHBOARD = 30
+
+
+class SimpleHealthCache:
+    """Simple Redis-based cache for health data"""
+
+    def __init__(self):
+        self.redis_client = get_redis_client()
+
+    def set_cache(self, key: str, data: Any, ttl: int = 60) -> bool:
+        """
+        Store data in Redis cache
+
+        Args:
+            key: Cache key
+            data: Data to cache (dict or dataclass)
+            ttl: Time to live in seconds
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.redis_client:
+            logger.debug("Redis client not available, skipping cache")
+            return False
+
+        try:
+            # Serialize data to JSON
+            if isinstance(data, dict):
+                serialized = json.dumps(data, default=str)
+            else:
+                # Handle dataclass/Pydantic model
+                if hasattr(data, "model_dump"):
+                    serialized = json.dumps(data.model_dump(), default=str)
+                elif hasattr(data, "__dict__"):
+                    serialized = json.dumps(data.__dict__, default=str)
+                else:
+                    serialized = json.dumps(data, default=str)
+
+            # Store in Redis
+            self.redis_client.setex(key, ttl, serialized)
+            logger.debug(f"Cached {key} (TTL: {ttl}s)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to cache {key}: {e}")
+            return False
+
+    def get_cache(self, key: str) -> Optional[dict]:
+        """
+        Retrieve data from Redis cache
+
+        Args:
+            key: Cache key
+
+        Returns:
+            Deserialized data or None if not found
+        """
+        if not self.redis_client:
+            logger.debug("Redis client not available, skipping cache retrieval")
+            return None
+
+        try:
+            data = self.redis_client.get(key)
+            if data:
+                return json.loads(data)
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to retrieve cache {key}: {e}")
+            return None
+
+    def delete_cache(self, key: str) -> bool:
+        """Delete cache entry"""
+        if not self.redis_client:
+            return False
+
+        try:
+            self.redis_client.delete(key)
+            logger.debug(f"Deleted cache {key}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete cache {key}: {e}")
+            return False
+
+    def clear_all_health_cache(self) -> bool:
+        """Clear all health-related cache entries"""
+        if not self.redis_client:
+            return False
+
+        try:
+            pattern = "health:*"
+            keys = self.redis_client.keys(pattern)
+            if keys:
+                self.redis_client.delete(*keys)
+                logger.info(f"Cleared {len(keys)} health cache entries")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear health cache: {e}")
+            return False
+
+    # Convenience methods for specific cache types
+
+    def cache_system_health(self, data: Any, ttl: int = DEFAULT_TTL_SYSTEM) -> bool:
+        """Cache system health data"""
+        return self.set_cache(CACHE_PREFIX_SYSTEM, data, ttl)
+
+    def get_system_health(self) -> Optional[dict]:
+        """Retrieve cached system health data"""
+        return self.get_cache(CACHE_PREFIX_SYSTEM)
+
+    def cache_providers_health(self, data: list, ttl: int = DEFAULT_TTL_PROVIDERS) -> bool:
+        """Cache providers health data"""
+        return self.set_cache(CACHE_PREFIX_PROVIDERS, {"providers": data}, ttl)
+
+    def get_providers_health(self) -> Optional[list]:
+        """Retrieve cached providers health data"""
+return cached.get("providers") if cached and isinstance(cached, dict) else None
+
+    def cache_models_health(self, data: list, ttl: int = DEFAULT_TTL_MODELS) -> bool:
+        """Cache models health data"""
+        return self.set_cache(CACHE_PREFIX_MODELS, {"models": data}, ttl)
+
+    def get_models_health(self) -> Optional[list]:
+        """Retrieve cached models health data"""
+return cached.get("models") if cached and isinstance(cached, dict) else None
+
+    def cache_health_summary(self, data: Any, ttl: int = DEFAULT_TTL_SUMMARY) -> bool:
+        """Cache complete health summary"""
+        return self.set_cache(CACHE_PREFIX_SUMMARY, data, ttl)
+
+    def get_health_summary(self) -> Optional[dict]:
+        """Retrieve cached health summary"""
+        return self.get_cache(CACHE_PREFIX_SUMMARY)
+
+    def cache_health_dashboard(self, data: Any, ttl: int = DEFAULT_TTL_DASHBOARD) -> bool:
+        """Cache health dashboard data"""
+        return self.set_cache(CACHE_PREFIX_DASHBOARD, data, ttl)
+
+    def get_health_dashboard(self) -> Optional[dict]:
+        """Retrieve cached health dashboard data"""
+        return self.get_cache(CACHE_PREFIX_DASHBOARD)
+
+
+# Global cache instance
+simple_health_cache = SimpleHealthCache()
