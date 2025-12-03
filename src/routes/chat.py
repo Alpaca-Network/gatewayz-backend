@@ -2557,7 +2557,26 @@ async def unified_responses(
                                     if chunk_json.get("usage"):
                                         usage_data = chunk_json["usage"]
 
-                                    if "choices" in chunk_json:
+                                    # Check for errors first (handles cases where both error and empty choices exist)
+                                    if chunk_json.get("error"):
+                                        # Transform error to Responses API error event
+                                        # Handle both dict and string error formats
+                                        error_field = chunk_json["error"]
+                                        if isinstance(error_field, dict):
+                                            error_message = error_field.get("message", "Unknown error")
+                                        else:
+                                            error_message = str(error_field)
+                                        error_event = {
+                                            "type": "error",
+                                            "sequence_number": sequence_number,
+                                            "error": {
+                                                "type": "server_error",
+                                                "message": error_message,
+                                            },
+                                        }
+                                        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                        sequence_number += 1
+                                    elif "choices" in chunk_json and chunk_json["choices"]:
                                         for choice in chunk_json["choices"]:
                                             choice_index = choice.get("index", 0)
 
@@ -2622,18 +2641,6 @@ async def unified_responses(
                                                     }
                                                     yield f"event: response.output_text.delta\ndata: {json.dumps(delta_event)}\n\n"
                                                     sequence_number += 1
-                                    elif chunk_json.get("error"):
-                                        # Transform error to Responses API error event
-                                        error_event = {
-                                            "type": "error",
-                                            "sequence_number": sequence_number,
-                                            "error": {
-                                                "type": "server_error",
-                                                "message": chunk_json["error"].get("message", "Unknown error"),
-                                            },
-                                        }
-                                        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
-                                        sequence_number += 1
                                 except json.JSONDecodeError:
                                     # Emit as error event for malformed JSON
                                     error_event = {
