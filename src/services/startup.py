@@ -120,16 +120,36 @@ async def lifespan(app):
         # Start active health monitoring (proactive periodic checks)
         # This complements passive monitoring from real API calls in chat.py and messages.py
         # Active monitoring detects issues before users encounter them
-        try:
-            await health_monitor.start_monitoring()
-            logger.info("✅ Active health monitoring started (periodic checks)")
-        except Exception as e:
-            logger.warning(f"Active health monitoring failed to start: {e}")
+        #
+        # IMPORTANT: When running a dedicated health-service container, disable
+        # active monitoring in the main API to prevent duplicate checks and reduce
+        # memory usage. Set DISABLE_ACTIVE_HEALTH_MONITORING=true
+        active_health_monitoring_disabled = (
+            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
+        )
+
+        if active_health_monitoring_disabled:
+            logger.info("⏭️  Active health monitoring DISABLED (handled by health-service)")
+            logger.info("   Main API will read health data from Redis cache")
+        else:
+            try:
+                await health_monitor.start_monitoring()
+                logger.info("✅ Active health monitoring started (periodic checks)")
+            except Exception as e:
+                logger.warning(f"Active health monitoring failed to start: {e}")
         logger.info("✅ Passive health monitoring active (from real API calls)")
 
         # Start availability monitoring
-        await availability_service.start_monitoring()
-        logger.info("Availability monitoring service started")
+        # Can also be disabled if running dedicated health-service
+        availability_monitoring_disabled = (
+            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
+        )
+
+        if availability_monitoring_disabled:
+            logger.info("⏭️  Availability monitoring DISABLED (handled by health-service)")
+        else:
+            await availability_service.start_monitoring()
+            logger.info("Availability monitoring service started")
 
         # Initialize connection pools (they're lazy-loaded, but log readiness)
         pool_stats = get_pool_stats()
@@ -177,16 +197,24 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Error monitoring shutdown warning: {e}")
 
-        # Stop availability monitoring
-        await availability_service.stop_monitoring()
-        logger.info("Availability monitoring service stopped")
+        # Stop availability monitoring (only if it was started)
+        availability_monitoring_disabled = (
+            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
+        )
+        if not availability_monitoring_disabled:
+            await availability_service.stop_monitoring()
+            logger.info("Availability monitoring service stopped")
 
-        # Stop active health monitoring
-        try:
-            await health_monitor.stop_monitoring()
-            logger.info("Active health monitoring stopped")
-        except Exception as e:
-            logger.warning(f"Health monitoring shutdown warning: {e}")
+        # Stop active health monitoring (only if it was started)
+        active_health_monitoring_disabled = (
+            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
+        )
+        if not active_health_monitoring_disabled:
+            try:
+                await health_monitor.stop_monitoring()
+                logger.info("Active health monitoring stopped")
+            except Exception as e:
+                logger.warning(f"Health monitoring shutdown warning: {e}")
         logger.info("Passive health monitoring: no shutdown needed (captures real API calls)")
 
         # Shutdown Prometheus remote write
@@ -215,16 +243,31 @@ async def lifespan(app):
 
 async def initialize_services():
     """
-    Initialize all monitoring services
+    Initialize all monitoring services.
+    Respects DISABLE_ACTIVE_HEALTH_MONITORING and DISABLE_AVAILABILITY_MONITORING flags.
     """
     try:
         logger.info("Initializing monitoring services...")
 
-        # Start health monitoring
-        await health_monitor.start_monitoring()
+        # Start health monitoring (respects disable flag)
+        active_health_monitoring_disabled = (
+            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
+        )
+        if not active_health_monitoring_disabled:
+            await health_monitor.start_monitoring()
+            logger.info("Health monitoring started")
+        else:
+            logger.info("Health monitoring disabled via environment variable")
 
-        # Start availability monitoring
-        await availability_service.start_monitoring()
+        # Start availability monitoring (respects disable flag)
+        availability_monitoring_disabled = (
+            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
+        )
+        if not availability_monitoring_disabled:
+            await availability_service.start_monitoring()
+            logger.info("Availability monitoring started")
+        else:
+            logger.info("Availability monitoring disabled via environment variable")
 
         logger.info("All services initialized successfully")
 
@@ -235,16 +278,27 @@ async def initialize_services():
 
 async def shutdown_services():
     """
-    Shutdown all monitoring services
+    Shutdown all monitoring services.
+    Respects DISABLE_ACTIVE_HEALTH_MONITORING and DISABLE_AVAILABILITY_MONITORING flags.
     """
     try:
         logger.info("Shutting down services...")
 
-        # Stop availability monitoring
-        await availability_service.stop_monitoring()
+        # Stop availability monitoring (only if it was started)
+        availability_monitoring_disabled = (
+            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
+        )
+        if not availability_monitoring_disabled:
+            await availability_service.stop_monitoring()
+            logger.info("Availability monitoring stopped")
 
-        # Stop health monitoring
-        await health_monitor.stop_monitoring()
+        # Stop health monitoring (only if it was started)
+        active_health_monitoring_disabled = (
+            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
+        )
+        if not active_health_monitoring_disabled:
+            await health_monitor.stop_monitoring()
+            logger.info("Health monitoring stopped")
 
         logger.info("All services shut down successfully")
 
