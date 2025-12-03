@@ -17,7 +17,6 @@ Deployment:
 - Can scale independently
 """
 
-import asyncio
 import logging
 import os
 import sys
@@ -42,6 +41,9 @@ HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "300"))
 
 # Whether to use intelligent (tiered) monitoring vs simple monitoring
 USE_INTELLIGENT_MONITOR = os.environ.get("USE_INTELLIGENT_MONITOR", "true").lower() == "true"
+
+# Track which monitor is actually running (may differ from config if fallback occurs)
+_active_monitor_type: str = "none"  # "intelligent", "simple", or "none"
 
 
 @asynccontextmanager
@@ -73,11 +75,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Redis initialization warning: {e}")
 
     # Start health monitoring based on configuration
+    global _active_monitor_type
     if USE_INTELLIGENT_MONITOR:
         logger.info("Starting Intelligent Health Monitor (tiered, database-backed)")
         try:
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             await intelligent_health_monitor.start_monitoring()
+            _active_monitor_type = "intelligent"
             logger.info("Intelligent health monitoring started successfully")
         except Exception as e:
             logger.error(f"Failed to start intelligent health monitor: {e}")
@@ -85,11 +89,14 @@ async def lifespan(app: FastAPI):
             logger.info("Falling back to simple health monitor...")
             from src.services.model_health_monitor import health_monitor
             await health_monitor.start_monitoring()
+            _active_monitor_type = "simple"
+            logger.info("Simple health monitoring started (fallback)")
     else:
         logger.info("Starting Simple Health Monitor")
         try:
             from src.services.model_health_monitor import health_monitor
             await health_monitor.start_monitoring()
+            _active_monitor_type = "simple"
             logger.info("Simple health monitoring started successfully")
         except Exception as e:
             logger.error(f"Failed to start simple health monitor: {e}")
@@ -121,15 +128,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Availability monitoring shutdown warning: {e}")
 
-    # Stop health monitoring
-    if USE_INTELLIGENT_MONITOR:
+    # Stop health monitoring based on which monitor is actually running
+    if _active_monitor_type == "intelligent":
         try:
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             await intelligent_health_monitor.stop_monitoring()
             logger.info("Intelligent health monitoring stopped")
         except Exception as e:
             logger.warning(f"Intelligent health monitoring shutdown warning: {e}")
-    else:
+    elif _active_monitor_type == "simple":
         try:
             from src.services.model_health_monitor import health_monitor
             await health_monitor.stop_monitoring()
@@ -168,7 +175,8 @@ async def get_status():
     Get detailed status of the health monitoring service.
     """
     try:
-        if USE_INTELLIGENT_MONITOR:
+        # Use actual running monitor type, not config
+        if _active_monitor_type == "intelligent":
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             monitor = intelligent_health_monitor
         else:
@@ -180,7 +188,7 @@ async def get_status():
         return {
             "status": "running",
             "service": "health-monitor",
-            "monitor_type": "intelligent" if USE_INTELLIGENT_MONITOR else "simple",
+            "monitor_type": _active_monitor_type,
             "health_monitoring_active": monitor.monitoring_active,
             "availability_monitoring_active": availability_service.monitoring_active,
             "models_tracked": len(getattr(monitor, "health_data", {})),
@@ -208,7 +216,8 @@ async def get_metrics():
     Can be used by Prometheus or other monitoring tools.
     """
     try:
-        if USE_INTELLIGENT_MONITOR:
+        # Use actual running monitor type, not config
+        if _active_monitor_type == "intelligent":
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             summary = intelligent_health_monitor.get_health_summary()
         else:
@@ -235,12 +244,24 @@ async def trigger_health_check():
     Useful for testing or forcing an immediate update.
     """
     try:
-        if USE_INTELLIGENT_MONITOR:
+        # Use actual running monitor type, not config
+        # Note: Using internal method as monitors don't expose public trigger interface
+        if _active_monitor_type == "intelligent":
             from src.services.intelligent_health_monitor import intelligent_health_monitor
-            await intelligent_health_monitor._perform_health_checks()
-        else:
+            # Intelligent monitor uses _monitoring_loop internally, trigger one cycle
+            await intelligent_health_monitor._check_tier_models("critical")
+        elif _active_monitor_type == "simple":
             from src.services.model_health_monitor import health_monitor
             await health_monitor._perform_health_checks()
+        else:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "message": "No health monitor is currently active",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
         return {
             "status": "success",

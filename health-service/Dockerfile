@@ -6,19 +6,18 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (curl needed for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY requirements.txt /app/health-service/
-COPY health-service/requirements.txt /app/health-service/requirements-health.txt
+# Copy health-service requirements first for caching
+COPY health-service/requirements.txt /app/health-service/requirements.txt
 
-# Install Python dependencies
-# Use main requirements but can override with health-specific requirements
-RUN pip install --no-cache-dir -r /app/health-service/requirements.txt || \
-    pip install --no-cache-dir -r /app/health-service/requirements-health.txt
+# Install Python dependencies from health-service specific requirements
+# This keeps the image lightweight by only installing what's needed
+RUN pip install --no-cache-dir -r /app/health-service/requirements.txt
 
 # Copy the entire project (needed for shared modules)
 COPY . /app
