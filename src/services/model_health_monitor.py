@@ -335,6 +335,8 @@ class ModelHealthMonitor:
         - Data policy restrictions (404 with policy message)
         - Invalid parameters for specific models (400 with known issues)
         - Temporary service unavailability (503)
+        - Non-serverless model access errors (400)
+        - Model not found/no access errors (404)
         """
         if not status_code:
             return True  # Capture unknown errors
@@ -344,8 +346,13 @@ class ModelHealthMonitor:
             return False
 
         # Don't capture data policy restrictions - user configuration issue
-        if status_code == 404 and error_message and "data policy" in error_message.lower():
-            return False
+        if status_code == 404 and error_message:
+            lower_msg = error_message.lower()
+            if "data policy" in lower_msg:
+                return False
+            # Don't capture model not found/no access errors - configuration/plan issue
+            if "does not exist" in lower_msg or "no access" in lower_msg or "not found" in lower_msg:
+                return False
 
         # Don't capture temporary service unavailability
         if status_code == 503 and error_message and "unavailable" in error_message.lower():
@@ -353,16 +360,26 @@ class ModelHealthMonitor:
 
         # Don't capture known parameter validation issues for specific providers
         if status_code == 400 and error_message:
-            # Google Vertex AI max_output_tokens validation
-            if "max_output_tokens" in error_message.lower() and "minimum value" in error_message.lower():
+            lower_msg = error_message.lower()
+            # Google Vertex AI max_output_tokens validation (already fixed in code)
+            if "max_output_tokens" in lower_msg and "minimum value" in lower_msg:
                 return False
             # Audio-only model requirements
-            if "audio" in error_message.lower() and "modality" in error_message.lower():
+            if "audio" in lower_msg and "modality" in lower_msg:
+                return False
+            # Non-serverless model access errors - plan/configuration issue
+            if "non-serverless" in lower_msg or "unable to access" in lower_msg:
                 return False
 
         # Don't capture authentication issues - configuration problem
         if status_code == 403 and error_message and "key" in error_message.lower():
             return False
+
+        # Don't capture internal server errors from providers (500) - transient issue
+        if status_code == 500 and error_message:
+            lower_msg = error_message.lower()
+            if "internal server error" in lower_msg:
+                return False
 
         # Capture all other errors
         return True
