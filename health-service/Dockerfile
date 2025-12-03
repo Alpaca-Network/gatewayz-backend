@@ -6,10 +6,9 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (curl needed for healthcheck)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy health-service requirements first for caching
@@ -31,9 +30,8 @@ WORKDIR /app/health-service
 # Default port (Railway will override with $PORT)
 ENV PORT=8001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/health || exit 1
+# Note: Railway handles healthchecks externally via railway.json config
+# Docker HEALTHCHECK removed to avoid port mismatch issues
 
 # Run the health service
 CMD ["python", "main.py"]
