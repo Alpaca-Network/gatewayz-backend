@@ -151,6 +151,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Simple health monitoring shutdown warning: {e}")
 
+    # Cleanup Supabase client and close httpx connections
+    try:
+        from src.config.supabase_config import cleanup_supabase_client
+        cleanup_supabase_client()
+        logger.info("Supabase client cleanup complete")
+    except Exception as e:
+        logger.warning(f"Supabase cleanup warning: {e}")
+
     logger.info("Health Monitoring Service shutdown complete")
 
 
