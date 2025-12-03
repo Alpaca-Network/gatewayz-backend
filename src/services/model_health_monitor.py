@@ -116,6 +116,7 @@ class ModelHealthMonitor:
         self.batch_size = max(1, batch_size)
         self.batch_interval = max(0.0, batch_interval)
         self.fetch_chunk_size = max(1, fetch_chunk_size)
+        self._monitoring_task: asyncio.Task | None = None
 
         # Test payload for health checks
         self.test_payload = {
@@ -153,13 +154,24 @@ class ModelHealthMonitor:
                 # Initialize with empty but valid system_data to avoid UNKNOWN status
                 await self._initialize_empty_system_data()
 
-        # Start monitoring loop for periodic checks
-        asyncio.create_task(self._monitoring_loop())
+        # Start monitoring loop for periodic checks and store task reference for cleanup
+        self._monitoring_task = asyncio.create_task(self._monitoring_loop())
 
     async def stop_monitoring(self):
-        """Stop the health monitoring service"""
+        """Stop the health monitoring service and wait for background task to complete"""
         self.monitoring_active = False
-        logger.info("Stopped model health monitoring service")
+        logger.info("Stopping model health monitoring service...")
+
+        # Cancel and await the monitoring task to ensure clean shutdown
+        if self._monitoring_task is not None:
+            self._monitoring_task.cancel()
+            try:
+                await self._monitoring_task
+            except asyncio.CancelledError:
+                pass  # Expected when task is cancelled
+            self._monitoring_task = None
+
+        logger.info("Model health monitoring service stopped")
 
     async def _perform_initial_health_check(self):
         """Perform a lightweight initial health check to populate system_data.
