@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Optional
 
-from src.redis_config import get_redis_client
+from src.config.redis_config import get_redis_client
 
 logger = logging.getLogger(__name__)
 
