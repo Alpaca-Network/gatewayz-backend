@@ -311,12 +311,106 @@ jobs:
 - Never commit real API keys or secrets to the repository
 - The seed data is designed for testing only
 
+## Keeping Schema in Sync
+
+### Automatic Sync Checks
+
+The project includes automated schema synchronization:
+
+1. **GitHub Actions Workflow** (`.github/workflows/schema-sync-check.yml`)
+   - Runs on PRs that touch migration files
+   - Nightly scheduled check for schema drift
+   - Validates migration naming conventions
+   - Detects timestamp conflicts
+   - Tests migrations against local Supabase
+   - Optional comparison against production
+
+2. **Schema Validation Script** (`scripts/database/validate_schema_sync.py`)
+   ```bash
+   # Validate local instance
+   python scripts/database/validate_schema_sync.py
+
+   # Generate schema snapshot
+   python scripts/database/validate_schema_sync.py --snapshot
+
+   # Compare two databases
+   python scripts/database/validate_schema_sync.py \
+     --source-url $PROD_URL --source-key $PROD_KEY \
+     --target-url $TEST_URL --target-key $TEST_KEY
+
+   # CI mode (exit code 1 on failure)
+   python scripts/database/validate_schema_sync.py --ci
+   ```
+
+### Manual Sync Process
+
+If your test instance gets out of sync:
+
+```bash
+# 1. Pull latest migrations
+git pull origin main
+
+# 2. Reset database with all migrations
+supabase db reset
+
+# 3. Validate schema
+python scripts/database/validate_schema_sync.py --verbose
+
+# 4. Re-seed test data
+python scripts/database/seed_test_data.py
+```
+
+### Adding New Migrations
+
+When adding new database changes:
+
+1. Create migration file with proper naming:
+   ```bash
+   # Format: YYYYMMDDHHMMSS_description.sql
+   touch supabase/migrations/20251204120000_add_new_feature.sql
+   ```
+
+2. Add your SQL changes to the file
+
+3. Update `validate_schema_sync.py` if adding new critical tables:
+   ```python
+   EXPECTED_TABLES = [
+       # ... existing tables ...
+       "new_table_name",
+   ]
+
+   CRITICAL_COLUMNS = {
+       # ... existing columns ...
+       "new_table_name": ["id", "name", "created_at"],
+   }
+   ```
+
+4. Test locally:
+   ```bash
+   supabase db reset
+   python scripts/database/validate_schema_sync.py --ci
+   ```
+
+5. The CI will automatically validate on PR
+
+### Production Schema Comparison
+
+To enable production schema comparison in CI:
+
+1. Add secrets to GitHub repository:
+   - `PROD_SUPABASE_URL`: Production Supabase URL
+   - `PROD_SUPABASE_SERVICE_KEY`: Production service key
+
+2. The nightly job will compare schemas and report differences
+
 ## Files Reference
 
 | File | Purpose |
 |------|---------|
 | `scripts/database/setup_test_instance.sh` | Main setup script |
 | `scripts/database/seed_test_data.py` | Python seeding script |
+| `scripts/database/validate_schema_sync.py` | Schema validation script |
+| `.github/workflows/schema-sync-check.yml` | CI schema sync workflow |
 | `supabase/seed.sql` | SQL seed file |
 | `supabase/config.toml` | Supabase configuration |
 | `supabase/migrations/` | Database migrations |
