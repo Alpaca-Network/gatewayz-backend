@@ -25,7 +25,7 @@ on:
       validate_production:
         description: 'Validate against production schema'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 concurrency:
@@ -259,7 +259,7 @@ jobs:
     needs: test-local-schema
     if: |
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.validate_production == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.validate_production) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
 
     steps:
@@ -286,8 +286,15 @@ jobs:
           SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.PROD_SUPABASE_SERVICE_KEY }}
         run: |
-          echo "Comparing local schema against production..."
-          python scripts/database/validate_schema_sync.py --ci --verbose || {
+          echo "Comparing production schema against local schema snapshot..."
+          # Generate production schema snapshot
+          python scripts/database/validate_schema_sync.py --snapshot --snapshot-file prod_snapshot.json
+
+          echo "Comparing production snapshot with local snapshot..."
+          # Compare production against the local snapshot we generated earlier
+          python scripts/database/validate_schema_sync.py \
+            --compare-snapshot schema_snapshot.json \
+            --ci --verbose || {
             echo "::warning::Schema differences detected between test and production"
             # Don't fail on differences, just warn
             exit 0
