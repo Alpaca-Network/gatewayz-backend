@@ -2442,17 +2442,15 @@ async def unified_responses(
                         - response.completed: Final response with usage
                         """
                         sequence_number = 0
-                        # Generate stable IDs upfront for consistency across events
+                        # Generate stable response ID upfront for consistency across events
                         response_id = f"resp_{secrets.token_hex(12)}"
-                        item_id = f"item_{secrets.token_hex(8)}"
                         created_timestamp = int(time.time())
                         model_name = request_model
-                        accumulated_content = ""
-                        output_index = 0
-                        content_index = 0
                         has_sent_created = False
-                        has_sent_item_added = False
                         usage_data = None
+                        # Track multiple choices (n > 1) separately by index
+                        # Each choice gets its own item_id, accumulated_content, etc.
+                        items_by_index: dict[int, dict] = {}  # choice_index -> item state
 
                         async for chunk_data in stream_generator(
                             stream,
@@ -2488,37 +2486,48 @@ async def unified_responses(
                                         sequence_number += 1
                                         has_sent_created = True
 
-                                    # Emit response.output_item.done
-                                    if has_sent_item_added:
+                                    # Emit done events for each tracked item (supports n > 1)
+                                    for idx in sorted(items_by_index.keys()):
+                                        item_state = items_by_index[idx]
                                         done_event = {
                                             "type": "response.output_text.done",
                                             "sequence_number": sequence_number,
-                                            "item_id": item_id,
-                                            "output_index": output_index,
-                                            "content_index": content_index,
-                                            "text": accumulated_content,
+                                            "item_id": item_state["item_id"],
+                                            "output_index": idx,
+                                            "content_index": 0,
+                                            "text": item_state["content"],
                                         }
                                         yield f"event: response.output_text.done\ndata: {json.dumps(done_event)}\n\n"
                                         sequence_number += 1
 
-                                        # Emit response.output_item.done
                                         item_done_event = {
                                             "type": "response.output_item.done",
                                             "sequence_number": sequence_number,
-                                            "output_index": output_index,
+                                            "output_index": idx,
                                             "item": {
-                                                "id": item_id,
+                                                "id": item_state["item_id"],
                                                 "type": "message",
                                                 "role": "assistant",
                                                 "status": "completed",
-                                                "content": [{"type": "output_text", "text": accumulated_content}],
+                                                "content": [{"type": "output_text", "text": item_state["content"]}],
                                             },
                                         }
                                         yield f"event: response.output_item.done\ndata: {json.dumps(item_done_event)}\n\n"
                                         sequence_number += 1
 
+                                    # Build output list from all tracked items
+                                    output_list = [
+                                        {
+                                            "id": items_by_index[idx]["item_id"],
+                                            "type": "message",
+                                            "role": "assistant",
+                                            "status": "completed",
+                                            "content": [{"type": "output_text", "text": items_by_index[idx]["content"]}],
+                                        }
+                                        for idx in sorted(items_by_index.keys())
+                                    ]
+
                                     # Emit response.completed
-                                    # Use has_sent_item_added to match item done events for consistency
                                     completed_event = {
                                         "type": "response.completed",
                                         "sequence_number": sequence_number,
@@ -2528,15 +2537,7 @@ async def unified_responses(
                                             "created_at": created_timestamp,
                                             "model": model_name,
                                             "status": "completed",
-                                            "output": [
-                                                {
-                                                    "id": item_id,
-                                                    "type": "message",
-                                                    "role": "assistant",
-                                                    "status": "completed",
-                                                    "content": [{"type": "output_text", "text": accumulated_content}],
-                                                }
-                                            ] if has_sent_item_added else [],
+                                            "output": output_list,
                                         },
                                     }
                                     # Add usage if available
@@ -2578,14 +2579,24 @@ async def unified_responses(
                                                 sequence_number += 1
                                                 has_sent_created = True
 
-                                            # Emit response.output_item.added on first content
-                                            if not has_sent_item_added and "delta" in choice:
+                                            # Initialize item state for this choice if not seen before
+                                            if choice_index not in items_by_index:
+                                                items_by_index[choice_index] = {
+                                                    "item_id": f"item_{secrets.token_hex(8)}",
+                                                    "content": "",
+                                                    "item_added_sent": False,
+                                                }
+
+                                            item_state = items_by_index[choice_index]
+
+                                            # Emit response.output_item.added on first content for this choice
+                                            if not item_state["item_added_sent"] and "delta" in choice:
                                                 item_added_event = {
                                                     "type": "response.output_item.added",
                                                     "sequence_number": sequence_number,
                                                     "output_index": choice_index,
                                                     "item": {
-                                                        "id": item_id,
+                                                        "id": item_state["item_id"],
                                                         "type": "message",
                                                         "role": choice["delta"].get("role", "assistant"),
                                                         "status": "in_progress",
@@ -2594,20 +2605,19 @@ async def unified_responses(
                                                 }
                                                 yield f"event: response.output_item.added\ndata: {json.dumps(item_added_event)}\n\n"
                                                 sequence_number += 1
-                                                output_index = choice_index
-                                                has_sent_item_added = True
+                                                item_state["item_added_sent"] = True
 
                                             # Emit response.output_text.delta for content
                                             if "delta" in choice and "content" in choice["delta"]:
                                                 delta_content = choice["delta"]["content"]
                                                 if delta_content:
-                                                    accumulated_content += delta_content
+                                                    item_state["content"] += delta_content
                                                     delta_event = {
                                                         "type": "response.output_text.delta",
                                                         "sequence_number": sequence_number,
-                                                        "item_id": item_id,
-                                                        "output_index": output_index,
-                                                        "content_index": content_index,
+                                                        "item_id": item_state["item_id"],
+                                                        "output_index": choice_index,
+                                                        "content_index": 0,
                                                         "delta": delta_content,
                                                     }
                                                     yield f"event: response.output_text.delta\ndata: {json.dumps(delta_event)}\n\n"
