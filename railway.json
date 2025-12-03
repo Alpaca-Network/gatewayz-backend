@@ -53,6 +53,57 @@
       }
     },
     {
+      "name": "health-service",
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "health-service/Dockerfile"
+      },
+      "deploy": {
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 5,
+        "healthchecks": {
+          "liveness": {
+            "enabled": true,
+            "interval": 60,
+            "timeout": 30,
+            "initialDelay": 120,
+            "path": "/health"
+          },
+          "readiness": {
+            "enabled": true,
+            "interval": 30,
+            "timeout": 15,
+            "initialDelay": 90,
+            "path": "/health"
+          }
+        },
+        "environments": {
+          "production": {
+            "replicas": 1,
+            "healthChecks": {
+              "liveness": {
+                "enabled": true,
+                "interval": 60,
+                "timeout": 30,
+                "initialDelay": 180
+              }
+            }
+          },
+          "staging": {
+            "replicas": 1,
+            "healthChecks": {
+              "liveness": {
+                "enabled": true,
+                "interval": 60,
+                "timeout": 30,
+                "initialDelay": 120
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "apidog-runner",
       "build": {
         "builder": "DOCKERFILE",
