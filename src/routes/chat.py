@@ -2442,16 +2442,16 @@ async def unified_responses(
                         - response.completed: Final response with usage
                         """
                         sequence_number = 0
-                        response_id = None
-                        created_timestamp = None
+                        # Generate stable IDs upfront for consistency across events
+                        response_id = f"resp_{secrets.token_hex(12)}"
+                        item_id = f"item_{secrets.token_hex(8)}"
+                        created_timestamp = int(time.time())
                         model_name = request_model
                         accumulated_content = ""
-                        item_id = None
                         output_index = 0
                         content_index = 0
                         has_sent_created = False
                         has_sent_item_added = False
-                        finish_reason = None
                         usage_data = None
 
                         async for chunk_data in stream_generator(
@@ -2464,7 +2464,7 @@ async def unified_responses(
                             session_id,
                             messages,
                             rate_limit_mgr,
-                            provider="openrouter",
+                            provider=attempt_provider,
                             tracker=None,
                         ):
                             if chunk_data.startswith("data: "):
@@ -2504,14 +2504,14 @@ async def unified_responses(
                                         "type": "response.completed",
                                         "sequence_number": sequence_number,
                                         "response": {
-                                            "id": response_id or f"resp_{secrets.token_hex(12)}",
+                                            "id": response_id,
                                             "object": "response",
-                                            "created_at": created_timestamp or int(time.time()),
+                                            "created_at": created_timestamp,
                                             "model": model_name,
                                             "status": "completed",
                                             "output": [
                                                 {
-                                                    "id": item_id or f"item_{secrets.token_hex(8)}",
+                                                    "id": item_id,
                                                     "type": "message",
                                                     "role": "assistant",
                                                     "status": "completed",
@@ -2529,11 +2529,7 @@ async def unified_responses(
                                 try:
                                     chunk_json = json.loads(data_str)
 
-                                    # Extract response metadata from first chunk
-                                    if not response_id and chunk_json.get("id"):
-                                        response_id = chunk_json["id"]
-                                    if not created_timestamp and chunk_json.get("created"):
-                                        created_timestamp = chunk_json["created"]
+                                    # Extract model name from chunk if available
                                     if chunk_json.get("model"):
                                         model_name = chunk_json["model"]
 
@@ -2547,15 +2543,13 @@ async def unified_responses(
 
                                             # Emit response.created on first chunk
                                             if not has_sent_created:
-                                                if not item_id:
-                                                    item_id = f"item_{secrets.token_hex(8)}"
                                                 created_event = {
                                                     "type": "response.created",
                                                     "sequence_number": sequence_number,
                                                     "response": {
-                                                        "id": response_id or f"resp_{secrets.token_hex(12)}",
+                                                        "id": response_id,
                                                         "object": "response",
-                                                        "created_at": created_timestamp or int(time.time()),
+                                                        "created_at": created_timestamp,
                                                         "model": model_name,
                                                         "status": "in_progress",
                                                         "output": [],
@@ -2599,17 +2593,45 @@ async def unified_responses(
                                                     }
                                                     yield f"event: response.output_text.delta\ndata: {json.dumps(delta_event)}\n\n"
                                                     sequence_number += 1
-
-                                            # Track finish reason
-                                            if choice.get("finish_reason"):
-                                                finish_reason = choice["finish_reason"]
-                                    else:
-                                        # Pass through non-choices data
-                                        yield chunk_data
+                                    elif chunk_json.get("error"):
+                                        # Transform error to Responses API error event
+                                        error_event = {
+                                            "type": "error",
+                                            "sequence_number": sequence_number,
+                                            "error": {
+                                                "type": "server_error",
+                                                "message": chunk_json["error"].get("message", "Unknown error"),
+                                            },
+                                        }
+                                        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                        sequence_number += 1
                                 except json.JSONDecodeError:
-                                    yield chunk_data
-                            else:
+                                    # Emit as error event for malformed JSON
+                                    error_event = {
+                                        "type": "error",
+                                        "sequence_number": sequence_number,
+                                        "error": {
+                                            "type": "invalid_response",
+                                            "message": f"Malformed response chunk: {data_str[:100]}",
+                                        },
+                                    }
+                                    yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                    sequence_number += 1
+                            elif chunk_data.startswith("event:") or chunk_data.strip() == "":
+                                # Pass through SSE event lines and empty lines (SSE formatting)
                                 yield chunk_data
+                            else:
+                                # Unknown format - emit as error
+                                error_event = {
+                                    "type": "error",
+                                    "sequence_number": sequence_number,
+                                    "error": {
+                                        "type": "invalid_response",
+                                        "message": f"Unexpected chunk format",
+                                    },
+                                }
+                                yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                sequence_number += 1
 
                     stream_release_handled = True
                     provider = attempt_provider
