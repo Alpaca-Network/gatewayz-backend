@@ -20,13 +20,20 @@ import time
 from typing import Any
 
 import httpx
-import snappy
 from prometheus_client import REGISTRY
 
 from src.config import Config
 from src.services.prometheus_pb2 import Label, Sample, TimeSeries, WriteRequest
 
 logger = logging.getLogger(__name__)
+
+# Try to import snappy for compression, fall back to uncompressed if unavailable
+try:
+    import snappy
+    SNAPPY_AVAILABLE = True
+except ImportError:
+    logger.warning("snappy module not available, prometheus metrics will be sent uncompressed")
+    SNAPPY_AVAILABLE = False
 
 # Protobuf is now always available via our custom implementation
 PROTOBUF_AVAILABLE = True
@@ -95,8 +102,13 @@ def _serialize_metrics_to_protobuf(registry=REGISTRY) -> bytes:
     # Serialize to protobuf bytes
     protobuf_data = write_request.SerializeToString()
 
-    # Compress with Snappy (block format, not framed)
-    compressed_data = snappy.compress(protobuf_data)
+    # Compress with Snappy if available (block format, not framed)
+    if SNAPPY_AVAILABLE:
+        compressed_data = snappy.compress(protobuf_data)
+    else:
+        # Fall back to uncompressed if snappy not available
+        logger.debug("Snappy not available, sending uncompressed metrics")
+        compressed_data = protobuf_data
 
     return compressed_data
 
@@ -147,6 +159,7 @@ class PrometheusRemoteWriter:
         logger.info(f"  Push interval: {self.push_interval}s")
         logger.info(f"  Enabled: {self.enabled}")
         logger.info(f"  Protobuf support: {PROTOBUF_AVAILABLE}")
+        logger.info(f"  Snappy compression: {SNAPPY_AVAILABLE}")
 
     async def start(self):
         """Start the background push task."""
