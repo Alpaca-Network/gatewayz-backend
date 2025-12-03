@@ -184,7 +184,10 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
                 continue
 
             # Log why we're not retrying for debugging
-            if is_auth and not has_more_regions:
+            # Note: should_retry is False here, meaning either:
+            # - is_auth=True but has_more_regions=False (exhausted all regions)
+            # - is_auth=False (non-auth error, don't retry)
+            if is_auth:
                 logger.error(
                     "Alibaba Cloud %s failed for %s (error: %s). "
                     "No more regions to try (attempted %d of %d regions).",
@@ -194,17 +197,10 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
                     idx + 1,
                     len(attempts),
                 )
-            elif not is_auth:
+            else:
                 logger.error(
                     "Alibaba Cloud %s failed for %s (error: %s). "
                     "Error is not an auth error, not retrying with other regions.",
-                    operation_name,
-                    _describe_region(region),
-                    exc,
-                )
-            else:
-                logger.error(
-                    "Alibaba Cloud %s failed for %s (error: %s)",
                     operation_name,
                     _describe_region(region),
                     exc,
