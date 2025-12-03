@@ -371,20 +371,25 @@ class TestDataSeeder:
 
         activities = []
         finish_reasons = ["stop"] * 80 + ["length"] * 15 + ["error"] * 5
+        # Routing provider slugs (matching providers table, not model vendors)
+        routing_providers = ["openrouter", "portkey", "together", "deepinfra", "fireworks"]
 
         for i in range(count):
             user = random.choice(self.created_users)
             model_info = random.choice(TEST_MODELS)
-            model_id, provider, _, input_cost, output_cost = model_info
+            model_id, _vendor, _, input_cost, output_cost = model_info
 
             tokens = random.randint(100, 10000)
             # Cost calculation (simplified)
             cost = round((tokens / 1_000_000) * ((input_cost + output_cost) / 2), 6)
 
+            # Use routing provider slug, not model vendor name
+            routing_provider = random.choice(routing_providers)
+
             activity = {
                 "user_id": user["id"],
                 "model": model_id,
-                "provider": provider.lower(),
+                "provider": routing_provider,
                 "tokens": tokens,
                 "cost": cost,
                 "speed": round(random.uniform(10, 100), 2),  # tokens/sec
