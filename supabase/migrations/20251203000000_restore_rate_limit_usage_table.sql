@@ -46,4 +46,4 @@ CREATE POLICY "Service role can manage rate limit usage" ON "public"."rate_limit
 CREATE POLICY "Users can read their own rate limit usage" ON "public"."rate_limit_usage"
     FOR SELECT
     TO authenticated
-    USING (true);
+    USING (user_id = (SELECT id FROM public.users WHERE auth_id = auth.uid()));
