@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("Health Monitoring Service is running")
     logger.info(f"Health check interval: {HEALTH_CHECK_INTERVAL}s")
-    logger.info(f"Monitor type: {'Intelligent' if USE_INTELLIGENT_MONITOR else 'Simple'}")
+    logger.info(f"Monitor type: {_active_monitor_type}")
     logger.info("=" * 60)
 
     yield
@@ -345,8 +345,10 @@ async def trigger_health_check():
         # Note: Using internal method as monitors don't expose public trigger interface
         if _active_monitor_type == "intelligent":
             from src.services.intelligent_health_monitor import intelligent_health_monitor
-            # Intelligent monitor uses _monitoring_loop internally, trigger one cycle
-            await intelligent_health_monitor._check_tier_models("critical")
+            # Get models due for checking and check them
+            models = await intelligent_health_monitor._get_models_for_checking()
+            for model in models[:10]:  # Limit to 10 for manual trigger
+                await intelligent_health_monitor._check_model_health(model)
         elif _active_monitor_type == "simple":
             from src.services.model_health_monitor import health_monitor
             await health_monitor._perform_health_checks()
