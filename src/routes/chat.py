@@ -2470,8 +2470,26 @@ async def unified_responses(
                             if chunk_data.startswith("data: "):
                                 data_str = chunk_data[6:].strip()
                                 if data_str == "[DONE]":
+                                    # Ensure response.created is always sent first
+                                    if not has_sent_created:
+                                        created_event = {
+                                            "type": "response.created",
+                                            "sequence_number": sequence_number,
+                                            "response": {
+                                                "id": response_id,
+                                                "object": "response",
+                                                "created_at": created_timestamp,
+                                                "model": model_name,
+                                                "status": "in_progress",
+                                                "output": [],
+                                            },
+                                        }
+                                        yield f"event: response.created\ndata: {json.dumps(created_event)}\n\n"
+                                        sequence_number += 1
+                                        has_sent_created = True
+
                                     # Emit response.output_item.done
-                                    if has_sent_item_added and item_id:
+                                    if has_sent_item_added:
                                         done_event = {
                                             "type": "response.output_text.done",
                                             "sequence_number": sequence_number,
@@ -2500,6 +2518,7 @@ async def unified_responses(
                                         sequence_number += 1
 
                                     # Emit response.completed
+                                    # Use has_sent_item_added to match item done events for consistency
                                     completed_event = {
                                         "type": "response.completed",
                                         "sequence_number": sequence_number,
@@ -2517,7 +2536,7 @@ async def unified_responses(
                                                     "status": "completed",
                                                     "content": [{"type": "output_text", "text": accumulated_content}],
                                                 }
-                                            ] if accumulated_content else [],
+                                            ] if has_sent_item_added else [],
                                         },
                                     }
                                     # Add usage if available
