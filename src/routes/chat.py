@@ -2492,6 +2492,7 @@ async def unified_responses(
                                         done_event = {
                                             "type": "response.output_text.done",
                                             "sequence_number": sequence_number,
+                                            "response_id": response_id,
                                             "item_id": item_state["item_id"],
                                             "output_index": idx,
                                             "content_index": 0,
@@ -2503,6 +2504,7 @@ async def unified_responses(
                                         item_done_event = {
                                             "type": "response.output_item.done",
                                             "sequence_number": sequence_number,
+                                            "response_id": response_id,
                                             "output_index": idx,
                                             "item": {
                                                 "id": item_state["item_id"],
@@ -2613,6 +2615,7 @@ async def unified_responses(
                                                 item_added_event = {
                                                     "type": "response.output_item.added",
                                                     "sequence_number": sequence_number,
+                                                    "response_id": response_id,
                                                     "output_index": choice_index,
                                                     "item": {
                                                         "id": item_state["item_id"],
@@ -2634,6 +2637,7 @@ async def unified_responses(
                                                     delta_event = {
                                                         "type": "response.output_text.delta",
                                                         "sequence_number": sequence_number,
+                                                        "response_id": response_id,
                                                         "item_id": item_state["item_id"],
                                                         "output_index": choice_index,
                                                         "content_index": 0,
