@@ -2,6 +2,7 @@
 Startup service for initializing health monitoring, availability services, and connection pools
 """
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -40,6 +41,59 @@ async def lifespan(app):
     else:
         logger.info("✅ All critical environment variables validated")
 
+    # Eagerly initialize Supabase client during startup with retry logic
+    # This ensures the database is ready before accepting requests, preventing
+    # initialization from happening during critical user requests
+    # Retry logic handles transient network issues during deployment
+    # However, we allow the app to start in degraded mode if DB is unavailable after retries
+    from src.config.supabase_config import get_supabase_client
+    import time
+
+    max_retries = 3
+    retry_delay = 2.0  # seconds
+    last_error = None
+    db_initialized = False
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"🔄 Initializing Supabase database client (attempt {attempt}/{max_retries})...")
+            get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
+            logger.info("✅ Supabase client initialized and connection verified")
+            db_initialized = True
+            break  # Success, exit retry loop
+        except Exception as e:
+            last_error = e
+            logger.warning(f"⚠️  Supabase initialization attempt {attempt}/{max_retries} failed: {e}")
+
+            if attempt < max_retries:
+                # Exponential backoff
+                wait_time = retry_delay * (2 ** (attempt - 1))
+                logger.info(f"⏳ Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+
+    # If all retries failed, log warning and start in degraded mode
+    if not db_initialized and last_error:
+        logger.warning(f"⚠️  Supabase client initialization failed after {max_retries} attempts: {last_error}")
+        logger.warning("Application will start in DEGRADED MODE - database-dependent endpoints may fail")
+        # Capture to Sentry with startup context
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_context("startup", {
+                    "phase": "supabase_initialization",
+                    "error_type": type(last_error).__name__,
+                    "attempts": max_retries,
+                    "degraded_mode": True,  # Flag that app is running in degraded mode
+                })
+                scope.set_tag("component", "startup")
+                scope.set_tag("degraded_mode", "true")
+                scope.level = "warning"  # Warning, not fatal - app can still start
+                sentry_sdk.capture_exception(last_error)
+        except (ImportError, Exception):
+            pass
+        # Allow app to start in degraded mode - health endpoints will report DB status
+        # The lazy proxy will retry connection on first actual database access
+
     try:
         # Initialize Fal.ai model cache from static catalog
         try:
@@ -63,10 +117,15 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Prometheus remote write initialization warning: {e}")
 
-        # Start health monitoring (DISABLED: using passive monitoring from real API calls instead)
-        # Passive health monitoring captures metrics from actual user requests in chat.py and messages.py
-        # await health_monitor.start_monitoring()
-        logger.info("Health monitoring: using passive monitoring from real API calls")
+        # Start active health monitoring (proactive periodic checks)
+        # This complements passive monitoring from real API calls in chat.py and messages.py
+        # Active monitoring detects issues before users encounter them
+        try:
+            await health_monitor.start_monitoring()
+            logger.info("✅ Active health monitoring started (periodic checks)")
+        except Exception as e:
+            logger.warning(f"Active health monitoring failed to start: {e}")
+        logger.info("✅ Passive health monitoring active (from real API calls)")
 
         # Start availability monitoring
         await availability_service.start_monitoring()
@@ -122,9 +181,13 @@ async def lifespan(app):
         await availability_service.stop_monitoring()
         logger.info("Availability monitoring service stopped")
 
-        # Stop health monitoring (DISABLED: using passive monitoring instead)
-        # await health_monitor.stop_monitoring()
-        logger.info("Health monitoring: passive monitoring (no shutdown needed)")
+        # Stop active health monitoring
+        try:
+            await health_monitor.stop_monitoring()
+            logger.info("Active health monitoring stopped")
+        except Exception as e:
+            logger.warning(f"Health monitoring shutdown warning: {e}")
+        logger.info("Passive health monitoring: no shutdown needed (captures real API calls)")
 
         # Shutdown Prometheus remote write
         try:
@@ -136,6 +199,13 @@ async def lifespan(app):
         # Clear connection pools
         clear_connection_pools()
         logger.info("Connection pools cleared")
+
+        # Cleanup Supabase client and close httpx connections
+        try:
+            from src.config.supabase_config import cleanup_supabase_client
+            cleanup_supabase_client()
+        except Exception as e:
+            logger.warning(f"Supabase cleanup warning: {e}")
 
         logger.info("All monitoring and health services stopped successfully")
 

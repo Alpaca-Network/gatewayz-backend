@@ -7,13 +7,21 @@
 
 -- ============================================================================
 -- ACTIVITY_LOG INDEXES
--- Columns: id, user_id, timestamp, model, provider, tokens, cost, speed, 
+-- Columns: id, user_id, timestamp, model, provider, tokens, cost, speed,
 --          finish_reason, app, metadata, created_at
 -- ============================================================================
 
+-- Check if activity_log table exists before creating indexes
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'activity_log'
+    ) THEN
+
 -- Index 1: Gateway field (JSONB expression index)
 -- Used by: /gateway/{gateway}/stats, /gateways/summary, /models/trending
-CREATE INDEX IF NOT EXISTS idx_activity_log_gateway 
+CREATE INDEX IF NOT EXISTS idx_activity_log_gateway
 ON activity_log ((metadata->>'gateway'));
 
 COMMENT ON INDEX idx_activity_log_gateway IS 
@@ -104,13 +112,24 @@ COMMENT ON INDEX idx_activity_log_cost IS
 CREATE INDEX IF NOT EXISTS idx_activity_log_model_time 
 ON activity_log (model, created_at DESC);
 
-COMMENT ON INDEX idx_activity_log_model_time IS 
+COMMENT ON INDEX idx_activity_log_model_time IS
 'Optimizes model-specific queries with time sorting';
+
+    END IF;
+END $$;
 
 
 -- ============================================================================
 -- USAGE_RECORDS INDEXES
 -- ============================================================================
+
+-- Check if usage_records table exists before creating indexes
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'usage_records'
+    ) THEN
 
 -- Index 13: API key field (ensure it exists)
 CREATE INDEX IF NOT EXISTS idx_usage_records_api_key 
@@ -158,8 +177,11 @@ COMMENT ON INDEX idx_usage_records_user_time IS
 CREATE INDEX IF NOT EXISTS idx_usage_records_cost 
 ON usage_records (cost) WHERE cost > 0;
 
-COMMENT ON INDEX idx_usage_records_cost IS 
+COMMENT ON INDEX idx_usage_records_cost IS
 'Speeds up cost aggregations (partial index on positive costs)';
+
+    END IF;
+END $$;
 
 
 -- ============================================================================
@@ -167,58 +189,76 @@ COMMENT ON INDEX idx_usage_records_cost IS
 -- Update table statistics for query planner
 -- ============================================================================
 
-ANALYZE activity_log;
-ANALYZE usage_records;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'activity_log') THEN
+        ANALYZE activity_log;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'usage_records') THEN
+        ANALYZE usage_records;
+    END IF;
+END $$;
 
 
 -- ============================================================================
 -- VERIFICATION QUERIES
 -- ============================================================================
 
--- Show all indexes created
+-- Show all indexes created (only if tables exist)
 DO $$
 DECLARE
-    activity_count INTEGER;
-    usage_count INTEGER;
+    activity_count INTEGER := 0;
+    usage_count INTEGER := 0;
+    activity_exists BOOLEAN;
+    usage_exists BOOLEAN;
 BEGIN
-    SELECT COUNT(*) INTO activity_count
-    FROM pg_indexes 
-    WHERE tablename = 'activity_log' 
-        AND indexname LIKE 'idx_activity_log_%';
-    
-    SELECT COUNT(*) INTO usage_count
-    FROM pg_indexes 
-    WHERE tablename = 'usage_records' 
-        AND indexname LIKE 'idx_usage_records_%';
-    
-    RAISE NOTICE '';
-    RAISE NOTICE '=================================================================';
-    RAISE NOTICE '✅ Performance Indexes Migration Completed Successfully!';
-    RAISE NOTICE '=================================================================';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Indexes created on activity_log: %', activity_count;
-    RAISE NOTICE 'Indexes created on usage_records: %', usage_count;
-    RAISE NOTICE 'Total indexes: %', activity_count + usage_count;
-    RAISE NOTICE '';
-    RAISE NOTICE 'Expected performance improvements:';
-    RAISE NOTICE '  - Gateway stats: 10-50x faster ⚡';
-    RAISE NOTICE '  - Provider stats: 10-50x faster ⚡';
-    RAISE NOTICE '  - Trending models: 5-20x faster ⚡';
-    RAISE NOTICE '  - User analytics: 5-15x faster ⚡';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to see the improvements!';
-    RAISE NOTICE '=================================================================';
-    RAISE NOTICE '';
-END $$;
+    -- Check if tables exist
+    SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'activity_log') INTO activity_exists;
+    SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'usage_records') INTO usage_exists;
 
--- Display all indexes with sizes
-SELECT 
-    schemaname,
-    tablename,
-    indexname,
-    pg_size_pretty(pg_relation_size((schemaname || '.' || indexname)::regclass)) AS index_size
-FROM pg_indexes 
-WHERE tablename IN ('activity_log', 'usage_records')
-    AND (indexname LIKE 'idx_activity_log_%' OR indexname LIKE 'idx_usage_records_%')
-ORDER BY tablename, indexname;
+    IF activity_exists THEN
+        SELECT COUNT(*) INTO activity_count
+        FROM pg_indexes
+        WHERE tablename = 'activity_log'
+            AND indexname LIKE 'idx_activity_log_%';
+    END IF;
+
+    IF usage_exists THEN
+        SELECT COUNT(*) INTO usage_count
+        FROM pg_indexes
+        WHERE tablename = 'usage_records'
+            AND indexname LIKE 'idx_usage_records_%';
+    END IF;
+
+    IF activity_exists OR usage_exists THEN
+        RAISE NOTICE '';
+        RAISE NOTICE '=================================================================';
+        RAISE NOTICE '✅ Performance Indexes Migration Completed Successfully!';
+        RAISE NOTICE '=================================================================';
+        RAISE NOTICE '';
+        IF activity_exists THEN
+            RAISE NOTICE 'Indexes created on activity_log: %', activity_count;
+        END IF;
+        IF usage_exists THEN
+            RAISE NOTICE 'Indexes created on usage_records: %', usage_count;
+        END IF;
+        RAISE NOTICE 'Total indexes: %', activity_count + usage_count;
+        RAISE NOTICE '';
+        RAISE NOTICE 'Expected performance improvements:';
+        RAISE NOTICE '  - Gateway stats: 10-50x faster ⚡';
+        RAISE NOTICE '  - Provider stats: 10-50x faster ⚡';
+        RAISE NOTICE '  - Trending models: 5-20x faster ⚡';
+        RAISE NOTICE '  - User analytics: 5-15x faster ⚡';
+        RAISE NOTICE '';
+        RAISE NOTICE 'Run EXPLAIN ANALYZE on your queries to see the improvements!';
+        RAISE NOTICE '=================================================================';
+        RAISE NOTICE '';
+    ELSE
+        RAISE NOTICE '';
+        RAISE NOTICE '⏭️  Skipped: Tables activity_log and usage_records do not exist yet';
+        RAISE NOTICE '   (This is normal if tables are created in a later migration)';
+        RAISE NOTICE '';
+    END IF;
+END $$;
 

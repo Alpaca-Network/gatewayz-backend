@@ -5,6 +5,7 @@ from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key
+from src.services.prometheus_metrics import track_database_query
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ def create_enhanced_user(
             "subscription_status": "trial",
             "trial_expires_at": trial_end.isoformat(),
             "welcome_email_sent": False,  # New users haven't received welcome email yet
+            "tier": "basic",
         }
 
         # Add privy_user_id if provided
@@ -80,6 +82,9 @@ def create_enhanced_user(
             "email": email,
             "credits": credits,
             "primary_api_key": primary_key,
+            "subscription_status": "trial",
+            "trial_expires_at": trial_end.isoformat(),
+            "tier": "basic",
         }
 
     except Exception as e:
@@ -93,14 +98,16 @@ def get_user(api_key: str) -> dict[str, Any] | None:
         client = get_supabase_client()
 
         # First, try to get user from the new api_keys table
-        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+        with track_database_query(table="api_keys_new", operation="select"):
+            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
         if key_result.data:
             key_data = key_result.data[0]
             user_id = key_data["user_id"]
 
             # Get user info from users table
-            user_result = client.table("users").select("*").eq("id", user_id).execute()
+            with track_database_query(table="users", operation="select"):
+                user_result = client.table("users").select("*").eq("id", user_id).execute()
 
             if user_result.data:
                 user = user_result.data[0]
@@ -113,7 +120,8 @@ def get_user(api_key: str) -> dict[str, Any] | None:
                 return user
 
         # Fallback: Check if this is a legacy key (for backward compatibility during migration)
-        legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
+        with track_database_query(table="users", operation="select"):
+            legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
         if legacy_result.data:
             logger.warning(
                 "Legacy API key %s detected - should be migrated",
@@ -372,14 +380,15 @@ def deduct_credits(
         balance_after = balance_before - tokens
 
         client = get_supabase_client()
-        result = (
-            client.table("users")
-            .update(
-                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
+        with track_database_query(table="users", operation="update"):
+            result = (
+                client.table("users")
+                .update(
+                    {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
+                )
+                .eq("id", user_id)
+                .execute()
             )
-            .eq("id", user_id)
-            .execute()
-        )
 
         if not result.data:
             raise ValueError(f"Failed to update user balance for user {user_id}")

@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -31,6 +31,7 @@ from src.services.query_timeout import (
     QueryTimeoutError,
     safe_query_with_timeout,
 )
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -71,6 +72,12 @@ def _generate_unique_username(client, base_username: str) -> str:
     return f"{sanitized}_{secrets.token_hex(4)}"
 
 
+def _get_tier_display_name(tier: str | None) -> str | None:
+    """Return a user-friendly display name for a subscription tier."""
+    tier_display_map = {"basic": "Basic", "pro": "Pro", "max": "MAX"}
+    return tier_display_map.get(tier) if tier else None
+
+
 def _handle_existing_user(
     existing_user: dict[str, Any],
     request: PrivyAuthRequest,
@@ -78,6 +85,7 @@ def _handle_existing_user(
     auth_method: AuthMethod,
     display_name: str | None,
     email: str | None,
+    auto_create_api_key: bool = True,
 ) -> PrivyAuthResponse:
     """Build a consistent response for existing users."""
     logger.info(f"Existing Privy user found: {existing_user['id']}")
@@ -147,6 +155,31 @@ def _handle_existing_user(
             key_error,
         )
 
+    # Validate that we're not returning a temporary key pattern
+    # Temporary keys created during user registration: gw_live_{token_urlsafe(16)}
+    #   - Format: "gw_live_" (8 chars) + token_urlsafe(16) (22 chars) = 30 chars total
+    # Proper keys from create_api_key: gw_live_{token_urlsafe(32)}
+    #   - Format: "gw_live_" (8 chars) + token_urlsafe(32) (43 chars) = 51 chars total
+    # Note: token_urlsafe() can contain underscores, so we check total length, not split by _
+    if api_key_to_return and api_key_to_return.startswith("gw_live_"):
+        key_length = len(api_key_to_return)
+        # Threshold: midpoint between 30 (temp) and 51 (proper) = 40
+        # Any gw_live_ key shorter than 40 chars is a temp key
+        if key_length < 40:
+            logger.error(
+                "Detected temporary API key pattern for user %s: %s (length: %d). "
+                "This key should have been replaced during user creation.",
+                existing_user["id"],
+                api_key_to_return[:15] + "...",
+                key_length,
+            )
+            # Don't return temporary keys - force key recreation by setting to None
+            api_key_to_return = None
+            logger.warning(
+                "Nullified temporary key for user %s to force proper key recreation",
+                existing_user["id"],
+            )
+
     user_credits = existing_user.get("credits")
     try:
         if user_credits is None:
@@ -166,6 +199,12 @@ def _handle_existing_user(
             credits_error,
         )
         user_credits = 0.0
+
+    tier = existing_user.get("tier")
+    tier_display_name = _get_tier_display_name(tier)
+    subscription_status_value = existing_user.get("subscription_status")
+    trial_expires_at = existing_user.get("trial_expires_at")
+    subscription_end_date = existing_user.get("subscription_end_date")
 
     user_email = existing_user.get("email") or email
     logger.info(
@@ -193,6 +232,54 @@ def _handle_existing_user(
         is_new_user=False,
     )
 
+    # Handle case where no valid API key exists
+    if not api_key_to_return:
+        if auto_create_api_key:
+            logger.info(
+                "No valid API key found for user %s, creating new primary key (auto_create_api_key=True)",
+                existing_user["id"],
+            )
+            try:
+                from src.db.api_keys import create_api_key
+
+                # Create a new primary key for this user
+                primary_key, _ = create_api_key(
+                    user_id=existing_user["id"],
+                    key_name="Primary Key (Auto-created)",
+                    environment_tag="live",
+                    is_primary=True,
+                )
+                api_key_to_return = primary_key
+
+                # Update the users table with the new key
+                try:
+                    client.table("users").update({"api_key": primary_key}).eq(
+                        "id", existing_user["id"]
+                    ).execute()
+                    logger.info(
+                        "Successfully created and set new primary key for user %s",
+                        existing_user["id"],
+                    )
+                except Exception as update_error:
+                    logger.warning(
+                        "Failed to update users.api_key for user %s: %s",
+                        existing_user["id"],
+                        update_error,
+                    )
+            except Exception as create_error:
+                logger.error(
+                    "Failed to create new API key for user %s: %s",
+                    existing_user["id"],
+                    create_error,
+                )
+                # Continue without a key - frontend will need to handle this
+        else:
+            logger.warning(
+                "No valid API key found for user %s and auto_create_api_key=False, returning None",
+                existing_user["id"],
+            )
+            # Return None as api_key - frontend should handle this case
+
     logger.info("Returning login response with credits: %s", user_credits)
 
     return PrivyAuthResponse(
@@ -207,6 +294,11 @@ def _handle_existing_user(
         email=user_email,
         credits=user_credits,
         timestamp=datetime.now(timezone.utc),
+        subscription_status=subscription_status_value,
+        tier=tier,
+        tier_display_name=tier_display_name,
+        trial_expires_at=trial_expires_at,
+        subscription_end_date=subscription_end_date,
     )
 
 
@@ -588,6 +680,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 auth_method=auth_method,
                 display_name=display_name,
                 email=email,
+                auto_create_api_key=request.auto_create_api_key
+                if request.auto_create_api_key is not None
+                else True,
             )
         else:
             # New user - create account
@@ -633,6 +728,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         auth_method=auth_method,
                         display_name=display_name,
                         email=email,
+                        auto_create_api_key=request.auto_create_api_key
+                        if request.auto_create_api_key is not None
+                        else True,
                     )
 
                 fallback_email = email or f"{request.user.id}@privy.user"
@@ -646,6 +744,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     )
                     username = resolved_username
 
+                trial_start = datetime.now(timezone.utc)
+                trial_end = trial_start + timedelta(days=3)
+
                 user_payload = {
                     "username": username,
                     "email": fallback_email,
@@ -654,8 +755,11 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                     ),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": trial_start.isoformat(),
                     "welcome_email_sent": False,
+                    "subscription_status": "trial",
+                    "trial_expires_at": trial_end.isoformat(),
+                    "tier": "basic",
                 }
 
                 try:
@@ -804,6 +908,10 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         "primary_api_key": api_key_value,
                         "api_key": api_key_value,
                         "scope_permissions": created_user.get("scope_permissions", {}),
+                        "subscription_status": created_user.get("subscription_status", "trial"),
+                        "trial_expires_at": created_user.get("trial_expires_at"),
+                        "tier": created_user.get("tier"),
+                        "subscription_end_date": created_user.get("subscription_end_date"),
                     }
                     logger.info(
                         (
@@ -884,6 +992,8 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 new_user_credits = 10.0
             logger.info(f"Returning registration response with credits: {new_user_credits}")
 
+            tier_value = user_data.get("tier")
+
             return PrivyAuthResponse(
                 success=True,
                 message="Account created successfully",
@@ -896,11 +1006,32 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 email=email,
                 credits=new_user_credits,
                 timestamp=datetime.now(timezone.utc),
+                subscription_status=user_data.get("subscription_status", "trial"),
+                tier=tier_value,
+                tier_display_name=_get_tier_display_name(tier_value),
+                trial_expires_at=user_data.get("trial_expires_at"),
+                subscription_end_date=user_data.get("subscription_end_date"),
             )
 
     except Exception as e:
         logger.error(f"Privy authentication failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}") from e
+        error_message = str(e)
+        # Provide clearer error message for common configuration issues
+        if (
+            "missing an 'http://' or 'https://' protocol" in error_message.lower()
+            or "supabase_url must start with" in error_message.lower()
+            or "supabase_url environment variable is not set" in error_message.lower()
+        ):
+            logger.error(
+                "SUPABASE_URL environment variable is missing or misconfigured. "
+                "Please update your environment configuration with a valid URL "
+                "(e.g., https://xxxxx.supabase.co)"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Service configuration error: Database URL is misconfigured. Please contact support.",
+            ) from e
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {error_message}") from e
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])
@@ -967,6 +1098,9 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                 str(creation_error),
             )
 
+            trial_start = datetime.now(timezone.utc)
+            trial_end = trial_start + timedelta(days=3)
+
             fallback_payload = {
                 "username": request.username,
                 "email": request.email,
@@ -977,8 +1111,11 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                     if hasattr(request.auth_method, "value")
                     else str(request.auth_method)
                 ),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": trial_start.isoformat(),
                 "welcome_email_sent": False,
+                "subscription_status": "trial",
+                "trial_expires_at": trial_end.isoformat(),
+                "tier": "basic",
             }
 
             try:
@@ -1028,6 +1165,10 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                     "primary_api_key": api_key_value,
                     "api_key": api_key_value,
                     "scope_permissions": created_user.get("scope_permissions", {}),
+                    "subscription_status": created_user.get("subscription_status", "trial"),
+                    "trial_expires_at": created_user.get("trial_expires_at"),
+                    "tier": created_user.get("tier"),
+                    "subscription_end_date": created_user.get("subscription_end_date"),
                 }
                 logger.info(
                     f"Successfully created fallback registration user {created_user['id']} "
@@ -1164,3 +1305,139 @@ async def reset_password(token: str):
     except Exception as e:
         logger.error(f"Error resetting password: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.get("/auth/health", tags=["authentication", "health"])
+async def auth_health_check():
+    """
+    Dedicated health check endpoint for authentication service.
+
+    Returns comprehensive health status including:
+    - Database connectivity (Supabase)
+    - Redis cache availability
+    - Auth cache statistics
+    - Query timeout configuration
+    - Overall auth service status
+
+    This endpoint does not require authentication and is suitable for
+    load balancer health checks and monitoring systems.
+    """
+    import time
+
+    from src.config.redis_config import get_redis_client
+    from src.services.auth_cache import get_auth_cache_stats_lightweight
+
+    start_time = time.time()
+    health_status = {
+        "service": "auth",
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {},
+        "latency_ms": 0,
+    }
+
+    issues = []
+
+    # Check 1: Database connectivity
+    # Use execute_with_timeout directly (not safe_query_with_timeout) so we can
+    # properly distinguish between timeouts and database errors
+    from src.services.query_timeout import execute_with_timeout
+
+    db_check_start = time.time()
+    try:
+        client = supabase_config.get_supabase_client()
+        # Simple query to verify connection - use timeout
+        result = execute_with_timeout(
+            lambda: client.table("users").select("id").limit(1).execute(),
+            timeout_seconds=3,
+            operation_name="auth health check",
+        )
+        db_latency = (time.time() - db_check_start) * 1000
+
+        health_status["checks"]["database"] = {
+            "status": "healthy",
+            "latency_ms": round(db_latency, 2),
+        }
+    except QueryTimeoutError as e:
+        db_latency = (time.time() - db_check_start) * 1000
+        health_status["checks"]["database"] = {
+            "status": "timeout",
+            "latency_ms": round(db_latency, 2),
+            "error": str(e),
+        }
+        issues.append("database_timeout")
+    except Exception as e:
+        db_latency = (time.time() - db_check_start) * 1000
+        health_status["checks"]["database"] = {
+            "status": "unhealthy",
+            "latency_ms": round(db_latency, 2),
+            "error": str(e),
+        }
+        issues.append("database_error")
+
+    # Check 2: Redis cache availability
+    redis_check_start = time.time()
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            # Ping Redis
+            redis_client.ping()
+            redis_latency = (time.time() - redis_check_start) * 1000
+            health_status["checks"]["redis"] = {
+                "status": "healthy",
+                "latency_ms": round(redis_latency, 2),
+            }
+        else:
+            redis_latency = (time.time() - redis_check_start) * 1000
+            health_status["checks"]["redis"] = {
+                "status": "unavailable",
+                "latency_ms": round(redis_latency, 2),
+                "note": "Redis client not configured - using fallback caching",
+            }
+            # Redis being unavailable is not critical - we have in-memory fallback
+    except Exception as e:
+        redis_latency = (time.time() - redis_check_start) * 1000
+        health_status["checks"]["redis"] = {
+            "status": "unhealthy",
+            "latency_ms": round(redis_latency, 2),
+            "error": str(e),
+        }
+        issues.append("redis_error")
+
+    # Check 3: Auth cache statistics (using lightweight O(1) operations only)
+    try:
+        cache_stats = get_auth_cache_stats_lightweight()
+        health_status["checks"]["auth_cache"] = {
+            "status": "healthy" if cache_stats.get("redis_available", False) else "degraded",
+            "stats": cache_stats,
+        }
+    except Exception as e:
+        health_status["checks"]["auth_cache"] = {
+            "status": "error",
+            "error": str(e),
+        }
+
+    # Check 4: Query timeout configuration
+    health_status["checks"]["timeouts"] = {
+        "auth_query_timeout_seconds": AUTH_QUERY_TIMEOUT,
+        "user_lookup_timeout_seconds": USER_LOOKUP_TIMEOUT,
+    }
+
+    # Calculate total latency
+    total_latency = (time.time() - start_time) * 1000
+    health_status["latency_ms"] = round(total_latency, 2)
+
+    # Determine overall status
+    if "database_error" in issues:
+        health_status["status"] = "unhealthy"
+    elif "database_timeout" in issues or "redis_error" in issues:
+        health_status["status"] = "degraded"
+    elif total_latency > 5000:  # > 5 seconds is concerning
+        health_status["status"] = "degraded"
+        health_status["warning"] = f"High latency detected: {total_latency:.0f}ms"
+
+    # Add issues list if any
+    if issues:
+        health_status["issues"] = issues
+
+    return health_status

@@ -5,6 +5,8 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-2.0.1-blue)](https://github.com/your-org/api-gateway-vercel)
 
+> 📚 **[View Complete Developer Wiki](DEVELOPER_WIKI.md)** - Comprehensive documentation hub for all project documentation
+
 A production-ready, enterprise-grade FastAPI application that provides a unified interface for accessing multiple AI models through various providers (OpenRouter, Portkey, Featherless, Chutes), with comprehensive credit management, rate limiting, and security features.
 
 ## 🎯 Overview

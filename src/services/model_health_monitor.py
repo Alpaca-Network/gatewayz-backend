@@ -248,11 +248,45 @@ class ModelHealthMonitor:
             else:
                 status = HealthStatus.UNHEALTHY
                 error_message = health_check_result.get("error", "Unknown error")
+                status_code = health_check_result.get("status_code")
+
+                # Only capture specific error types to Sentry (not rate limits or expected failures)
+                should_capture = self._should_capture_error(status_code, error_message)
+
+                if should_capture:
+                    # Capture non-functional model to Sentry
+                    error = Exception(f"Model health check failed: {error_message}")
+                    capture_model_health_error(
+                        error,
+                        model_id=model_id,
+                        provider=provider,
+                        gateway=gateway,
+                        operation='health_check',
+                        status='unhealthy',
+                        response_time_ms=health_check_result.get("response_time"),
+                        details={
+                            'status_code': status_code,
+                            'error_message': error_message,
+                        }
+                    )
 
         except Exception as e:
             status = HealthStatus.UNHEALTHY
             error_message = str(e)
             logger.warning(f"Health check failed for {model_id}: {e}")
+
+            # Capture exception to Sentry
+            capture_model_health_error(
+                e,
+                model_id=model_id,
+                provider=provider,
+                gateway=gateway,
+                operation='health_check',
+                status='unhealthy',
+                details={
+                    'error_message': error_message,
+                }
+            )
 
         # Create health metrics
         health_metrics = ModelHealthMetrics(
@@ -266,6 +300,66 @@ class ModelHealthMonitor:
         )
 
         return health_metrics
+
+    def _should_capture_error(self, status_code: int | None, error_message: str | None) -> bool:
+        """
+        Determine if an error should be captured to Sentry.
+
+        Filter out expected/transient errors like:
+        - Rate limits (429)
+        - Data policy restrictions (404 with policy message)
+        - Invalid parameters for specific models (400 with known issues)
+        - Temporary service unavailability (503)
+        """
+        if not status_code:
+            return True  # Capture unknown errors
+
+        # Don't capture rate limits - these are expected for free tier models
+        if status_code == 429:
+            return False
+
+        # Don't capture data policy restrictions - user configuration issue
+        if status_code == 404 and error_message and "data policy" in error_message.lower():
+            return False
+
+        # Don't capture temporary service unavailability
+        if status_code == 503 and error_message and "unavailable" in error_message.lower():
+            return False
+
+        # Don't capture known parameter validation issues for specific providers
+        if status_code == 400 and error_message:
+            # Google Vertex AI max_output_tokens validation
+            if "max_output_tokens" in error_message.lower() and "minimum value" in error_message.lower():
+                return False
+            # Audio-only model requirements
+            if "audio" in error_message.lower() and "modality" in error_message.lower():
+                return False
+
+        # Don't capture authentication issues - configuration problem
+        if status_code == 403 and error_message and "key" in error_message.lower():
+            return False
+
+        # Capture all other errors
+        return True
+
+    def _get_api_key_for_gateway(self, gateway: str) -> str | None:
+        """Get the API key for a specific gateway from configuration."""
+        api_key_mapping = {
+            "openrouter": Config.OPENROUTER_API_KEY,
+            "featherless": Config.FEATHERLESS_API_KEY,
+            "deepinfra": Config.DEEPINFRA_API_KEY,
+            "huggingface": Config.HUG_API_KEY,
+            "groq": Config.GROQ_API_KEY,
+            "fireworks": Config.FIREWORKS_API_KEY,
+            "together": Config.TOGETHER_API_KEY,
+            "xai": Config.XAI_API_KEY,
+            "novita": Config.NOVITA_API_KEY,
+            "chutes": Config.CHUTES_API_KEY,
+            "aimo": Config.AIMO_API_KEY,
+            "nebius": Config.NEBIUS_API_KEY,
+            "cerebras": Config.CEREBRAS_API_KEY,
+        }
+        return api_key_mapping.get(gateway)
 
     async def _perform_model_request(self, model_id: str, gateway: str) -> dict[str, Any]:
         """Perform a real test request to a model"""
@@ -309,8 +403,21 @@ class ModelHealthMonitor:
                     "status_code": 400,
                 }
 
-            # Set up headers based on gateway
-            headers = {"Content-Type": "application/json", "User-Agent": "HealthMonitor/1.0"}
+            # Get API key for this gateway
+            api_key = self._get_api_key_for_gateway(gateway)
+            if not api_key:
+                return {
+                    "success": False,
+                    "error": f"No API key configured for gateway: {gateway}",
+                    "status_code": 401,
+                }
+
+            # Set up headers based on gateway with authentication
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "HealthMonitor/1.0",
+                "Authorization": f"Bearer {api_key}",
+            }
 
             # For HuggingFace, use a different payload format
             if gateway == "huggingface":
@@ -587,5 +694,15 @@ class ModelHealthMonitor:
         }
 
 
-# Global health monitor instance
-health_monitor = ModelHealthMonitor()
+# Global health monitor instance with rate-limited configuration
+# This prevents hitting provider rate limits by:
+# - Checking models in small batches (20 at a time)
+# - Adding 15-second delay between batches (4 batches/min max)
+# - Running checks every 5 minutes by default
+# This is especially important for OpenRouter's 4 model switches/minute limit
+health_monitor = ModelHealthMonitor(
+    check_interval=300,  # Check every 5 minutes
+    batch_size=20,  # Process 20 models per batch
+    batch_interval=15.0,  # 15 second delay between batches (4 batches/min)
+    fetch_chunk_size=100,  # Fetch models in chunks of 100
+)

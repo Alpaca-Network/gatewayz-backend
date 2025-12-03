@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import secrets
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -52,6 +54,12 @@ class EnhancedNotificationService:
                 "RESEND_API_KEY configured but 'resend' package is not installed. "
                 "Email notifications will be disabled."
             )
+
+        # Rate limiting for Resend API (2 requests per second limit)
+        # We use 0.6 seconds (600ms) between requests to safely stay under 2/sec
+        self._email_rate_limit_lock = threading.Lock()
+        self._last_email_send_time = 0.0
+        self._min_email_interval = 0.6  # seconds between email sends
 
     def send_welcome_email(self, user_id: int, username: str, email: str, credits: int) -> bool:
         """Send welcome email to new users (API key not included for security)"""
@@ -369,6 +377,26 @@ The {self.app_name} Team
             logger.error(f"Error sending API key creation email: {e}")
             return False
 
+    def _wait_for_rate_limit(self):
+        """
+        Ensure we respect Resend's rate limit of 2 requests per second.
+        This method blocks until enough time has passed since the last email send.
+        """
+        with self._email_rate_limit_lock:
+            current_time = time.time()
+            time_since_last_send = current_time - self._last_email_send_time
+            
+            if time_since_last_send < self._min_email_interval:
+                sleep_time = self._min_email_interval - time_since_last_send
+                logger.debug(
+                    f"Rate limiting: sleeping for {sleep_time:.3f}s to respect "
+                    f"Resend API limit (2 req/sec)"
+                )
+                time.sleep(sleep_time)
+            
+            # Update last send time
+            self._last_email_send_time = time.time()
+
     def send_email_notification(
         self, to_email: str, subject: str, html_content: str, text_content: str = None
     ) -> bool:
@@ -388,6 +416,9 @@ The {self.app_name} Team
 
             # Ensure API key is set before each send (in case it changed)
             resend.api_key = self.resend_api_key  # type: ignore[union-attr]
+
+            # Apply rate limiting to respect Resend's 2 requests/second limit
+            self._wait_for_rate_limit()
 
             # Use Resend SDK
             logger.info("Sending email via Resend SDK...")

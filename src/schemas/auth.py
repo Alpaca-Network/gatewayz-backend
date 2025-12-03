@@ -82,6 +82,7 @@ class PrivyAuthRequest(BaseModel):
     is_new_user: bool | None = None
     referral_code: str | None = None  # Referral code if user signed up with one
     environment_tag: str | None = "live"  # Environment tag for API keys (live, test, development)
+    auto_create_api_key: bool | None = True  # Whether to automatically create API keys for new users
 
     @field_validator("token")
     @classmethod
@@ -115,3 +116,8 @@ class PrivyAuthResponse(BaseModel):
     email: str | None = None
     credits: float | None = None
     timestamp: datetime | None = None
+    subscription_status: str | None = None
+    tier: str | None = None
+    tier_display_name: str | None = None
+    trial_expires_at: str | None = None
+    subscription_end_date: int | None = None

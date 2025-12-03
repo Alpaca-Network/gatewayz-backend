@@ -21,9 +21,17 @@ import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
-from src.security.deps import get_api_key
+from src.security.deps import get_api_key, get_optional_api_key
 from src.services.passive_health_monitor import capture_model_health
 from src.utils.rate_limit_headers import get_rate_limit_headers
+from src.services.prometheus_metrics import (
+    model_inference_requests,
+    model_inference_duration,
+    tokens_used,
+    credits_used,
+)
+from src.services.redis_metrics import get_redis_metrics
+from src.utils.sentry_context import capture_payment_error, capture_provider_error
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -332,6 +340,36 @@ make_clarifai_request_openai = _clarifai.get("make_clarifai_request_openai")
 process_clarifai_response = _clarifai.get("process_clarifai_response")
 make_clarifai_request_openai_stream = _clarifai.get("make_clarifai_request_openai_stream")
 
+_groq = _safe_import_provider(
+    "groq",
+    [
+        "make_groq_request_openai",
+        "process_groq_response",
+        "make_groq_request_openai_stream",
+    ],
+)
+make_groq_request_openai = _groq.get("make_groq_request_openai")
+process_groq_response = _groq.get("process_groq_response")
+make_groq_request_openai_stream = _groq.get("make_groq_request_openai_stream")
+
+_cloudflare_workers_ai = _safe_import_provider(
+    "cloudflare_workers_ai",
+    [
+        "make_cloudflare_workers_ai_request_openai",
+        "process_cloudflare_workers_ai_response",
+        "make_cloudflare_workers_ai_request_openai_stream",
+    ],
+)
+make_cloudflare_workers_ai_request_openai = _cloudflare_workers_ai.get(
+    "make_cloudflare_workers_ai_request_openai"
+)
+process_cloudflare_workers_ai_response = _cloudflare_workers_ai.get(
+    "process_cloudflare_workers_ai_response"
+)
+make_cloudflare_workers_ai_request_openai_stream = _cloudflare_workers_ai.get(
+    "make_cloudflare_workers_ai_request_openai_stream"
+)
+
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
@@ -339,6 +377,7 @@ from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
+    filter_by_circuit_breaker,
     map_provider_error,
     should_failover,
 )
@@ -464,6 +503,110 @@ def _fallback_get_user(api_key: str):
     return None
 
 
+async def _record_inference_metrics_and_health(
+    provider: str,
+    model: str,
+    elapsed_seconds: float,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost: float,
+    success: bool = True,
+    error_message: str | None = None,
+):
+    """
+    Record Prometheus metrics, Redis metrics, and passive health monitoring.
+
+    This centralizes metrics recording for both streaming and non-streaming requests.
+    """
+    try:
+        # Record Prometheus metrics
+        status = "success" if success else "error"
+
+        # Request count
+        model_inference_requests.labels(
+            provider=provider,
+            model=model,
+            status=status
+        ).inc()
+
+        # Duration
+        model_inference_duration.labels(
+            provider=provider,
+            model=model
+        ).observe(elapsed_seconds)
+
+        # Token usage
+        if prompt_tokens > 0:
+            tokens_used.labels(
+                provider=provider,
+                model=model,
+                token_type="input"
+            ).inc(prompt_tokens)
+
+        if completion_tokens > 0:
+            tokens_used.labels(
+                provider=provider,
+                model=model,
+                token_type="output"
+            ).inc(completion_tokens)
+
+        # Credits consumed
+        if cost > 0:
+            credits_used.labels(
+                provider=provider,
+                model=model
+            ).inc(cost)
+
+        # Record Redis metrics (real-time dashboards)
+        redis_metrics = get_redis_metrics()
+        await redis_metrics.record_request(
+            provider=provider,
+            model=model,
+            latency_ms=int(elapsed_seconds * 1000),
+            success=success,
+            cost=cost,
+            tokens_input=prompt_tokens,
+            tokens_output=completion_tokens,
+            error_message=error_message
+        )
+
+        # Passive health monitoring (background task)
+        response_time_ms = int(elapsed_seconds * 1000)
+        health_status = "success" if success else "error"
+
+        # Create usage dict for health monitoring
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens
+        }
+
+        # Call passive health monitor in background (non-blocking)
+        asyncio.create_task(
+            asyncio.to_thread(
+                capture_model_health,
+                provider,
+                model,
+                response_time_ms,
+                health_status,
+                error_message,
+                usage
+            )
+        )
+
+        logger.debug(
+            f"Recorded metrics for {provider}/{model}: "
+            f"duration={elapsed_seconds:.3f}s, "
+            f"tokens={prompt_tokens}+{completion_tokens}, "
+            f"cost=${cost:.4f}, "
+            f"status={status}"
+        )
+
+    except Exception as e:
+        # Never let metrics recording break the main flow
+        logger.warning(f"Failed to record inference metrics: {e}", exc_info=True)
+
+
 async def _process_stream_completion_background(
     user,
     api_key,
@@ -478,14 +621,49 @@ async def _process_stream_completion_background(
     total_tokens,
     elapsed,
     provider,
+    is_anonymous=False,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
 
     This runs asynchronously after the stream completes, allowing the [DONE]
     event to be sent immediately without waiting for database operations.
+
+    For anonymous users, only metrics recording is performed (no credits, usage tracking, or history).
     """
     try:
+        # Skip user-specific operations for anonymous requests
+        if is_anonymous:
+            logger.info("Skipping user-specific post-processing for anonymous request")
+            # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
+            cost = calculate_cost(model, prompt_tokens, completion_tokens)
+            await _record_inference_metrics_and_health(
+                provider=provider,
+                model=model,
+                elapsed_seconds=elapsed,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=cost,
+                success=True,
+                error_message=None
+            )
+            # Capture health metrics (passive monitoring)
+            try:
+                await capture_model_health(
+                    provider=provider,
+                    model=model,
+                    response_time_ms=elapsed * 1000,
+                    status="success",
+                    usage={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Failed to capture health metric: {e}")
+            return
+
         # Track trial usage
         if trial.get("is_trial") and not trial.get("is_expired"):
             try:
@@ -516,6 +694,13 @@ async def _process_stream_completion_background(
                 )
             except Exception as e:
                 logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
+                # Capture to Sentry - trial tracking failure
+                capture_payment_error(
+                    e,
+                    operation="trial_usage_logging",
+                    user_id=user.get("id"),
+                    details={"model": model, "tokens": total_tokens, "is_trial": True}
+                )
         else:
             try:
                 await _to_thread(
@@ -543,9 +728,34 @@ async def _process_stream_completion_background(
                 await _to_thread(update_rate_limit_usage, api_key, total_tokens)
             except Exception as e:
                 logger.error("Usage recording error in background: %s", e)
+                # Capture to Sentry - CRITICAL revenue loss if credits not deducted!
+                capture_payment_error(
+                    e,
+                    operation="credit_deduction",
+                    user_id=user.get("id"),
+                    amount=cost,
+                    details={
+                        "model": model,
+                        "tokens": total_tokens,
+                        "cost_usd": cost,
+                        "api_key": api_key[:10] + "..." if api_key else None
+                    }
+                )
 
         # Increment API key usage counter
         await _to_thread(increment_api_key_usage, api_key)
+
+        # Record Prometheus metrics and passive health monitoring
+        await _record_inference_metrics_and_health(
+            provider=provider,
+            model=model,
+            elapsed_seconds=elapsed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            success=True,
+            error_message=None
+        )
 
         # Log activity
         try:
@@ -654,6 +864,7 @@ async def stream_generator(
     rate_limit_mgr=None,
     provider="openrouter",
     tracker=None,
+    is_anonymous=False,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)"""
     accumulated_content = ""
@@ -739,6 +950,29 @@ async def stream_generator(
             f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
         )
 
+        # DEFENSIVE: Detect empty streams and log as error
+        if chunk_count == 0:
+            logger.error(
+                f"[EMPTY STREAM] Provider {provider} returned zero chunks for model {model}. "
+                f"This indicates a provider routing or model ID transformation issue."
+            )
+            # Send error chunk to client
+            error_chunk = {
+                "error": {
+                    "message": f"Provider returned empty stream for model {model}. Please try again or contact support.",
+                    "type": "empty_stream_error",
+                    "provider": provider,
+                    "model": model,
+                }
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+        elif accumulated_content == "" and chunk_count > 0:
+            logger.warning(
+                f"[EMPTY CONTENT] Provider {provider} returned {chunk_count} chunks but no content for model {model}."
+            )
+
         # If no usage was provided, estimate based on content
         if total_tokens == 0:
             # Rough estimate: 1 token ≈ 4 characters
@@ -793,11 +1027,12 @@ async def stream_generator(
                 total_tokens=total_tokens,
                 elapsed=elapsed,
                 provider=provider,
+                is_anonymous=is_anonymous,
             )
         )
 
     except Exception as e:
-        logger.error(f"Streaming error: {e}")
+        logger.error(f"Streaming error: {e}", exc_info=True)
         error_chunk = {"error": {"message": "Streaming error occurred", "type": "stream_error"}}
         yield f"data: {json.dumps(error_chunk)}\n\n"
         yield "data: [DONE]\n\n"
@@ -811,15 +1046,15 @@ async def stream_generator(
 
 
 # Log route registration for debugging
-logger.info("📍 Registering /v1/chat/completions endpoint")
+logger.info("📍 Registering /chat/completions endpoint")
 
 
-@router.post("/v1/chat/completions", tags=["chat"])
+@router.post("/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
     req: ProxyRequest,
     background_tasks: BackgroundTasks,
-    api_key: str = Depends(get_api_key),
+    api_key: str | None = Depends(get_optional_api_key),
     session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
 ):
@@ -834,11 +1069,15 @@ async def chat_completions(
         if auth_header and auth_header.lower().startswith("bearer "):
             api_key = auth_header.split(" ", 1)[1].strip()
 
+    # Determine if this is an authenticated or anonymous request
+    is_anonymous = api_key is None
+
     logger.info(
-        "chat_completions start (request_id=%s, api_key=%s, model=%s)",
+        "chat_completions start (request_id=%s, api_key=%s, model=%s, anonymous=%s)",
         request_id,
-        mask_key(api_key),
+        mask_key(api_key) if api_key else "anonymous",
         req.model,
+        is_anonymous,
         extra={"request_id": request_id},
     )
 
@@ -851,22 +1090,30 @@ async def chat_completions(
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
         with tracker.stage("auth_validation"):
-            # Step 1: Get user first (required for subsequent checks)
-            user = await _to_thread(get_user, api_key)
-            if not user and Config.IS_TESTING:
-                logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
-                user = await _to_thread(_fallback_get_user, api_key)
-            if not user:
-                logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
-                raise HTTPException(status_code=401, detail="Invalid API key")
+            if is_anonymous:
+                # Anonymous user - skip user lookup, trial validation, plan limits
+                user = None
+                trial = {"is_valid": True, "is_trial": False}
+                environment_tag = "live"
+                logger.info("Processing anonymous chat request (request_id=%s)", request_id)
+            else:
+                # Authenticated user - perform full validation
+                # Step 1: Get user first (required for subsequent checks)
+                user = await _to_thread(get_user, api_key)
+                if not user and Config.IS_TESTING:
+                    logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
+                    user = await _to_thread(_fallback_get_user, api_key)
+                if not user:
+                    logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
+                    raise HTTPException(status_code=401, detail="Invalid API key")
 
-            environment_tag = user.get("environment_tag", "live")
+                environment_tag = user.get("environment_tag", "live")
 
-            # Step 2: Only validate trial access (plan limits checked after token usage known)
-            trial = await _to_thread(validate_trial_access, api_key)
+                # Step 2: Only validate trial access (plan limits checked after token usage known)
+                trial = await _to_thread(validate_trial_access, api_key)
 
-        # Validate trial access
-        if not trial.get("is_valid", False):
+        # Validate trial access (only for authenticated users)
+        if not is_anonymous and not trial.get("is_valid", False):
             if trial.get("is_trial") and trial.get("is_expired"):
                 raise HTTPException(
                     status_code=403,
@@ -886,18 +1133,21 @@ async def chat_completions(
                 raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
         # Fast-fail requests that would exceed plan limits before hitting any upstream provider
-        await _ensure_plan_capacity(user["id"], environment_tag)
+        # (only for authenticated users)
+        if not is_anonymous:
+            await _ensure_plan_capacity(user["id"], environment_tag)
 
         rate_limit_mgr = get_rate_limit_manager()
-        should_release_concurrency = not trial.get("is_trial", False)
+        should_release_concurrency = not trial.get("is_trial", False) and not is_anonymous
 
-        # Pre-check plan limits before making any upstream calls
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-        if not pre_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429,
-                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
-            )
+        # Pre-check plan limits before making any upstream calls (only for authenticated users)
+        if not is_anonymous:
+            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+            if not pre_plan.get("allowed", False):
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
+                )
 
         # Allow disabling rate limiting for testing (DEV ONLY)
         import os
@@ -908,8 +1158,10 @@ async def chat_completions(
         rl_pre = None
         rl_final = None
 
+        # Rate limiting (only for authenticated non-trial users)
         if (
-            not trial.get("is_trial", False)
+            not is_anonymous
+            and not trial.get("is_trial", False)
             and rate_limit_mgr
             and not disable_rate_limiting
         ):
@@ -934,23 +1186,26 @@ async def chat_completions(
                     ),
                 )
 
-        if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
+        # Credit check (only for authenticated non-trial users)
+        if not is_anonymous and not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
 
-        # Pre-check plan limits before streaming (fail fast)
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-        if not pre_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429,
-                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
-            )
+        # Pre-check plan limits before streaming (fail fast) - only for authenticated users
+        if not is_anonymous:
+            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
+            if not pre_plan.get("allowed", False):
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+                )
 
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
             messages = [m.model_dump() for m in req.messages]
 
         # === 2.1) Inject conversation history if session_id provided ===
-        if session_id:
+        # Chat history is only available for authenticated users
+        if session_id and not is_anonymous:
             try:
                 # Fetch the session with its message history
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -983,14 +1238,17 @@ async def chat_completions(
                     sanitize_for_logging(str(session_id)),
                     sanitize_for_logging(str(e)),
                 )
+        elif session_id and is_anonymous:
+            logger.debug("Ignoring session_id for anonymous request")
 
-        # === 2.2) Plan limit pre-check with estimated tokens ===
+        # === 2.2) Plan limit pre-check with estimated tokens (only for authenticated users) ===
         estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
-        if not pre_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
-            )
+        if not is_anonymous:
+            pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+            if not pre_plan.get("allowed", False):
+                raise HTTPException(
+                    status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+                )
 
         # Store original model for response
         original_model = req.model
@@ -1079,6 +1337,7 @@ async def chat_completions(
 
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(original_model, provider_chain)
+            provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
             model = original_model
 
         # Diagnostic logging for tools parameter
@@ -1204,6 +1463,20 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "groq":
+                        stream = await _to_thread(
+                            make_groq_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
+                    elif attempt_provider == "cloudflare-workers-ai":
+                        stream = await _to_thread(
+                            make_cloudflare_workers_ai_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
                     else:
                         stream = await _to_thread(
                             make_openrouter_request_openai_stream,
@@ -1232,6 +1505,7 @@ async def chat_completions(
                             rate_limit_mgr,
                             provider,
                             tracker,
+                            is_anonymous,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -1239,16 +1513,49 @@ async def chat_completions(
                 except Exception as exc:
                     if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
+                        # Capture timeout to Sentry
+                        capture_provider_error(
+                            exc,
+                            provider=attempt_provider,
+                            model=request_model,
+                            endpoint="/v1/chat/completions",
+                            request_id=request_id_var.get()
+                        )
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
+                        # Capture network error to Sentry
+                        capture_provider_error(
+                            exc,
+                            provider=attempt_provider,
+                            model=request_model,
+                            endpoint="/v1/chat/completions",
+                            request_id=request_id_var.get()
+                        )
                     elif isinstance(exc, httpx.HTTPStatusError):
                         logger.debug(
                             "Upstream HTTP error (%s): %s",
                             attempt_provider,
                             exc.response.status_code,
                         )
+                        # Capture HTTP errors to Sentry (except 4xx client errors)
+                        if exc.response.status_code >= 500:
+                            capture_provider_error(
+                                exc,
+                                provider=attempt_provider,
+                                model=request_model,
+                                endpoint="/v1/chat/completions",
+                                request_id=request_id_var.get()
+                            )
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
+                        # Capture unexpected errors to Sentry
+                        capture_provider_error(
+                            exc,
+                            provider=attempt_provider,
+                            model=request_model,
+                            endpoint="/v1/chat/completions",
+                            request_id=request_id_var.get()
+                        )
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                     last_http_exc = http_exc
@@ -1436,6 +1743,28 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_clarifai_response, resp_raw)
+                elif attempt_provider == "groq":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_groq_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_groq_response, resp_raw)
+                elif attempt_provider == "cloudflare-workers-ai":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_cloudflare_workers_ai_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_cloudflare_workers_ai_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -1486,136 +1815,154 @@ async def chat_completions(
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
 
-        post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
-        if not post_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429, detail=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}"
-            )
-
-        if trial.get("is_trial") and not trial.get("is_expired"):
-            try:
-                await _to_thread(track_trial_usage, api_key, total_tokens, 1)
-            except Exception as e:
-                logger.warning("Failed to track trial usage: %s", e)
-
-        if should_release_concurrency and rate_limit_mgr and not disable_rate_limiting:
-            try:
-                await rate_limit_mgr.release_concurrency(api_key)
-            except Exception as exc:
-                logger.debug(
-                    "Failed to release concurrency before final check for %s: %s",
-                    mask_key(api_key),
-                    exc,
-                )
-            rl_final = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=total_tokens)
-            if not rl_final.allowed:
-                await _to_thread(
-                    create_rate_limit_alert,
-                    api_key,
-                    "rate_limit_exceeded",
-                    {
-                        "reason": rl_final.reason,
-                        "retry_after": rl_final.retry_after,
-                        "remaining_requests": rl_final.remaining_requests,
-                        "remaining_tokens": rl_final.remaining_tokens,
-                        "tokens_requested": total_tokens,
-                    },
-                )
+        # Plan limits and usage tracking (only for authenticated users)
+        if not is_anonymous:
+            post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
+            if not post_plan.get("allowed", False):
                 raise HTTPException(
-                    status_code=429,
-                    detail=f"Rate limit exceeded: {rl_final.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_final.retry_after)} if rl_final.retry_after else None
-                    ),
+                    status_code=429, detail=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}"
                 )
+
+            if trial.get("is_trial") and not trial.get("is_expired"):
+                try:
+                    await _to_thread(track_trial_usage, api_key, total_tokens, 1)
+                except Exception as e:
+                    logger.warning("Failed to track trial usage: %s", e)
+
+            if should_release_concurrency and rate_limit_mgr and not disable_rate_limiting:
+                try:
+                    await rate_limit_mgr.release_concurrency(api_key)
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to release concurrency before final check for %s: %s",
+                        mask_key(api_key),
+                        exc,
+                    )
+                rl_final = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=total_tokens)
+                if not rl_final.allowed:
+                    await _to_thread(
+                        create_rate_limit_alert,
+                        api_key,
+                        "rate_limit_exceeded",
+                        {
+                            "reason": rl_final.reason,
+                            "retry_after": rl_final.retry_after,
+                            "remaining_requests": rl_final.remaining_requests,
+                            "remaining_tokens": rl_final.remaining_tokens,
+                            "tokens_requested": total_tokens,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Rate limit exceeded: {rl_final.reason}",
+                        headers=(
+                            {"Retry-After": str(rl_final.retry_after)} if rl_final.retry_after else None
+                        ),
+                    )
 
         cost = calculate_cost(model, prompt_tokens, completion_tokens)
         is_trial = trial.get("is_trial", False)
 
-        if is_trial:
-            # Log transaction for trial users (with $0 cost)
+        # Credit/usage tracking (only for authenticated users)
+        if not is_anonymous:
+            if is_trial:
+                # Log transaction for trial users (with $0 cost)
+                try:
+                    await _to_thread(
+                        log_api_usage_transaction,
+                        api_key,
+                        0.0,
+                        f"API usage - {model} (Trial)",
+                        {
+                            "model": model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "cost_usd": 0.0,
+                            "is_trial": True,
+                        },
+                        True,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
+            else:
+                # For non-trial users, deduct credits
+                try:
+                    await _to_thread(
+                        deduct_credits,
+                        api_key,
+                        cost,
+                        f"API usage - {model}",
+                        {
+                            "model": model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "cost_usd": cost,
+                        },
+                    )
+                    await _to_thread(
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        model,
+                        total_tokens,
+                        cost,
+                        int(elapsed * 1000),
+                    )
+                except ValueError as e:
+                    # e.g., insufficient funds detected atomically in DB
+                    raise HTTPException(status_code=402, detail=str(e))
+                except Exception as e:
+                    logger.error("Usage recording error: %s", e)
+
+                await _to_thread(update_rate_limit_usage, api_key, total_tokens)
+
+            await _to_thread(increment_api_key_usage, api_key)
+
+        # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
+        await _record_inference_metrics_and_health(
+            provider=provider,
+            model=model,
+            elapsed_seconds=elapsed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            success=True,
+            error_message=None
+        )
+
+        # === 4.5) Log activity for tracking and analytics (only for authenticated users) ===
+        if not is_anonymous:
             try:
+                provider_name = get_provider_from_model(model)
+                speed = total_tokens / elapsed if elapsed > 0 else 0
                 await _to_thread(
-                    log_api_usage_transaction,
-                    api_key,
-                    0.0,
-                    f"API usage - {model} (Trial)",
-                    {
-                        "model": model,
-                        "total_tokens": total_tokens,
+                    log_activity,
+                    user_id=user["id"],
+                    model=model,
+                    provider=provider_name,
+                    tokens=total_tokens,
+                    cost=cost if not trial.get("is_trial", False) else 0.0,
+                    speed=speed,
+                    finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                    app="API",
+                    metadata={
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
-                        "cost_usd": 0.0,
-                        "is_trial": True,
-                    },
-                    True,
-                )
-            except Exception as e:
-                logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
-        else:
-            # For non-trial users, deduct credits
-            try:
-                await _to_thread(
-                    deduct_credits,
-                    api_key,
-                    cost,
-                    f"API usage - {model}",
-                    {
-                        "model": model,
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "cost_usd": cost,
+                        "endpoint": "/v1/chat/completions",
+                        "session_id": session_id,
+                        "gateway": provider,  # Track which gateway was used
                     },
                 )
-                await _to_thread(
-                    record_usage,
-                    user["id"],
-                    api_key,
-                    model,
-                    total_tokens,
-                    cost,
-                    int(elapsed * 1000),
-                )
-            except ValueError as e:
-                # e.g., insufficient funds detected atomically in DB
-                raise HTTPException(status_code=402, detail=str(e))
             except Exception as e:
-                logger.error("Usage recording error: %s", e)
-
-            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
-
-        await _to_thread(increment_api_key_usage, api_key)
-
-        # === 4.5) Log activity for tracking and analytics ===
-        try:
-            provider_name = get_provider_from_model(model)
-            speed = total_tokens / elapsed if elapsed > 0 else 0
-            await _to_thread(
-                log_activity,
-                user_id=user["id"],
-                model=model,
-                provider=provider_name,
-                tokens=total_tokens,
-                cost=cost if not trial.get("is_trial", False) else 0.0,
-                speed=speed,
-                finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
-                app="API",
-                metadata={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "endpoint": "/v1/chat/completions",
-                    "session_id": session_id,
-                    "gateway": provider,  # Track which gateway was used
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to log activity for user {user['id']}, model {model}: {e}", exc_info=True
-            )
+                logger.error(
+                    f"Failed to log activity for user {user['id']}, model {model}: {e}", exc_info=True
+                )
 
         # === 5) History (use the last user message in this request only) ===
-        if session_id:
+        # Chat history is only saved for authenticated users
+        if session_id and not is_anonymous:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
                 if session:
@@ -1731,7 +2078,7 @@ async def chat_completions(
         )
 
 
-@router.post("/v1/responses", tags=["chat"])
+@router.post("/responses", tags=["chat"])
 @traced(name="unified_responses", type="llm")
 async def unified_responses(
     req: ResponseRequest,
@@ -2003,6 +2350,7 @@ async def unified_responses(
 
         provider_chain = build_provider_failover_chain(provider)
         provider_chain = enforce_model_failover_rules(original_model, provider_chain)
+        provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
         model = original_model
 
         # Diagnostic logging for tools parameter
@@ -2068,6 +2416,10 @@ async def unified_responses(
                     elif attempt_provider == "chutes":
                         stream = await _to_thread(
                             make_chutes_request_openai_stream, messages, request_model, **optional
+                        )
+                    elif attempt_provider == "groq":
+                        stream = await _to_thread(
+                            make_groq_request_openai_stream, messages, request_model, **optional
                         )
                     else:
                         stream = await _to_thread(
@@ -2240,6 +2592,12 @@ async def unified_responses(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_chutes_response, resp_raw)
+                elif attempt_provider == "groq":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(make_groq_request_openai, messages, request_model, **optional),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_groq_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -2374,6 +2732,18 @@ async def unified_responses(
             await _to_thread(update_rate_limit_usage, api_key, total_tokens)
 
         await _to_thread(increment_api_key_usage, api_key)
+
+        # Record Prometheus metrics and passive health monitoring
+        await _record_inference_metrics_and_health(
+            provider=provider,
+            model=model,
+            elapsed_seconds=elapsed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            success=True,
+            error_message=None
+        )
 
         # === 4.5) Log activity for tracking and analytics ===
         try:

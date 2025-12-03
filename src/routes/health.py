@@ -5,6 +5,7 @@ Provides comprehensive monitoring of model availability, performance,
 and health status across all providers and gateways.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -35,6 +36,7 @@ from src.services.health_cache_service import (
 )
 from src.services.model_availability import availability_service
 from src.services.model_health_monitor import health_monitor
+from src.utils.sentry_context import capture_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,9 +47,35 @@ async def health_check():
     """
     Simple health check endpoint
 
-    Returns basic health status for monitoring and load balancing
+    Returns basic health status for monitoring and load balancing.
+
+    This endpoint always returns HTTP 200 to indicate the application is running,
+    even if the database is unavailable (degraded mode). Check the response body
+    for detailed status including database connectivity.
     """
-    return {"status": "healthy"}
+    from src.config.supabase_config import get_initialization_status
+
+    # Get database initialization status
+    db_status = get_initialization_status()
+
+    # Application is always "healthy" if it's running (responds to requests)
+    # Degraded mode means DB is unavailable but app is still serving traffic
+    response = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Add database status if there are issues
+    if db_status["has_error"]:
+        response["database"] = "unavailable"
+        response["mode"] = "degraded"
+        response["database_error"] = db_status["error_type"]
+    elif db_status["initialized"]:
+        response["database"] = "connected"
+    else:
+        response["database"] = "not_initialized"
+
+    return response
 
 
 @router.get("/health/system", response_model=SystemHealthResponse, tags=["health"])
@@ -89,7 +117,28 @@ async def get_system_health(
         return system_health
     except Exception as e:
         logger.error(f"Failed to get system health: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve system health") from e
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/system', 'operation': 'get_system_health'},
+            tags={'endpoint': 'system_health', 'error_type': type(e).__name__}
+        )
+        # Return degraded status instead of failing
+        from src.models.health_models import HealthStatus
+
+        return SystemHealthResponse(
+            overall_status=HealthStatus.UNKNOWN,
+            total_providers=0,
+            healthy_providers=0,
+            degraded_providers=0,
+            unhealthy_providers=0,
+            total_models=0,
+            healthy_models=0,
+            degraded_models=0,
+            unhealthy_models=0,
+            system_uptime=0.0,
+            last_updated=datetime.now(timezone.utc),
+        )
 
 
 @router.get("/health/providers", response_model=list[ProviderHealthResponse], tags=["health"])
@@ -131,7 +180,7 @@ async def get_providers_health(
         return providers_health
     except Exception as e:
         logger.error(f"Failed to get providers health: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve providers health") from e
+        return []  # Return empty list instead of 500 error
 
 
 @router.get("/health/models", response_model=list[ModelHealthResponse], tags=["health"])
@@ -165,12 +214,12 @@ async def get_models_health(
         # Fetch fresh data
         models_health = health_monitor.get_all_models_health(gateway)
 
-        # Apply filters
-        if provider:
-            models_health = [m for m in models_health if m.provider == provider]
+            # Apply filters
+            if provider:
+                models_health = [m for m in models_health if m.provider == provider]
 
-        if status:
-            models_health = [m for m in models_health if m.status == status]
+            if status:
+                models_health = [m for m in models_health if m.status == status]
 
         # Cache the result (only if no filters)
         if not gateway and not provider and not status:
@@ -182,7 +231,7 @@ async def get_models_health(
         return models_health
     except Exception as e:
         logger.error(f"Failed to get models health: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve models health") from e
+        return []  # Return empty list instead of 500 error
 
 
 @router.get("/health/model/{model_id}", response_model=ModelHealthResponse, tags=["health"])
@@ -356,7 +405,19 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
     try:
         system_health = health_monitor.get_system_health()
         if not system_health:
-            raise HTTPException(status_code=503, detail="Uptime metrics not available")
+            # Return default metrics instead of failing
+            logger.warning("Uptime metrics not available - returning defaults")
+            return UptimeMetricsResponse(
+                status="unknown",
+                uptime_percentage=0.0,
+                response_time_avg=None,
+                last_incident=None,
+                total_requests=0,
+                successful_requests=0,
+                failed_requests=0,
+                error_rate=0.0,
+                last_updated=datetime.now(timezone.utc),
+            )
 
         # Calculate uptime metrics
         total_requests = sum(m.total_requests for m in health_monitor.get_all_models_health())
@@ -396,7 +457,24 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve uptime metrics") from e
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/uptime', 'operation': 'get_uptime_metrics'},
+            tags={'endpoint': 'uptime', 'error_type': type(e).__name__}
+        )
+        # Return default metrics instead of failing (graceful degradation)
+        return UptimeMetricsResponse(
+            status="unknown",
+            uptime_percentage=0.0,
+            response_time_avg=None,
+            last_incident=None,
+            total_requests=0,
+            successful_requests=0,
+            failed_requests=0,
+            error_rate=0.0,
+            last_updated=datetime.now(timezone.utc),
+        )
 
 
 @router.get(
@@ -612,6 +690,12 @@ async def get_health_dashboard(
         return response
     except Exception as e:
         logger.error(f"Failed to get health dashboard: {e}")
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/dashboard', 'operation': 'get_health_dashboard'},
+            tags={'endpoint': 'dashboard', 'error_type': type(e).__name__}
+        )
         import traceback
 
         logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -786,9 +870,13 @@ async def database_health():
     This is critical for startup diagnostics in Railway.
     """
     try:
-        from src.config.supabase_config import supabase
+        from src.config.supabase_config import get_initialization_status, supabase
 
         logger.info("Checking database connectivity...")
+
+        # Get initialization status
+        init_status = get_initialization_status()
+
         # Try a simple query to verify connection
         supabase.table("users").limit(1).execute()
 
@@ -797,15 +885,29 @@ async def database_health():
             "status": "healthy",
             "database": "supabase",
             "connection": "verified",
+            "initialization": init_status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
+        from src.config.supabase_config import get_initialization_status
+
         logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
+
+        # Capture to Sentry
+        try:
+            import sentry_sdk
+
+            sentry_sdk.capture_exception(e)
+        except (ImportError, Exception):
+            pass
+
         return {
             "status": "unhealthy",
             "database": "supabase",
             "connection": "failed",
             "error": str(e),
+            "error_type": type(e).__name__,
+            "initialization": get_initialization_status(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

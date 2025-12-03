@@ -31,7 +31,7 @@ class Message(BaseModel):
 class ProxyRequest(BaseModel):
     model: str
     messages: list[Message]
-    max_tokens: int | None = 950
+    max_tokens: int | None = 4096
     temperature: float | None = 1.0
     top_p: float | None = 1.0
     frequency_penalty: float | None = 0.0
@@ -80,7 +80,7 @@ class ResponseRequest(BaseModel):
 
     model: str
     input: list[InputMessage]  # Replaces 'messages' in chat/completions
-    max_tokens: int | None = 950
+    max_tokens: int | None = 4096
     temperature: float | None = 1.0
     top_p: float | None = 1.0
     frequency_penalty: float | None = 0.0

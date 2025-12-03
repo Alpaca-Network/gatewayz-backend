@@ -26,6 +26,17 @@ For development, add to `.env` file:
 ALIBABA_CLOUD_API_KEY=your-dashscope-api-key-here
 ```
 
+#### Region-Specific Keys (Optional)
+
+If Alibaba issued separate keys for each region, configure them as well:
+
+```bash
+export ALIBABA_CLOUD_API_KEY_INTERNATIONAL="dashscope-intl-key"
+export ALIBABA_CLOUD_API_KEY_CHINA="dashscope-cn-key"
+```
+
+When provided, the Gateway automatically selects the correct key for each endpoint and skips regions that do not have credentials, preventing repeated 401 errors.
+
 ### Obtaining an API Key
 
 1. Sign up for Alibaba Cloud: https://www.alibabacloud.com/
@@ -110,9 +121,10 @@ response = requests.post(
 ```python
 from openai import OpenAI
 
+# Both URL formats work - the SDK automatically appends /v1 to the base URL
 client = OpenAI(
     api_key="YOUR_GATEWAYZ_API_KEY",
-    base_url="http://localhost:8000/v1"
+    base_url="http://localhost:8000"  # or "http://localhost:8000/v1"
 )
 
 response = client.chat.completions.create(
@@ -233,7 +245,7 @@ If the API key is not configured:
 ValueError: Alibaba Cloud API key not configured
 ```
 
-Ensure `ALIBABA_CLOUD_API_KEY` is set in your environment.
+Ensure `ALIBABA_CLOUD_API_KEY` (or the region-specific variables) is set in your environment.
 
 ## Integration Points
 
@@ -244,7 +256,7 @@ Ensure `ALIBABA_CLOUD_API_KEY` is set in your environment.
    - 4 main functions: get_alibaba_cloud_client(), make_alibaba_cloud_request_openai(), process_alibaba_cloud_response(), make_alibaba_cloud_request_openai_stream()
 
 2. **src/config/config.py** (MODIFIED)
-   - Added ALIBABA_CLOUD_API_KEY configuration
+   - Added ALIBABA_CLOUD_API_KEY and region-specific key configuration
 
 3. **src/routes/chat.py** (MODIFIED)
    - Added provider imports and registration
@@ -313,7 +325,7 @@ POST /v1/chat/completions
 **Issue**: "Authorization failed" or "Invalid API key"
 
 **Solution**:
-- Verify ALIBABA_CLOUD_API_KEY is set correctly
+- Verify ALIBABA_CLOUD_API_KEY (or the matching region-specific key) is set correctly
 - Check that the API key has not expired
 - Confirm you're using a valid DashScope API key
 

@@ -41,7 +41,7 @@ from src.db.providers_db import get_provider_by_id, get_provider_by_slug
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/models",
+    prefix="/catalog/models-db",
     tags=["Models Catalog Management"],
 )
 

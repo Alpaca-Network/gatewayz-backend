@@ -246,8 +246,8 @@ def sb(monkeypatch):
     # short helper to access tx log in tests
     stub._tx_log = tx_log
 
-    # predictable create_api_key
-    monkeypatch.setattr("src.db.users.create_api_key", lambda **kwargs: ("gw_live_primary_TESTKEY", 1))
+    # predictable create_api_key (realistic 51 char key)
+    monkeypatch.setattr("src.db.users.create_api_key", lambda **kwargs: ("gw_live_primary_TESTKEY_1234567890abcdefghijklm", 1))
 
     return stub
 
@@ -273,8 +273,12 @@ def test_create_enhanced_user_creates_trial_and_primary(sb):
     row = users_rows[0]
     assert row["subscription_status"] == "trial"
     assert "trial_expires_at" in row
-    assert out["primary_api_key"] == "gw_live_primary_TESTKEY"
-    assert row["api_key"] == "gw_live_primary_TESTKEY"
+    assert row["tier"] == "basic"
+    assert out["primary_api_key"] == "gw_live_primary_TESTKEY_1234567890abcdefghijklm"
+    assert row["api_key"] == "gw_live_primary_TESTKEY_1234567890abcdefghijklm"
+    assert out["subscription_status"] == "trial"
+    assert out["trial_expires_at"]
+    assert out["tier"] == "basic"
 
 def test_get_user_prefers_new_api_keys_then_legacy(sb):
     import src.db.users as users
@@ -283,11 +287,11 @@ def test_get_user_prefers_new_api_keys_then_legacy(sb):
     user = {"id": 7, "username": "bob", "email": "b@e.com", "credits": 5, "api_key": "legacy_key"}
     sb.table("users").insert(user).execute()
 
-    new_key = {"id": 10, "api_key": "gw_live_primary_TESTKEY", "user_id": 7, "key_name": "Primary",
+    new_key = {"id": 10, "api_key": "gw_live_primary_TESTKEY_1234567890abcdefghijklm", "user_id": 7, "key_name": "Primary",
                "environment_tag": "live", "scope_permissions": {"read": ["*"]}, "is_primary": True}
     sb.table("api_keys_new").insert(new_key).execute()
 
-    res = users.get_user("gw_live_primary_TESTKEY")
+    res = users.get_user("gw_live_primary_TESTKEY_1234567890abcdefghijklm")
     assert res["id"] == 7
     assert res["key_id"] == 10
     assert res["key_name"] == "Primary"
@@ -428,6 +432,8 @@ def test_create_enhanced_user_with_privy_id(sb):
     assert row["auth_method"] == "google"
     assert row["credits"] == 20
     assert out["credits"] == 20
+    assert out["subscription_status"] == "trial"
+    assert out["tier"] == "basic"
 
 
 def test_create_enhanced_user_failure_no_data(sb, monkeypatch):

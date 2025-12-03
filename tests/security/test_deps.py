@@ -192,6 +192,38 @@ async def test_require_admin_denied_logs_violation(monkeypatch, mod):
     assert fake_audit.violation_calls[0]["violation_type"] == "UNAUTHORIZED_ADMIN_ACCESS"
 
 
+# ---------------- get_optional_api_key ----------------
+
+@pytest.mark.anyio
+async def test_get_optional_api_key_no_credentials_returns_none(mod):
+    out = await mod.get_optional_api_key(credentials=None, request=None)
+    assert out is None
+
+
+@pytest.mark.anyio
+async def test_get_optional_api_key_invalid_returns_none(monkeypatch, mod):
+    # Make inner get_api_key raise HTTPException
+    async def _raise(creds, request=None):
+        raise HTTPException(status_code=401, detail="bad key")
+    monkeypatch.setattr(mod, "get_api_key", _raise)
+
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+    out = await mod.get_optional_api_key(credentials=creds, request=None)
+    assert out is None
+
+
+@pytest.mark.anyio
+async def test_get_optional_api_key_valid_returns_key(monkeypatch, mod):
+    # normal flow
+    async def _ok(creds, request=None):
+        return creds.credentials
+    monkeypatch.setattr(mod, "get_api_key", _ok)
+
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-good")
+    out = await mod.get_optional_api_key(credentials=creds, request=None)
+    assert out == "sk-good"
+
+
 # ---------------- get_optional_user ----------------
 
 @pytest.mark.anyio

@@ -5,8 +5,12 @@ This module provides persistent HTTP client connections with connection pooling,
 keepalive, and optimized timeout settings to improve chat streaming performance.
 """
 
+import asyncio
 import hashlib
 import logging
+import os
+import time
+from collections import OrderedDict
 from threading import Lock
 
 import httpx
@@ -16,10 +20,14 @@ from src.config import Config
 
 logger = logging.getLogger(__name__)
 
-# Global connection pool instances
-_client_pool: dict[str, OpenAI] = {}
-_async_client_pool: dict[str, AsyncOpenAI] = {}
+# Global connection pool instances with LRU tracking
+_client_pool: OrderedDict[str, tuple[OpenAI, float]] = OrderedDict()  # (client, last_used)
+_async_client_pool: OrderedDict[str, tuple[AsyncOpenAI, float]] = OrderedDict()
 _pool_lock = Lock()
+_cleanup_task = None
+
+# Pool configuration
+MAX_POOL_SIZE = int(os.getenv("CONNECTION_POOL_MAX_SIZE", "50"))
 
 # Connection pool configuration
 DEFAULT_LIMITS = httpx.Limits(
@@ -70,9 +78,10 @@ def _evict_sync_clients(prefix: str):
     """Remove (and close) cached sync clients that match the prefix."""
     stale_keys = [key for key in _client_pool if key.startswith(prefix)]
     for stale_key in stale_keys:
-        client = _client_pool.pop(stale_key, None)
-        if client:
+        client_tuple = _client_pool.pop(stale_key, None)
+        if client_tuple:
             try:
+                client, _ = client_tuple  # Unpack the (client, timestamp) tuple
                 client.close()
             except Exception as exc:
                 logger.warning(f"Error closing client for {prefix}: {exc}")
@@ -143,9 +152,21 @@ def get_pooled_client(
     cache_key = _cache_key(provider, base_url, api_key)
 
     with _pool_lock:
-        cached = _client_pool.get(cache_key)
-        if cached:
-            return cached
+        # Check if client exists and mark as recently used
+        if cache_key in _client_pool:
+            client, _ = _client_pool[cache_key]
+            _client_pool[cache_key] = (client, time.time())
+            _client_pool.move_to_end(cache_key)  # Mark as recently used
+            return client
+
+        # Evict oldest if at capacity
+        if len(_client_pool) >= MAX_POOL_SIZE:
+            oldest_key, (old_client, _) = _client_pool.popitem(last=False)
+            try:
+                old_client.close()
+            except Exception as e:
+                logger.warning(f"Error closing evicted client: {e}")
+            logger.info(f"Evicted oldest client from pool: {oldest_key} (pool size: {len(_client_pool)})")
 
         # API key rotated: evict any stale clients for this provider/base pair
         _evict_sync_clients(prefix)
@@ -163,8 +184,8 @@ def get_pooled_client(
             max_retries=2,  # Enable automatic retries
         )
 
-        _client_pool[cache_key] = client
-        logger.info(f"Created pooled client for {provider}")
+        _client_pool[cache_key] = (client, time.time())
+        logger.info(f"Created pooled client for {provider} (pool size: {len(_client_pool)})")
 
         return client
 
@@ -193,9 +214,22 @@ def get_pooled_async_client(
     cache_key = _cache_key(provider, base_url, api_key) + "_async"
 
     with _pool_lock:
-        cached = _async_client_pool.get(cache_key)
-        if cached:
-            return cached
+        # Check if client exists and mark as recently used
+        if cache_key in _async_client_pool:
+            client, _ = _async_client_pool[cache_key]
+            _async_client_pool[cache_key] = (client, time.time())
+            _async_client_pool.move_to_end(cache_key)
+            return client
+
+        # Evict oldest if at capacity
+        if len(_async_client_pool) >= MAX_POOL_SIZE:
+            oldest_key, (old_client, _) = _async_client_pool.popitem(last=False)
+            try:
+                # Async close in background (don't block)
+                asyncio.create_task(old_client.close())
+            except Exception as e:
+                logger.warning(f"Error closing evicted async client: {e}")
+            logger.info(f"Evicted oldest async client from pool: {oldest_key} (pool size: {len(_async_client_pool)})")
 
         _evict_async_clients(prefix)
 
@@ -212,8 +246,8 @@ def get_pooled_async_client(
             max_retries=2,
         )
 
-        _async_client_pool[cache_key] = client
-        logger.info(f"Created pooled async client for {provider}")
+        _async_client_pool[cache_key] = (client, time.time())
+        logger.info(f"Created pooled async client for {provider} (pool size: {len(_async_client_pool)})")
 
         return client
 
@@ -222,7 +256,7 @@ def clear_connection_pools():
     """Clear all connection pools. Useful for testing or graceful shutdown."""
     with _pool_lock:
         # Close all sync clients
-        for client in _client_pool.values():
+        for client, _ in _client_pool.values():
             try:
                 client.close()
             except Exception as e:
@@ -230,11 +264,15 @@ def clear_connection_pools():
         _client_pool.clear()
 
         # Close all async clients
-        for _client in _async_client_pool.values():
+        for client, _ in _async_client_pool.values():
             try:
                 # AsyncOpenAI clients need to be closed in an async context
-                # For now, just clear the reference
-                pass
+                # Schedule close task if in event loop
+                try:
+                    asyncio.create_task(client.close())
+                except RuntimeError:
+                    # No event loop running, just clear reference
+                    pass
             except Exception as e:
                 logger.warning(f"Error closing async client: {e}")
         _async_client_pool.clear()
@@ -355,13 +393,77 @@ def get_chutes_pooled_client() -> OpenAI:
 
 
 def get_clarifai_pooled_client() -> OpenAI:
-    """Get pooled client for Clarifai."""
+    """Get pooled client for Clarifai.
+
+    Uses Clarifai's OpenAI-compatible API endpoint.
+    See: https://docs.clarifai.com/compute/inference/open-ai/
+    """
     if not Config.CLARIFAI_API_KEY:
         raise ValueError("Clarifai API key not configured")
 
     return get_pooled_client(
         provider="clarifai",
-        base_url="https://api.clarifai.com/v1",
+        base_url="https://api.clarifai.com/v2/ext/openai/v1",
         api_key=Config.CLARIFAI_API_KEY,
-        default_headers={"X-Clarifai-PAT": Config.CLARIFAI_API_KEY},
+    )
+
+
+def get_onerouter_pooled_client() -> OpenAI:
+    """Get pooled client for OneRouter."""
+    if not Config.ONEROUTER_API_KEY:
+        raise ValueError("OneRouter API key not configured")
+
+    return get_pooled_client(
+        provider="onerouter",
+        base_url="https://llm.onerouter.pro/v1",
+        api_key=Config.ONEROUTER_API_KEY,
+    )
+
+
+def get_groq_pooled_client() -> OpenAI:
+    """Get pooled client for Groq."""
+    if not Config.GROQ_API_KEY:
+        raise ValueError("Groq API key not configured")
+
+    return get_pooled_client(
+        provider="groq",
+        base_url="https://api.groq.com/openai/v1",
+        api_key=Config.GROQ_API_KEY,
+    )
+
+
+def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
+    """Get pooled client for Cloudflare Workers AI.
+
+    Cloudflare Workers AI provides an OpenAI-compatible API endpoint.
+    See: https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/
+    """
+    if not Config.CLOUDFLARE_API_TOKEN:
+        raise ValueError("Cloudflare API token not configured")
+    if not Config.CLOUDFLARE_ACCOUNT_ID:
+        raise ValueError("Cloudflare Account ID not configured")
+
+    # Cloudflare's OpenAI-compatible base URL includes the account ID
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{Config.CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+
+    return get_pooled_client(
+        provider="cloudflare-workers-ai",
+        base_url=base_url,
+        api_key=Config.CLOUDFLARE_API_TOKEN,
+    )
+
+
+def get_akash_pooled_client() -> OpenAI:
+    """Get pooled client for Akash ML.
+
+    Akash ML provides an OpenAI-compatible API endpoint.
+    See: https://api.akashml.com/v1
+    """
+    if not Config.AKASH_API_KEY:
+        raise ValueError("Akash API key not configured")
+
+    return get_pooled_client(
+        provider="akash",
+        base_url="https://api.akashml.com/v1",
+        api_key=Config.AKASH_API_KEY,
     )

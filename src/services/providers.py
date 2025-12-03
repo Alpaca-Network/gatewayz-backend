@@ -81,6 +81,7 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             "aihubmix": "https://aihubmix.com/favicon.ico",
             "anannas": "https://api.anannas.ai/favicon.ico",
             "alpaca-network": "https://console.anyscale.com/favicon.ico",
+            "onerouter": "https://onerouter.pro/favicon.ico",
         }
 
         # Try manual mapping first
@@ -287,5 +288,12 @@ def fetch_models_from_nebius():
 def fetch_models_from_novita():
     """Fetch models from Novita client"""
     from src.services.novita_client import fetch_models_from_novita as _fetch
+
+    return _fetch()
+
+
+def fetch_models_from_onerouter():
+    """Fetch models from OneRouter client"""
+    from src.services.onerouter_client import fetch_models_from_onerouter as _fetch
 
     return _fetch()

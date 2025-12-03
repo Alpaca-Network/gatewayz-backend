@@ -204,8 +204,23 @@ def skip_if_no_database(request):
     if 'TestHealthEndpoints' in str(request.cls) or 'test_ping' in str(request.function):
         return
 
-    # Check if this is a database or integration test
-    if 'db' in str(request.fspath) or 'integration' in str(request.fspath):
+    # Check if this is a database, integration, or routes test that uses FastAPI TestClient
+    # Routes tests may fail if database is unavailable due to dependency injection
+    test_path = str(request.fspath).lower()
+    test_cls = str(request.cls or '') if request.cls else ''
+    test_func = str(request.function or '') if request.function else ''
+
+    # Check if this test needs database access
+    needs_db = (
+        'db' in test_path or
+        'integration' in test_path or
+        'test_generate_image' in test_func or
+        'test_messages_endpoint' in test_func or
+        'TestImageGeneration' in test_cls or
+        'TestMessagesEndpoint' in test_cls
+    )
+
+    if needs_db:
         # Cache the database check result
         if not hasattr(skip_if_no_database, '_db_available'):
             try:

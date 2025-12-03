@@ -131,3 +131,387 @@ groups:
           summary: "Streaming duration degrading over time"
           description: "Streaming duration (p95) has increased by more than 50% compared to 1 hour ago. Current: {{ $value }}x baseline."
 
+  # ==================== Model Inference Alerts ====================
+  - name: model_inference
+    interval: 1m
+    rules:
+      - alert: HighModelErrorRate
+        expr: |
+          (
+            sum(rate(model_inference_requests_total{status="error"}[5m])) by (provider, model)
+            /
+            sum(rate(model_inference_requests_total[5m])) by (provider, model)
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: critical
+          component: inference
+        annotations:
+          summary: "High error rate for {{ $labels.provider }}/{{ $labels.model }}"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 10%) for {{ $labels.provider }}/{{ $labels.model }} over the last 5 minutes."
+          dashboard_url: "https://grafana.com/d/gatewayz-inference"
+          runbook_url: "https://docs.gatewayz.ai/runbooks/high-error-rate"
+
+      - alert: ModelLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(model_inference_duration_seconds_bucket[5m])) by (provider, model, le)
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "High P95 latency for {{ $labels.provider }}/{{ $labels.model }}"
+          description: "P95 latency is {{ $value }}s (threshold: 30s) for {{ $labels.provider }}/{{ $labels.model }}."
+          dashboard_url: "https://grafana.com/d/gatewayz-latency"
+
+      - alert: ModelLatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(model_inference_duration_seconds_bucket[5m])) by (provider, model, le)
+          ) > 60
+        for: 5m
+        labels:
+          severity: critical
+          component: inference
+        annotations:
+          summary: "Critical P95 latency for {{ $labels.provider }}/{{ $labels.model }}"
+          description: "P95 latency is {{ $value }}s (threshold: 60s) for {{ $labels.provider }}/{{ $labels.model }}. Users experiencing severe delays."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/high-latency"
+
+      - alert: NoInferenceRequests
+        expr: |
+          sum(rate(model_inference_requests_total[10m])) by (provider) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "No inference requests for {{ $labels.provider }}"
+          description: "Provider {{ $labels.provider }} has received no requests in the last 15 minutes. Possible routing issue or provider outage."
+
+      - alert: TokenUsageSpike
+        expr: |
+          sum(rate(tokens_used_total[5m])) by (provider, model, token_type)
+          >
+          2 * avg_over_time(sum(rate(tokens_used_total[1h])) by (provider, model, token_type)[6h:1h])
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "Token usage spike for {{ $labels.provider }}/{{ $labels.model }}"
+          description: "Token usage ({{ $labels.token_type }}) is {{ $value | humanize }} tokens/sec, more than 2x the 6-hour average."
+
+  # ==================== Provider Health Alerts ====================
+  - name: provider_health
+    interval: 1m
+    rules:
+      - alert: ProviderUnhealthy
+        expr: provider_health_score < 50
+        for: 5m
+        labels:
+          severity: critical
+          component: providers
+        annotations:
+          summary: "Provider {{ $labels.provider }} is unhealthy"
+          description: "Health score is {{ $value }} (threshold: 50). Circuit breakers may be opening."
+          dashboard_url: "https://grafana.com/d/gatewayz-providers"
+          runbook_url: "https://docs.gatewayz.ai/runbooks/provider-unhealthy"
+
+      - alert: ProviderDegraded
+        expr: provider_health_score < 80 and provider_health_score >= 50
+        for: 10m
+        labels:
+          severity: warning
+          component: providers
+        annotations:
+          summary: "Provider {{ $labels.provider }} is degraded"
+          description: "Health score is {{ $value }} (threshold: 80). Performance may be impacted."
+
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state{state="open"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: providers
+        annotations:
+          summary: "Circuit breaker open for {{ $labels.provider }}/{{ $labels.model }}"
+          description: "Circuit breaker has opened due to consecutive failures. Traffic is being blocked."
+          dashboard_url: "https://grafana.com/d/gatewayz-circuit-breakers"
+          runbook_url: "https://docs.gatewayz.ai/runbooks/circuit-breaker-open"
+
+      - alert: MultipleCircuitBreakersOpen
+        expr: count(circuit_breaker_state{state="open"} == 1) by (provider) > 3
+        for: 5m
+        labels:
+          severity: critical
+          component: providers
+        annotations:
+          summary: "Multiple circuit breakers open for {{ $labels.provider }}"
+          description: "{{ $value }} circuit breakers are open for {{ $labels.provider }}. Provider may be experiencing a major outage."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/provider-outage"
+
+  # ==================== Database Alerts ====================
+  - name: database
+    interval: 1m
+    rules:
+      - alert: DatabaseQuerySlow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(database_query_duration_seconds_bucket[5m])) by (table, operation, le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow database queries on {{ $labels.table }}"
+          description: "P95 query duration is {{ $value }}s (threshold: 2s) for {{ $labels.operation }} on {{ $labels.table }}."
+          dashboard_url: "https://grafana.com/d/gatewayz-database"
+
+      - alert: DatabaseQueryCritical
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(database_query_duration_seconds_bucket[5m])) by (table, operation, le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Critical database query slowness on {{ $labels.table }}"
+          description: "P95 query duration is {{ $value }}s (threshold: 5s). Database may be overloaded."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/database-slow"
+
+      - alert: HighDatabaseErrorRate
+        expr: |
+          (
+            sum(rate(database_query_total{status="error"}[5m])) by (table, operation)
+            /
+            sum(rate(database_query_total[5m])) by (table, operation)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "High database error rate on {{ $labels.table }}"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%) for {{ $labels.operation }} on {{ $labels.table }}."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/database-errors"
+
+  # ==================== Cache Alerts ====================
+  - name: cache
+    interval: 1m
+    rules:
+      - alert: LowCacheHitRate
+        expr: |
+          (
+            sum(rate(cache_hits_total[10m])) by (cache_type)
+            /
+            sum(rate(cache_total[10m])) by (cache_type)
+          ) < 0.70
+        for: 15m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit rate for {{ $labels.cache_type }}"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} (threshold: 70%). Performance may be degraded."
+          dashboard_url: "https://grafana.com/d/gatewayz-cache"
+
+      - alert: CacheConnectionFailure
+        expr: redis_connection_failures_total > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis connection failures detected"
+          description: "{{ $value }} Redis connection failures. Rate limiting and caching may be degraded."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/redis-failure"
+
+  # ==================== Rate Limiting Alerts ====================
+  - name: rate_limiting
+    interval: 1m
+    rules:
+      - alert: HighRateLimitHitRate
+        expr: |
+          (
+            sum(rate(rate_limit_hits_total[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          component: rate_limiting
+        annotations:
+          summary: "High rate of requests being rate limited"
+          description: "{{ $value | humanizePercentage }} of requests are being rate limited (threshold: 10%)."
+
+      - alert: RateLimitSystemOverload
+        expr: |
+          (
+            sum(rate(rate_limit_hits_total[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.25
+        for: 5m
+        labels:
+          severity: critical
+          component: rate_limiting
+        annotations:
+          summary: "System under heavy rate limiting"
+          description: "{{ $value | humanizePercentage }} of requests are being rate limited. Possible attack or misconfigured client."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/rate-limit-overload"
+
+  # ==================== Business Metrics Alerts ====================
+  - name: business_metrics
+    interval: 5m
+    rules:
+      - alert: CreditCostSpike
+        expr: |
+          sum(rate(credits_used_total[10m])) by (provider)
+          >
+          2 * avg_over_time(sum(rate(credits_used_total[1h])) by (provider)[6h:1h])
+        for: 15m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "Credit usage spike for {{ $labels.provider }}"
+          description: "Credit burn rate is {{ $value | humanize }} credits/sec, more than 2x the 6-hour average."
+          dashboard_url: "https://grafana.com/d/gatewayz-costs"
+
+  # ==================== HTTP / API Alerts ====================
+  - name: http_api
+    interval: 1m
+    rules:
+      - alert: HighHTTP5xxRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High rate of 5xx errors"
+          description: "{{ $value | humanizePercentage }} of requests are returning 5xx errors (threshold: 5%)."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/5xx-errors"
+
+      - alert: HighHTTP4xxRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"4.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High rate of 4xx errors"
+          description: "{{ $value | humanizePercentage }} of requests are returning 4xx errors (threshold: 20%)."
+
+      - alert: APIEndpointDown
+        expr: |
+          sum(rate(http_requests_total{endpoint=~"/v1/chat/completions|/v1/messages"}[5m])) == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical API endpoint receiving no traffic"
+          description: "Endpoint {{ $labels.endpoint }} has received no requests in 5 minutes. Possible outage."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/api-down"
+
+      - alert: HighRequestLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (endpoint, le)
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value }}s (threshold: 10s) for {{ $labels.endpoint }}."
+
+  # ==================== System Health Alerts ====================
+  - name: system_health
+    interval: 1m
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes / process_virtual_memory_max_bytes > 0.90
+        for: 10m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is at {{ $value | humanizePercentage }} (threshold: 90%)."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/high-memory"
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value | humanizePercentage }} (threshold: 80%)."
+
+      - alert: TooManyOpenConnections
+        expr: active_database_connections > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High number of database connections"
+          description: "{{ $value }} active connections (threshold: 80). Connection pool may be exhausted."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/connection-pool"
+
+  # ==================== Anomaly Detection Alerts ====================
+  - name: anomalies
+    interval: 5m
+    rules:
+      - alert: TrafficAnomalyDetected
+        expr: |
+          sum(rate(http_requests_total[5m]))
+          >
+          3 * avg_over_time(sum(rate(http_requests_total[1h]))[6h:1h])
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Unusual traffic spike detected"
+          description: "Request rate is {{ $value }} req/sec, more than 3x the 6-hour average. Possible DDoS or viral traffic."
+          dashboard_url: "https://grafana.com/d/gatewayz-traffic"
+          runbook_url: "https://docs.gatewayz.ai/runbooks/traffic-spike"
+
+      - alert: UnusualErrorPattern
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (endpoint)
+          >
+          5 * avg_over_time(sum(rate(http_requests_total{status=~"5.."}[1h])) by (endpoint)[6h:1h])
+        for: 5m
+        labels:
+          severity: critical
+          component: security
+        annotations:
+          summary: "Unusual error pattern on {{ $labels.endpoint }}"
+          description: "Error rate is more than 5x the normal level. Possible deployment issue or attack."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/error-spike"
+

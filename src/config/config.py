@@ -142,6 +142,9 @@ class Config:
     OPENROUTER_SITE_URL = _get_env_var("OPENROUTER_SITE_URL", "https://your-site.com")
     OPENROUTER_SITE_NAME = _get_env_var("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
 
+    # OneRouter Configuration
+    ONEROUTER_API_KEY = os.environ.get("ONEROUTER_API_KEY")
+
     # DeepInfra Configuration (for direct API access)
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
     XAI_API_KEY = os.environ.get("XAI_API_KEY")
@@ -206,11 +209,21 @@ class Config:
 
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
+    ALIBABA_CLOUD_API_KEY_INTERNATIONAL = os.environ.get("ALIBABA_CLOUD_API_KEY_INTERNATIONAL")
+    ALIBABA_CLOUD_API_KEY_CHINA = os.environ.get("ALIBABA_CLOUD_API_KEY_CHINA")
+    ALIBABA_CLOUD_REGION = os.environ.get("ALIBABA_CLOUD_REGION", "international")  # 'international' or 'china'
 
     # Clarifai Configuration
     CLARIFAI_API_KEY = os.environ.get("CLARIFAI_API_KEY")
     CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
     CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
+
+    # Akash ML Configuration
+    AKASH_API_KEY = os.environ.get("AKASH_API_KEY")
+
+    # Cloudflare Workers AI Configuration
+    CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
+    CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 
     # Google Vertex AI Configuration (for image generation & generative APIs)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
@@ -285,6 +298,48 @@ class Config:
     LOKI_PUSH_URL = _default_loki_push_url
     LOKI_QUERY_URL = _default_loki_query_url
 
+    # Grafana Cloud Configuration
+    GRAFANA_CLOUD_ENABLED = os.environ.get("GRAFANA_CLOUD_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Grafana Cloud Prometheus (Metrics)
+    GRAFANA_PROMETHEUS_REMOTE_WRITE_URL = os.environ.get(
+        "GRAFANA_PROMETHEUS_REMOTE_WRITE_URL"
+    )
+    GRAFANA_PROMETHEUS_USERNAME = os.environ.get("GRAFANA_PROMETHEUS_USERNAME")
+    GRAFANA_PROMETHEUS_API_KEY = os.environ.get("GRAFANA_PROMETHEUS_API_KEY")
+
+    # Grafana Cloud Loki (Logs)
+    GRAFANA_LOKI_USERNAME = os.environ.get("GRAFANA_LOKI_USERNAME")
+    GRAFANA_LOKI_API_KEY = os.environ.get("GRAFANA_LOKI_API_KEY")
+
+    # Grafana Cloud Tempo (Traces)
+    GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
+    GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")
+
+    # Redis Configuration (for real-time metrics and rate limiting)
+    REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    REDIS_MAX_CONNECTIONS = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
+    REDIS_SOCKET_TIMEOUT = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
+    REDIS_SOCKET_CONNECT_TIMEOUT = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
+
+    # Metrics Aggregation Configuration
+    METRICS_AGGREGATION_ENABLED = os.environ.get("METRICS_AGGREGATION_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    METRICS_AGGREGATION_INTERVAL_MINUTES = int(
+        os.environ.get("METRICS_AGGREGATION_INTERVAL_MINUTES", "60")
+    )
+    METRICS_REDIS_RETENTION_HOURS = int(os.environ.get("METRICS_REDIS_RETENTION_HOURS", "2"))
+
     # ==================== Filesystem Paths ====================
     PROJECT_ROOT = _project_root
     SRC_ROOT = _src_root
@@ -297,11 +352,28 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate that all required environment variables are set"""
-        # Skip validation in Vercel environment to prevent startup failures
-        if os.environ.get("VERCEL"):
-            return True
+        # In Vercel environment, only validate URL format (not presence of keys)
+        # to prevent startup failures while still catching configuration errors
+        is_vercel = os.environ.get("VERCEL")
 
         missing_vars = []
+        invalid_vars = []
+
+        # Always validate URL format, even in Vercel
+        if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
+            url_preview = cls.SUPABASE_URL[:50] + "..." if len(cls.SUPABASE_URL) > 50 else cls.SUPABASE_URL
+            invalid_vars.append(
+                f"SUPABASE_URL must start with 'http://' or 'https://' (got: '{url_preview}'). "
+                f"Example: https://{url_preview}"
+            )
+
+        # Skip presence validation in Vercel environment
+        if is_vercel:
+            if invalid_vars:
+                raise RuntimeError(
+                    f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+                )
+            return True
 
         if not cls.SUPABASE_URL:
             missing_vars.append("SUPABASE_URL")
@@ -310,8 +382,9 @@ class Config:
         if not cls.OPENROUTER_API_KEY:
             missing_vars.append("OPENROUTER_API_KEY")
 
+        error_messages = []
         if missing_vars:
-            raise RuntimeError(
+            error_messages.append(
                 f"Missing required environment variables: {', '.join(missing_vars)}\n"
                 "Please create a .env file with the following variables:\n"
                 "SUPABASE_URL=your_supabase_project_url\n"
@@ -320,6 +393,13 @@ class Config:
                 "OPENROUTER_SITE_URL=your_site_url (optional)\n"
                 "OPENROUTER_SITE_NAME=your_site_name (optional)"
             )
+        if invalid_vars:
+            error_messages.append(
+                f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+            )
+
+        if error_messages:
+            raise RuntimeError("\n\n".join(error_messages))
 
         return True
 
@@ -331,16 +411,26 @@ class Config:
     @classmethod
     def validate_critical_env_vars(cls) -> tuple[bool, list[str]]:
         """
-        Validate that all critical environment variables are set.
+        Validate that all critical environment variables are set and valid.
 
         Returns:
-            tuple: (is_valid, missing_vars)
-                - is_valid: bool indicating if all critical vars are present
-                - missing_vars: list of missing variable names
+            tuple: (is_valid, issues)
+                - is_valid: bool indicating if all critical vars are present and valid
+                - issues: list of missing or invalid variable descriptions
         """
-        # Skip validation in Vercel environment to prevent startup failures
-        if os.environ.get("VERCEL"):
-            return True, []
+        is_vercel = os.environ.get("VERCEL")
+        issues = []
+
+        # Always validate SUPABASE_URL format, even in Vercel
+        if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
+            issues.append(
+                f"SUPABASE_URL (missing http:// or https:// protocol - should be https://{cls.SUPABASE_URL})"
+            )
+
+        # Skip presence validation in Vercel environment to prevent startup failures
+        if is_vercel:
+            is_valid = len(issues) == 0
+            return is_valid, issues
 
         critical_vars = {
             "SUPABASE_URL": cls.SUPABASE_URL,
@@ -348,7 +438,8 @@ class Config:
             "OPENROUTER_API_KEY": cls.OPENROUTER_API_KEY,
         }
 
-        missing = [name for name, value in critical_vars.items() if not value]
-        is_valid = len(missing) == 0
+        issues.extend([name for name, value in critical_vars.items() if not value])
 
-        return is_valid, missing
+        is_valid = len(issues) == 0
+
+        return is_valid, issues

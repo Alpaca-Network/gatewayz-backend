@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/v1/model-health", tags=["monitoring"])
+@router.get("/model-health", tags=["monitoring"])
 async def get_all_model_health(
     provider: Optional[str] = Query(None, description="Filter by provider"),
     status: Optional[str] = Query(None, description="Filter by last status (success, error, timeout, etc.)"),
@@ -63,7 +63,7 @@ async def get_all_model_health(
         raise HTTPException(status_code=500, detail="Failed to fetch model health data")
 
 
-@router.get("/v1/model-health/{provider}/{model}", tags=["monitoring"])
+@router.get("/model-health/{provider}/{model}", tags=["monitoring"])
 async def get_model_health(
     provider: str,
     model: str,
@@ -96,7 +96,7 @@ async def get_model_health(
         raise HTTPException(status_code=500, detail="Failed to fetch model health data")
 
 
-@router.get("/v1/model-health/unhealthy", tags=["monitoring"])
+@router.get("/model-health/unhealthy", tags=["monitoring"])
 async def get_unhealthy_models(
     error_threshold: float = Query(0.2, ge=0.0, le=1.0, description="Minimum error rate (0.0-1.0)"),
     min_calls: int = Query(10, ge=1, description="Minimum number of calls to evaluate"),
@@ -129,7 +129,7 @@ async def get_unhealthy_models(
         raise HTTPException(status_code=500, detail="Failed to fetch unhealthy models")
 
 
-@router.get("/v1/model-health/stats", tags=["monitoring"])
+@router.get("/model-health/stats", tags=["monitoring"])
 async def get_model_health_stats(
     _: dict[str, Any] | None = Depends(get_optional_user),
 ) -> Dict:
@@ -153,7 +153,7 @@ async def get_model_health_stats(
         raise HTTPException(status_code=500, detail="Failed to fetch model health stats")
 
 
-@router.get("/v1/model-health/provider/{provider}/summary", tags=["monitoring"])
+@router.get("/model-health/provider/{provider}/summary", tags=["monitoring"])
 async def get_provider_health_summary(
     provider: str,
     _: dict[str, Any] | None = Depends(get_optional_user),
@@ -184,7 +184,7 @@ async def get_provider_health_summary(
         raise HTTPException(status_code=500, detail="Failed to fetch provider health summary")
 
 
-@router.get("/v1/model-health/providers", tags=["monitoring"])
+@router.get("/model-health/providers", tags=["monitoring"])
 async def get_all_providers(
     _: dict[str, Any] | None = Depends(get_optional_user),
 ) -> Dict:

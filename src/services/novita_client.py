@@ -1,20 +1,36 @@
 """Novita AI client for API integration.
 
-This module provides integration with Novita AI models via OpenAI-compatible API.
+This module provides integration with Novita AI:
+1. LLM models (Qwen, DeepSeek, Llama, etc.) via OpenAI-compatible API
+2. Image/video generation via official Novita Python SDK
+
+Note: Novita provides two separate APIs:
+- OpenAI-compatible API for LLM chat completions: https://api.novita.ai/v3/openai
+- Native API for image/video generation (accessed via novita-client SDK)
+
+The official Novita Python SDK (novita-client) is available for image generation.
+For LLM models, we use OpenAI SDK to access their OpenAI-compatible endpoint.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Any
-
-from datetime import timezone
 
 from src.cache import _novita_models_cache
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Optional: Import Novita SDK for image generation features
+try:
+    from novita_client import NovitaClient
+    NOVITA_SDK_AVAILABLE = True
+except ImportError:
+    logger.debug("Novita SDK (novita-client) not available. Install with: pip install novita-client")
+    NOVITA_SDK_AVAILABLE = False
+    NovitaClient = None
 
 DEFAULT_NOVITA_MODELS: list[dict[str, Any]] = [
     {
@@ -50,12 +66,43 @@ DEFAULT_NOVITA_MODELS: list[dict[str, Any]] = [
 ]
 
 
-def fetch_models_from_novita():
-    """Fetch and normalize models from Novita.
+def get_novita_sdk_client():
+    """Get an instance of the Novita SDK client for image/video generation.
 
-    Novita provides an OpenAI-compatible API endpoint that lists available models.
+    Returns:
+        NovitaClient instance if SDK is available and API key is configured, None otherwise.
+
+    Raises:
+        ValueError: If NOVITA_API_KEY is not configured.
+    """
+    if not NOVITA_SDK_AVAILABLE:
+        logger.warning("Novita SDK not available. Install with: pip install novita-client")
+        return None
+
+    try:
+        from src.config import Config
+
+        if not Config.NOVITA_API_KEY:
+            raise ValueError("NOVITA_API_KEY not configured")
+
+        # Initialize SDK client with API key
+        client = NovitaClient(api_key=Config.NOVITA_API_KEY)
+        logger.debug("Novita SDK client initialized successfully")
+        return client
+    except Exception as exc:
+        logger.error(f"Failed to initialize Novita SDK client: {exc}")
+        raise
+
+
+def fetch_models_from_novita():
+    """Fetch and normalize LLM models from Novita's OpenAI-compatible API.
+
+    Novita provides an OpenAI-compatible API endpoint that lists available LLM models.
     We fetch from that endpoint and normalize the response to match our catalog format.
     Falls back to a static catalog if the live fetch fails.
+
+    Note: This function fetches LLM models (Qwen, DeepSeek, Llama, etc.) for chat completions.
+    For image generation models, use get_novita_sdk_client() and call client.models_v3().
     """
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -313,14 +360,97 @@ def _extract_supported_parameters(payload: dict[str, Any]) -> list[str]:
 
 def _cleanup_model_id(model_id: str) -> str:
     cleaned = model_id.strip()
+    # Remove leading @ symbols and @novita/ prefix
     if cleaned.startswith("@"):
         cleaned = cleaned.lstrip("@")
-    if cleaned.startswith("novita/"):
-        cleaned = cleaned.split("novita/", 1)[1]
-    if cleaned.startswith("models/"):
-        cleaned = cleaned.split("models/", 1)[1]
-    if cleaned.startswith("api/"):
-        cleaned = cleaned.split("api/", 1)[1]
-    if cleaned.startswith("@novita/"):
-        cleaned = cleaned.split("@novita/", 1)[1]
+    # Remove common prefixes
+    for prefix in ("novita/", "models/", "api/"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned.split(prefix, 1)[1]
+            break
     return cleaned
+
+
+# Image Generation Functions (using Novita SDK)
+def fetch_image_models_from_novita_sdk():
+    """Fetch image generation models using the official Novita SDK.
+
+    This fetches models for image generation (checkpoints, LoRAs, VAE, ControlNet, etc.)
+    using the novita-client SDK. These are different from the LLM models.
+
+    Returns:
+        List of image generation models, or None if SDK is unavailable or fetch fails.
+    """
+    if not NOVITA_SDK_AVAILABLE:
+        logger.warning("Cannot fetch image models: Novita SDK not installed")
+        return None
+
+    try:
+        client = get_novita_sdk_client()
+        if not client:
+            return None
+
+        # Fetch all image models using SDK
+        model_list = client.models_v3(refresh=True)
+        logger.info(f"Fetched {len(model_list.models)} image models from Novita SDK")
+
+        # Return the raw model list for now
+        # Can be normalized to match our catalog format if needed
+        return model_list.models
+    except Exception as exc:
+        logger.error(f"Failed to fetch image models from Novita SDK: {exc}")
+        return None
+
+
+def generate_image_with_novita_sdk(
+    prompt: str,
+    model_name: str = "dreamshaper_8_93211.safetensors",
+    **kwargs
+):
+    """Generate an image using the Novita SDK.
+
+    Args:
+        prompt: Text description of the image to generate
+        model_name: Name of the model to use for generation
+        **kwargs: Additional parameters (width, height, steps, etc.)
+
+    Returns:
+        Generated image response from Novita SDK
+
+    Example:
+        response = generate_image_with_novita_sdk(
+            prompt="a cute dog",
+            model_name="dreamshaper_8_93211.safetensors",
+            width=512,
+            height=512,
+            steps=30
+        )
+    """
+    if not NOVITA_SDK_AVAILABLE:
+        raise ImportError("Novita SDK not installed. Install with: pip install novita-client")
+
+    try:
+        client = get_novita_sdk_client()
+        if not client:
+            raise ValueError("Failed to initialize Novita SDK client")
+
+        # Generate image using SDK's txt2img_v3 method
+        response = client.txt2img_v3(
+            model_name=model_name,
+            prompt=prompt,
+            image_num=kwargs.get("image_num", 1),
+            width=kwargs.get("width", 512),
+            height=kwargs.get("height", 512),
+            steps=kwargs.get("steps", 30),
+            guidance_scale=kwargs.get("guidance_scale", 7.5),
+            seed=kwargs.get("seed", -1),
+            negative_prompt=kwargs.get("negative_prompt"),
+            sampler_name=kwargs.get("sampler_name"),
+            download_images=kwargs.get("download_images", True),
+        )
+
+        logger.info(f"Successfully generated image with Novita SDK for prompt: {prompt[:50]}...")
+        return response
+    except Exception as exc:
+        logger.error(f"Failed to generate image with Novita SDK: {exc}")
+        raise

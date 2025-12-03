@@ -14,12 +14,8 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
-    # Llama models are better served through OpenRouter, Featherless, or HuggingFace
-    # rather than directly through Cerebras which doesn't have native Llama models
-    "cerebras/llama-3.3-70b": "openrouter",
-    "cerebras/llama-3.3-70b-instruct": "openrouter",
-    "cerebras/llama-3.1-70b": "openrouter",
-    "cerebras/llama-3.1-70b-instruct": "openrouter",
+    # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
+    # No override needed - let natural provider detection route to Cerebras
 }
 
 # Canonical aliases for commonly mistyped or reformatted model IDs.
@@ -215,6 +211,13 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'aimo/' prefix: '{model_id}' -> '{stripped}' for AIMO")
         model_id = stripped
 
+    # Special handling for Groq: strip 'groq/' prefix if present
+    # Groq API expects just the model name without the provider prefix
+    if provider_lower == "groq" and model_id.startswith("groq/"):
+        stripped = model_id[len("groq/") :]
+        logger.info(f"Stripped 'groq/' prefix: '{model_id}' -> '{stripped}' for Groq")
+        model_id = stripped
+
     # Get the mapping for this provider
     mapping = get_model_id_mapping(provider_lower)
 
@@ -320,6 +323,12 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
+            # Cerebras models explicitly routed through OpenRouter
+            # (for users who request provider="openrouter" explicitly or failover scenarios)
+            "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+            "cerebras/llama-3.3-70b-instruct": "meta-llama/llama-3.3-70b-instruct",
+            "cerebras/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+            "cerebras/llama-3.1-70b-instruct": "meta-llama/llama-3.1-70b-instruct",
         },
         "featherless": {
             # Featherless uses direct provider/model format
@@ -393,6 +402,25 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Chutes uses org/model format directly
             # Most models pass through as-is from their catalog
             # Keep the exact format from the catalog for proper routing
+        },
+        "groq": {
+            # Groq models use simple names without org prefix
+            # The groq/ prefix is stripped in transform_model_id
+            # Popular Groq models:
+            "llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
+            "llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
+            "llama-3.1-8b-instant": "llama-3.1-8b-instant",
+            "llama3-70b-8192": "llama3-70b-8192",
+            "llama3-8b-8192": "llama3-8b-8192",
+            "mixtral-8x7b-32768": "mixtral-8x7b-32768",
+            "gemma2-9b-it": "gemma2-9b-it",
+            "gemma-7b-it": "gemma-7b-it",
+            # With groq/ prefix (stripped automatically)
+            "groq/llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
+            "groq/llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
+            "groq/llama-3.1-8b-instant": "llama-3.1-8b-instant",
+            "groq/mixtral-8x7b-32768": "mixtral-8x7b-32768",
+            "groq/gemma2-9b-it": "gemma2-9b-it",
         },
         "google-vertex": {
             # Google Vertex AI models - simple names
@@ -625,28 +653,38 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "qwen-plus-latest": "qwen-plus",
         },
         "clarifai": {
-            # Clarifai supports many models through its unified API
-            # Most models pass through directly using their standard naming
-            # Anthropic models
-            "anthropic/claude-3-opus": "claude-3-opus",
-            "anthropic/claude-3.5-sonnet": "claude-3.5-sonnet",
-            "claude-3-opus": "claude-3-opus",
-            "claude-3.5-sonnet": "claude-3.5-sonnet",
-            # OpenAI models
-            "openai/gpt-4": "gpt-4",
-            "openai/gpt-4-turbo": "gpt-4-turbo",
-            "gpt-4": "gpt-4",
-            "gpt-4-turbo": "gpt-4-turbo",
-            # Meta Llama models
-            "meta-llama/llama-3.1-70b": "llama-3.1-70b-instruct",
-            "meta-llama/llama-3-70b": "llama-3-70b-instruct",
-            "llama-3.1-70b": "llama-3.1-70b-instruct",
-            "llama-3-70b": "llama-3-70b-instruct",
-            # Mistral models
-            "mistralai/mistral-7b": "mistral-7b-instruct",
-            "mistralai/mixtral-8x7b": "mixtral-8x7b-instruct",
-            "mistral-7b": "mistral-7b-instruct",
-            "mixtral-8x7b": "mixtral-8x7b-instruct",
+            # Clarifai OpenAI-compatible API requires full model URLs or abbreviated paths
+            # Format: https://clarifai.com/{user_id}/{app_id}/models/{model_id}
+            # Or abbreviated: {user_id}/{app_id}/models/{model_id}
+            # See: https://docs.clarifai.com/compute/inference/open-ai/
+            #
+            # OpenAI models (via Clarifai)
+            "openai/gpt-4o": "openai/chat-completion/models/gpt-4o",
+            "openai/gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
+            "openai/gpt-4": "openai/chat-completion/models/gpt-4",
+            "gpt-4o": "openai/chat-completion/models/gpt-4o",
+            "gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
+            "gpt-4": "openai/chat-completion/models/gpt-4",
+            # GPT-OSS (Clarifai's open-source GPT)
+            "gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
+            "openai/gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
+            # Anthropic Claude models (via Clarifai)
+            "anthropic/claude-3-opus": "anthropic/completion/models/claude-3-opus",
+            "anthropic/claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
+            "anthropic/claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
+            "claude-3-opus": "anthropic/completion/models/claude-3-opus",
+            "claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
+            "claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
+            # Meta Llama models (via Clarifai)
+            "meta-llama/llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
+            "meta-llama/llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
+            "llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
+            "llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
+            # Mistral models (via Clarifai)
+            "mistralai/mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
+            "mistralai/mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
+            "mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
+            "mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
         },
         "xai": {
             # XAI Grok models - pass-through format
@@ -660,6 +698,161 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "xai/grok-2": "grok-2",
             "xai/grok-2-1212": "grok-2-1212",
             "xai/grok-vision-beta": "grok-vision-beta",
+        },
+        "cerebras": {
+            # Cerebras API expects model IDs without the "cerebras/" prefix
+            # Transform: "cerebras/llama-3.3-70b" → "llama-3.3-70b"
+            "cerebras/llama-3.3-70b": "llama-3.3-70b",
+            "cerebras/llama-3.3-70b-instruct": "llama-3.3-70b",
+            "cerebras/llama-3.3-405b": "llama-3.3-405b",
+            "cerebras/llama-3.1-70b": "llama3.1-70b",
+            "cerebras/llama-3.1-70b-instruct": "llama3.1-70b",
+            "cerebras/llama-3.1-8b": "llama3.1-8b",
+            "cerebras/llama-3.1-8b-instruct": "llama3.1-8b",
+            "cerebras/llama-3.1-405b": "llama3.1-405b",
+            # Support direct model names (passthrough)
+            "llama-3.3-70b": "llama-3.3-70b",
+            "llama-3.3-405b": "llama-3.3-405b",
+            "llama3.1-70b": "llama3.1-70b",
+            "llama3.1-8b": "llama3.1-8b",
+            "llama3.1-405b": "llama3.1-405b",
+        },
+        "cloudflare-workers-ai": {
+            # Cloudflare Workers AI uses @cf/ prefix for model names
+            # OpenAI-compatible API: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
+            # Documentation: https://developers.cloudflare.com/workers-ai/
+            #
+            # ======== OpenAI GPT-OSS models ========
+            "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "gpt-oss/gpt-120b": "@cf/openai/gpt-oss-120b",
+            "gpt-oss/gpt-20b": "@cf/openai/gpt-oss-20b",
+            #
+            # ======== Meta Llama 4 models ========
+            "meta-llama/llama-4-scout-17b": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "meta-llama/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "llama-4-scout": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            #
+            # ======== Meta Llama 3.3 models ========
+            "meta-llama/llama-3.3-70b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "meta-llama/llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            #
+            # ======== Meta Llama 3.2 models ========
+            "meta-llama/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+            "meta-llama/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
+            "meta-llama/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
+            "llama-3.2-11b-vision": "@cf/meta/llama-3.2-11b-vision-instruct",
+            "llama-3.2-3b": "@cf/meta/llama-3.2-3b-instruct",
+            "llama-3.2-1b": "@cf/meta/llama-3.2-1b-instruct",
+            #
+            # ======== Meta Llama 3.1 models ========
+            "meta-llama/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
+            "meta-llama/llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
+            "meta-llama/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "meta-llama/llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
+            "llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+            "llama-3.1-8b-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+            #
+            # ======== Meta Llama 3 models ========
+            "meta-llama/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
+            "meta-llama/llama-3-8b": "@cf/meta/llama-3-8b-instruct",
+            "llama-3-8b": "@cf/meta/llama-3-8b-instruct",
+            #
+            # ======== Meta Llama 2 models (Legacy) ========
+            "meta-llama/llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
+            "llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
+            "llama-2-7b": "@cf/meta/llama-2-7b-chat-fp16",
+            #
+            # ======== Meta Llama Guard ========
+            "meta-llama/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
+            "llama-guard-3": "@cf/meta/llama-guard-3-8b",
+            #
+            # ======== Qwen models ========
+            "qwen/qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "qwen/qwq-32b": "@cf/qwen/qwq-32b",
+            "qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            "qwen/qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            "qwq-32b": "@cf/qwen/qwq-32b",
+            "qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            #
+            # ======== Google Gemma models ========
+            "google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+            "google/gemma-7b-it": "@cf/google/gemma-7b-it",
+            "google/gemma-2b-it": "@cf/google/gemma-2b-it-lora",
+            "gemma-3-12b": "@cf/google/gemma-3-12b-it",
+            "gemma-7b": "@cf/google/gemma-7b-it",
+            "gemma-2b": "@cf/google/gemma-2b-it-lora",
+            #
+            # ======== Mistral models ========
+            "mistralai/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            "mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
+            "mistral-small-3.1-24b": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "mistral-7b-instruct": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            "mistral-7b": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            #
+            # ======== DeepSeek models ========
+            "deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            "deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            "deepseek-r1-distill": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            #
+            # ======== IBM Granite models ========
+            "ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
+            "granite-4.0-micro": "@cf/ibm/granite-4.0-h-micro",
+            #
+            # ======== AI Singapore models ========
+            "aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+            "sea-lion-27b": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+            #
+            # ======== NousResearch models ========
+            "nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+            "hermes-2-pro": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+            #
+            # ======== Microsoft models ========
+            "microsoft/phi-2": "@cf/microsoft/phi-2",
+            "phi-2": "@cf/microsoft/phi-2",
+            #
+            # ======== Direct @cf/ model names (passthrough) ========
+            "@cf/openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "@cf/openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "@cf/meta/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/meta/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+            "@cf/meta/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
+            "@cf/meta/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
+            "@cf/meta/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+            "@cf/meta/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct-fp8": "@cf/meta/llama-3.1-8b-instruct-fp8",
+            "@cf/meta/llama-3.1-8b-instruct-awq": "@cf/meta/llama-3.1-8b-instruct-awq",
+            "@cf/meta/meta-llama-3-8b-instruct": "@cf/meta/meta-llama-3-8b-instruct",
+            "@cf/meta/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
+            "@cf/meta/llama-3-8b-instruct-awq": "@cf/meta/llama-3-8b-instruct-awq",
+            "@cf/meta/llama-2-7b-chat-fp16": "@cf/meta/llama-2-7b-chat-fp16",
+            "@cf/meta/llama-2-7b-chat-int8": "@cf/meta/llama-2-7b-chat-int8",
+            "@cf/meta-llama/llama-2-7b-chat-hf-lora": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+            "@cf/meta/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
+            "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "@cf/qwen/qwq-32b": "@cf/qwen/qwq-32b",
+            "@cf/qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+            "@cf/google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+            "@cf/google/gemma-7b-it": "@cf/google/gemma-7b-it",
+            "@cf/google/gemma-7b-it-lora": "@cf/google/gemma-7b-it-lora",
+            "@cf/google/gemma-2b-it-lora": "@cf/google/gemma-2b-it-lora",
+            "@cf/mistral/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+            "@cf/mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
+            "@cf/mistralai/mistral-7b-instruct-v0.2-lora": "@cf/mistralai/mistral-7b-instruct-v0.2-lora",
+            "@cf/mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
+            "@cf/deepseek/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+            "@cf/ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
+            "@cf/aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+            "@cf/nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+            "@cf/microsoft/phi-2": "@cf/microsoft/phi-2",
         },
     }
 
@@ -852,6 +1045,12 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
             return "openrouter"
 
+    # Check for Cloudflare Workers AI models (use @cf/ prefix)
+    # IMPORTANT: This must come before the general @ prefix check below
+    if model_id.startswith("@cf/"):
+        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
+        return "cloudflare-workers-ai"
+
     # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
     # After Portkey removal, @ prefix models are now routed through OpenRouter
     # which supports multi-provider model format
@@ -880,6 +1079,8 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "alibaba-cloud",
         "fal",
         "xai",
+        "groq",
+        "cloudflare-workers-ai",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -904,6 +1105,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # Near AI models (e.g., "near/deepseek-ai/DeepSeek-V3", "near/deepseek-ai/DeepSeek-R1")
         if org == "near":
             return "near"
+
+        # Cerebras models (e.g., "cerebras/llama-3.3-70b")
+        if org == "cerebras":
+            return "cerebras"
 
         # Anannas models (e.g., "anannas/openai/gpt-4o")
         if org == "anannas":
@@ -951,6 +1156,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # XAI models (e.g., "xai/grok-2")
         if org == "xai":
             return "xai"
+
+        # Groq models (e.g., "groq/llama-3.3-70b-versatile", "groq/mixtral-8x7b-32768")
+        if org == "groq":
+            return "groq"
 
     # Check for grok models without org prefix (e.g., "grok-2", "grok-beta", "grok-vision-beta")
     if model_id.startswith("grok-"):

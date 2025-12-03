@@ -300,10 +300,11 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
             cache_details += f" (models: {cache_count})"
 
         # Recalculate final_status based on endpoint and cache test results
-        # Final status is only "healthy" if BOTH tests pass
+        # Final status is "healthy" if EITHER endpoint OR cache test passes
+        # This allows cache-only gateways (like Fal.ai) and gateways with empty caches but working endpoints
         if not data.get("configured"):
             final_status = "unconfigured"
-        elif endpoint_test.get("success") and cache_test.get("success"):
+        elif endpoint_test.get("success") or cache_test.get("success"):
             final_status = "healthy"
         else:
             final_status = "unhealthy"
@@ -1851,6 +1852,70 @@ async def clear_modelz_cache_endpoint():
         raise HTTPException(
             status_code=500, detail=f"Failed to clear Modelz cache: {str(e)}"
         ) from e
+
+
+@router.post("/api/cache/invalidate", tags=["cache"])
+async def invalidate_cache(
+    gateway: str | None = Query(
+        None, description="Specific gateway cache to invalidate, or all if not specified"
+    ),
+    cache_type: str | None = Query(
+        None, description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified"
+    ),
+):
+    """
+    Invalidate cache for specified gateway or cache type.
+
+    This endpoint is called by the frontend dashboard to invalidate caches
+    after configuration changes.
+
+    **Parameters:**
+    - `gateway`: Optional gateway name to invalidate (e.g., 'openrouter', 'together')
+    - `cache_type`: Optional cache type ('models', 'providers', 'pricing')
+
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8000/api/cache/invalidate?gateway=openrouter"
+    ```
+    """
+    try:
+        invalidated = []
+
+        if gateway:
+            gateway = gateway.lower()
+            clear_models_cache(gateway)
+            invalidated.append(f"models:{gateway}")
+        elif cache_type == "models":
+            # Clear all gateway model caches
+            gateways = get_all_gateway_names()
+            for gw in gateways:
+                clear_models_cache(gw)
+            invalidated.extend([f"models:{gw}" for gw in gateways])
+        elif cache_type == "providers":
+            clear_providers_cache()
+            invalidated.append("providers")
+        elif cache_type == "pricing":
+            refresh_pricing_cache()
+            invalidated.append("pricing")
+        else:
+            # Clear all caches
+            gateways = get_all_gateway_names()
+            for gw in gateways:
+                clear_models_cache(gw)
+            clear_providers_cache()
+            refresh_pricing_cache()
+            invalidated = [f"models:{gw}" for gw in gateways] + ["providers", "pricing"]
+
+        return {
+            "success": True,
+            "message": f"Cache invalidated successfully",
+            "invalidated": invalidated,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to invalidate cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to invalidate cache: {str(e)}") from e
 
 
 @router.post("/cache/pricing/refresh", tags=["cache", "pricing"])

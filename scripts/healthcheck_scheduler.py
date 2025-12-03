@@ -32,7 +32,7 @@ import atexit
 
 from healthcheck_all_models import run_all_gateways_healthcheck
 
-# Configure logging
+# Configure logging first before any imports that might need it
 log_dir = Path('logs')
 log_dir.mkdir(exist_ok=True)
 
@@ -45,6 +45,14 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Import rate-limited healthcheck
+try:
+    from healthcheck_rate_limited import check_critical_models_with_rate_limit
+    RATE_LIMITED_AVAILABLE = True
+except ImportError:
+    RATE_LIMITED_AVAILABLE = False
+    logger.warning("Rate-limited healthcheck not available")
 
 # Results directory
 results_dir = Path('healthcheck_results')
@@ -81,16 +89,18 @@ class HealthcheckScheduler:
             except Exception as e:
                 logger.warning(f"Failed to load config file: {e}. Using defaults.")
 
-        # Default configuration
+        # Default configuration (OpenRouter rate-limit compliant)
         return {
             'schedule_type': 'interval',  # 'interval' or 'cron'
-            'interval_minutes': 60,  # Run every 60 minutes
-            'cron_expression': '0 * * * *',  # Run every hour (cron format)
+            'interval_minutes': 360,  # Run every 6 hours (was 60)
+            'cron_expression': '0 */6 * * *',  # Run every 6 hours (cron format)
             'export_json': True,
             'keep_history': True,
-            'max_history_files': 168,  # Keep 7 days of hourly runs
+            'max_history_files': 56,  # Keep 8 days of 6-hourly runs
             'notify_on_unhealthy': True,
             'notification_webhook': None,
+            'rate_limited_mode': True,  # Use rate-limited healthcheck
+            'use_critical_models_only': True,  # Only check critical models
         }
 
     def schedule_healthcheck(self):
@@ -129,11 +139,27 @@ class HealthcheckScheduler:
             run_timestamp = datetime.now(timezone.utc).isoformat()
             self.last_run_timestamp = run_timestamp
 
-            # Run the healthcheck
-            results = run_all_gateways_healthcheck(
-                specific_gateway=None,
-                export_json=self.config['export_json']
-            )
+            # Use rate-limited healthcheck if enabled and available
+            if self.config.get('rate_limited_mode', True) and RATE_LIMITED_AVAILABLE:
+                logger.info("Using rate-limited healthcheck (OpenRouter compliant)")
+                results = check_critical_models_with_rate_limit('openrouter')
+
+                # Convert to format expected by rest of code
+                results = {
+                    'timestamp': results['timestamp'],
+                    'total_gateways': 1,
+                    'healthy_gateways': 1 if results.get('accessible_models', 0) > 0 else 0,
+                    'unhealthy_gateways': 0 if results.get('accessible_models', 0) > 0 else 1,
+                    'degraded_gateways': 0,
+                    'gateway_summaries': [results],
+                }
+            else:
+                logger.info("Using standard healthcheck")
+                # Run the standard healthcheck
+                results = run_all_gateways_healthcheck(
+                    specific_gateway=None,
+                    export_json=self.config['export_json']
+                )
 
             self.last_run_results = results
 

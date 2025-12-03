@@ -675,6 +675,16 @@ pytest tests/integration/test_chat.py -v
 
 ---
 
+## Troubleshooting
+
+### Health Check
+To verify the API is running and responsive:
+```bash
+curl https://api.gatewayz.ai/health
+```
+
+---
+
 ## Notes for Claude
 
 This codebase is a sophisticated, production-grade AI gateway system. When working on tasks:

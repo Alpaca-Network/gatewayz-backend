@@ -100,6 +100,8 @@ def valid_image_request():
 class TestImageGenerationSuccess:
     """Test successful image generation"""
 
+    @patch('src.security.deps.validate_api_key_security')
+    @patch('src.services.user_lookup_cache.get_user')
     @patch('src.routes.images.get_user')
     @patch('src.routes.images.make_deepinfra_image_request')
     @patch('src.routes.images.process_image_generation_response')
@@ -114,6 +116,8 @@ class TestImageGenerationSuccess:
         mock_process_response,
         mock_make_request,
         mock_get_user,
+        mock_get_user_cache,
+        mock_validate_key,
         client,
         mock_user,
         mock_deepinfra_response,
@@ -121,6 +125,8 @@ class TestImageGenerationSuccess:
     ):
         """Test successful image generation with DeepInfra"""
         # Setup mocks
+        mock_validate_key.return_value = 'test_api_key_12345'
+        mock_get_user_cache.return_value = mock_user
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = mock_deepinfra_response
         mock_process_response.return_value = {
@@ -159,6 +165,8 @@ class TestImageGenerationSuccess:
         mock_record_usage.assert_called_once()
         mock_increment_usage.assert_called_once_with('test_api_key_12345')
 
+    @patch('src.security.deps.validate_api_key_security')
+    @patch('src.services.user_lookup_cache.get_user')
     @patch('src.routes.images.get_user')
     @patch('src.routes.images.make_deepinfra_image_request')
     @patch('src.routes.images.process_image_generation_response')
@@ -173,10 +181,14 @@ class TestImageGenerationSuccess:
         mock_process_response,
         mock_make_request,
         mock_get_user,
+        mock_get_user_cache,
+        mock_validate_key,
         client,
         mock_user
     ):
         """Test generating multiple images"""
+        mock_validate_key.return_value = 'test_api_key_12345'
+        mock_get_user_cache.return_value = mock_user
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = {
             'created': 1677652288,
@@ -215,6 +227,8 @@ class TestImageGenerationSuccess:
         # Verify credits deducted for all images
         mock_deduct_credits.assert_called_once_with('test_api_key_12345', 300)
 
+    @patch('src.security.deps.validate_api_key_security')
+    @patch('src.services.user_lookup_cache.get_user')
     @patch('src.routes.images.get_user')
     @patch('src.routes.images.make_fal_image_request')
     @patch('src.routes.images.process_image_generation_response')
@@ -229,12 +243,16 @@ class TestImageGenerationSuccess:
         mock_process_response,
         mock_make_request,
         mock_get_user,
+        mock_get_user_cache,
+        mock_validate_key,
         client,
         mock_user,
         mock_fal_response
     ):
         """Test successful image generation with Fal.ai"""
         # Setup mocks
+        mock_validate_key.return_value = 'test_api_key_12345'
+        mock_get_user_cache.return_value = mock_user
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = mock_fal_response
         mock_process_response.return_value = {
@@ -446,6 +464,8 @@ class TestImageGenerationValidation:
 class TestImageGenerationProviders:
     """Test provider selection and routing"""
 
+    @patch('src.security.deps.validate_api_key_security')
+    @patch('src.services.user_lookup_cache.get_user')
     @patch('src.routes.images.get_user')
     @patch('src.routes.images.make_deepinfra_image_request')
     @patch('src.routes.images.process_image_generation_response')
@@ -460,11 +480,15 @@ class TestImageGenerationProviders:
         mock_process_response,
         mock_make_request,
         mock_get_user,
+        mock_get_user_cache,
+        mock_validate_key,
         client,
         mock_user,
         mock_deepinfra_response
     ):
         """Test that DeepInfra is the default provider"""
+        mock_validate_key.return_value = 'test_api_key_12345'
+        mock_get_user_cache.return_value = mock_user
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = mock_deepinfra_response
         mock_process_response.return_value = {
@@ -518,6 +542,8 @@ class TestImageGenerationProviders:
 class TestImageGenerationResponseProcessing:
     """Test response processing"""
 
+    @patch('src.security.deps.validate_api_key_security')
+    @patch('src.services.user_lookup_cache.get_user')
     @patch('src.routes.images.get_user')
     @patch('src.routes.images.make_deepinfra_image_request')
     @patch('src.routes.images.process_image_generation_response')
@@ -532,12 +558,16 @@ class TestImageGenerationResponseProcessing:
         mock_process_response,
         mock_make_request,
         mock_get_user,
+        mock_get_user_cache,
+        mock_validate_key,
         client,
         mock_user,
         mock_deepinfra_response,
         valid_image_request
     ):
         """Test that response includes gateway usage metadata"""
+        mock_validate_key.return_value = 'test_api_key_12345'
+        mock_get_user_cache.return_value = mock_user
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = mock_deepinfra_response
         mock_process_response.return_value = {
@@ -569,6 +599,8 @@ class TestImageGenerationResponseProcessing:
         assert gateway_usage['images_generated'] == 1
         assert gateway_usage['user_balance_after'] == 900.0  # 1000 - 100
 
+    @patch('src.security.deps.validate_api_key_security')
+    @patch('src.services.user_lookup_cache.get_user')
     @patch('src.routes.images.get_user')
     @patch('src.routes.images.make_deepinfra_image_request')
     @patch('src.routes.images.process_image_generation_response')
@@ -583,12 +615,16 @@ class TestImageGenerationResponseProcessing:
         mock_process_response,
         mock_make_request,
         mock_get_user,
+        mock_get_user_cache,
+        mock_validate_key,
         client,
         mock_user,
         mock_deepinfra_response,
         valid_image_request
     ):
         """Test that request timing is tracked"""
+        mock_validate_key.return_value = 'test_api_key_12345'
+        mock_get_user_cache.return_value = mock_user
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = mock_deepinfra_response
         mock_process_response.return_value = {

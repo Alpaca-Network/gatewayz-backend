@@ -198,7 +198,7 @@ async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str,
     return plan_check
 
 
-@router.post("/v1/messages", tags=["chat"])
+@router.post("/messages", tags=["chat"])
 async def anthropic_messages(
     req: MessagesRequest,
     background_tasks: BackgroundTasks,

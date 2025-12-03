@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -21,9 +21,50 @@ from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 configure_logging()
 logger = logging.getLogger(__name__)
 
-# Initialize Sentry for error monitoring
+# Initialize Sentry for error monitoring with adaptive sampling
 if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
     import sentry_sdk
+
+    def sentry_traces_sampler(sampling_context):
+        """
+        Adaptive sampling to control Sentry costs while maintaining visibility.
+
+        Sampling strategy:
+        - Development: 100% (all requests)
+        - Health/metrics endpoints: 0% (skip monitoring endpoints)
+        - Critical endpoints: 20% (chat, messages)
+        - Other endpoints: 10%
+        - Errors: Always sampled (parent_sampled)
+        """
+        # Always sample errors
+        if sampling_context.get("parent_sampled") is not None:
+            return 1.0
+
+        # 100% sampling in development
+        if Config.SENTRY_ENVIRONMENT == "development":
+            return 1.0
+
+        # Get endpoint path
+        endpoint = ""
+        if "wsgi_environ" in sampling_context:
+            endpoint = sampling_context["wsgi_environ"].get("PATH_INFO", "")
+        elif "asgi_scope" in sampling_context:
+            endpoint = sampling_context["asgi_scope"].get("path", "")
+
+        # Skip health check and monitoring endpoints (0%)
+        if endpoint in ["/health", "/metrics", "/api/health", "/api/monitoring/health"]:
+            return 0.0
+
+        # Critical inference endpoints: 20% sampling
+        if endpoint in ["/v1/chat/completions", "/v1/messages", "/v1/images/generations"]:
+            return 0.2
+
+        # Admin endpoints: 50% sampling (important but lower volume)
+        if endpoint.startswith("/api/admin"):
+            return 0.5
+
+        # All other endpoints: 10% sampling
+        return 0.1
 
     sentry_sdk.init(
         dsn=Config.SENTRY_DSN,
@@ -35,16 +76,16 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         environment=Config.SENTRY_ENVIRONMENT,
         # Release tracking for Sentry release management
         release=Config.SENTRY_RELEASE,
-        # Set traces_sample_rate to capture transactions for tracing
-        traces_sample_rate=Config.SENTRY_TRACES_SAMPLE_RATE,
-        # Set profiles_sample_rate to capture profiling data
-        profiles_sample_rate=Config.SENTRY_PROFILES_SAMPLE_RATE,
+        # Adaptive sampling function (replaces static traces_sample_rate)
+        traces_sampler=sentry_traces_sampler,
+        # Reduced profiling: 5% (down from default)
+        profiles_sample_rate=0.05,
         # Set profile_lifecycle to "trace" to run profiler during transactions
         profile_lifecycle="trace",
     )
     logger.info(
-        f"✅ Sentry initialized (environment: {Config.SENTRY_ENVIRONMENT}, "
-        f"release: {Config.SENTRY_RELEASE})"
+        f"✅ Sentry initialized with adaptive sampling "
+        f"(environment: {Config.SENTRY_ENVIRONMENT}, release: {Config.SENTRY_RELEASE})"
     )
 else:
     logger.info("⏭️  Sentry disabled (SENTRY_ENABLED=false or SENTRY_DSN not set)")
@@ -94,6 +135,11 @@ def create_app() -> FastAPI:
         version="2.0.3",  # Multi-sort strategy for 1204 HuggingFace models + auto :hf-inference suffix
         lifespan=lifespan,
     )
+
+    # Create v1 router for OpenAI-compatible endpoints
+    # This allows users to use base_url="https://api.gatewayz.ai" (SDK appends /v1)
+    # or base_url="https://api.gatewayz.ai/v1" directly
+    v1_router = APIRouter(prefix="/v1")
 
     # Add CORS middleware
     # Note: When allow_credentials=True, allow_origins cannot be ["*"]
@@ -153,6 +199,13 @@ def create_app() -> FastAPI:
 
     app.add_middleware(TraceContextMiddleware)
     logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
+
+    # Add automatic Sentry error capture middleware (captures ALL route errors)
+    if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+        from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
+
+        app.add_middleware(AutoSentryMiddleware)
+        logger.info("  🎯 Auto-Sentry middleware enabled (automatic error capture for all routes)")
 
     # Add CORS middleware second (must be early for OPTIONS requests)
     app.add_middleware(
@@ -255,17 +308,25 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
-    # Define all routes to load
-    # IMPORTANT: chat & messages must be before catalog to avoid /v1/* being caught by /model/{provider}/{model}
-    routes_to_load = [
+    # Define v1 routes (OpenAI-compatible API endpoints)
+    # These routes are mounted under /v1 prefix via v1_router
+    # IMPORTANT: chat & messages must be before catalog to avoid /* being caught by /model/{provider}/{model}
+    v1_routes_to_load = [
+        ("chat", "Chat Completions"),
+        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
+        ("images", "Image Generation"),  # Image generation endpoints
+        ("catalog", "Model Catalog"),
+        ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
+        ("status_page", "Public Status Page"),  # Public status page (no auth required)
+    ]
+
+    # Define non-v1 routes (loaded directly on app without prefix)
+    non_v1_routes_to_load = [
         ("health", "Health Check"),
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
-        ("chat", "Chat Completions"),  # Moved before catalog
-        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
+        ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
-        ("images", "Image Generation"),  # Image generation endpoints
-        ("catalog", "Model Catalog"),
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
@@ -274,7 +335,6 @@ def create_app() -> FastAPI:
             "optimization_monitor",
             "Optimization Monitoring",
         ),  # Connection pool, cache, and priority stats
-        ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("error_monitor", "Error Monitoring"),  # Error detection and auto-fix system
         ("admin_cache", "Admin Cache Management"),  # Cache invalidation and monitoring
         ("root", "Root/Home"),
@@ -302,7 +362,9 @@ def create_app() -> FastAPI:
     loaded_count = 0
     failed_count = 0
 
-    for module_name, display_name in routes_to_load:
+    def load_route(module_name: str, display_name: str, target_router):
+        """Load a route module and attach it to the target router."""
+        nonlocal loaded_count, failed_count
         try:
             # Import the route module
             logger.debug(f"  [LOADING] Importing src.routes.{module_name}...")
@@ -314,8 +376,8 @@ def create_app() -> FastAPI:
             router = module.router
             logger.debug(f"  [LOADING] Router found for {module_name}")
 
-            # Include the router (all routes now follow clean REST patterns)
-            app.include_router(router)
+            # Include the router
+            target_router.include_router(router)
             logger.debug(f"  [LOADING] Router included for {module_name}")
 
             # Log success
@@ -357,12 +419,46 @@ def create_app() -> FastAPI:
             logger.error(f"       Traceback:\n{traceback.format_exc()}")
             failed_count += 1
 
+    # Load v1 routes (mounted under /v1 prefix)
+    logger.info("Loading v1 API routes (OpenAI-compatible)...")
+    for module_name, display_name in v1_routes_to_load:
+        load_route(module_name, display_name, v1_router)
+
+    # Mount v1 router on app
+    app.include_router(v1_router)
+    logger.info("  [OK] v1 router mounted at /v1")
+
+    # Add /models route at root for backwards compatibility
+    # Only mount the specific /models endpoint, not the entire catalog router
+    try:
+        from src.routes.catalog import get_all_models
+
+        app.get("/models", tags=["models"])(get_all_models)
+        logger.info("  [OK] /models route added at root (backwards compatibility)")
+    except ImportError as e:
+        logger.warning(f"  [WARN] Could not add /models route for backwards compatibility: {e}")
+
+    # Load non-v1 routes (mounted directly on app)
+    logger.info("Loading non-v1 routes...")
+    for module_name, display_name in non_v1_routes_to_load:
+        load_route(module_name, display_name, app)
+
     # Log summary
     logger.info("\nRoute Loading Summary:")
     logger.info(f"   [OK] Loaded: {loaded_count}")
     if failed_count > 0:
         logger.warning(f"   [FAIL] Failed: {failed_count}")
     logger.info(f"   Total: {loaded_count + failed_count}")
+
+    # ==================== Sentry Tunnel Router ====================
+    # Load Sentry tunnel router separately (at root /monitoring path)
+    try:
+        from src.routes.monitoring import sentry_tunnel_router
+
+        app.include_router(sentry_tunnel_router)
+        logger.info("  [OK] Sentry Tunnel (POST /monitoring)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
 
     # ==================== Exception Handler ====================
 
@@ -525,18 +621,38 @@ def create_app() -> FastAPI:
             asyncio.create_task(warm_caches_async())
             logger.info("  🔥 Cache warming started in background (non-blocking)")
 
+            # Initialize intelligent health monitoring
+            try:
+                logger.info("   Starting intelligent health monitoring...")
+                from src.services.intelligent_health_monitor import intelligent_health_monitor
+
+                await intelligent_health_monitor.start_monitoring()
+                logger.info("   Intelligent health monitoring started")
+            except Exception as health_e:
+                logger.warning(f"    Health monitoring initialization warning: {health_e}")
+
         except Exception as e:
             logger.error(f"   Startup initialization failed: {e}")
 
         logger.info("\n🎉 Application startup complete!")
         logger.info(" API Documentation: http://localhost:8000/docs")
-        logger.info(" Health Check: http://localhost:8000/health\n")
+        logger.info(" Health Check: http://localhost:8000/health")
+        logger.info(" Public Status Page: http://localhost:8000/v1/status\n")
 
     # ==================== Shutdown Event ====================
 
     @app.on_event("shutdown")
     async def on_shutdown():
         logger.info("🛑 Shutting down application...")
+
+        # Shutdown health monitoring
+        try:
+            from src.services.intelligent_health_monitor import intelligent_health_monitor
+
+            await intelligent_health_monitor.stop_monitoring()
+            logger.info("   Health monitoring stopped")
+        except Exception as e:
+            logger.warning(f"    Health monitoring shutdown warning: {e}")
 
         # Shutdown OpenTelemetry
         try:

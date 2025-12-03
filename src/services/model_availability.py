@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from src.utils.sentry_context import capture_model_health_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -210,11 +212,37 @@ class ModelAvailabilityService:
 
         circuit_breaker = self.circuit_breakers[model_key]
 
+        # Track previous state to detect status changes
+        previous_availability = self.availability_cache.get(model_key)
+        was_available = previous_availability and previous_availability.status == AvailabilityStatus.AVAILABLE
+
         # Update circuit breaker based on health
         if availability_status == AvailabilityStatus.AVAILABLE:
             circuit_breaker.record_success()
         else:
             circuit_breaker.record_failure()
+
+            # Capture to Sentry when a model becomes unavailable or remains unavailable
+            # Only send if this is a new failure or circuit breaker just opened
+            if (not previous_availability or was_available or
+                circuit_breaker.state == CircuitBreakerState.OPEN):
+                error = Exception(f"Model unavailable: {model_health.error_message or 'Health check failed'}")
+                capture_model_health_error(
+                    error,
+                    model_id=model_health.model_id,
+                    provider=model_health.provider,
+                    gateway=model_health.gateway,
+                    operation='availability_check',
+                    status=availability_status.value,
+                    response_time_ms=model_health.response_time_ms,
+                    details={
+                        'error_count': model_health.error_count,
+                        'success_rate': model_health.success_rate,
+                        'circuit_breaker_state': circuit_breaker.state.value,
+                        'error_message': model_health.error_message,
+                        'last_failure': model_health.last_failure.isoformat() if model_health.last_failure else None,
+                    }
+                )
 
         # Get fallback models
         fallback_models = self.fallback_mappings.get(model_health.model_id, [])

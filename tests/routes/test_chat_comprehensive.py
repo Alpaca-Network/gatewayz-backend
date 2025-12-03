@@ -529,7 +529,7 @@ def client(sb, monkeypatch):
 # ==================================================
 
 def test_chat_completions_no_api_key(client):
-    """Test chat endpoint without API key"""
+    """Test chat endpoint without API key - anonymous access is now allowed"""
     response = client.post(
         "/v1/chat/completions",
         json={
@@ -537,7 +537,10 @@ def test_chat_completions_no_api_key(client):
             "messages": [{"role": "user", "content": "Hello"}]
         }
     )
-    assert response.status_code == 401
+    # Anonymous access is now allowed - should return 200
+    assert response.status_code == 200
+    data = response.json()
+    assert "choices" in data
 
 
 def test_chat_completions_invalid_api_key(client, sb):
