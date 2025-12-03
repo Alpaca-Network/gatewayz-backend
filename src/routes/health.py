@@ -25,6 +25,14 @@ from src.models.health_models import (
     UptimeMetricsResponse,
 )
 from src.security.deps import get_api_key
+from src.services.health_cache_service import (
+    health_cache_service,
+    DEFAULT_TTL_DASHBOARD,
+    DEFAULT_TTL_MODELS,
+    DEFAULT_TTL_PROVIDERS,
+    DEFAULT_TTL_SUMMARY,
+    DEFAULT_TTL_SYSTEM,
+)
 from src.services.model_availability import availability_service
 from src.services.model_health_monitor import health_monitor
 
@@ -43,7 +51,10 @@ async def health_check():
 
 
 @router.get("/health/system", response_model=SystemHealthResponse, tags=["health"])
-async def get_system_health(api_key: str = Depends(get_api_key)):
+async def get_system_health(
+    api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
+):
     """
     Get overall system health metrics
 
@@ -52,11 +63,28 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
     - Provider counts and statuses
     - Model counts and statuses
     - System uptime percentage
+
+    Query Parameters:
+    - force_refresh: Force fresh data fetch, bypassing cache
     """
     try:
+        # Try to get from cache first
+        if not force_refresh:
+            cached_data = health_cache_service.get_system_health()
+            if cached_data:
+                logger.debug("System health served from cache")
+                return cached_data
+
+        # Fetch fresh data
         system_health = health_monitor.get_system_health()
         if not system_health:
             raise HTTPException(status_code=503, detail="System health data not available")
+
+        # Cache the result
+        health_cache_service.cache_system_health(
+            system_health.__dict__ if hasattr(system_health, "__dict__") else system_health,
+            ttl=DEFAULT_TTL_SYSTEM,
+        )
 
         return system_health
     except Exception as e:
@@ -68,6 +96,7 @@ async def get_system_health(api_key: str = Depends(get_api_key)):
 async def get_providers_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
 ):
     """
     Get health metrics for all providers
@@ -77,9 +106,28 @@ async def get_providers_health(
     - Model counts per provider
     - Response times and uptime
     - Error information
+
+    Query Parameters:
+    - force_refresh: Force fresh data fetch, bypassing cache
     """
     try:
+        # Try to get from cache first (only if no gateway filter)
+        if not force_refresh and not gateway:
+            cached_data = health_cache_service.get_providers_health()
+            if cached_data:
+                logger.debug("Providers health served from cache")
+                return cached_data
+
+        # Fetch fresh data
         providers_health = health_monitor.get_all_providers_health(gateway)
+
+        # Cache the result (only if no gateway filter)
+        if not gateway:
+            health_cache_service.cache_providers_health(
+                [p.__dict__ if hasattr(p, "__dict__") else p for p in providers_health],
+                ttl=DEFAULT_TTL_PROVIDERS,
+            )
+
         return providers_health
     except Exception as e:
         logger.error(f"Failed to get providers health: {e}")
@@ -92,6 +140,7 @@ async def get_models_health(
     provider: str | None = Query(None, description="Filter by specific provider"),
     status: str | None = Query(None, description="Filter by health status"),
     api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
 ):
     """
     Get health metrics for all models
@@ -101,8 +150,19 @@ async def get_models_health(
     - Response times and success rates
     - Error counts and uptime
     - Last check timestamps
+
+    Query Parameters:
+    - force_refresh: Force fresh data fetch, bypassing cache
     """
     try:
+        # Try to get from cache first (only if no filters)
+        if not force_refresh and not gateway and not provider and not status:
+            cached_data = health_cache_service.get_models_health()
+            if cached_data:
+                logger.debug("Models health served from cache")
+                return cached_data
+
+        # Fetch fresh data
         models_health = health_monitor.get_all_models_health(gateway)
 
         # Apply filters
@@ -111,6 +171,13 @@ async def get_models_health(
 
         if status:
             models_health = [m for m in models_health if m.status == status]
+
+        # Cache the result (only if no filters)
+        if not gateway and not provider and not status:
+            health_cache_service.cache_models_health(
+                [m.__dict__ if hasattr(m, "__dict__") else m for m in models_health],
+                ttl=DEFAULT_TTL_MODELS,
+            )
 
         return models_health
     except Exception as e:
@@ -179,7 +246,10 @@ async def get_provider_health(
 
 
 @router.get("/health/summary", response_model=HealthSummaryResponse, tags=["health"])
-async def get_health_summary(api_key: str = Depends(get_api_key)):
+async def get_health_summary(
+    api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
+):
     """
     Get comprehensive health summary
 
@@ -188,9 +258,24 @@ async def get_health_summary(api_key: str = Depends(get_api_key)):
     - All provider health data
     - All model health data
     - Monitoring status
+
+    Query Parameters:
+    - force_refresh: Force fresh data fetch, bypassing cache
     """
     try:
+        # Try to get from cache first
+        if not force_refresh:
+            cached_data = health_cache_service.get_health_summary()
+            if cached_data:
+                logger.debug("Health summary served from cache")
+                return cached_data
+
+        # Fetch fresh data
         summary = health_monitor.get_health_summary()
+
+        # Cache the result
+        health_cache_service.cache_health_summary(summary, ttl=DEFAULT_TTL_SUMMARY)
+
         return summary
     except Exception as e:
         logger.error(f"Failed to get health summary: {e}")
@@ -317,7 +402,10 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
 @router.get(
     "/health/dashboard", response_model=HealthDashboardResponse, tags=["health", "dashboard"]
 )
-async def get_health_dashboard(api_key: str = Depends(get_api_key)):
+async def get_health_dashboard(
+    api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
+):
     """
     Get complete health dashboard data for frontend
 
@@ -326,9 +414,19 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
     - Provider statuses with counts and metrics
     - Model statuses with response times and uptime
     - Uptime metrics for status page integration
+
+    Query Parameters:
+    - force_refresh: Force fresh data fetch, bypassing cache
     """
     try:
         logger.info("Starting health dashboard request")
+
+        # Try to get from cache first
+        if not force_refresh:
+            cached_data = health_cache_service.get_health_dashboard()
+            if cached_data:
+                logger.debug("Health dashboard served from cache")
+                return cached_data
 
         # Import required models at the top
         from datetime import datetime
@@ -504,6 +602,13 @@ async def get_health_dashboard(api_key: str = Depends(get_api_key)):
         )
 
         logger.info("HealthDashboardResponse created successfully")
+
+        # Cache the dashboard response
+        health_cache_service.cache_health_dashboard(
+            response.model_dump() if hasattr(response, "model_dump") else response.__dict__,
+            ttl=DEFAULT_TTL_DASHBOARD,
+        )
+
         return response
     except Exception as e:
         logger.error(f"Failed to get health dashboard: {e}")
