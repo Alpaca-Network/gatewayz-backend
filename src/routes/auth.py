@@ -1339,33 +1339,25 @@ async def auth_health_check():
     issues = []
 
     # Check 1: Database connectivity
+    # Use execute_with_timeout directly (not safe_query_with_timeout) so we can
+    # properly distinguish between timeouts and database errors
+    from src.services.query_timeout import execute_with_timeout
+
     db_check_start = time.time()
     try:
         client = supabase_config.get_supabase_client()
         # Simple query to verify connection - use timeout
-        result = safe_query_with_timeout(
-            client,
-            "users",
+        result = execute_with_timeout(
             lambda: client.table("users").select("id").limit(1).execute(),
             timeout_seconds=3,
             operation_name="auth health check",
-            fallback_value=None,
-            log_errors=False,
         )
         db_latency = (time.time() - db_check_start) * 1000
 
-        if result is not None:
-            health_status["checks"]["database"] = {
-                "status": "healthy",
-                "latency_ms": round(db_latency, 2),
-            }
-        else:
-            health_status["checks"]["database"] = {
-                "status": "timeout",
-                "latency_ms": round(db_latency, 2),
-                "error": "Query timed out after 3 seconds",
-            }
-            issues.append("database_timeout")
+        health_status["checks"]["database"] = {
+            "status": "healthy",
+            "latency_ms": round(db_latency, 2),
+        }
     except QueryTimeoutError as e:
         db_latency = (time.time() - db_check_start) * 1000
         health_status["checks"]["database"] = {
