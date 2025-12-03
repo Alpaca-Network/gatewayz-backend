@@ -65,11 +65,12 @@ class SimpleHealthCache:
 
             # Store in Redis
             self.redis_client.setex(key, ttl, serialized)
-            logger.debug(f"Cached {key} (TTL: {ttl}s)")
+            logger.debug(f"Cached {key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to cache {key}: {e}")
+            logger.error(f"Failed to cache {key}: {e}", exc_info=True)
+            logger.error(f"Cache write error type: {type(e).__name__}, Data type: {type(data).__name__}")
             return False
 
     def get_cache(self, key: str) -> Optional[dict]:
@@ -89,11 +90,14 @@ class SimpleHealthCache:
         try:
             data = self.redis_client.get(key)
             if data:
+                logger.debug(f"Cache HIT for {key} (size: {len(data)} bytes)")
                 return json.loads(data)
+            logger.debug(f"Cache MISS for {key}")
             return None
 
         except Exception as e:
-            logger.error(f"Failed to retrieve cache {key}: {e}")
+            logger.error(f"Failed to retrieve cache {key}: {e}", exc_info=True)
+            logger.error(f"Cache retrieval error type: {type(e).__name__}")
             return None
 
     def delete_cache(self, key: str) -> bool:

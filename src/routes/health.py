@@ -215,9 +215,18 @@ async def get_providers_health(
         return result
     except asyncio.TimeoutError:
         logger.warning("Providers health check timed out after 5 seconds")
+        logger.debug("Timeout occurred while fetching providers from health_monitor.get_all_providers_health()")
         return []  # Return empty list on timeout
     except Exception as e:
-        logger.error(f"Failed to get providers health: {e}")
+        logger.error(f"Failed to get providers health: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}, Error message: {str(e)}")
+        logger.debug(f"Stack trace for providers health error", exc_info=True)
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/providers', 'operation': 'get_providers_health'},
+            tags={'endpoint': 'providers_health', 'error_type': type(e).__name__}
+        )
         return []  # Return empty list instead of 500 error
 
 
@@ -271,9 +280,18 @@ async def get_models_health(
         return result
     except asyncio.TimeoutError:
         logger.warning("Models health check timed out after 5 seconds")
+        logger.debug("Timeout occurred while fetching models from health_monitor.get_all_models_health()")
         return []  # Return empty list on timeout
     except Exception as e:
-        logger.error(f"Failed to get models health: {e}")
+        logger.error(f"Failed to get models health: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}, Error message: {str(e)}")
+        logger.debug(f"Stack trace for models health error", exc_info=True)
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/models', 'operation': 'get_models_health'},
+            tags={'endpoint': 'models_health', 'error_type': type(e).__name__}
+        )
         return []  # Return empty list instead of 500 error
 
 
