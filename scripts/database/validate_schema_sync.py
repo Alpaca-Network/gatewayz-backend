@@ -258,14 +258,20 @@ class SchemaValidator:
         return schema
 
     def _get_tables_fallback(self) -> dict:
-        """Fallback method to get table info by querying each table"""
+        """Fallback method to get table info by querying each table.
+
+        Note: This method can only verify table existence, not column info.
+        Tables are marked with 'columns_unknown': True to indicate that
+        column validation should be skipped.
+        """
         tables = {}
 
         for table_name in EXPECTED_TABLES:
             try:
                 # Try to select from table to verify it exists
                 self.client.table(table_name).select("*").limit(0).execute()
-                tables[table_name] = {"columns": {}, "exists": True}
+                # Mark columns as unknown since we can't get column info via this method
+                tables[table_name] = {"columns": {}, "exists": True, "columns_unknown": True}
             except Exception:
                 # Table doesn't exist or error - this is expected for missing tables
                 pass
@@ -287,18 +293,33 @@ class SchemaValidator:
             for table in missing:
                 result.add_error(f"Missing table: {table}")
 
-        # Check for critical columns
+        # Check for critical columns (only if we have column info)
+        columns_checked = False
         for table, expected_columns in CRITICAL_COLUMNS.items():
             if table not in schema.tables:
                 continue
 
-            actual_columns = set(schema.tables[table].get("columns", {}).keys())
+            table_info = schema.tables[table]
+
+            # Skip column validation if we couldn't get column info (fallback mode)
+            if table_info.get("columns_unknown"):
+                continue
+
+            columns_checked = True
+            actual_columns = set(table_info.get("columns", {}).keys())
             missing_cols = set(expected_columns) - actual_columns
 
             if missing_cols:
                 result.missing_columns[table] = list(missing_cols)
                 for col in missing_cols:
                     result.add_error(f"Missing column: {table}.{col}")
+
+        # Warn if we couldn't validate columns
+        if not columns_checked and schema.tables:
+            result.add_warning(
+                "Column validation skipped: exec_sql RPC not available. "
+                "Only table existence was verified."
+            )
 
         # Extra tables (informational)
         extra = existing_tables - expected_tables
@@ -425,6 +446,48 @@ def load_snapshot(filepath: str) -> SchemaInfo:
     return SchemaInfo.from_dict(data)
 
 
+def compare_schema_to_snapshot(current: SchemaInfo, snapshot: SchemaInfo) -> ValidationResult:
+    """Compare current schema against a saved snapshot"""
+    result = ValidationResult()
+
+    current_tables = set(current.tables.keys())
+    snapshot_tables = set(snapshot.tables.keys())
+
+    # Missing tables (in snapshot but not current)
+    missing = snapshot_tables - current_tables
+    if missing:
+        result.missing_tables = list(missing)
+        for table in missing:
+            result.add_error(f"Table missing from snapshot: {table}")
+
+    # Extra tables (in current but not snapshot)
+    extra = current_tables - snapshot_tables
+    if extra:
+        result.extra_tables = list(extra)
+        for table in extra:
+            result.add_warning(f"Extra table not in snapshot: {table}")
+
+    # Compare columns for common tables
+    common_tables = current_tables & snapshot_tables
+    for table in common_tables:
+        current_cols = set(current.tables[table].get("columns", {}).keys())
+        snapshot_cols = set(snapshot.tables[table].get("columns", {}).keys())
+
+        missing_cols = snapshot_cols - current_cols
+        if missing_cols:
+            result.missing_columns[table] = list(missing_cols)
+            for col in missing_cols:
+                result.add_error(f"Column missing from snapshot: {table}.{col}")
+
+        extra_cols = current_cols - snapshot_cols
+        if extra_cols:
+            result.extra_columns[table] = list(extra_cols)
+            for col in extra_cols:
+                result.add_warning(f"Extra column not in snapshot: {table}.{col}")
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Validate Supabase schema sync between environments",
@@ -505,9 +568,9 @@ def main():
         # Compare against snapshot
         if args.compare_snapshot:
             print(f"Comparing against snapshot: {args.compare_snapshot}")
-            # This would require implementing snapshot comparison
-            # For now, just validate against expected
-            result = validator.validate_against_expected()
+            snapshot_schema = load_snapshot(args.compare_snapshot)
+            current_schema = validator.get_schema_info()
+            result = compare_schema_to_snapshot(current_schema, snapshot_schema)
             print_result(result, args.verbose)
             if args.ci and not result.is_valid:
                 sys.exit(1)

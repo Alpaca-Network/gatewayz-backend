@@ -51,7 +51,18 @@ jobs:
         run: |
           echo "Checking migration file naming conventions..."
           INVALID_FILES=""
-          for file in supabase/migrations/*.sql; do
+
+          # Check if any migration files exist
+          shopt -s nullglob
+          files=(supabase/migrations/*.sql)
+          shopt -u nullglob
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No migration files found - skipping validation"
+            exit 0
+          fi
+
+          for file in "${files[@]}"; do
             filename=$(basename "$file")
             # Expected format: YYYYMMDDHHMMSS_description.sql
             if ! [[ "$filename" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
@@ -108,9 +119,19 @@ jobs:
         run: |
           echo "Validating SQL syntax..."
 
+          # Check if any migration files exist
+          shopt -s nullglob
+          files=(supabase/migrations/*.sql)
+          shopt -u nullglob
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No migration files found - skipping validation"
+            exit 0
+          fi
+
           # Check for common SQL errors
           ERRORS=""
-          for file in supabase/migrations/*.sql; do
+          for file in "${files[@]}"; do
             # Check for missing semicolons at end of statements
             if grep -P '^\s*(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE)\s' "$file" | grep -v ';$' | grep -v '^\s*--' > /dev/null; then
               echo "⚠️  Possible missing semicolon in: $file"
@@ -168,11 +189,21 @@ jobs:
       - name: Apply migrations
         run: |
           echo "Applying migrations..."
+          set +e  # Don't exit on error, we'll check the exit code
           supabase db reset --debug 2>&1 | tee migration_output.txt
+          EXIT_CODE=$?
+          set -e
 
-          # Check for errors
-          if grep -i "error" migration_output.txt; then
-            echo "::error::Migration errors detected"
+          # Check exit code first - this is the most reliable indicator
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Migration command failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+
+          # Check for actual error patterns (not just the word "error" anywhere)
+          # Look for PostgreSQL error patterns and Supabase CLI error messages
+          if grep -E "(ERROR:|FATAL:|PANIC:|error applying migration|migration failed|syntax error)" migration_output.txt; then
+            echo "::error::Migration errors detected in output"
             exit 1
           fi
           echo "✅ Migrations applied successfully"
