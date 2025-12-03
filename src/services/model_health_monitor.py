@@ -313,7 +313,9 @@ class ModelHealthMonitor:
 
             for gateway in gateways:
                 try:
+                    logger.debug(f"Fetching models from {gateway}...")
                     gateway_models = get_cached_models(gateway)
+                    logger.debug(f"Got {len(gateway_models) if gateway_models else 0} models from {gateway}")
                     if gateway_models:
                         for chunk in self._chunk_list(gateway_models, self.fetch_chunk_size):
                             for model in chunk:
@@ -331,7 +333,9 @@ class ModelHealthMonitor:
         except Exception as e:
             logger.error(f"Failed to get models for health checking: {e}")
 
+        logger.info(f"Total models collected for health checking: {len(models)}")
         return models
+
 
     @staticmethod
     def _chunk_list(items: list[dict[str, Any]], size: int):
@@ -425,6 +429,8 @@ class ModelHealthMonitor:
         - Data policy restrictions (404 with policy message)
         - Invalid parameters for specific models (400 with known issues)
         - Temporary service unavailability (503)
+        - Non-serverless model access errors (400)
+        - Model access permission errors (404 with specific patterns)
         """
         if not status_code:
             return True  # Capture unknown errors
@@ -433,9 +439,17 @@ class ModelHealthMonitor:
         if status_code == 429:
             return False
 
-        # Don't capture data policy restrictions - user configuration issue
-        if status_code == 404 and error_message and "data policy" in error_message.lower():
-            return False
+        # Don't capture data policy restrictions or specific model access permission errors
+        if status_code == 404 and error_message:
+            lower_msg = error_message.lower()
+            # Data policy restrictions - user configuration issue
+            if "data policy" in lower_msg:
+                return False
+            # Model access permission errors - only filter specific access/permission patterns
+            # Don't filter generic "not found" errors which could be genuine issues
+            if ("does not exist" in lower_msg and ("team" in lower_msg or "access" in lower_msg)) or \
+               ("no access" in lower_msg and "model" in lower_msg):
+                return False
 
         # Don't capture temporary service unavailability
         if status_code == 503 and error_message and "unavailable" in error_message.lower():
@@ -443,18 +457,22 @@ class ModelHealthMonitor:
 
         # Don't capture known parameter validation issues for specific providers
         if status_code == 400 and error_message:
-            # Google Vertex AI max_output_tokens validation
-            if "max_output_tokens" in error_message.lower() and "minimum value" in error_message.lower():
+            lower_msg = error_message.lower()
+            # Google Vertex AI max_output_tokens validation (already fixed in code)
+            if "max_output_tokens" in lower_msg and "minimum value" in lower_msg:
                 return False
             # Audio-only model requirements
-            if "audio" in error_message.lower() and "modality" in error_message.lower():
+            if "audio" in lower_msg and "modality" in lower_msg:
+                return False
+            # Non-serverless model access errors - plan/configuration issue
+            if "non-serverless" in lower_msg or "unable to access" in lower_msg:
                 return False
 
         # Don't capture authentication issues - configuration problem
         if status_code == 403 and error_message and "key" in error_message.lower():
             return False
 
-        # Capture all other errors
+        # Capture all other errors (including generic 500 errors and most 404s)
         return True
 
     def _get_api_key_for_gateway(self, gateway: str) -> str | None:

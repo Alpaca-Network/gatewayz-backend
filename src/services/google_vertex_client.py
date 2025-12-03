@@ -329,7 +329,15 @@ def _make_google_vertex_request_sdk(
         try:
             generation_config = {}
             if max_tokens is not None:
-                generation_config["max_output_tokens"] = max_tokens
+                # Google Vertex AI requires max_output_tokens to be at least 16
+                # Validate and adjust if necessary to prevent 400 errors
+                adjusted_max_tokens = max(16, max_tokens)
+                if adjusted_max_tokens != max_tokens:
+                    logger.warning(
+                        f"max_tokens={max_tokens} is below minimum (16). "
+                        f"Adjusting to {adjusted_max_tokens} for Google Vertex AI compatibility."
+                    )
+                generation_config["max_output_tokens"] = adjusted_max_tokens
             if temperature is not None:
                 generation_config["temperature"] = temperature
             if top_p is not None:
@@ -437,7 +445,15 @@ def _make_google_vertex_request_rest(
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
-            generation_config["maxOutputTokens"] = max_tokens
+            # Google Vertex AI requires maxOutputTokens to be at least 16
+            # Validate and adjust if necessary to prevent 400 errors
+            adjusted_max_tokens = max(16, max_tokens)
+            if adjusted_max_tokens != max_tokens:
+                logger.warning(
+                    f"max_tokens={max_tokens} is below minimum (16). "
+                    f"Adjusting to {adjusted_max_tokens} for Google Vertex AI compatibility."
+                )
+            generation_config["maxOutputTokens"] = adjusted_max_tokens
         if temperature is not None:
             generation_config["temperature"] = temperature
         if top_p is not None:

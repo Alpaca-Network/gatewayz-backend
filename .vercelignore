@@ -1,0 +1,36 @@
+# Virtual environments
+gatewayz/
+venv/
+.venv/
+env/
+
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg
+
+# Git
+.git/
+.gitignore
+
+# Tests
+tests/
+.coverage
+
+# Docs (optional - remove if needed)
+docs/
+
+# Environment
+.env
+.env.local
