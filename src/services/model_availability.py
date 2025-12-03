@@ -131,6 +131,7 @@ class ModelAvailabilityService:
         self.fallback_mappings: dict[str, list[str]] = {}
         self.config = AvailabilityConfig()
         self.monitoring_active = False
+        self._monitoring_task: asyncio.Task | None = None
 
         # Load fallback mappings
         self._load_fallback_mappings()
@@ -156,13 +157,24 @@ class ModelAvailabilityService:
         self.monitoring_active = True
         logger.info("Starting model availability monitoring")
 
-        # Start monitoring loop
-        asyncio.create_task(self._monitoring_loop())
+        # Start monitoring loop and store task reference for cleanup
+        self._monitoring_task = asyncio.create_task(self._monitoring_loop())
 
     async def stop_monitoring(self):
-        """Stop availability monitoring"""
+        """Stop availability monitoring and wait for background task to complete"""
         self.monitoring_active = False
-        logger.info("Stopped model availability monitoring")
+        logger.info("Stopping model availability monitoring...")
+
+        # Cancel and await the monitoring task to ensure clean shutdown
+        if self._monitoring_task is not None:
+            self._monitoring_task.cancel()
+            try:
+                await self._monitoring_task
+            except asyncio.CancelledError:
+                pass  # Expected when task is cancelled
+            self._monitoring_task = None
+
+        logger.info("Model availability monitoring stopped")
 
     async def _monitoring_loop(self):
         """Main monitoring loop"""

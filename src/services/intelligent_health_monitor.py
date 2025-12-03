@@ -116,6 +116,7 @@ class IntelligentHealthMonitor:
         self.monitoring_active = False
         self._worker_id = None
         self._semaphore = asyncio.Semaphore(max_concurrent_checks)
+        self._monitoring_tasks: list[asyncio.Task] = []
 
         # Configuration for each tier
         self.tier_config = {
@@ -152,16 +153,29 @@ class IntelligentHealthMonitor:
 
         logger.info(f"Starting intelligent health monitoring service (worker: {self._worker_id})")
 
-        # Start background tasks
-        asyncio.create_task(self._monitoring_loop())
-        asyncio.create_task(self._tier_update_loop())
-        asyncio.create_task(self._aggregate_metrics_loop())
-        asyncio.create_task(self._incident_resolution_loop())
+        # Start background tasks and store references for cleanup
+        self._monitoring_tasks = [
+            asyncio.create_task(self._monitoring_loop()),
+            asyncio.create_task(self._tier_update_loop()),
+            asyncio.create_task(self._aggregate_metrics_loop()),
+            asyncio.create_task(self._incident_resolution_loop()),
+        ]
 
     async def stop_monitoring(self):
-        """Stop the health monitoring service"""
+        """Stop the health monitoring service and wait for all background tasks to complete"""
         self.monitoring_active = False
-        logger.info(f"Stopped intelligent health monitoring service (worker: {self._worker_id})")
+        logger.info(f"Stopping intelligent health monitoring service (worker: {self._worker_id})...")
+
+        # Cancel and await all monitoring tasks to ensure clean shutdown
+        for task in self._monitoring_tasks:
+            task.cancel()
+
+        # Wait for all tasks to complete cancellation
+        if self._monitoring_tasks:
+            await asyncio.gather(*self._monitoring_tasks, return_exceptions=True)
+            self._monitoring_tasks = []
+
+        logger.info(f"Intelligent health monitoring service stopped (worker: {self._worker_id})")
 
     async def _monitoring_loop(self):
         """Main monitoring loop with intelligent scheduling"""
