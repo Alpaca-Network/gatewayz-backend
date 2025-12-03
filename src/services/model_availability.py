@@ -224,9 +224,29 @@ class ModelAvailabilityService:
 
             # Capture to Sentry when a model becomes unavailable or remains unavailable
             # Only send if this is a new failure or circuit breaker just opened
-            if (not previous_availability or was_available or
-                circuit_breaker.state == CircuitBreakerState.OPEN):
-                error = Exception(f"Model unavailable: {model_health.error_message or 'Health check failed'}")
+            # Skip rate limit (429) and expected provider errors to reduce Sentry noise
+            should_capture_error = (
+                not previous_availability
+                or was_available
+                or circuit_breaker.state == CircuitBreakerState.OPEN
+            )
+
+            # Don't capture rate limit errors (429) or expected operational errors
+            error_msg = model_health.error_message or ''
+            is_rate_limit_error = (
+                'HTTP 429' in error_msg
+                or '429' in error_msg
+                or 'rate limit' in error_msg.lower()
+                or 'switch models' in error_msg.lower()
+            )
+            is_expected_error = (
+                'non-serverless model' in error_msg.lower()
+                or 'does not exist' in error_msg.lower()
+                or 'no access' in error_msg.lower()
+            )
+
+            if should_capture_error and not is_rate_limit_error and not is_expected_error:
+                error = Exception(f"Model unavailable: {error_msg or 'Health check failed'}")
                 capture_model_health_error(
                     error,
                     model_id=model_health.model_id,
@@ -239,7 +259,7 @@ class ModelAvailabilityService:
                         'error_count': model_health.error_count,
                         'success_rate': model_health.success_rate,
                         'circuit_breaker_state': circuit_breaker.state.value,
-                        'error_message': model_health.error_message,
+                        'error_message': error_msg,
                         'last_failure': model_health.last_failure.isoformat() if model_health.last_failure else None,
                     }
                 )
