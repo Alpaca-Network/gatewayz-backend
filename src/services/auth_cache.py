@@ -483,18 +483,60 @@ def invalidate_all_user_caches(user_id: int, api_key: Optional[str] = None, user
 # Statistics and Monitoring
 
 
-def get_auth_cache_stats() -> dict[str, Any]:
-    """Get authentication cache statistics.
+def get_auth_cache_stats_lightweight() -> dict[str, Any]:
+    """Get lightweight authentication cache statistics suitable for health probes.
+
+    This function performs O(1) operations only to avoid blocking Redis.
+    Use this for health endpoints and frequent monitoring.
 
     Returns:
-        Dictionary with cache statistics
+        Dictionary with basic cache health info
+    """
+    try:
+        redis_client = get_redis_client()
+        if not redis_client:
+            return {"redis_available": False, "error": "Redis not available"}
+
+        # O(1) ping to verify connectivity
+        redis_client.ping()
+
+        # O(1) - get Redis info for basic stats without scanning keys
+        info = redis_client.info("memory")
+        keyspace_info = redis_client.info("keyspace")
+
+        stats = {
+            "redis_available": True,
+            "memory_used_mb": round(info.get("used_memory", 0) / (1024 * 1024), 2),
+            "memory_peak_mb": round(info.get("used_memory_peak", 0) / (1024 * 1024), 2),
+            "total_keys": sum(
+                db_info.get("keys", 0)
+                for db_info in keyspace_info.values()
+                if isinstance(db_info, dict)
+            ),
+        }
+
+        return stats
+    except Exception as e:
+        logger.warning(f"Failed to get lightweight auth cache stats: {e}")
+        return {"error": str(e), "redis_available": False}
+
+
+def get_auth_cache_stats() -> dict[str, Any]:
+    """Get detailed authentication cache statistics.
+
+    WARNING: This function uses Redis KEYS command which is O(N) and blocks Redis.
+    DO NOT use in health endpoints or frequently-called code paths.
+    Use get_auth_cache_stats_lightweight() for health probes instead.
+
+    Returns:
+        Dictionary with detailed cache statistics
     """
     try:
         redis_client = get_redis_client()
         if not redis_client:
             return {"error": "Redis not available"}
 
-        # Count cached keys by prefix
+        # Count cached keys by prefix - O(N) operation, use sparingly
         stats = {
             "api_key_user_count": len(redis_client.keys(f"{API_KEY_USER_PREFIX}*")),
             "api_key_validation_count": len(redis_client.keys(f"{API_KEY_CACHE_PREFIX}*")),

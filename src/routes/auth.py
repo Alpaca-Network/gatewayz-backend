@@ -1325,7 +1325,7 @@ async def auth_health_check():
     import time
 
     from src.config.redis_config import get_redis_client
-    from src.services.auth_cache import get_auth_cache_stats
+    from src.services.auth_cache import get_auth_cache_stats_lightweight
 
     start_time = time.time()
     health_status = {
@@ -1412,9 +1412,9 @@ async def auth_health_check():
         }
         issues.append("redis_error")
 
-    # Check 3: Auth cache statistics
+    # Check 3: Auth cache statistics (using lightweight O(1) operations only)
     try:
-        cache_stats = get_auth_cache_stats()
+        cache_stats = get_auth_cache_stats_lightweight()
         health_status["checks"]["auth_cache"] = {
             "status": "healthy" if cache_stats.get("redis_available", False) else "degraded",
             "stats": cache_stats,
