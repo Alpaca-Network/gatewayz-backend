@@ -624,24 +624,8 @@ def track_referral_signup(
         if referrer["id"] == referred_user_id:
             return False, "Cannot use your own referral code", None
 
-        # Check how many times this referral code has been used
-        usage_count_result = (
-            client.table("referrals")
-            .select("id", count="exact")
-            .eq("referral_code", referral_code)
-            .execute()
-        )
-
-        usage_count = usage_count_result.count if usage_count_result.count else 0
-
-        if usage_count >= MAX_REFERRAL_USES:
-            return (
-                False,
-                f"This referral code has reached its usage limit ({MAX_REFERRAL_USES} uses)",
-                None,
-            )
-
-        # Check if there's already a referral record for this user
+        # Check if there's already a referral record for this user BEFORE checking usage limits
+        # This allows idempotent retries even if the code has since reached its limit
         existing_referral = (
             client.table("referrals")
             .select("*")
@@ -661,12 +645,30 @@ def track_referral_signup(
                 return False, "You have already been referred by another user", None
 
             # Same code, just ensure referred_by_code is set (idempotent)
+            # Skip usage limit check since this user is already counted
             logger.info(
                 f"Referral record already exists for user {referred_user_id} with same code, "
                 f"ensuring referred_by_code is set"
             )
             code_to_set = original_code
         else:
+            # New referral - check usage limits before creating record
+            usage_count_result = (
+                client.table("referrals")
+                .select("id", count="exact")
+                .eq("referral_code", referral_code)
+                .execute()
+            )
+
+            usage_count = usage_count_result.count if usage_count_result.count else 0
+
+            if usage_count >= MAX_REFERRAL_USES:
+                return (
+                    False,
+                    f"This referral code has reached its usage limit ({MAX_REFERRAL_USES} uses)",
+                    None,
+                )
+
             # Create pending referral record (will be completed when they make first purchase)
             referral_data = {
                 "referrer_id": referrer["id"],
