@@ -242,6 +242,7 @@ class ModelHealthMonitor:
 
         return models
 
+
     @staticmethod
     def _chunk_list(items: list[dict[str, Any]], size: int):
         """Yield successive chunks from a list."""
