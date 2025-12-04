@@ -2,8 +2,10 @@
 Comprehensive tests for Morpheus AI Gateway Client service
 """
 
+import importlib
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 class TestMorpheusClient:
@@ -11,9 +13,9 @@ class TestMorpheusClient:
 
     def test_module_imports(self):
         """Test that module imports successfully"""
-        import src.services.morpheus_client
+        module = importlib.import_module("src.services.morpheus_client")
 
-        assert src.services.morpheus_client is not None
+        assert module is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
@@ -135,9 +137,51 @@ class TestMorpheusClient:
         assert len(result["choices"]) == 1
         assert result["choices"][0]["index"] == 0
         assert result["choices"][0]["finish_reason"] == "stop"
+        # Verify message content and structure
+        assert "message" in result["choices"][0]
+        message = result["choices"][0]["message"]
+        assert "content" in message or "role" in message
         assert result["usage"]["prompt_tokens"] == 10
         assert result["usage"]["completion_tokens"] == 20
         assert result["usage"]["total_tokens"] == 30
+
+    def test_process_morpheus_response_with_tool_calls(self):
+        """Test processing Morpheus response with tool calls"""
+        from src.services.morpheus_client import process_morpheus_response
+
+        # Create mock response with tool calls
+        mock_tool_call = Mock()
+        mock_tool_call.id = "call_123"
+        mock_tool_call.type = "function"
+        mock_tool_call.function = Mock()
+        mock_tool_call.function.name = "get_weather"
+        mock_tool_call.function.arguments = '{"location": "NYC"}'
+
+        mock_message = Mock()
+        mock_message.content = None
+        mock_message.role = "assistant"
+        mock_message.tool_calls = [mock_tool_call]
+
+        mock_choice = Mock()
+        mock_choice.index = 0
+        mock_choice.message = mock_message
+        mock_choice.finish_reason = "tool_calls"
+
+        mock_response = Mock()
+        mock_response.id = "chatcmpl-456"
+        mock_response.object = "chat.completion"
+        mock_response.created = 1234567890
+        mock_response.model = "llama-3.1-8b"
+        mock_response.choices = [mock_choice]
+        mock_response.usage = None
+
+        result = process_morpheus_response(mock_response)
+
+        assert result["id"] == "chatcmpl-456"
+        assert result["choices"][0]["finish_reason"] == "tool_calls"
+        assert "message" in result["choices"][0]
+        # Usage should be empty dict when None
+        assert result["usage"] == {}
 
     @patch("httpx.get")
     @patch("src.services.morpheus_client.Config")

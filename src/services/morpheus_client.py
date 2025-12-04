@@ -8,6 +8,8 @@ Documentation: https://apidocs.mor.org/
 
 import logging
 
+import httpx
+
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_morpheus_pooled_client
@@ -117,8 +119,6 @@ def fetch_models_from_morpheus():
         if not Config.MORPHEUS_API_KEY:
             logger.warning("Morpheus API key not configured, returning empty model list")
             return []
-
-        import httpx
 
         headers = {
             "Authorization": f"Bearer {Config.MORPHEUS_API_KEY}",
