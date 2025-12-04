@@ -771,12 +771,14 @@ class IntelligentHealthMonitor:
             degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
             unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
 
-            if unhealthy_providers == 0:
+            if unhealthy_providers == 0 and degraded_providers == 0:
                 overall_status = "healthy"
-            elif unhealthy_providers < total_providers * 0.5:
+            elif unhealthy_providers >= total_providers * 0.5:
+                overall_status = "unhealthy"
+            elif unhealthy_providers > 0 or degraded_providers > 0:
                 overall_status = "degraded"
             else:
-                overall_status = "unhealthy"
+                overall_status = "healthy"
 
             system_uptime = (healthy_models / total_models * 100) if total_models > 0 else 0.0
 

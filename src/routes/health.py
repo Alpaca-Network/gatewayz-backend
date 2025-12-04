@@ -619,7 +619,7 @@ async def get_health_dashboard(
             providers_status.append(
                 ProviderStatusResponse(
                     provider=provider.get("provider", "unknown"),
-                    gateway=provider.get("gateway"),
+                    gateway=provider.get("gateway") or "unknown",
                     status=status_text,
                     status_color=status_color,
                     models_count=provider.get("total_models", 0),
@@ -664,6 +664,8 @@ async def get_health_dashboard(
                     if isinstance(last_checked, str):
                         parsed = dt.fromisoformat(last_checked.replace("Z", "+00:00"))
                         last_checked_display = parsed.strftime("%H:%M:%S")
+                    elif hasattr(last_checked, "strftime"):
+                        last_checked_display = last_checked.strftime("%H:%M:%S")
                 except Exception as e:
                     logger.debug(f"Failed to parse last_checked '{last_checked}': {e}")
 
