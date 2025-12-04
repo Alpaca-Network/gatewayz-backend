@@ -700,9 +700,9 @@ class IntelligentHealthMonitor:
             models_data = []
             for m in models_response.data or []:
                 models_data.append({
-                    "model_id": m.get("model"),
-                    "provider": m.get("provider"),
-                    "gateway": m.get("gateway"),
+                    "model_id": m.get("model") or "unknown",
+                    "provider": m.get("provider") or "unknown",
+                    "gateway": m.get("gateway") or "unknown",
                     "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
                     "response_time_ms": m.get("last_response_time_ms"),
                     "avg_response_time_ms": m.get("last_response_time_ms"),
