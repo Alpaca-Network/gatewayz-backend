@@ -371,6 +371,18 @@ make_cloudflare_workers_ai_request_openai_stream = _cloudflare_workers_ai.get(
     "make_cloudflare_workers_ai_request_openai_stream"
 )
 
+_morpheus = _safe_import_provider(
+    "morpheus",
+    [
+        "make_morpheus_request_openai",
+        "process_morpheus_response",
+        "make_morpheus_request_openai_stream",
+    ],
+)
+make_morpheus_request_openai = _morpheus.get("make_morpheus_request_openai")
+process_morpheus_response = _morpheus.get("process_morpheus_response")
+make_morpheus_request_openai_stream = _morpheus.get("make_morpheus_request_openai_stream")
+
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
@@ -1478,6 +1490,13 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "morpheus":
+                        stream = await _to_thread(
+                            make_morpheus_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
                     else:
                         stream = await _to_thread(
                             make_openrouter_request_openai_stream,
@@ -1766,6 +1785,17 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_cloudflare_workers_ai_response, resp_raw)
+                elif attempt_provider == "morpheus":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_morpheus_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_morpheus_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(

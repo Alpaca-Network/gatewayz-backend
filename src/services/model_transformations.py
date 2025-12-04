@@ -218,6 +218,13 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'groq/' prefix: '{model_id}' -> '{stripped}' for Groq")
         model_id = stripped
 
+    # Special handling for Morpheus: strip 'morpheus/' prefix if present
+    # Morpheus API expects just the model name without the provider prefix
+    if provider_lower == "morpheus" and model_id.startswith("morpheus/"):
+        stripped = model_id[len("morpheus/") :]
+        logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
+        model_id = stripped
+
     # Get the mapping for this provider
     mapping = get_model_id_mapping(provider_lower)
 
@@ -859,6 +866,21 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@cf/nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
             "@cf/microsoft/phi-2": "@cf/microsoft/phi-2",
         },
+        "morpheus": {
+            # Morpheus AI Gateway uses OpenAI-compatible model identifiers
+            # Models are dynamically fetched from the Morpheus API
+            # Pass-through format - model IDs from the Morpheus /models endpoint
+            # Strip morpheus/ prefix for actual API calls
+            "morpheus/llama-3.1-8b": "llama-3.1-8b",
+            "morpheus/llama-3.1-70b": "llama-3.1-70b",
+            "morpheus/mistral-7b": "mistral-7b",
+            "morpheus/deepseek-r1": "deepseek-r1",
+            # Direct model names (passthrough)
+            "llama-3.1-8b": "llama-3.1-8b",
+            "llama-3.1-70b": "llama-3.1-70b",
+            "mistral-7b": "mistral-7b",
+            "deepseek-r1": "deepseek-r1",
+        },
     }
 
     return mappings.get(provider, {})
@@ -1086,6 +1108,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "xai",
         "groq",
         "cloudflare-workers-ai",
+        "morpheus",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -1126,6 +1149,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # Helicone models (e.g., "helicone/gpt-4o-mini")
         if org == "helicone":
             return "helicone"
+
+        # Morpheus models (e.g., "morpheus/llama-3.1-8b")
+        if org == "morpheus":
+            return "morpheus"
 
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
