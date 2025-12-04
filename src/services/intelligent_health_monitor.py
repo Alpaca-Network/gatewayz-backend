@@ -186,6 +186,8 @@ class IntelligentHealthMonitor:
 
                 if not models_to_check:
                     logger.debug("No models need checking at this time")
+                    # Still publish cached health data to keep cache fresh
+                    await self._publish_health_to_cache()
                     await asyncio.sleep(60)
                     continue
 
