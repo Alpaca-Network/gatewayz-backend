@@ -370,12 +370,27 @@ async def get_health_summary(
                 last_updated=datetime.now(timezone.utc),
             )
 
+        # Check if cache is stale (no update in last 5 minutes)
+        monitoring_active = False
+        if cached_system:
+            last_updated_str = cached_system.get("last_updated")
+            if last_updated_str:
+                try:
+                    if isinstance(last_updated_str, str):
+                        last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
+                    else:
+                        last_updated = last_updated_str
+                    age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
+                    monitoring_active = age_seconds < 300  # 5 minutes
+                except Exception:
+                    monitoring_active = False
+
         return HealthSummaryResponse(
-            system_health=system_health,
+            system=system_health,
             providers=[ProviderHealthResponse(**p) for p in cached_providers] if cached_providers else [],
             models=[ModelHealthResponse(**m) for m in cached_models] if cached_models else [],
-            monitoring_active=cached_system is not None,
-            last_updated=datetime.now(timezone.utc),
+            monitoring_active=monitoring_active,
+            last_check=datetime.now(timezone.utc),
         )
     except Exception as e:
         logger.error(f"Failed to get health summary: {e}")
@@ -478,11 +493,16 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
         avg_response_time = sum(response_times) / len(response_times) if response_times else None
 
         # Determine status from cached system health
+        # Handle both lowercase and uppercase enum values
         overall_status = cached_system.get("overall_status", "unknown")
+        if isinstance(overall_status, str):
+            overall_status = overall_status.lower()
         if overall_status == "healthy":
             status = "operational"
         elif overall_status == "degraded":
             status = "degraded"
+        elif overall_status in ("unknown", "maintenance"):
+            status = "unknown"
         else:
             status = "outage"
 
@@ -644,8 +664,8 @@ async def get_health_dashboard(
                     if isinstance(last_checked, str):
                         parsed = dt.fromisoformat(last_checked.replace("Z", "+00:00"))
                         last_checked_display = parsed.strftime("%H:%M:%S")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse last_checked '{last_checked}': {e}")
 
             model_id = model.get("model_id", "unknown")
             models_status.append(
@@ -727,12 +747,26 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
+        # Check if cache is stale (no update in last 5 minutes)
+        monitoring_active = False
+        last_updated_str = cached_system.get("last_updated")
+        if last_updated_str:
+            try:
+                if isinstance(last_updated_str, str):
+                    last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
+                else:
+                    last_updated = last_updated_str
+                age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
+                monitoring_active = age_seconds < 300  # 5 minutes
+            except Exception:
+                monitoring_active = False
+
         return {
             "status": cached_system.get("overall_status", "unknown"),
             "uptime": cached_system.get("system_uptime", 0.0),
             "healthy_models": cached_system.get("healthy_models", 0),
             "total_models": cached_system.get("total_models", 0),
-            "monitoring_active": True,  # If we have cached data, monitoring is active
+            "monitoring_active": monitoring_active,
             "data_source": "health-service (via Redis cache)",
             "timestamp": cached_system.get("last_updated", datetime.now(timezone.utc).isoformat()),
         }
