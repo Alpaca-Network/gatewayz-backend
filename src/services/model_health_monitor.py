@@ -532,7 +532,7 @@ class ModelHealthMonitor:
                 "openrouter": "https://openrouter.ai/api/v1/chat/completions",
                 "featherless": "https://api.featherless.ai/v1/chat/completions",
                 "deepinfra": "https://api.deepinfra.com/v1/openai/chat/completions",
-                "huggingface": "https://api-inference.huggingface.co/models/" + model_id,
+                "huggingface": "https://router.huggingface.co/v1/chat/completions",
                 "groq": "https://api.groq.com/openai/v1/chat/completions",
                 "fireworks": "https://api.fireworks.ai/inference/v1/chat/completions",
                 "together": "https://api.together.xyz/v1/chat/completions",

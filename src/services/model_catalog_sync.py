@@ -328,7 +328,7 @@ def ensure_provider_exists(provider_slug: str) -> Optional[Dict[str, Any]]:
             "huggingface": {
                 "name": "HuggingFace",
                 "description": "HuggingFace inference API",
-                "base_url": "https://api-inference.huggingface.co",
+                "base_url": "https://router.huggingface.co",
                 "api_key_env_var": "HUGGINGFACE_API_KEY",
                 "site_url": "https://huggingface.co",
                 "supports_streaming": True,

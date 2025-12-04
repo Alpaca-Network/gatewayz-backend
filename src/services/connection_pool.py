@@ -350,7 +350,7 @@ def get_huggingface_pooled_client() -> OpenAI:
 
     return get_pooled_client(
         provider="huggingface",
-        base_url="https://api-inference.huggingface.co/v1",
+        base_url="https://router.huggingface.co/v1",
         api_key=Config.HUGGINGFACE_API_KEY,
         timeout=HUGGINGFACE_TIMEOUT,
     )

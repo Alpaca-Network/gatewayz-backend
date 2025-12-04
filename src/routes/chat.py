@@ -1280,6 +1280,19 @@ async def chat_completions(
                 if val is not None:
                     optional[name] = val
 
+            # Validate and adjust max_tokens for Gemini models (minimum 16 required)
+            if "max_tokens" in optional and optional["max_tokens"] is not None:
+                model_lower = original_model.lower()
+                # Check if this is a Gemini model that requires min tokens >= 16
+                if "gemini" in model_lower or "google" in model_lower:
+                    min_tokens = 16
+                    if optional["max_tokens"] < min_tokens:
+                        logger.warning(
+                            f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
+                            f"for Gemini model {original_model} (minimum requirement)"
+                        )
+                        optional["max_tokens"] = min_tokens
+
             # Auto-detect provider if not specified
             req_provider_missing = req.provider is None or (
                 isinstance(req.provider, str) and not req.provider
@@ -2301,6 +2314,19 @@ async def unified_responses(
             val = getattr(req, name, None)
             if val is not None:
                 optional[name] = val
+
+        # Validate and adjust max_tokens for Gemini models (minimum 16 required)
+        if "max_tokens" in optional and optional["max_tokens"] is not None:
+            model_lower = original_model.lower()
+            # Check if this is a Gemini model that requires min tokens >= 16
+            if "gemini" in model_lower or "google" in model_lower:
+                min_tokens = 16
+                if optional["max_tokens"] < min_tokens:
+                    logger.warning(
+                        f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
+                        f"for Gemini model {original_model} (minimum requirement)"
+                    )
+                    optional["max_tokens"] = min_tokens
 
         # Add response_format if specified
         if req.response_format:
