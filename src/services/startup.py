@@ -1,5 +1,9 @@
 """
-Startup service for initializing health monitoring, availability services, and connection pools
+Startup service for initializing observability, connection pools, and other services.
+
+NOTE: Active health monitoring is handled by the dedicated health-service container.
+The main API reads health data from Redis cache populated by health-service.
+See: health-service/main.py
 """
 
 import asyncio
@@ -10,8 +14,6 @@ from contextlib import asynccontextmanager
 from src.cache import initialize_fal_cache_from_catalog
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import clear_connection_pools, get_pool_stats
-from src.services.model_availability import availability_service
-from src.services.model_health_monitor import health_monitor
 from src.services.prometheus_remote_write import (
     init_prometheus_remote_write,
     shutdown_prometheus_remote_write,
@@ -117,39 +119,12 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Prometheus remote write initialization warning: {e}")
 
-        # Start active health monitoring (proactive periodic checks)
-        # This complements passive monitoring from real API calls in chat.py and messages.py
-        # Active monitoring detects issues before users encounter them
-        #
-        # IMPORTANT: When running a dedicated health-service container, disable
-        # active monitoring in the main API to prevent duplicate checks and reduce
-        # memory usage. Set DISABLE_ACTIVE_HEALTH_MONITORING=true
-        active_health_monitoring_disabled = (
-            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
-        )
-
-        if active_health_monitoring_disabled:
-            logger.info("⏭️  Active health monitoring DISABLED (handled by health-service)")
-            logger.info("   Main API will read health data from Redis cache")
-        else:
-            try:
-                await health_monitor.start_monitoring()
-                logger.info("✅ Active health monitoring started (periodic checks)")
-            except Exception as e:
-                logger.warning(f"Active health monitoring failed to start: {e}")
-        logger.info("✅ Passive health monitoring active (from real API calls)")
-
-        # Start availability monitoring
-        # Can also be disabled if running dedicated health-service
-        availability_monitoring_disabled = (
-            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
-        )
-
-        if availability_monitoring_disabled:
-            logger.info("⏭️  Availability monitoring DISABLED (handled by health-service)")
-        else:
-            await availability_service.start_monitoring()
-            logger.info("Availability monitoring service started")
+        # Health monitoring is handled by the dedicated health-service container
+        # The main API reads health data from Redis cache populated by health-service
+        # This prevents heavy health checks from affecting API response times
+        logger.info("⏭️  Health monitoring handled by dedicated health-service container")
+        logger.info("   Main API reads health data from Redis cache")
+        logger.info("✅ Passive health monitoring active (from real API calls in chat.py/messages.py)")
 
         # Initialize connection pools (they're lazy-loaded, but log readiness)
         pool_stats = get_pool_stats()
@@ -197,24 +172,9 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Error monitoring shutdown warning: {e}")
 
-        # Stop availability monitoring (only if it was started)
-        availability_monitoring_disabled = (
-            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
-        )
-        if not availability_monitoring_disabled:
-            await availability_service.stop_monitoring()
-            logger.info("Availability monitoring service stopped")
-
-        # Stop active health monitoring (only if it was started)
-        active_health_monitoring_disabled = (
-            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
-        )
-        if not active_health_monitoring_disabled:
-            try:
-                await health_monitor.stop_monitoring()
-                logger.info("Active health monitoring stopped")
-            except Exception as e:
-                logger.warning(f"Health monitoring shutdown warning: {e}")
+        # Health monitoring is handled by the dedicated health-service container
+        # No health monitor shutdown needed in main API
+        logger.info("Health monitoring: handled by health-service (no shutdown needed)")
         logger.info("Passive health monitoring: no shutdown needed (captures real API calls)")
 
         # Shutdown Prometheus remote write
@@ -243,32 +203,14 @@ async def lifespan(app):
 
 async def initialize_services():
     """
-    Initialize all monitoring services.
-    Respects DISABLE_ACTIVE_HEALTH_MONITORING and DISABLE_AVAILABILITY_MONITORING flags.
+    Initialize services for the main API.
+
+    NOTE: Health monitoring is handled by the dedicated health-service container.
+    The main API reads health data from Redis cache populated by health-service.
     """
     try:
-        logger.info("Initializing monitoring services...")
-
-        # Start health monitoring (respects disable flag)
-        active_health_monitoring_disabled = (
-            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
-        )
-        if not active_health_monitoring_disabled:
-            await health_monitor.start_monitoring()
-            logger.info("Health monitoring started")
-        else:
-            logger.info("Health monitoring disabled via environment variable")
-
-        # Start availability monitoring (respects disable flag)
-        availability_monitoring_disabled = (
-            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
-        )
-        if not availability_monitoring_disabled:
-            await availability_service.start_monitoring()
-            logger.info("Availability monitoring started")
-        else:
-            logger.info("Availability monitoring disabled via environment variable")
-
+        logger.info("Initializing services...")
+        logger.info("Health monitoring: handled by dedicated health-service container")
         logger.info("All services initialized successfully")
 
     except Exception as e:
@@ -278,28 +220,14 @@ async def initialize_services():
 
 async def shutdown_services():
     """
-    Shutdown all monitoring services.
-    Respects DISABLE_ACTIVE_HEALTH_MONITORING and DISABLE_AVAILABILITY_MONITORING flags.
+    Shutdown services for the main API.
+
+    NOTE: Health monitoring is handled by the dedicated health-service container.
+    No health monitor shutdown needed in main API.
     """
     try:
         logger.info("Shutting down services...")
-
-        # Stop availability monitoring (only if it was started)
-        availability_monitoring_disabled = (
-            os.environ.get("DISABLE_AVAILABILITY_MONITORING", "false").lower() == "true"
-        )
-        if not availability_monitoring_disabled:
-            await availability_service.stop_monitoring()
-            logger.info("Availability monitoring stopped")
-
-        # Stop health monitoring (only if it was started)
-        active_health_monitoring_disabled = (
-            os.environ.get("DISABLE_ACTIVE_HEALTH_MONITORING", "false").lower() == "true"
-        )
-        if not active_health_monitoring_disabled:
-            await health_monitor.stop_monitoring()
-            logger.info("Health monitoring stopped")
-
+        logger.info("Health monitoring: handled by health-service (no shutdown needed)")
         logger.info("All services shut down successfully")
 
     except Exception as e:

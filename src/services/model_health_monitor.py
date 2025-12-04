@@ -784,6 +784,37 @@ class ModelHealthMonitor:
             last_updated=datetime.now(timezone.utc),
         )
 
+        # Publish health data to Redis cache for consumption by main API
+        await self._publish_health_to_cache()
+
+    async def _publish_health_to_cache(self):
+        """Publish health data to Redis cache for consumption by main API"""
+        try:
+            from src.services.simple_health_cache import simple_health_cache
+
+            # Cache system health
+            if self.system_data:
+                simple_health_cache.cache_system_health(asdict(self.system_data))
+                logger.debug("Published system health to Redis cache")
+
+            # Cache providers health
+            providers_data = [asdict(p) for p in self.provider_data.values()]
+            if providers_data:
+                simple_health_cache.cache_providers_health(providers_data)
+                logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
+
+            # Cache models health
+            models_data = [asdict(m) for m in self.health_data.values()]
+            if models_data:
+                simple_health_cache.cache_models_health(models_data)
+                logger.debug(f"Published {len(models_data)} models health to Redis cache")
+
+            logger.info("Health data published to Redis cache successfully")
+
+        except Exception as e:
+            logger.warning(f"Failed to publish health data to Redis cache: {e}")
+            # Don't fail the health check if cache publish fails
+
     def get_model_health(self, model_id: str, gateway: str = None) -> ModelHealthMetrics | None:
         """Get health metrics for a specific model"""
         if gateway:
