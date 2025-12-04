@@ -33,6 +33,11 @@ MODEL_ID_ALIASES = {
     "gpt5_1": "openai/gpt-5.1",
     "gpt5.1": "openai/gpt-5.1",
     "gpt-5.1": "openai/gpt-5.1",
+    # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
+    "grok-beta": "grok-3",
+    "xai/grok-beta": "xai/grok-3",
+    "grok-vision-beta": "grok-3",
+    "xai/grok-vision-beta": "xai/grok-3",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
@@ -700,16 +705,19 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         },
         "xai": {
             # XAI Grok models - pass-through format
-            # Models are referenced by their simple names (e.g., "grok-2", "grok-beta")
+            # Models are referenced by their simple names (e.g., "grok-2", "grok-3")
             # Can also use xai/grok-* format
-            "grok-beta": "grok-beta",
+            # Note: grok-beta was deprecated on 2025-09-15, now redirected to grok-3
+            "grok-beta": "grok-3",
             "grok-2": "grok-2",
             "grok-2-1212": "grok-2-1212",
-            "grok-vision-beta": "grok-vision-beta",
-            "xai/grok-beta": "grok-beta",
+            "grok-3": "grok-3",
+            "grok-vision-beta": "grok-3",  # grok-vision-beta also deprecated
+            "xai/grok-beta": "grok-3",
             "xai/grok-2": "grok-2",
             "xai/grok-2-1212": "grok-2-1212",
-            "xai/grok-vision-beta": "grok-vision-beta",
+            "xai/grok-3": "grok-3",
+            "xai/grok-vision-beta": "grok-3",
         },
         "cerebras": {
             # Cerebras API expects model IDs without the "cerebras/" prefix
