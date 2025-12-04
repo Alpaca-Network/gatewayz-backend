@@ -447,6 +447,33 @@ def log_activity(*args, **kwargs):
     return activity_module.log_activity(*args, **kwargs)
 
 
+def validate_and_adjust_max_tokens(optional: dict, model: str) -> None:
+    """
+    Validate and adjust max_tokens for models with minimum token requirements.
+
+    Google Gemini models require max_tokens >= 16. This function automatically
+    adjusts the value if it's below the minimum to prevent API errors.
+
+    Args:
+        optional: Dictionary of optional parameters (modified in-place)
+        model: The model ID being used
+    """
+    if "max_tokens" not in optional or optional["max_tokens"] is None:
+        return
+
+    model_lower = model.lower()
+
+    # Check if this is a Gemini model that requires min tokens >= 16
+    if "gemini" in model_lower or "google" in model_lower:
+        min_tokens = 16
+        if optional["max_tokens"] < min_tokens:
+            logger.warning(
+                f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
+                f"for Gemini model {model} (minimum requirement)"
+            )
+            optional["max_tokens"] = min_tokens
+
+
 def get_provider_from_model(*args, **kwargs):
     return activity_module.get_provider_from_model(*args, **kwargs)
 
@@ -1280,18 +1307,8 @@ async def chat_completions(
                 if val is not None:
                     optional[name] = val
 
-            # Validate and adjust max_tokens for Gemini models (minimum 16 required)
-            if "max_tokens" in optional and optional["max_tokens"] is not None:
-                model_lower = original_model.lower()
-                # Check if this is a Gemini model that requires min tokens >= 16
-                if "gemini" in model_lower or "google" in model_lower:
-                    min_tokens = 16
-                    if optional["max_tokens"] < min_tokens:
-                        logger.warning(
-                            f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
-                            f"for Gemini model {original_model} (minimum requirement)"
-                        )
-                        optional["max_tokens"] = min_tokens
+            # Validate and adjust max_tokens for models with minimum requirements
+            validate_and_adjust_max_tokens(optional, original_model)
 
             # Auto-detect provider if not specified
             req_provider_missing = req.provider is None or (
@@ -2315,18 +2332,8 @@ async def unified_responses(
             if val is not None:
                 optional[name] = val
 
-        # Validate and adjust max_tokens for Gemini models (minimum 16 required)
-        if "max_tokens" in optional and optional["max_tokens"] is not None:
-            model_lower = original_model.lower()
-            # Check if this is a Gemini model that requires min tokens >= 16
-            if "gemini" in model_lower or "google" in model_lower:
-                min_tokens = 16
-                if optional["max_tokens"] < min_tokens:
-                    logger.warning(
-                        f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
-                        f"for Gemini model {original_model} (minimum requirement)"
-                    )
-                    optional["max_tokens"] = min_tokens
+        # Validate and adjust max_tokens for models with minimum requirements
+        validate_and_adjust_max_tokens(optional, original_model)
 
         # Add response_format if specified
         if req.response_format:
