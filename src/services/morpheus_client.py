@@ -135,6 +135,8 @@ def fetch_models_from_morpheus():
         transformed_models = []
         for model in models:
             model_id = model.get("id", "")
+            if not model_id:
+                continue  # Skip models with empty or missing IDs
             transformed_models.append(
                 {
                     "id": f"morpheus/{model_id}",

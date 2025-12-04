@@ -218,6 +218,33 @@ class TestMorpheusClient:
         models = fetch_models_from_morpheus()
         assert models == []
 
+    @patch("httpx.get")
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_skips_empty_ids(self, mock_config, mock_httpx_get):
+        """Test that models with empty or missing IDs are skipped"""
+        mock_config.MORPHEUS_API_KEY = "test-key"
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "valid-model", "context_length": 4096},
+                {"id": "", "context_length": 4096},  # Empty ID
+                {"context_length": 4096},  # Missing ID
+                {"id": "another-valid", "context_length": 8192},
+            ]
+        }
+        mock_response.raise_for_status = Mock()
+        mock_httpx_get.return_value = mock_response
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Only valid models should be included
+        assert len(models) == 2
+        assert models[0]["id"] == "morpheus/valid-model"
+        assert models[1]["id"] == "morpheus/another-valid"
+
 
 class TestMorpheusModelTransformations:
     """Test model ID transformations for Morpheus"""
