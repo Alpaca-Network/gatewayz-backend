@@ -787,6 +787,12 @@ class ModelHealthMonitor:
         """Publish health data to Redis cache for consumption by main API"""
         try:
             from src.services.simple_health_cache import simple_health_cache
+            from src.config.redis_config import get_redis_config
+
+            # Debug log to check Redis connection
+            redis_config = get_redis_config()
+            redis_host = redis_config.redis_host
+            logger.info(f"Attempting to publish health data to Redis from simple monitor (host: {redis_host})")
 
             # Cache system health
             if self.system_data:
