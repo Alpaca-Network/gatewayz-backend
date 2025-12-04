@@ -40,7 +40,12 @@ logger = logging.getLogger(__name__)
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "300"))
 
 # Whether to use intelligent (tiered) monitoring vs simple monitoring
+# IMPORTANT: Use intelligent monitor for 9,000+ models to avoid memory exhaustion
+# Simple monitor loads all models into memory and will crash with large datasets
 USE_INTELLIGENT_MONITOR = os.environ.get("USE_INTELLIGENT_MONITOR", "true").lower() == "true"
+
+# Memory limit safeguard (in MB)
+MEMORY_LIMIT_MB = int(os.environ.get("MEMORY_LIMIT_MB", "28000"))  # 28GB for 32GB container
 
 # Track which monitor is actually running (may differ from config if fallback occurs)
 _active_monitor_type: str = "none"  # "intelligent", "simple", or "none"
@@ -55,6 +60,10 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("Starting Gatewayz Health Monitoring Service")
     logger.info("=" * 60)
+    
+    # Log memory configuration
+    logger.info(f"Memory limit: {MEMORY_LIMIT_MB}MB")
+    logger.info(f"Using Intelligent Monitor: {USE_INTELLIGENT_MONITOR}")
 
     # Validate critical environment variables
     is_valid, missing_vars = Config.validate_critical_env_vars()

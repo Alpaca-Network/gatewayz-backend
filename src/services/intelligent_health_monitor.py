@@ -685,6 +685,12 @@ class IntelligentHealthMonitor:
         try:
             from src.config.supabase_config import supabase
             from src.services.simple_health_cache import simple_health_cache
+            from src.config.redis_config import get_redis_config
+
+            # Debug log to check Redis connection
+            redis_config = get_redis_config()
+            redis_host = redis_config.redis_host
+            logger.info(f"Attempting to publish health data to Redis (host: {redis_host})")
 
             # Query aggregated health data from database
             # Get model health data
