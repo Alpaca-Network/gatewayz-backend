@@ -68,14 +68,14 @@
             "enabled": true,
             "interval": 60,
             "timeout": 30,
-            "initialDelay": 120,
+            "initialDelay": 180,
             "path": "/health"
           },
           "readiness": {
             "enabled": true,
             "interval": 30,
             "timeout": 15,
-            "initialDelay": 90,
+            "initialDelay": 180,
             "path": "/health"
           }
         },
