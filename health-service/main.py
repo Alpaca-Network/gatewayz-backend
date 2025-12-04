@@ -57,73 +57,81 @@ async def lifespan(app: FastAPI):
     Application lifespan manager for startup and shutdown events.
     Starts and stops the health monitoring services.
     """
-    logger.info("=" * 60)
-    logger.info("Starting Gatewayz Health Monitoring Service")
-    logger.info("=" * 60)
-    
-    # Log memory configuration
-    logger.info(f"Memory limit: {MEMORY_LIMIT_MB}MB")
-    logger.info(f"Using Intelligent Monitor: {USE_INTELLIGENT_MONITOR}")
-
-    # Validate critical environment variables
-    is_valid, missing_vars = Config.validate_critical_env_vars()
-    if not is_valid:
-        logger.error(f"Missing required environment variables: {missing_vars}")
-        # Continue anyway - some vars might not be needed for health checks
-        logger.warning("Proceeding with available configuration...")
-
-    # Initialize Redis connection
     try:
-        from src.config.redis_config import get_redis_client
-        redis_client = get_redis_client()
-        if redis_client:
-            logger.info("Redis connection established")
-        else:
-            logger.warning("Redis not available - health data will not be shared")
-    except Exception as e:
-        logger.warning(f"Redis initialization warning: {e}")
+        logger.info("=" * 60)
+        logger.info("Starting Gatewayz Health Monitoring Service")
+        logger.info("=" * 60)
+        
+        # Log memory configuration
+        logger.info(f"Memory limit: {MEMORY_LIMIT_MB}MB")
+        logger.info(f"Using Intelligent Monitor: {USE_INTELLIGENT_MONITOR}")
+
+        # Validate critical environment variables
+        is_valid, missing_vars = Config.validate_critical_env_vars()
+        if not is_valid:
+            logger.error(f"Missing required environment variables: {missing_vars}")
+            # Continue anyway - some vars might not be needed for health checks
+            logger.warning("Proceeding with available configuration...")
+
+        # Initialize Redis connection
+        try:
+            from src.config.redis_config import get_redis_client
+            redis_client = get_redis_client()
+            if redis_client:
+                logger.info("Redis connection established")
+            else:
+                logger.warning("Redis not available - health data will not be shared")
+        except Exception as e:
+            logger.warning(f"Redis initialization warning: {e}")
+    except Exception as startup_error:
+        logger.error(f"CRITICAL: Startup error in lifespan: {startup_error}", exc_info=True)
+        raise
 
     # Start health monitoring based on configuration
-    global _active_monitor_type
-    if USE_INTELLIGENT_MONITOR:
-        logger.info("Starting Intelligent Health Monitor (tiered, database-backed)")
-        try:
-            from src.services.intelligent_health_monitor import intelligent_health_monitor
-            await intelligent_health_monitor.start_monitoring()
-            _active_monitor_type = "intelligent"
-            logger.info("Intelligent health monitoring started successfully")
-        except Exception as e:
-            logger.error(f"Failed to start intelligent health monitor: {e}")
-            # Fall back to simple monitor
-            logger.info("Falling back to simple health monitor...")
+    try:
+        global _active_monitor_type
+        if USE_INTELLIGENT_MONITOR:
+            logger.info("Starting Intelligent Health Monitor (tiered, database-backed)")
+            try:
+                from src.services.intelligent_health_monitor import intelligent_health_monitor
+                await intelligent_health_monitor.start_monitoring()
+                _active_monitor_type = "intelligent"
+                logger.info("Intelligent health monitoring started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start intelligent health monitor: {e}", exc_info=True)
+                # Fall back to simple monitor
+                logger.info("Falling back to simple health monitor...")
+                try:
+                    from src.services.model_health_monitor import health_monitor
+                    # Apply configured interval before starting
+                    health_monitor.check_interval = HEALTH_CHECK_INTERVAL
+                    await health_monitor.start_monitoring()
+                    _active_monitor_type = "simple"
+                    logger.info("Simple health monitoring started (fallback)")
+                except Exception as fallback_error:
+                    logger.error(f"Failed to start fallback health monitor: {fallback_error}", exc_info=True)
+        else:
+            logger.info("Starting Simple Health Monitor")
             try:
                 from src.services.model_health_monitor import health_monitor
                 # Apply configured interval before starting
                 health_monitor.check_interval = HEALTH_CHECK_INTERVAL
                 await health_monitor.start_monitoring()
                 _active_monitor_type = "simple"
-                logger.info("Simple health monitoring started (fallback)")
-            except Exception as fallback_error:
-                logger.error(f"Failed to start fallback health monitor: {fallback_error}")
-    else:
-        logger.info("Starting Simple Health Monitor")
-        try:
-            from src.services.model_health_monitor import health_monitor
-            # Apply configured interval before starting
-            health_monitor.check_interval = HEALTH_CHECK_INTERVAL
-            await health_monitor.start_monitoring()
-            _active_monitor_type = "simple"
-            logger.info("Simple health monitoring started successfully")
-        except Exception as e:
-            logger.error(f"Failed to start simple health monitor: {e}")
+                logger.info("Simple health monitoring started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start simple health monitor: {e}", exc_info=True)
 
-    # Start availability monitoring
-    try:
-        from src.services.model_availability import availability_service
-        await availability_service.start_monitoring()
-        logger.info("Availability monitoring started")
-    except Exception as e:
-        logger.warning(f"Availability monitoring failed to start: {e}")
+        # Start availability monitoring
+        try:
+            from src.services.model_availability import availability_service
+            await availability_service.start_monitoring()
+            logger.info("Availability monitoring started")
+        except Exception as e:
+            logger.warning(f"Availability monitoring failed to start: {e}")
+    except Exception as monitor_error:
+        logger.error(f"CRITICAL: Monitor startup error: {monitor_error}", exc_info=True)
+        # Don't raise - allow app to start even if monitoring fails
 
     logger.info("=" * 60)
     logger.info("Health Monitoring Service is running")
@@ -179,6 +187,17 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.get("/")
+async def root():
+    """Root endpoint for health-service."""
+    return {
+        "service": "health-monitor",
+        "status": "running",
+        "version": "1.0.0",
+        "endpoints": ["/health", "/status", "/metrics", "/cache/stats"],
+    }
 
 
 @app.get("/health")
