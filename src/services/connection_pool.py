@@ -467,3 +467,19 @@ def get_akash_pooled_client() -> OpenAI:
         base_url="https://api.akashml.com/v1",
         api_key=Config.AKASH_API_KEY,
     )
+
+
+def get_morpheus_pooled_client() -> OpenAI:
+    """Get pooled client for Morpheus AI Gateway.
+
+    Morpheus provides an OpenAI-compatible API endpoint for decentralized AI.
+    See: https://api.mor.org/api/v1
+    """
+    if not Config.MORPHEUS_API_KEY:
+        raise ValueError("Morpheus API key not configured")
+
+    return get_pooled_client(
+        provider="morpheus",
+        base_url="https://api.mor.org/api/v1",
+        api_key=Config.MORPHEUS_API_KEY,
+    )

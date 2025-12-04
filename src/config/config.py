@@ -194,6 +194,9 @@ class Config:
     # Akash ML Configuration
     AKASH_API_KEY = os.environ.get("AKASH_API_KEY")
 
+    # Morpheus AI Gateway Configuration
+    MORPHEUS_API_KEY = os.environ.get("MORPHEUS_API_KEY")
+
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
     CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
