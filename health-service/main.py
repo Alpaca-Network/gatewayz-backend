@@ -482,4 +482,11 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", "8001"))
     logger.info(f"Starting Health Monitoring Service on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    logger.info("=" * 60)
+    logger.info("Service is now listening for requests")
+    logger.info("=" * 60)
+    try:
+        uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    except Exception as e:
+        logger.error(f"FATAL: Failed to start uvicorn: {e}", exc_info=True)
+        raise
