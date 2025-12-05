@@ -608,6 +608,7 @@ class TestSentryTunnelEndpoint:
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.content = b'{"id": "12345"}'
+            mock_response.headers = {}
 
             mock_client_instance = Mock()
             mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
@@ -620,3 +621,151 @@ class TestSentryTunnelEndpoint:
 
             # Endpoint should forward to Sentry and return success
             assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    def test_sentry_tunnel_429_retry_success(self, client: TestClient):
+        """Test that 429 response triggers retry and succeeds on second attempt"""
+        import json
+        # Create a valid Sentry envelope
+        envelope_header = json.dumps({
+            "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
+            "event_id": "12345"
+        }).encode()
+        envelope = envelope_header + b"\n"
+
+        with patch("src.routes.monitoring.httpx.AsyncClient") as mock_client:
+            # First response is 429, second is success
+            mock_response_429 = Mock()
+            mock_response_429.status_code = 429
+            mock_response_429.content = b'{"error": "rate_limited"}'
+            mock_response_429.headers = {"Retry-After": "1"}
+
+            mock_response_200 = Mock()
+            mock_response_200.status_code = 200
+            mock_response_200.content = b'{"id": "12345"}'
+            mock_response_200.headers = {}
+
+            mock_client_instance = Mock()
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            # Return 429 first, then 200
+            mock_client_instance.post = AsyncMock(side_effect=[mock_response_429, mock_response_200])
+
+            mock_client.return_value = mock_client_instance
+
+            # Patch asyncio.sleep to avoid actual delay
+            with patch("src.routes.monitoring.asyncio.sleep", new_callable=AsyncMock):
+                response = client.post("/monitoring", content=envelope)
+
+            # Should succeed after retry
+            assert response.status_code == 200
+            # Should have been called twice (initial + 1 retry)
+            assert mock_client_instance.post.call_count == 2
+
+    @pytest.mark.asyncio
+    def test_sentry_tunnel_429_all_retries_exhausted(self, client: TestClient):
+        """Test that 429 response after all retries returns 429 with Retry-After header"""
+        import json
+        # Create a valid Sentry envelope
+        envelope_header = json.dumps({
+            "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
+            "event_id": "12345"
+        }).encode()
+        envelope = envelope_header + b"\n"
+
+        with patch("src.routes.monitoring.httpx.AsyncClient") as mock_client:
+            # All responses are 429
+            mock_response_429 = Mock()
+            mock_response_429.status_code = 429
+            mock_response_429.content = b'{"error": "rate_limited"}'
+            mock_response_429.headers = {"Retry-After": "30"}
+
+            mock_client_instance = Mock()
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            # Always return 429
+            mock_client_instance.post = AsyncMock(return_value=mock_response_429)
+
+            mock_client.return_value = mock_client_instance
+
+            # Patch asyncio.sleep to avoid actual delay
+            with patch("src.routes.monitoring.asyncio.sleep", new_callable=AsyncMock):
+                response = client.post("/monitoring", content=envelope)
+
+            # Should return 429 after all retries
+            assert response.status_code == 429
+            # Should include Retry-After header
+            assert response.headers.get("Retry-After") == "30"
+            # Should have been called 3 times (SENTRY_MAX_RETRIES)
+            assert mock_client_instance.post.call_count == 3
+
+    @pytest.mark.asyncio
+    def test_sentry_tunnel_429_default_retry_after(self, client: TestClient):
+        """Test that 429 without Retry-After header gets default value"""
+        import json
+        # Create a valid Sentry envelope
+        envelope_header = json.dumps({
+            "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
+            "event_id": "12345"
+        }).encode()
+        envelope = envelope_header + b"\n"
+
+        with patch("src.routes.monitoring.httpx.AsyncClient") as mock_client:
+            # All responses are 429 without Retry-After header
+            mock_response_429 = Mock()
+            mock_response_429.status_code = 429
+            mock_response_429.content = b'{"error": "rate_limited"}'
+            mock_response_429.headers = {}  # No Retry-After header
+
+            mock_client_instance = Mock()
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client_instance.post = AsyncMock(return_value=mock_response_429)
+
+            mock_client.return_value = mock_client_instance
+
+            # Patch asyncio.sleep to avoid actual delay
+            with patch("src.routes.monitoring.asyncio.sleep", new_callable=AsyncMock):
+                response = client.post("/monitoring", content=envelope)
+
+            # Should return 429 with default Retry-After
+            assert response.status_code == 429
+            # Should include default Retry-After header of 60 seconds
+            assert response.headers.get("Retry-After") == "60"
+
+    @pytest.mark.asyncio
+    def test_sentry_tunnel_http_error_retry(self, client: TestClient):
+        """Test that HTTP errors trigger retry"""
+        import json
+        import httpx
+        # Create a valid Sentry envelope
+        envelope_header = json.dumps({
+            "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
+            "event_id": "12345"
+        }).encode()
+        envelope = envelope_header + b"\n"
+
+        with patch("src.routes.monitoring.httpx.AsyncClient") as mock_client:
+            # First call raises error, second succeeds
+            mock_response_200 = Mock()
+            mock_response_200.status_code = 200
+            mock_response_200.content = b'{"id": "12345"}'
+            mock_response_200.headers = {}
+
+            mock_client_instance = Mock()
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            # First call raises error, second succeeds
+            mock_client_instance.post = AsyncMock(
+                side_effect=[httpx.ConnectError("Connection failed"), mock_response_200]
+            )
+
+            mock_client.return_value = mock_client_instance
+
+            # Patch asyncio.sleep to avoid actual delay
+            with patch("src.routes.monitoring.asyncio.sleep", new_callable=AsyncMock):
+                response = client.post("/monitoring", content=envelope)
+
+            # Should succeed after retry
+            assert response.status_code == 200
+            assert mock_client_instance.post.call_count == 2

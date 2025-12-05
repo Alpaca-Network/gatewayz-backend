@@ -12,7 +12,10 @@ This was causing the frontend Sentry SDK to fail silently, preventing error trac
 
 ## Root Cause
 
-The frontend Sentry SDK was configured with a **tunnel** pointing to `/monitoring` to bypass ad blockers. However, the backend did not have a corresponding POST endpoint at `/monitoring` to receive and forward these events to Sentry's ingestion servers.
+The frontend Sentry SDK was configured with a **tunnel** pointing to `/monitoring` to bypass ad blockers. However:
+
+1. Initially, the backend did not have a corresponding POST endpoint at `/monitoring`
+2. After adding the endpoint, Sentry's ingestion servers may still return 429 errors when rate limited
 
 The existing `/api/monitoring/*` endpoints (GET requests) were not related to this issue - they provide health metrics, analytics, and provider comparison data.
 
@@ -22,13 +25,13 @@ The existing `/api/monitoring/*` endpoints (GET requests) were not related to th
 
 **File: `src/routes/monitoring.py`**
 
-Added a new Sentry tunnel endpoint at `POST /monitoring` that:
+Added a new Sentry tunnel endpoint at `POST /monitoring` with:
 
 1. Receives Sentry envelope data from the frontend SDK
 2. Parses the envelope header to extract the DSN
 3. Validates that the target is a legitimate Sentry host (security measure)
-4. Forwards the envelope to Sentry's ingestion endpoint
-5. Returns Sentry's response to the frontend
+4. Forwards the envelope to Sentry's ingestion endpoint with **automatic retry on 429**
+5. Returns Sentry's response to the frontend with appropriate `Retry-After` headers
 
 **File: `src/main.py`**
 
@@ -37,6 +40,11 @@ Registered the new `sentry_tunnel_router` to expose the `/monitoring` POST endpo
 ### Implementation Details
 
 ```python
+# Retry configuration for Sentry tunnel
+SENTRY_MAX_RETRIES = 3
+SENTRY_BASE_DELAY = 0.5  # seconds
+SENTRY_MAX_DELAY = 10.0  # seconds
+
 # Allowed Sentry hosts for security
 ALLOWED_SENTRY_HOSTS = {
     "sentry.io",
@@ -45,14 +53,28 @@ ALLOWED_SENTRY_HOSTS = {
     "ingest.us.sentry.io",
 }
 
+async def _forward_to_sentry_with_retry(...) -> httpx.Response:
+    # Exponential backoff retry on 429 errors
+    # Respects Retry-After header from Sentry
+    # Returns last response after retries exhausted
+
 @sentry_tunnel_router.post("/monitoring")
 async def sentry_tunnel(request: Request) -> Response:
     # 1. Read envelope body
     # 2. Parse JSON header to get DSN
     # 3. Validate Sentry host
-    # 4. Forward to Sentry
-    # 5. Return response
+    # 4. Forward to Sentry with retry logic
+    # 5. Return response with Retry-After header on 429
 ```
+
+### Rate Limit Handling (Updated 2025-12-05)
+
+The endpoint now handles 429 responses from Sentry's ingestion servers:
+
+1. **Automatic Retry**: Up to 3 retries with exponential backoff (0.5s, 1s, 2s)
+2. **Retry-After Header**: Respects Sentry's `Retry-After` header when present
+3. **Default Retry-After**: Returns `Retry-After: 60` if Sentry doesn't provide one
+4. **Graceful Degradation**: After all retries, returns 429 with appropriate headers
 
 ### Security Considerations
 
@@ -101,6 +123,10 @@ Test cases:
 - `test_sentry_tunnel_number_json` - Returns 400 for number JSON
 - `test_sentry_tunnel_null_json` - Returns 400 for null JSON
 - `test_sentry_tunnel_valid_envelope` - Forwards valid envelopes to Sentry
+- `test_sentry_tunnel_429_retry_success` - Retries on 429 and succeeds
+- `test_sentry_tunnel_429_all_retries_exhausted` - Returns 429 with Retry-After after all retries
+- `test_sentry_tunnel_429_default_retry_after` - Returns default Retry-After when not provided
+- `test_sentry_tunnel_http_error_retry` - Retries on HTTP connection errors
 
 ### Manual Testing
 
