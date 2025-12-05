@@ -289,7 +289,10 @@ class IntelligentHealthMonitor:
                 lock_key = f"health_check_lock:{model['provider']}:{model['model']}:{model['gateway']}"
 
                 # Try to acquire lock (60 second expiry)
-                acquired = await redis_client.set(lock_key, self._worker_id, ex=60, nx=True)
+                # Note: redis_client is synchronous, so we use asyncio.to_thread
+                acquired = await asyncio.to_thread(
+                    redis_client.set, lock_key, self._worker_id, ex=60, nx=True
+                )
 
                 if acquired:
                     filtered_models.append(model)
