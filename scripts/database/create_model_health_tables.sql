@@ -141,6 +141,10 @@ CREATE INDEX IF NOT EXISTS idx_incidents_severity
 CREATE INDEX IF NOT EXISTS idx_incidents_resolved
     ON model_health_incidents(resolved) WHERE resolved = FALSE;
 
+-- Composite index for view subquery performance (provider, model, status)
+CREATE INDEX IF NOT EXISTS idx_incidents_provider_model_status
+    ON model_health_incidents(provider, model, status);
+
 COMMENT ON TABLE model_health_incidents IS 'Tracks incidents and outages for models across providers';
 
 -- ============================================================================
@@ -345,6 +349,26 @@ CREATE POLICY "Service role can do anything on aggregates" ON model_health_aggre
 -- Grant select on views to anonymous users (for public status page)
 GRANT SELECT ON model_status_current TO anon;
 GRANT SELECT ON provider_health_current TO anon;
+
+-- ============================================================================
+-- PART 10: Data retention policy for model_health_history
+-- ============================================================================
+
+-- Function to clean up old history records (keeps last 30 days by default)
+CREATE OR REPLACE FUNCTION cleanup_model_health_history(retention_days INTEGER DEFAULT 30)
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM model_health_history
+    WHERE checked_at < NOW() - (retention_days || ' days')::INTERVAL;
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION cleanup_model_health_history IS 'Removes history records older than specified days (default 30). Call periodically via cron or scheduled job.';
 
 -- ============================================================================
 -- DONE: Migration complete!
