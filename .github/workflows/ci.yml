@@ -11,6 +11,8 @@ on:
       - "requirements*.txt"
       - "pyproject.toml"
       - ".github/workflows/ci.yml"
+  repository_dispatch:
+    types: [monorepo-sync]
   workflow_dispatch:
 
 concurrency:

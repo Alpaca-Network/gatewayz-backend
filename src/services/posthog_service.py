@@ -85,8 +85,9 @@ class PostHogService:
             return
 
         try:
+            # PostHog SDK v6.x: event is first positional arg, distinct_id is keyword arg
             self.client.capture(
-                distinct_id=distinct_id, event=event, properties=properties or {}, groups=groups
+                event, distinct_id=distinct_id, properties=properties or {}, groups=groups
             )
             logger.debug(f"Captured event '{event}' for user '{distinct_id}'")
 
@@ -106,7 +107,9 @@ class PostHogService:
             return
 
         try:
-            self.client.identify(distinct_id=distinct_id, properties=properties or {})
+            # PostHog SDK v6.x: use set() instead of identify()
+            # Properties are passed via $set in a capture call
+            self.client.set(distinct_id=distinct_id, properties=properties or {})
             logger.debug(f"Identified user '{distinct_id}'")
 
         except Exception as e:

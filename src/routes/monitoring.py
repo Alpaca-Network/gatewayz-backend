@@ -28,6 +28,7 @@ Note: These endpoints support optional authentication. If an API key is provided
 it will be validated. If not provided, public access is allowed with rate limiting.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -43,6 +44,11 @@ from src.services.model_availability import availability_service
 from src.services.redis_metrics import get_redis_metrics
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for Sentry tunnel
+SENTRY_MAX_RETRIES = 3
+SENTRY_BASE_DELAY = 0.5  # seconds
+SENTRY_MAX_DELAY = 10.0  # seconds
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
@@ -85,6 +91,88 @@ def _is_valid_sentry_host(hostname: str | None) -> bool:
     return False
 
 
+async def _forward_to_sentry_with_retry(
+    client: httpx.AsyncClient,
+    sentry_url: str,
+    body: bytes,
+    client_host: str,
+) -> httpx.Response:
+    """
+    Forward a Sentry envelope with exponential backoff retry on 429 errors.
+
+    Args:
+        client: The httpx AsyncClient to use
+        sentry_url: The Sentry ingestion URL
+        body: The envelope body to forward
+        client_host: The original client's IP address
+
+    Returns:
+        The Sentry response
+
+    Raises:
+        httpx.HTTPError: If all retries fail
+    """
+    last_exception = None
+    last_response = None
+
+    for attempt in range(SENTRY_MAX_RETRIES):
+        try:
+            response = await client.post(
+                sentry_url,
+                content=body,
+                headers={
+                    "Content-Type": "application/x-sentry-envelope",
+                    "X-Forwarded-For": client_host,
+                },
+            )
+
+            # Success - return immediately
+            if response.status_code != 429:
+                return response
+
+            # Rate limited - prepare for retry
+            last_response = response
+
+            # Check for Retry-After header
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    delay = float(retry_after)
+                except (ValueError, TypeError):
+                    # If Retry-After is a date string, use exponential backoff
+                    delay = min(SENTRY_BASE_DELAY * (2 ** attempt), SENTRY_MAX_DELAY)
+            else:
+                # Exponential backoff with jitter
+                delay = min(SENTRY_BASE_DELAY * (2 ** attempt), SENTRY_MAX_DELAY)
+                # Add small jitter to prevent thundering herd
+                delay += (attempt * 0.1)
+
+            if attempt < SENTRY_MAX_RETRIES - 1:
+                logger.warning(
+                    f"Sentry tunnel: Rate limited (429), retrying in {delay:.2f}s "
+                    f"(attempt {attempt + 1}/{SENTRY_MAX_RETRIES})"
+                )
+                await asyncio.sleep(delay)
+
+        except httpx.HTTPError as e:
+            last_exception = e
+            if attempt < SENTRY_MAX_RETRIES - 1:
+                delay = min(SENTRY_BASE_DELAY * (2 ** attempt), SENTRY_MAX_DELAY)
+                logger.warning(
+                    f"Sentry tunnel: HTTP error, retrying in {delay:.2f}s "
+                    f"(attempt {attempt + 1}/{SENTRY_MAX_RETRIES}): {e}"
+                )
+                await asyncio.sleep(delay)
+
+    # All retries exhausted
+    if last_response is not None:
+        return last_response
+    if last_exception is not None:
+        raise last_exception
+    # Should never reach here, but just in case
+    raise httpx.HTTPError("All retries exhausted")
+
+
 @sentry_tunnel_router.post("/monitoring")
 async def sentry_tunnel(request: Request) -> Response:
     """
@@ -93,6 +181,11 @@ async def sentry_tunnel(request: Request) -> Response:
     This endpoint acts as a proxy to forward Sentry events from the frontend
     to Sentry's ingestion endpoint. This helps bypass ad blockers that might
     block direct requests to sentry.io.
+
+    Features:
+    - Automatic retry with exponential backoff on 429 (rate limit) responses
+    - Respects Retry-After headers from Sentry
+    - Returns appropriate headers for client-side retry handling
 
     The frontend Sentry SDK should be configured with:
     ```javascript
@@ -158,23 +251,38 @@ async def sentry_tunnel(request: Request) -> Response:
             logger.warning(f"Sentry tunnel: Failed to parse envelope header: {e}")
             return Response(status_code=400, content="Invalid envelope header")
 
-        # Forward the envelope to Sentry
+        # Forward the envelope to Sentry with retry logic
+        client_host = request.client.host if request.client else ""
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                sentry_response = await client.post(
-                    sentry_url,
-                    content=body,
-                    headers={
-                        "Content-Type": "application/x-sentry-envelope",
-                        "X-Forwarded-For": request.client.host if request.client else "",
-                    },
+                sentry_response = await _forward_to_sentry_with_retry(
+                    client=client,
+                    sentry_url=sentry_url,
+                    body=body,
+                    client_host=client_host,
                 )
+
+                # Build response headers
+                response_headers = {"Content-Type": "application/json"}
+
+                # If Sentry returned 429 after all retries, pass through Retry-After header
+                if sentry_response.status_code == 429:
+                    retry_after = sentry_response.headers.get("Retry-After")
+                    if retry_after:
+                        response_headers["Retry-After"] = retry_after
+                    else:
+                        # Provide a default retry-after of 60 seconds
+                        response_headers["Retry-After"] = "60"
+                    logger.warning(
+                        "Sentry tunnel: Rate limit exceeded after retries, "
+                        f"returning 429 with Retry-After: {response_headers.get('Retry-After')}"
+                    )
 
                 # Return Sentry's response
                 return Response(
                     status_code=sentry_response.status_code,
                     content=sentry_response.content,
-                    headers={"Content-Type": "application/json"},
+                    headers=response_headers,
                 )
 
             except httpx.TimeoutException:

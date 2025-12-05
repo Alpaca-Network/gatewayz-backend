@@ -676,6 +676,36 @@ def test_chat_completions_streaming_success(client, sb):
     assert "[DONE]" in content
 
 
+def test_chat_completions_streaming_anonymous_success(client):
+    """Test successful streaming chat completion for anonymous users (no API key).
+
+    This tests the fix for the bug where anonymous streaming would fail with
+    'Streaming error occurred' because stream_generator tried to access user["id"]
+    when user was None.
+    """
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True
+        }
+        # No Authorization header - anonymous request
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+    # Parse SSE stream
+    content = response.text
+    # Should receive valid SSE data, not an error
+    assert "data:" in content
+    assert "[DONE]" in content
+    # The bug manifested as a generic error - ensure we don't get that
+    assert '"type": "stream_error"' not in content
+    assert "Streaming error occurred" not in content
+
+
 # ==================================================
 # BUSINESS LOGIC ERROR TESTS
 # ==================================================

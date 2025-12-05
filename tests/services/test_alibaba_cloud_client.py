@@ -150,3 +150,95 @@ def test_failover_with_misconfigured_region_key(monkeypatch):
     assert response.data[0]["id"] == "qwen-max"
     assert call_order == ["international", "china"], "should failover from international to china"
     assert acc._inferred_region == "china"
+
+
+def test_failover_works_with_explicit_region_env_var(monkeypatch):
+    """Test that failover still works when ALIBABA_CLOUD_REGION env var is set explicitly.
+
+    Previously, setting _explicit_region (from env var) would disable failover entirely,
+    causing 'attempted 1 of 1 regions' errors when the configured region failed.
+    """
+
+    # Simulate the module-level env var capture for ALIBABA_CLOUD_REGION
+    monkeypatch.setattr(acc, "_explicit_region", "international", raising=False)
+    monkeypatch.setattr(acc, "_inferred_region", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None, raising=False)
+
+    call_order: list[str] = []
+
+    def fake_get_client(region_override=None):
+        region = region_override or "international"
+        call_order.append(region)
+
+        failing = MagicMock()
+        failing.models.list.side_effect = Exception(
+            "Error code: 401 - {'error': {'message': 'Incorrect API key provided. '}}"
+        )
+
+        success_response = types.SimpleNamespace(data=[{"id": "qwen-max"}])
+        succeeding = MagicMock()
+        succeeding.models.list.return_value = success_response
+
+        # Simulate the key only working for China endpoint
+        return failing if region == "international" else succeeding
+
+    monkeypatch.setattr(acc, "get_alibaba_cloud_client", fake_get_client)
+
+    response = acc.list_alibaba_models()
+
+    assert response.data[0]["id"] == "qwen-max"
+    # Key assertion: should now attempt both regions even with _explicit_region set
+    assert call_order == ["international", "china"], (
+        "should failover to china even when _explicit_region is set"
+    )
+    assert acc._inferred_region == "china", "should remember successful region"
+
+
+def test_inferred_region_is_cached_after_failover_with_explicit_region(monkeypatch):
+    """Ensure the successful region is cached even when explicit region was set.
+
+    After a successful failover, subsequent requests should go directly to the
+    working region without re-attempting the failing region.
+    """
+
+    # Set explicit region to international, but key only works for china
+    monkeypatch.setattr(acc, "_explicit_region", "international", raising=False)
+    monkeypatch.setattr(acc, "_inferred_region", None, raising=False)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key", raising=False)
+
+    call_order: list[str] = []
+
+    class FakeChat:
+        def __init__(self):
+            self.completions = MagicMock()
+            self.completions.create.return_value = {"ok": True}
+
+    def fake_get_client(region_override=None):
+        region = region_override or "international"
+        call_order.append(region)
+
+        failing = MagicMock()
+        failing.models.list.side_effect = Exception("Error code: 401")
+        failing.chat = MagicMock()
+        failing.chat.completions = MagicMock()
+        failing.chat.completions.create.side_effect = Exception("Error code: 401")
+
+        succeeding = MagicMock()
+        succeeding.models.list.return_value = types.SimpleNamespace(data=[])
+        succeeding.chat = FakeChat()
+
+        return failing if region == "international" else succeeding
+
+    monkeypatch.setattr(acc, "get_alibaba_cloud_client", fake_get_client)
+
+    # First request: should failover from international to china
+    acc.list_alibaba_models()
+    assert call_order == ["international", "china"]
+    assert acc._inferred_region == "china"
+
+    # Second request: should go directly to china (the inferred region)
+    call_order.clear()
+    acc.make_alibaba_cloud_request_openai(messages=[], model="qwen-max")
+    assert call_order == ["china"], "should use cached inferred region"

@@ -89,27 +89,40 @@ def _normalize_region(region: str | None) -> str:
 
 
 def _region_attempt_order() -> list[str]:
-    explicit = _normalize_region(_explicit_region) if _explicit_region else None
-    if explicit:
-        return [explicit] if _get_region_api_key(explicit) else []
+    """Build the list of regions to attempt, in priority order.
 
+    Priority order:
+    1. Previously inferred working region (if any)
+    2. Explicitly configured region (ALIBABA_CLOUD_REGION env var or Config)
+    3. All other regions with available API keys
+
+    This allows failover even when a specific region is configured, which helps
+    when the user has misconfigured their API key (e.g., a China key set as
+    the international key).
+    """
     attempts: list[str] = []
+
+    # 1. Start with inferred region from previous successful request
     if _inferred_region:
         attempts.append(_inferred_region)
 
-    default_region = _normalize_region(getattr(Config, "ALIBABA_CLOUD_REGION", None))
-    if default_region not in attempts:
-        attempts.append(default_region)
+    # 2. Add configured region (from env var or Config)
+    configured_region = _normalize_region(
+        _explicit_region or getattr(Config, "ALIBABA_CLOUD_REGION", None)
+    )
+    if configured_region not in attempts:
+        attempts.append(configured_region)
 
+    # 3. Add all other regions to enable failover on auth errors
     for region in _VALID_REGIONS:
         if region not in attempts:
             attempts.append(region)
+
     return [region for region in attempts if _get_region_api_key(region)]
 
 
 def _remember_successful_region(region: str) -> None:
-    if _explicit_region:
-        return
+    """Cache the region that worked, so subsequent requests go directly to it."""
     global _inferred_region
     with _region_lock:
         _inferred_region = region
