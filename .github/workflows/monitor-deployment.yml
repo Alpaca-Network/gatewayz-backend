@@ -19,8 +19,29 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Railway CLI
+        continue-on-error: true
+        id: railway-install
         run: |
-          npm install -g @railway/cli
+          # Retry npm install with exponential backoff
+          MAX_RETRIES=3
+          RETRY=0
+          while [ $RETRY -lt $MAX_RETRIES ]; do
+            echo "Attempting to install Railway CLI (attempt $((RETRY + 1))/$MAX_RETRIES)..."
+            if npm install -g @railway/cli; then
+              echo "Railway CLI installed successfully"
+              echo "cli_installed=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            RETRY=$((RETRY + 1))
+            if [ $RETRY -lt $MAX_RETRIES ]; then
+              WAIT_TIME=$((2 ** RETRY))
+              echo "Installation failed, waiting ${WAIT_TIME}s before retry..."
+              sleep $WAIT_TIME
+            fi
+          done
+          echo "Failed to install Railway CLI after $MAX_RETRIES attempts"
+          echo "cli_installed=false" >> $GITHUB_OUTPUT
+          exit 0
 
       - name: Check production health
         id: prod-health
@@ -61,12 +82,13 @@ jobs:
           exit 1
 
       - name: Get deployment logs
-        if: steps.prod-health.outcome == 'failure'
+        if: steps.prod-health.outcome == 'failure' && steps.railway-install.outputs.cli_installed == 'true'
+        continue-on-error: true
         run: |
           echo "Fetching recent deployment logs..."
           railway project switch --id $RAILWAY_PROJECT_ID
           railway environment switch --name production
-          railway logs --tail 100 || true
+          railway logs --tail 100 || echo "Failed to fetch logs from Railway"
 
       - name: Create issue if health check fails (with deduplication)
         if: steps.prod-health.outcome == 'failure'
@@ -182,10 +204,32 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Railway CLI
+        continue-on-error: true
+        id: railway-install-metrics
         run: |
-          npm install -g @railway/cli
+          # Retry npm install with exponential backoff
+          MAX_RETRIES=3
+          RETRY=0
+          while [ $RETRY -lt $MAX_RETRIES ]; do
+            echo "Attempting to install Railway CLI (attempt $((RETRY + 1))/$MAX_RETRIES)..."
+            if npm install -g @railway/cli; then
+              echo "Railway CLI installed successfully"
+              echo "cli_installed=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            RETRY=$((RETRY + 1))
+            if [ $RETRY -lt $MAX_RETRIES ]; then
+              WAIT_TIME=$((2 ** RETRY))
+              echo "Installation failed, waiting ${WAIT_TIME}s before retry..."
+              sleep $WAIT_TIME
+            fi
+          done
+          echo "Failed to install Railway CLI after $MAX_RETRIES attempts"
+          echo "cli_installed=false" >> $GITHUB_OUTPUT
+          exit 0
 
       - name: Collect production metrics
+        if: steps.railway-install-metrics.outputs.cli_installed == 'true'
         continue-on-error: true
         run: |
           railway project switch --id $RAILWAY_PROJECT_ID
