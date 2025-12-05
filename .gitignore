@@ -48,6 +48,7 @@ __pycache__
 !LIVE_API_TESTING_GUIDE.md
 
 # Temp and output files
+tmp/
 temp*.json
 response.json
 *.csv
@@ -68,6 +69,7 @@ models_export_*.csv
 *.sh
 !start.sh
 !scripts/test_api_live.sh
+!scripts/sync-superpowers.sh
 
 server.log
 nul
