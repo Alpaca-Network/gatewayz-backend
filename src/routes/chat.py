@@ -24,6 +24,11 @@ from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
 from src.services.passive_health_monitor import capture_model_health
+from src.services.stream_normalizer import (
+    StreamNormalizer,
+    create_error_sse_chunk,
+    create_done_sse,
+)
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.services.prometheus_metrics import (
     model_inference_requests,
@@ -867,15 +872,22 @@ async def stream_generator(
     tracker=None,
     is_anonymous=False,
 ):
-    """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)"""
-    accumulated_content = ""
-    accumulated_thinking = ""
+    """Generate SSE stream from provider response with normalization (OPTIMIZED: background post-processing)
+
+    Uses StreamNormalizer to standardize all provider responses to OpenAI Chat Completions format.
+    Key normalization:
+    - Content always in delta.content
+    - Reasoning/thinking always in delta.reasoning_content
+    - Finish reasons normalized to: stop, length, error
+    """
+    # Initialize the stream normalizer for this provider/model
+    normalizer = StreamNormalizer(provider=provider, model=model)
+
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
     start_time = time.monotonic()
     rate_limit_mgr is not None and not trial.get("is_trial", False)
-    has_thinking = False
     streaming_ctx = None
 
     try:
@@ -884,68 +896,51 @@ async def stream_generator(
             streaming_ctx = tracker.streaming()
             streaming_ctx.__enter__()
 
-        chunk_count = 0
+        # Process stream through normalizer
         for chunk in stream:
-            chunk_count += 1
+            # Normalize the chunk using StreamNormalizer
+            normalized = normalizer.normalize_chunk(chunk)
+
+            if normalized is None:
+                continue
+
+            chunk_count = normalizer.get_chunk_count()
             logger.debug(f"[STREAM] Processing chunk {chunk_count} for model {model}")
 
-            # Extract chunk data
-            chunk_dict = {
-                "id": chunk.id,
-                "object": chunk.object,
-                "created": chunk.created,
-                "model": chunk.model,
-                "choices": [],
-            }
+            # Extract usage from normalized chunk if present
+            if normalized.usage:
+                prompt_tokens = normalized.usage.get("prompt_tokens", 0)
+                completion_tokens = normalized.usage.get("completion_tokens", 0)
+                total_tokens = normalized.usage.get("total_tokens", 0)
 
-            for choice in chunk.choices:
-                choice_dict = {
-                    "index": choice.index,
-                    "delta": {},
-                    "finish_reason": choice.finish_reason,
-                }
-
-                if hasattr(choice.delta, "role") and choice.delta.role:
-                    choice_dict["delta"]["role"] = choice.delta.role
-                if hasattr(choice.delta, "content") and choice.delta.content:
-                    content = choice.delta.content
-                    choice_dict["delta"]["content"] = content
-                    accumulated_content += content
-                    logger.debug(
-                        f"[STREAM] Chunk {chunk_count}: Added {len(content)} characters of content"
-                    )
-
-                    # Detect thinking tags for debug logging
-                    if "<thinking>" in content or "[THINKING" in content or "thinking>" in content:
-                        has_thinking = True
-                        accumulated_thinking += content
-                        # Log when we first detect thinking
-                        if accumulated_thinking.count("<thinking>") == 1:
-                            logger.info(
-                                f"[THINKING DEBUG] Detected thinking tag in stream for model {model}"
-                            )
-                else:
-                    logger.debug(f"[STREAM] Chunk {chunk_count}: No content in delta")
-
-                chunk_dict["choices"].append(choice_dict)
-
-            logger.debug(
-                f"[STREAM] Chunk {chunk_count} dict: {json.dumps(chunk_dict, default=str)}"
-            )
-
-            # Check for usage in chunk (some providers send it in final chunk)
-            if hasattr(chunk, "usage") and chunk.usage:
-                prompt_tokens = chunk.usage.prompt_tokens
-                completion_tokens = chunk.usage.completion_tokens
-                total_tokens = chunk.usage.total_tokens
-
-            # Send SSE event with potential debug info
-            if has_thinking and not accumulated_thinking.endswith("DEBUG_LOGGED"):
+            # Log reasoning content detection
+            accumulated_reasoning = normalizer.get_accumulated_reasoning()
+            if accumulated_reasoning:
                 logger.debug(
-                    f"[THINKING DEBUG] Streaming chunk with thinking content: {json.dumps(choice_dict)}"
+                    f"[STREAM] Chunk {chunk_count}: Reasoning content detected, "
+                    f"total reasoning length: {len(accumulated_reasoning)}"
                 )
 
-            yield f"data: {json.dumps(chunk_dict)}\n\n"
+            # Log content accumulation
+            content_delta = ""
+            for choice in normalized.choices:
+                delta = choice.get("delta", {})
+                if delta.get("content"):
+                    content_delta = delta["content"]
+                    logger.debug(
+                        f"[STREAM] Chunk {chunk_count}: Added {len(content_delta)} characters of content"
+                    )
+
+            logger.debug(
+                f"[STREAM] Chunk {chunk_count} dict: {json.dumps(normalized.to_dict(), default=str)}"
+            )
+
+            # Yield normalized SSE chunk
+            yield normalized.to_sse()
+
+        # Get accumulated content from normalizer
+        accumulated_content = normalizer.get_accumulated_content()
+        chunk_count = normalizer.get_chunk_count()
 
         logger.info(
             f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
@@ -957,17 +952,14 @@ async def stream_generator(
                 f"[EMPTY STREAM] Provider {provider} returned zero chunks for model {model}. "
                 f"This indicates a provider routing or model ID transformation issue."
             )
-            # Send error chunk to client
-            error_chunk = {
-                "error": {
-                    "message": f"Provider returned empty stream for model {model}. Please try again or contact support.",
-                    "type": "empty_stream_error",
-                    "provider": provider,
-                    "model": model,
-                }
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
+            # Send standardized error chunk to client
+            yield create_error_sse_chunk(
+                error_message=f"Provider returned empty stream for model {model}. Please try again or contact support.",
+                error_type="empty_stream_error",
+                provider=provider,
+                model=model,
+            )
+            yield create_done_sse()
             return
         elif accumulated_content == "" and chunk_count > 0:
             logger.warning(
@@ -1000,19 +992,16 @@ async def stream_generator(
         if not is_anonymous and user is not None:
             post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
             if not post_plan.get("allowed", False):
-                error_chunk = {
-                    "error": {
-                        "message": f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
-                        "type": "plan_limit_exceeded",
-                    }
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
-                yield "data: [DONE]\n\n"
+                yield create_error_sse_chunk(
+                    error_message=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
+                    error_type="plan_limit_exceeded",
+                )
+                yield create_done_sse()
                 return
 
         # OPTIMIZATION: Send [DONE] immediately, process credits/logging in background!
         # This makes the stream complete 100-200ms faster for the client
-        yield "data: [DONE]\n\n"
+        yield create_done_sse()
 
         # Schedule background processing (non-blocking)
         asyncio.create_task(
@@ -1036,9 +1025,13 @@ async def stream_generator(
 
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
-        error_chunk = {"error": {"message": "Streaming error occurred", "type": "stream_error"}}
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield create_error_sse_chunk(
+            error_message="Streaming error occurred",
+            error_type="stream_error",
+            provider=provider,
+            model=model,
+        )
+        yield create_done_sse()
     finally:
         # Record streaming duration
         if streaming_ctx:
