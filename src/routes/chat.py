@@ -622,15 +622,15 @@ async def _record_inference_metrics_and_health(
         }
 
         # Call passive health monitor in background (non-blocking)
+        # Note: capture_model_health is already async, so we just create a task for it
         asyncio.create_task(
-            asyncio.to_thread(
-                capture_model_health,
-                provider,
-                model,
-                response_time_ms,
-                health_status,
-                error_message,
-                usage
+            capture_model_health(
+                provider=provider,
+                model=model,
+                response_time_ms=response_time_ms,
+                status=health_status,
+                error_message=error_message,
+                usage=usage
             )
         )
 
