@@ -169,6 +169,10 @@ async def get_optional_api_key(
     Use for endpoints that work for both auth and non-auth users
     but need the raw API key string (not the user object).
 
+    For optional auth endpoints, we validate the key if provided but treat
+    invalid keys as "no key provided" (anonymous access) without logging
+    security violations, since the endpoint explicitly supports anonymous access.
+
     Args:
         credentials: Optional credentials
         request: Request object
@@ -179,9 +183,31 @@ async def get_optional_api_key(
     if not credentials:
         return None
 
+    api_key = credentials.credentials
+    if not api_key:
+        return None
+
+    # Extract security context for validation
+    client_ip = None
+    referer = None
+
+    if request:
+        client_ip = request.client.host if request.client else None
+        referer = request.headers.get("referer")
+
     try:
-        return await get_api_key(credentials, request)
-    except HTTPException:
+        # Validate API key with security checks but without logging violations
+        # since this endpoint supports anonymous access
+        validated_key = validate_api_key_security(
+            api_key=api_key, client_ip=client_ip, referer=referer
+        )
+        return validated_key
+    except ValueError:
+        # Invalid key on optional auth endpoint - treat as anonymous
+        # Don't log security violation since anonymous access is allowed
+        logger.debug(
+            "Invalid API key provided on optional auth endpoint, treating as anonymous"
+        )
         return None
 
 
@@ -194,6 +220,10 @@ async def get_optional_user(
 
     Use for endpoints that work for both auth and non-auth users.
 
+    For optional auth endpoints, we validate the key if provided but treat
+    invalid keys as "no key provided" (anonymous access) without logging
+    security violations, since the endpoint explicitly supports anonymous access.
+
     Args:
         credentials: Optional credentials
         request: Request object
@@ -204,11 +234,12 @@ async def get_optional_user(
     if not credentials:
         return None
 
-    try:
-        api_key = await get_api_key(credentials, request)
-        return get_user(api_key)
-    except HTTPException:
+    # Reuse get_optional_api_key which handles validation without security logging
+    api_key = await get_optional_api_key(credentials, request)
+    if not api_key:
         return None
+
+    return get_user(api_key)
 
 
 async def require_active_subscription(

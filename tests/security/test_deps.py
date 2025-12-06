@@ -201,23 +201,44 @@ async def test_get_optional_api_key_no_credentials_returns_none(mod):
 
 
 @pytest.mark.anyio
-async def test_get_optional_api_key_invalid_returns_none(monkeypatch, mod):
-    # Make inner get_api_key raise HTTPException
-    async def _raise(creds, request=None):
-        raise HTTPException(status_code=401, detail="bad key")
-    monkeypatch.setattr(mod, "get_api_key", _raise)
-
-    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+async def test_get_optional_api_key_empty_credentials_returns_none(mod):
+    """Empty credentials should return None without validation"""
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="")
     out = await mod.get_optional_api_key(credentials=creds, request=None)
     assert out is None
 
 
 @pytest.mark.anyio
+async def test_get_optional_api_key_invalid_returns_none_without_security_log(monkeypatch, mod):
+    """Invalid API key on optional endpoint returns None WITHOUT logging security violation.
+
+    This is the key fix for the INVALID_API_KEY security violation spam issue.
+    Optional auth endpoints should not log security violations for invalid keys
+    since they explicitly support anonymous access.
+    """
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+
+    # Make validate_api_key_security raise ValueError (invalid key)
+    def _raise(*a, **k):
+        raise ValueError("Invalid API key")
+    monkeypatch.setattr(mod, "validate_api_key_security", _raise)
+
+    req = make_request(client_ip="5.6.7.8")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+    out = await mod.get_optional_api_key(credentials=creds, request=req)
+
+    # Should return None (treat as anonymous)
+    assert out is None
+    # Should NOT log a security violation
+    assert not fake_audit.violation_calls, "Security violation should NOT be logged for optional auth endpoints"
+
+
+@pytest.mark.anyio
 async def test_get_optional_api_key_valid_returns_key(monkeypatch, mod):
-    # normal flow
-    async def _ok(creds, request=None):
-        return creds.credentials
-    monkeypatch.setattr(mod, "get_api_key", _ok)
+    """Valid API key should be returned after validation"""
+    # Make validate_api_key_security return the key (valid)
+    monkeypatch.setattr(mod, "validate_api_key_security", lambda api_key, client_ip=None, referer=None: api_key)
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-good")
     out = await mod.get_optional_api_key(credentials=creds, request=None)
@@ -233,23 +254,31 @@ async def test_get_optional_user_no_credentials_returns_none(mod):
 
 
 @pytest.mark.anyio
-async def test_get_optional_user_invalid_returns_none(monkeypatch, mod):
-    # Make inner get_api_key raise HTTPException
-    async def _raise(creds, request=None):
-        raise HTTPException(status_code=401, detail="bad key")
-    monkeypatch.setattr(mod, "get_api_key", _raise)
+async def test_get_optional_user_invalid_returns_none_without_security_log(monkeypatch, mod):
+    """Invalid API key on optional endpoint returns None WITHOUT logging security violation."""
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
 
+    # Make validate_api_key_security raise ValueError (invalid key)
+    def _raise(*a, **k):
+        raise ValueError("Invalid API key")
+    monkeypatch.setattr(mod, "validate_api_key_security", _raise)
+
+    req = make_request(client_ip="5.6.7.8")
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
-    out = await mod.get_optional_user(credentials=creds, request=None)
+    out = await mod.get_optional_user(credentials=creds, request=req)
+
+    # Should return None (treat as anonymous)
     assert out is None
+    # Should NOT log a security violation
+    assert not fake_audit.violation_calls, "Security violation should NOT be logged for optional auth endpoints"
 
 
 @pytest.mark.anyio
 async def test_get_optional_user_valid_returns_user(monkeypatch, mod):
-    # normal flow
-    async def _ok(creds, request=None):
-        return creds.credentials
-    monkeypatch.setattr(mod, "get_api_key", _ok)
+    """Valid API key returns user after validation"""
+    # Make validate_api_key_security return the key (valid)
+    monkeypatch.setattr(mod, "validate_api_key_security", lambda api_key, client_ip=None, referer=None: api_key)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 11, "credits": 3.14})
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-good")
