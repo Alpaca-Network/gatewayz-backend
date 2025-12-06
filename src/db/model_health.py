@@ -137,7 +137,27 @@ def record_model_call(
             if total_tokens is not None:
                 insert_data["total_tokens"] = total_tokens
 
-            result = supabase.table("model_health_tracking").insert(insert_data).execute()
+            try:
+                result = supabase.table("model_health_tracking").insert(insert_data).execute()
+            except APIError as insert_error:
+                # Handle race condition: another request inserted the same record
+                if "23505" in str(insert_error) or "duplicate key" in str(insert_error).lower():
+                    logger.debug(
+                        f"Race condition detected for {provider}/{model}, "
+                        "retrying as update"
+                    )
+                    # Retry as an update - fetch the record and update it
+                    return record_model_call(
+                        provider=provider,
+                        model=model,
+                        response_time_ms=response_time_ms,
+                        status=status,
+                        error_message=error_message,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                    )
+                raise
 
         return result.data[0] if result.data else {}
 
