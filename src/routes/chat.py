@@ -30,6 +30,7 @@ from src.services.prometheus_metrics import (
     model_inference_duration,
     tokens_used,
     credits_used,
+    track_time_to_first_chunk,
 )
 from src.services.redis_metrics import get_redis_metrics
 from src.utils.sentry_context import capture_payment_error, capture_provider_error
@@ -120,11 +121,13 @@ _openrouter = _safe_import_provider(
         "make_openrouter_request_openai",
         "process_openrouter_response",
         "make_openrouter_request_openai_stream",
+        "make_openrouter_request_openai_stream_async",
     ],
 )
 make_openrouter_request_openai = _openrouter.get("make_openrouter_request_openai")
 process_openrouter_response = _openrouter.get("process_openrouter_response")
 make_openrouter_request_openai_stream = _openrouter.get("make_openrouter_request_openai_stream")
+make_openrouter_request_openai_stream_async = _openrouter.get("make_openrouter_request_openai_stream_async")
 
 
 _featherless = _safe_import_provider(
@@ -905,8 +908,15 @@ async def stream_generator(
     provider="openrouter",
     tracker=None,
     is_anonymous=False,
+    is_async_stream=False,  # PERF: Flag to indicate if stream is async
 ):
-    """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)"""
+    """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
+
+    Args:
+        is_async_stream: If True, stream is an async iterator and will be consumed with
+                        `async for` instead of `for`. This prevents blocking the event
+                        loop while waiting for chunks from slow AI providers.
+    """
     accumulated_content = ""
     accumulated_thinking = ""
     prompt_tokens = 0
@@ -916,6 +926,8 @@ async def stream_generator(
     rate_limit_mgr is not None and not trial.get("is_trial", False)
     has_thinking = False
     streaming_ctx = None
+    first_chunk_sent = False  # TTFC tracking
+    ttfc_start = time.monotonic()  # TTFC tracking
 
     try:
         # Track streaming duration if tracker is provided
@@ -924,8 +936,36 @@ async def stream_generator(
             streaming_ctx.__enter__()
 
         chunk_count = 0
-        for chunk in stream:
+
+        # PERF: Use async iteration for async streams to avoid blocking the event loop
+        # This is critical for reducing perceived TTFC as it allows the server to handle
+        # other requests while waiting for the AI provider to start streaming
+        async def iterate_stream():
+            """Helper to support both sync and async iteration"""
+            if is_async_stream:
+                async for chunk in stream:
+                    yield chunk
+            else:
+                for chunk in stream:
+                    yield chunk
+
+        async for chunk in iterate_stream():
             chunk_count += 1
+
+            # TTFC: Track time to first chunk for performance monitoring
+            if not first_chunk_sent:
+                ttfc = time.monotonic() - ttfc_start
+                first_chunk_sent = True
+                # Record TTFC metric
+                track_time_to_first_chunk(provider=provider, model=model, ttfc=ttfc)
+                # Log TTFC for debugging slow streams
+                if ttfc > 2.0:
+                    logger.warning(
+                        f"[TTFC] Slow first chunk: {ttfc:.2f}s for {provider}/{model} (threshold: 2.0s)"
+                    )
+                else:
+                    logger.info(f"[TTFC] First chunk in {ttfc:.2f}s for {provider}/{model}")
+
             logger.debug(f"[STREAM] Processing chunk {chunk_count} for model {model}")
 
             # Extract chunk data
@@ -1404,6 +1444,7 @@ async def chat_completions(
                     )
 
                 request_model = attempt_model
+                is_async_stream = False  # Default to sync, only OpenRouter uses async currently
                 try:
                     if attempt_provider == "featherless":
                         stream = await _to_thread(
@@ -1528,12 +1569,27 @@ async def chat_completions(
                             **optional,
                         )
                     else:
-                        stream = await _to_thread(
-                            make_openrouter_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
+                        # PERF: Use async streaming for OpenRouter (default provider)
+                        # This is the most impactful optimization - prevents event loop blocking
+                        # while waiting for the AI provider to return the first chunk
+                        try:
+                            stream = await make_openrouter_request_openai_stream_async(
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                            is_async_stream = True
+                            logger.debug(f"Using async streaming for OpenRouter model {request_model}")
+                        except Exception as async_err:
+                            # Fallback to sync streaming if async fails
+                            logger.warning(f"Async streaming failed, falling back to sync: {async_err}")
+                            stream = await _to_thread(
+                                make_openrouter_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                            is_async_stream = False
 
                     provider = attempt_provider
                     model = request_model
@@ -1541,6 +1597,14 @@ async def chat_completions(
                     stream_headers = {}
                     if rl_pre is not None:
                         stream_headers.update(get_rate_limit_headers(rl_pre))
+
+                    # PERF: Add timing headers for debugging stream startup latency
+                    if tracker:
+                        prep_time_ms = tracker.get_total_duration() * 1000
+                        stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
+                    stream_headers["X-Provider"] = provider
+                    stream_headers["X-Model"] = model
+                    stream_headers["X-Requested-Model"] = original_model
 
                     return StreamingResponse(
                         stream_generator(
@@ -1556,6 +1620,7 @@ async def chat_completions(
                             provider,
                             tracker,
                             is_anonymous,
+                            is_async_stream=is_async_stream,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,

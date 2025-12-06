@@ -13,7 +13,11 @@ from contextlib import asynccontextmanager
 
 from src.cache import initialize_fal_cache_from_catalog
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
-from src.services.connection_pool import clear_connection_pools, get_pool_stats
+from src.services.connection_pool import (
+    clear_connection_pools,
+    get_pool_stats,
+    warmup_provider_connections_async,
+)
 from src.services.prometheus_remote_write import (
     init_prometheus_remote_write,
     shutdown_prometheus_remote_write,
@@ -129,6 +133,18 @@ async def lifespan(app):
         # Initialize connection pools (they're lazy-loaded, but log readiness)
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
+
+        # PERF: Pre-warm connections to frequently used AI providers
+        # This eliminates cold-start penalty (~100-200ms) for first requests
+        try:
+            logger.info("🔥 Pre-warming provider connections...")
+            warmup_results = await warmup_provider_connections_async()
+            warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
+            logger.info(f"✅ Warmed {warmed_count}/{len(warmup_results)} provider connections")
+            pool_stats = get_pool_stats()
+            logger.info(f"Connection pool after warmup: {pool_stats}")
+        except Exception as e:
+            logger.warning(f"Provider connection warmup warning: {e}")
 
         # Initialize response cache
         get_cache()

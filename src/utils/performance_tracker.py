@@ -94,6 +94,18 @@ class PerformanceTracker:
                 track_request_stage("stream_processing", self.endpoint, self.streaming_duration)
                 logger.debug(f"Streaming duration: {self.streaming_duration:.4f}s")
 
+    def get_total_duration(self) -> float:
+        """Get total elapsed time since tracker was created."""
+        return time.time() - self.total_start_time
+
+    def get_frontend_time(self) -> float:
+        """Get total frontend processing time (parsing + auth + preparation)."""
+        return (
+            self.stage_times.get("request_parsing", 0)
+            + self.stage_times.get("auth_validation", 0)
+            + self.stage_times.get("request_preparation", 0)
+        )
+
     def record_percentages(self):
         """Calculate and record stage percentages of total time."""
         total_time = time.time() - self.total_start_time
