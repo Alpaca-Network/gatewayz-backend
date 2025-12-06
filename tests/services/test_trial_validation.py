@@ -263,3 +263,167 @@ def test_track_usage_handles_exception(monkeypatch, mod):
 
     ok = mod.track_trial_usage("sk-any", tokens_used=10, requests_used=1)
     assert ok is False
+
+
+# ----------------------------- tests: trial validation cache -----------------------------
+
+def test_trial_cache_hit_skips_database(monkeypatch, mod):
+    """Second call with same API key should use cache (not hit database)"""
+    # Clear cache before test
+    mod.clear_trial_cache()
+
+    call_count = 0
+    rows = {
+        "sk-cached": {
+            "api_key": "sk-cached",
+            "is_trial": False,
+        }
+    }
+
+    def counting_client():
+        nonlocal call_count
+        call_count += 1
+        return _FakeSupabase(rows)
+
+    monkeypatch.setattr(mod, "get_supabase_client", counting_client)
+
+    # First call (should hit database)
+    result1 = mod.validate_trial_access("sk-cached")
+    assert result1["is_valid"] is True
+    assert call_count == 1
+
+    # Second call (should use cache)
+    result2 = mod.validate_trial_access("sk-cached")
+    assert result2["is_valid"] is True
+    assert call_count == 1  # No additional database call
+
+
+def test_trial_cache_different_keys_separate_entries(monkeypatch, mod):
+    """Different API keys should have separate cache entries"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    rows = {
+        "sk-key1": {"api_key": "sk-key1", "is_trial": False},
+        "sk-key2": {"api_key": "sk-key2", "is_trial": False},
+    }
+
+    def counting_client():
+        nonlocal call_count
+        call_count += 1
+        return _FakeSupabase(rows)
+
+    monkeypatch.setattr(mod, "get_supabase_client", counting_client)
+
+    mod.validate_trial_access("sk-key1")
+    mod.validate_trial_access("sk-key2")
+
+    # Both keys should hit database
+    assert call_count == 2
+
+
+def test_clear_trial_cache_all(monkeypatch, mod):
+    """clear_trial_cache() with no arguments should clear entire cache"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    rows = {"sk-clear": {"api_key": "sk-clear", "is_trial": False}}
+
+    def counting_client():
+        nonlocal call_count
+        call_count += 1
+        return _FakeSupabase(rows)
+
+    monkeypatch.setattr(mod, "get_supabase_client", counting_client)
+
+    mod.validate_trial_access("sk-clear")
+    assert call_count == 1
+
+    mod.clear_trial_cache()
+
+    mod.validate_trial_access("sk-clear")
+    assert call_count == 2  # Should hit database again
+
+
+def test_invalidate_trial_cache_specific_key(monkeypatch, mod):
+    """invalidate_trial_cache should clear cache for specific key"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    rows = {
+        "sk-key1": {"api_key": "sk-key1", "is_trial": False},
+        "sk-key2": {"api_key": "sk-key2", "is_trial": False},
+    }
+
+    def counting_client():
+        nonlocal call_count
+        call_count += 1
+        return _FakeSupabase(rows)
+
+    monkeypatch.setattr(mod, "get_supabase_client", counting_client)
+
+    mod.validate_trial_access("sk-key1")
+    mod.validate_trial_access("sk-key2")
+    assert call_count == 2
+
+    # Invalidate only key1
+    mod.invalidate_trial_cache("sk-key1")
+
+    mod.validate_trial_access("sk-key1")  # Should hit database
+    assert call_count == 3
+
+    mod.validate_trial_access("sk-key2")  # Should use cache
+    assert call_count == 3
+
+
+def test_get_trial_cache_stats(mod):
+    """get_trial_cache_stats should return cache statistics"""
+    mod.clear_trial_cache()
+
+    stats = mod.get_trial_cache_stats()
+    assert "cached_trials" in stats
+    assert "ttl_seconds" in stats
+    assert stats["cached_trials"] == 0
+    assert stats["ttl_seconds"] == 60  # Default TTL for trial cache
+
+
+def test_track_usage_invalidates_cache(monkeypatch, mod):
+    """track_trial_usage should invalidate cache after successful update"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "is_trial": True,
+            "trial_used_tokens": 10,
+            "trial_used_requests": 1,
+            "trial_used_credits": 0.0,
+            "trial_max_tokens": 1000,
+            "trial_max_requests": 100,
+            "trial_credits": 10.0,
+            "trial_end_date": "2100-12-31",
+        }
+    }
+
+    def counting_client():
+        nonlocal call_count
+        call_count += 1
+        return _FakeSupabase(rows)
+
+    monkeypatch.setattr(mod, "get_supabase_client", counting_client)
+
+    # First validation (hits DB, caches result)
+    mod.validate_trial_access("sk-trial")
+    initial_calls = call_count
+
+    # Second validation (should use cache)
+    mod.validate_trial_access("sk-trial")
+    assert call_count == initial_calls  # No new DB call
+
+    # Track usage (should invalidate cache)
+    mod.track_trial_usage("sk-trial", tokens_used=50, requests_used=1)
+
+    # Next validation should hit DB again (cache was invalidated)
+    mod.validate_trial_access("sk-trial")
+    assert call_count > initial_calls  # New DB call for fresh data
