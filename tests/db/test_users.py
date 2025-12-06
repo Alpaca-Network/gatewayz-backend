@@ -921,3 +921,144 @@ def test_delete_user_account_exception_handling(sb, monkeypatch):
     # Function raises RuntimeError on any exception
     with pytest.raises(RuntimeError, match="Failed to delete user account"):
         users.delete_user_account("key_700")
+
+
+# ============================================================================
+# USER CACHE TESTS (PERF OPTIMIZATION)
+# ============================================================================
+
+def test_user_cache_hit_on_second_call(sb):
+    """Second call to get_user with same API key should use cache (not hit database)"""
+    import src.db.users as users
+
+    # Clear cache first
+    users.clear_user_cache()
+
+    # Setup test data
+    sb.table("users").insert({
+        "id": 801,
+        "username": "cache_test",
+        "email": "cache@test.com",
+        "credits": 10.0,
+        "api_key": "cache_key_801"
+    }).execute()
+    sb.table("api_keys_new").insert({
+        "id": 801,
+        "api_key": "cache_key_801",
+        "user_id": 801,
+        "key_name": "default",
+        "environment_tag": "live",
+        "scope_permissions": None,
+        "is_primary": True
+    }).execute()
+
+    # First call (cache miss)
+    result1 = users.get_user("cache_key_801")
+    assert result1 is not None
+    assert result1["id"] == 801
+
+    # Check cache stats - should have 1 cached user
+    stats = users.get_user_cache_stats()
+    assert stats["cached_users"] == 1
+
+    # Second call should use cache
+    result2 = users.get_user("cache_key_801")
+    assert result2 is not None
+    assert result2["id"] == 801
+
+
+def test_user_cache_miss_for_different_keys(sb):
+    """Different API keys should have separate cache entries"""
+    import src.db.users as users
+
+    users.clear_user_cache()
+
+    # Setup two users
+    sb.table("users").insert([
+        {"id": 802, "username": "user1", "email": "u1@test.com", "credits": 10.0},
+        {"id": 803, "username": "user2", "email": "u2@test.com", "credits": 20.0},
+    ]).execute()
+    sb.table("api_keys_new").insert([
+        {"id": 802, "api_key": "key_802", "user_id": 802, "key_name": "default", "environment_tag": "live", "is_primary": True},
+        {"id": 803, "api_key": "key_803", "user_id": 803, "key_name": "default", "environment_tag": "live", "is_primary": True},
+    ]).execute()
+
+    result1 = users.get_user("key_802")
+    result2 = users.get_user("key_803")
+
+    assert result1["id"] == 802
+    assert result2["id"] == 803
+
+    # Cache should have 2 entries
+    stats = users.get_user_cache_stats()
+    assert stats["cached_users"] == 2
+
+
+def test_clear_user_cache_specific_key(sb):
+    """clear_user_cache(api_key) should clear only that key"""
+    import src.db.users as users
+
+    users.clear_user_cache()
+
+    sb.table("users").insert({"id": 804, "username": "clear_test", "email": "c@test.com", "credits": 5.0}).execute()
+    sb.table("api_keys_new").insert({"id": 804, "api_key": "key_804", "user_id": 804, "key_name": "default", "environment_tag": "live", "is_primary": True}).execute()
+
+    # Populate cache
+    users.get_user("key_804")
+    assert users.get_user_cache_stats()["cached_users"] == 1
+
+    # Clear specific key
+    users.clear_user_cache("key_804")
+    assert users.get_user_cache_stats()["cached_users"] == 0
+
+
+def test_clear_user_cache_all(sb):
+    """clear_user_cache() with no arguments should clear entire cache"""
+    import src.db.users as users
+
+    users.clear_user_cache()
+
+    sb.table("users").insert([
+        {"id": 805, "username": "u5", "email": "u5@test.com", "credits": 5.0},
+        {"id": 806, "username": "u6", "email": "u6@test.com", "credits": 5.0},
+    ]).execute()
+    sb.table("api_keys_new").insert([
+        {"id": 805, "api_key": "key_805", "user_id": 805, "key_name": "default", "environment_tag": "live", "is_primary": True},
+        {"id": 806, "api_key": "key_806", "user_id": 806, "key_name": "default", "environment_tag": "live", "is_primary": True},
+    ]).execute()
+
+    users.get_user("key_805")
+    users.get_user("key_806")
+    assert users.get_user_cache_stats()["cached_users"] == 2
+
+    users.clear_user_cache()
+    assert users.get_user_cache_stats()["cached_users"] == 0
+
+
+def test_invalidate_user_cache(sb):
+    """invalidate_user_cache should clear cache for specific user"""
+    import src.db.users as users
+
+    users.clear_user_cache()
+
+    sb.table("users").insert({"id": 807, "username": "inv_test", "email": "inv@test.com", "credits": 5.0}).execute()
+    sb.table("api_keys_new").insert({"id": 807, "api_key": "key_807", "user_id": 807, "key_name": "default", "environment_tag": "live", "is_primary": True}).execute()
+
+    users.get_user("key_807")
+    assert users.get_user_cache_stats()["cached_users"] == 1
+
+    users.invalidate_user_cache("key_807")
+    assert users.get_user_cache_stats()["cached_users"] == 0
+
+
+def test_user_cache_not_found_user(sb):
+    """Cache should not cache None returns for invalid keys"""
+    import src.db.users as users
+
+    users.clear_user_cache()
+
+    result = users.get_user("nonexistent_key_xyz")
+    assert result is None
+
+    # Invalid keys should not be cached (to avoid filling cache with bad keys)
+    assert users.get_user_cache_stats()["cached_users"] == 0

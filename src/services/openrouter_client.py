@@ -1,11 +1,12 @@
 import logging
+from typing import AsyncIterator
 
 from fastapi import APIRouter
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
-from src.services.connection_pool import get_openrouter_pooled_client
+from src.services.connection_pool import get_openrouter_pooled_client, get_pooled_async_client
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
@@ -101,5 +102,58 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
             provider='openrouter',
             model=model,
             endpoint='/chat/completions (stream)'
+        )
+        raise
+
+
+def get_openrouter_async_client() -> AsyncOpenAI:
+    """Get async OpenRouter client with connection pooling for better performance.
+
+    PERF: Uses AsyncOpenAI for non-blocking streaming, which prevents the
+    event loop from being blocked while waiting for the first chunk from the
+    AI provider. This is critical for reducing perceived TTFC.
+    """
+    try:
+        if not Config.OPENROUTER_API_KEY:
+            raise ValueError("OpenRouter API key not configured")
+
+        return get_pooled_async_client(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_key=Config.OPENROUTER_API_KEY,
+            default_headers={
+                "HTTP-Referer": Config.OPENROUTER_SITE_URL,
+                "X-TitleSection": Config.OPENROUTER_SITE_NAME,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize async OpenRouter client: {e}")
+        capture_provider_error(e, provider='openrouter', endpoint='async_client_init')
+        raise
+
+
+async def make_openrouter_request_openai_stream_async(messages, model, **kwargs) -> AsyncIterator:
+    """Make async streaming request to OpenRouter using AsyncOpenAI client.
+
+    PERF: This async version doesn't block the event loop while waiting for
+    the AI provider to start streaming. The caller can yield control back to
+    the event loop between chunks, improving overall concurrency.
+
+    Returns:
+        AsyncIterator of streaming chunks
+    """
+    try:
+        client = get_openrouter_async_client()
+        stream = await client.chat.completions.create(
+            model=model, messages=messages, stream=True, **kwargs
+        )
+        return stream
+    except Exception as e:
+        logger.error(f"OpenRouter async streaming request failed: {e}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions (async stream)'
         )
         raise
