@@ -64,6 +64,169 @@ def apply_model_alias(model_id: str | None) -> str | None:
         return canonical
     return model_id
 
+
+# ============================================================================
+# Model ID Parsing: researcher/model:provider format
+# ============================================================================
+#
+# The canonical model ID format is: researcher/model:provider
+#
+# Examples:
+#   - "meta-llama/llama-3.3-70b" - canonical model, provider auto-detected
+#   - "meta-llama/llama-3.3-70b:fireworks" - explicit provider routing
+#   - "meta-llama/llama-3.3-70b:cerebras" - same model, different provider
+#   - "openai/gpt-4:openrouter" - explicit OpenRouter routing
+#
+# The :provider suffix is OPTIONAL. When omitted, provider is auto-detected.
+# This format separates model IDENTITY (researcher/model) from ROUTING (:provider).
+#
+# Reserved provider suffixes (OpenRouter-specific, not routing hints):
+#   - :exacto, :free, :extended - these are OpenRouter model variants
+#
+# ============================================================================
+
+# OpenRouter-specific suffixes that are NOT provider routing hints
+OPENROUTER_SPECIAL_SUFFIXES = {"exacto", "free", "extended"}
+
+
+class ParsedModelId:
+    """Parsed components of a model ID in researcher/model:provider format."""
+
+    def __init__(
+        self,
+        canonical_id: str,
+        researcher: str | None = None,
+        model_name: str | None = None,
+        provider_hint: str | None = None,
+    ):
+        self.canonical_id = canonical_id  # researcher/model (without :provider)
+        self.researcher = researcher  # e.g., "meta-llama", "openai"
+        self.model_name = model_name  # e.g., "llama-3.3-70b", "gpt-4"
+        self.provider_hint = provider_hint  # e.g., "fireworks", "cerebras", None
+
+    def __repr__(self) -> str:
+        if self.provider_hint:
+            return f"ParsedModelId({self.canonical_id}:{self.provider_hint})"
+        return f"ParsedModelId({self.canonical_id})"
+
+    @property
+    def full_id(self) -> str:
+        """Return the full model ID including provider hint if present."""
+        if self.provider_hint:
+            return f"{self.canonical_id}:{self.provider_hint}"
+        return self.canonical_id
+
+
+def parse_model_id(model_id: str | None) -> ParsedModelId | None:
+    """
+    Parse a model ID into its components: researcher/model:provider
+
+    Supports formats:
+      - "researcher/model" -> canonical_id="researcher/model", provider_hint=None
+      - "researcher/model:provider" -> canonical_id="researcher/model", provider_hint="provider"
+      - "model" -> canonical_id="model", researcher=None, provider_hint=None
+      - "model:provider" -> canonical_id="model", provider_hint="provider"
+
+    Special cases:
+      - OpenRouter suffixes (:exacto, :free, :extended) are NOT treated as provider hints
+      - These are passed through as part of the canonical_id
+
+    Args:
+        model_id: The model ID string to parse
+
+    Returns:
+        ParsedModelId object with parsed components, or None if model_id is empty
+    """
+    if not model_id:
+        return None
+
+    # Handle OpenRouter special suffixes - these are NOT provider hints
+    if ":" in model_id:
+        base, suffix = model_id.rsplit(":", 1)
+        suffix_lower = suffix.lower()
+
+        if suffix_lower in OPENROUTER_SPECIAL_SUFFIXES:
+            # This is an OpenRouter variant, not a provider hint
+            # Keep the full string as the canonical ID
+            researcher = None
+            model_name = model_id
+            if "/" in base:
+                researcher, model_name = base.split("/", 1)
+                model_name = f"{model_name}:{suffix}"  # Keep the suffix
+            return ParsedModelId(
+                canonical_id=model_id,
+                researcher=researcher,
+                model_name=model_name,
+                provider_hint=None,
+            )
+
+        # This is a provider routing hint
+        provider_hint = suffix_lower
+        canonical_id = base
+    else:
+        provider_hint = None
+        canonical_id = model_id
+
+    # Parse researcher/model
+    researcher = None
+    model_name = canonical_id
+    if "/" in canonical_id:
+        # Handle special prefixes like @google/models/...
+        if canonical_id.startswith("@"):
+            # Keep the @ prefix with the researcher
+            parts = canonical_id.split("/", 1)
+            researcher = parts[0]  # e.g., "@google"
+            model_name = parts[1] if len(parts) > 1 else canonical_id
+        else:
+            researcher, model_name = canonical_id.split("/", 1)
+
+    return ParsedModelId(
+        canonical_id=canonical_id,
+        researcher=researcher,
+        model_name=model_name,
+        provider_hint=provider_hint,
+    )
+
+
+def extract_provider_hint(model_id: str | None) -> tuple[str, str | None]:
+    """
+    Extract provider hint from model ID if present.
+
+    Args:
+        model_id: The full model ID (e.g., "meta-llama/llama-3.3-70b:fireworks")
+
+    Returns:
+        Tuple of (canonical_id, provider_hint or None)
+        e.g., ("meta-llama/llama-3.3-70b", "fireworks")
+    """
+    if not model_id:
+        return model_id or "", None
+
+    parsed = parse_model_id(model_id)
+    if parsed:
+        return parsed.canonical_id, parsed.provider_hint
+    return model_id, None
+
+
+def normalize_to_canonical_id(model_id: str | None) -> str | None:
+    """
+    Normalize a model ID to its canonical form (without provider hint).
+
+    Args:
+        model_id: Any model ID format
+
+    Returns:
+        The canonical model ID (researcher/model) without :provider suffix
+    """
+    if not model_id:
+        return model_id
+
+    parsed = parse_model_id(model_id)
+    if parsed:
+        return parsed.canonical_id
+    return model_id
+
+
 # Gemini model name constants to reduce duplication
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
@@ -82,6 +245,9 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     """
     Transform model ID from simplified format to provider-specific format.
 
+    Supports the researcher/model:provider format where :provider suffix is extracted
+    and used for routing. The canonical model ID (without :provider) is transformed.
+
     Now supports multi-provider models - will automatically get the correct
     provider-specific model ID from the registry.
 
@@ -90,7 +256,8 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     are case-insensitive, so lowercase works universally.
 
     Args:
-        model_id: The input model ID (e.g., "deepseek-ai/deepseek-v3")
+        model_id: The input model ID (e.g., "deepseek-ai/deepseek-v3" or
+                  "meta-llama/llama-3.3-70b:fireworks")
         provider: The target provider (e.g., "fireworks", "openrouter")
         use_multi_provider: Whether to check multi-provider registry first (default: True)
 
@@ -106,10 +273,23 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
 
         Input: "OpenAI/GPT-4", provider="openrouter"
         Output: "openai/gpt-4"
+
+        Input: "meta-llama/llama-3.3-70b:fireworks", provider="fireworks"
+        Output: "accounts/fireworks/models/llama-v3p3-70b-instruct"
     """
 
     if not model_id:
         return model_id
+
+    # Parse the model ID to extract canonical ID and provider hint
+    parsed = parse_model_id(model_id)
+    if parsed and parsed.provider_hint:
+        # Log that we're using the canonical ID for transformation
+        logger.debug(
+            f"Extracting canonical ID from '{model_id}' -> '{parsed.canonical_id}' "
+            f"(provider hint: {parsed.provider_hint})"
+        )
+        model_id = parsed.canonical_id
 
     user_supplied_model_id = model_id
     model_id = apply_model_alias(model_id)
@@ -944,36 +1124,53 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
     """
     Try to detect which provider a model belongs to based on its ID.
 
+    Supports the researcher/model:provider format where :provider is an explicit
+    routing hint that takes precedence over auto-detection.
+
     Now supports multi-provider models with automatic provider selection.
 
     Args:
-        model_id: The model ID to analyze
+        model_id: The model ID to analyze (e.g., "meta-llama/llama-3.3-70b:fireworks")
         preferred_provider: Optional preferred provider (for multi-provider models)
 
     Returns:
         The detected provider name, or None if unable to detect
     """
+    if not model_id:
+        return None
 
-    model_id = apply_model_alias(model_id)
+    # FIRST: Check for explicit :provider suffix (new researcher/model:provider format)
+    # This takes precedence over all other detection methods
+    parsed = parse_model_id(model_id)
+    if parsed and parsed.provider_hint:
+        logger.info(
+            f"Using explicit provider hint from model ID: '{model_id}' -> provider='{parsed.provider_hint}'"
+        )
+        return parsed.provider_hint
+
+    # Use the canonical_id (without :provider suffix) for remaining detection
+    canonical_model_id = parsed.canonical_id if parsed else model_id
+
+    canonical_model_id = apply_model_alias(canonical_model_id)
 
     # Check multi-provider registry first
     try:
         from src.services.multi_provider_registry import get_registry
 
         registry = get_registry()
-        if registry.has_model(model_id):
+        if registry.has_model(canonical_model_id):
             # Model is in multi-provider registry
             from src.services.provider_selector import get_selector
 
             selector = get_selector()
             selected_provider = selector.registry.select_provider(
-                model_id=model_id,
+                model_id=canonical_model_id,
                 preferred_provider=preferred_provider,
             )
 
             if selected_provider:
                 logger.info(
-                    f"Multi-provider model {model_id}: selected {selected_provider.name} "
+                    f"Multi-provider model {canonical_model_id}: selected {selected_provider.name} "
                     f"(priority {selected_provider.priority})"
                 )
                 return selected_provider.name
@@ -985,31 +1182,31 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # Fall through to legacy detection
 
     # Apply explicit overrides first
-    normalized_id = (model_id or "").lower()
-    normalized_base = normalized_id.split(":", 1)[0]
-    override = MODEL_PROVIDER_OVERRIDES.get(normalized_base)
+    normalized_id = (canonical_model_id or "").lower()
+    override = MODEL_PROVIDER_OVERRIDES.get(normalized_id)
     if override:
-        logger.info(f"Provider override for model '{model_id}': {override}")
+        logger.info(f"Provider override for model '{canonical_model_id}': {override}")
         return override
 
     # OpenRouter models with colon-based suffixes (e.g., :exacto, :free, :extended)
-    # These are OpenRouter-specific model variants
-    if ":" in model_id and "/" in model_id:
+    # These are OpenRouter-specific model variants (already handled in parse_model_id)
+    # If we reach here with these suffixes, it means they're OpenRouter variants
+    if ":" in canonical_model_id and "/" in canonical_model_id:
         # Models like "z-ai/glm-4.6:exacto", "google/gemini-2.0-flash-exp:free"
-        suffix = model_id.split(":", 1)[1]
-        if suffix in ["exacto", "free", "extended"]:
-            logger.info(f"Detected OpenRouter model with :{suffix} suffix: {model_id}")
+        suffix = canonical_model_id.split(":", 1)[1]
+        if suffix in OPENROUTER_SPECIAL_SUFFIXES:
+            logger.info(f"Detected OpenRouter model with :{suffix} suffix: {canonical_model_id}")
             return "openrouter"
 
     # Check if it's already in a provider-specific format
-    if model_id.startswith("accounts/fireworks/models/"):
+    if canonical_model_id.startswith("accounts/fireworks/models/"):
         return "fireworks"
 
     # Normalize to lowercase for consistency in all @ prefix checks
-    normalized_model = model_id.lower()
+    normalized_model = canonical_model_id.lower()
 
     # Check for Google Vertex AI models first (before Portkey check)
-    if model_id.startswith("projects/") and "/models/" in model_id:
+    if canonical_model_id.startswith("projects/") and "/models/" in canonical_model_id:
         return "google-vertex"
     if normalized_model.startswith("@google/models/") and any(
         pattern in normalized_model
@@ -1022,11 +1219,11 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             pattern in normalized_model
             for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
         )
-        and "/" not in model_id
+        and "/" not in canonical_model_id
     ):
         # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
         return "google-vertex"
-    if model_id.startswith("google/") and "gemini" in normalized_model:
+    if canonical_model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
         # These can go to either Vertex AI or OpenRouter
         # Check if Vertex AI credentials are available
@@ -1036,33 +1233,33 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         gvc = os.environ.get("GOOGLE_VERTEX_CREDENTIALS_JSON")
         logger.info(
-            f"[CREDENTIAL CHECK] model={model_id}, "
+            f"[CREDENTIAL CHECK] model={canonical_model_id}, "
             f"GOOGLE_APPLICATION_CREDENTIALS={'SET' if gac else 'NOT SET'}, "
             f"GOOGLE_VERTEX_CREDENTIALS_JSON={'SET (len=' + str(len(gvc)) + ')' if gvc else 'NOT SET'}"
         )
 
         has_credentials = gac or gvc
         if has_credentials:
-            logger.info(f"✅ Routing {model_id} to google-vertex (credentials available)")
+            logger.info(f"✅ Routing {canonical_model_id} to google-vertex (credentials available)")
             return "google-vertex"
         else:
             # No Vertex credentials, route to OpenRouter which supports google/ prefix
-            logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
+            logger.warning(f"⚠️ Routing {canonical_model_id} to openrouter (no Vertex credentials found)")
             return "openrouter"
 
     # Check for Cloudflare Workers AI models (use @cf/ prefix)
     # IMPORTANT: This must come before the general @ prefix check below
-    if model_id.startswith("@cf/"):
-        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
+    if canonical_model_id.startswith("@cf/"):
+        logger.info(f"Detected Cloudflare Workers AI model: {canonical_model_id}")
         return "cloudflare-workers-ai"
 
     # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
     # After Portkey removal, @ prefix models are now routed through OpenRouter
     # which supports multi-provider model format
-    if model_id.startswith("@") and "/" in model_id:
+    if canonical_model_id.startswith("@") and "/" in canonical_model_id:
         if not normalized_model.startswith("@google/models/"):
             # Route @ prefix models (e.g., "@anthropic/claude-3-sonnet") to OpenRouter
-            logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
+            logger.info(f"Routing @ prefix model {canonical_model_id} to openrouter (Portkey removed)")
             return "openrouter"
 
     # Check all mappings to see if this model exists
@@ -1088,18 +1285,18 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "cloudflare-workers-ai",
     ]:
         mapping = get_model_id_mapping(provider)
-        if model_id in mapping:
-            logger.info(f"Detected provider '{provider}' for model '{model_id}'")
+        if canonical_model_id in mapping:
+            logger.info(f"Detected provider '{provider}' for model '{canonical_model_id}'")
             return provider
 
         # Also check the values (native formats)
-        if model_id in mapping.values():
-            logger.info(f"Detected provider '{provider}' for native model '{model_id}'")
+        if canonical_model_id in mapping.values():
+            logger.info(f"Detected provider '{provider}' for native model '{canonical_model_id}'")
             return provider
 
     # Check by model patterns
-    if "/" in model_id:
-        org, model_name = model_id.split("/", 1)
+    if "/" in canonical_model_id:
+        org, model_name = canonical_model_id.split("/", 1)
 
         # Google Vertex models should only be routed if explicitly in the mapping above
         # OpenRouter also has google/ models (with :free suffix) that should stay with OpenRouter
