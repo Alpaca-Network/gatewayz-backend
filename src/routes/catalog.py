@@ -405,6 +405,11 @@ async def get_models(
             if not cerebras_models and gateway_value == "cerebras":
                 logger.warning("Cerebras models unavailable - continuing without them")
 
+        if gateway_value in ("google", "all"):
+            google_models = get_cached_models("google") or []
+            if not google_models and gateway_value == "google":
+                logger.warning("Google models unavailable - continuing without them")
+
         if gateway_value in ("nebius", "all"):
             nebius_models = get_cached_models("nebius") or []
             if gateway_value == "nebius" and not nebius_models:
@@ -471,6 +476,11 @@ async def get_models(
             if not alibaba_models and gateway_value == "alibaba":
                 logger.warning("Alibaba Cloud models unavailable - continuing without them")
 
+        if gateway_value in ("alpaca", "all"):
+            alpaca_models = get_cached_models("alpaca") or []
+            if not alpaca_models and gateway_value == "alpaca":
+                logger.warning("Alpaca Network models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "featherless":
@@ -487,6 +497,8 @@ async def get_models(
             models = together_models
         elif gateway_value == "cerebras":
             models = cerebras_models
+        elif gateway_value == "google":
+            models = google_models
         elif gateway_value == "nebius":
             models = nebius_models
         elif gateway_value == "xai":
@@ -511,6 +523,8 @@ async def get_models(
             models = vercel_ai_gateway_models
         elif gateway_value == "alibaba":
             models = alibaba_models
+        elif gateway_value == "alpaca":
+            models = alpaca_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -521,6 +535,7 @@ async def get_models(
                 groq_models,
                 fireworks_models,
                 together_models,
+                google_models,
                 aimo_models,
                 near_models,
                 fal_models,
@@ -529,6 +544,7 @@ async def get_models(
                 aihubmix_models,
                 vercel_ai_gateway_models,
                 alibaba_models,
+                alpaca_models,
             )
 
         if not models:
@@ -664,6 +680,12 @@ async def get_models(
             )
             annotated_vercel = annotate_provider_sources(vercel_providers, "vercel-ai-gateway")
             provider_groups.append(annotated_vercel)
+
+        if gateway_value in ("alpaca", "all"):
+            models_for_providers = alpaca_models if gateway_value == "all" else models
+            alpaca_providers = derive_providers_from_models(models_for_providers, "alpaca")
+            annotated_alpaca = annotate_provider_sources(alpaca_providers, "alpaca")
+            provider_groups.append(annotated_alpaca)
 
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")

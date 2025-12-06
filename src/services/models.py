@@ -16,6 +16,7 @@ from src.cache import (
     _aihubmix_models_cache,
     _aimo_models_cache,
     _alibaba_models_cache,
+    _alpaca_models_cache,
     _anannas_models_cache,
     _cerebras_models_cache,
     _chutes_models_cache,
@@ -53,6 +54,7 @@ from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
+from src.services.alpaca_network_client import fetch_models_from_alpaca_network
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.nebius_client import fetch_models_from_nebius
@@ -648,12 +650,12 @@ def get_cached_models(gateway: str = "openrouter"):
             _register_canonical_records("deepinfra", result)
             return result if result is not None else []
 
-        if gateway == "google-vertex":
-            cached = _get_fresh_or_stale_cached_models(_google_vertex_models_cache, "google-vertex")
+        if gateway in ("google-vertex", "google"):
+            cached = _get_fresh_or_stale_cached_models(_google_vertex_models_cache, "google")
             if cached is not None:
                 return cached
             result = fetch_models_from_google_vertex()
-            _register_canonical_records("google-vertex", result)
+            _register_canonical_records("google", result)
             return result if result is not None else []
 
         if gateway == "cerebras":
@@ -829,6 +831,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_cloudflare_workers_ai()
             _register_canonical_records("cloudflare-workers-ai", result)
+            return result if result is not None else []
+
+        if gateway == "alpaca":
+            cached = _get_fresh_or_stale_cached_models(_alpaca_models_cache, "alpaca")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_alpaca_network()
+            _register_canonical_records("alpaca", result)
             return result if result is not None else []
 
         if gateway == "all":

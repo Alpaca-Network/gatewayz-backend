@@ -1104,7 +1104,51 @@ def fetch_models_from_google_vertex():
     """Fetch models from Google Vertex AI API
 
     Google Vertex AI does not provide a public API to list available models.
-    Returns None to indicate no dynamic model listing is available.
+    Returns a hardcoded list of known Google/Gemini models instead.
     """
-    logger.info("Google Vertex AI does not provide a public model listing API")
-    return None
+    logger.info("Google Vertex AI does not provide a public model listing API, returning known Gemini models")
+
+    # Import here to avoid circular dependency
+    from src.services.google_models_config import get_google_models
+
+    models = get_google_models()
+    result = []
+
+    for model in models:
+        # Get pricing from the google-vertex provider config
+        vertex_provider = next((p for p in model.providers if p.name == "google-vertex"), None)
+        pricing = {
+            "prompt": str(vertex_provider.cost_per_1k_input) if vertex_provider else "0",
+            "completion": str(vertex_provider.cost_per_1k_output) if vertex_provider else "0",
+            "request": "0",
+            "image": "0",
+        }
+
+        # Determine modality
+        modalities = model.modalities or ["text"]
+        if "image" in modalities or "video" in modalities:
+            modality = "text+image->text"
+            input_modalities = ["text", "image"]
+        else:
+            modality = "text->text"
+            input_modalities = ["text"]
+
+        result.append({
+            "id": model.id,
+            "slug": model.id,
+            "canonical_slug": model.id,
+            "name": model.name,
+            "description": model.description,
+            "context_length": model.context_length,
+            "architecture": {
+                "modality": modality,
+                "input_modalities": input_modalities,
+                "output_modalities": ["text"],
+            },
+            "pricing": pricing,
+            "provider_slug": "google",
+            "source_gateway": "google",
+        })
+
+    logger.info(f"Returning {len(result)} static Google/Gemini models")
+    return result
