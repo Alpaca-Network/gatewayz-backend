@@ -676,6 +676,39 @@ def test_chat_completions_streaming_success(client, sb):
     assert "[DONE]" in content
 
 
+def test_chat_completions_streaming_anonymous_success(client):
+    """Test successful streaming chat completion for anonymous user.
+
+    This test verifies that anonymous users (without API key) can successfully
+    stream chat completions. The fix ensures that plan limit checks are skipped
+    for anonymous users, preventing TypeError from accessing user["id"] when
+    user is None.
+
+    Related fix: Skip enforce_plan_limits() for anonymous requests in stream_generator()
+    """
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True
+        }
+        # No Authorization header - anonymous request
+    )
+
+    # Anonymous streaming should succeed
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+    # Parse SSE stream
+    content = response.text
+    assert "data:" in content
+    assert "[DONE]" in content
+
+    # Ensure no error in the stream
+    assert '"error":' not in content or '"type": "stream_error"' not in content
+
+
 # ==================================================
 # BUSINESS LOGIC ERROR TESTS
 # ==================================================
