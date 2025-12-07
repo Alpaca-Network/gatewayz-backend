@@ -1075,17 +1075,19 @@ async def stream_generator(
         elapsed = max(0.001, time.monotonic() - start_time)
 
         # OPTIMIZATION: Quick plan limit check (critical - must be synchronous)
-        post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
-        if not post_plan.get("allowed", False):
-            error_chunk = {
-                "error": {
-                    "message": f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
-                    "type": "plan_limit_exceeded",
+        # Skip plan limit check for anonymous users (user is None)
+        if not is_anonymous and user is not None:
+            post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
+            if not post_plan.get("allowed", False):
+                error_chunk = {
+                    "error": {
+                        "message": f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
+                        "type": "plan_limit_exceeded",
+                    }
                 }
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+                yield f"data: {json.dumps(error_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
         # OPTIMIZATION: Send [DONE] immediately, process credits/logging in background!
         # This makes the stream complete 100-200ms faster for the client
