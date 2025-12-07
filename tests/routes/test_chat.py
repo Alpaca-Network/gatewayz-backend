@@ -590,3 +590,115 @@ def test_provider_failover_on_404_to_huggingface(
     assert data["choices"][0]["message"]["content"] == "fallback success"
     assert mock_make_featherless.call_count == 1
     assert mock_make_hf.call_count == 1
+
+
+# ----------------------------------------------------------------------
+#                    NONE-SAFETY TESTS
+# ----------------------------------------------------------------------
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_response_with_none_choices(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    client, payload_basic, auth_headers
+):
+    """Test that responses with None choices are handled safely (no NoneType error)"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    # Response with choices set to None
+    mock_process.return_value = {
+        "choices": None,
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
+    mock_calculate_cost.return_value = 0.001
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
+
+    # Should not raise NoneType error - should return the response
+    assert r.status_code == 200
+    data = r.json()
+    # Choices may still be None in response, that's expected
+    assert "usage" in data
+
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_response_with_empty_choices(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    client, payload_basic, auth_headers
+):
+    """Test that responses with empty choices are handled safely"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    # Response with empty choices list
+    mock_process.return_value = {
+        "choices": [],
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
+    mock_calculate_cost.return_value = 0.001
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
+
+    # Should not raise IndexError - should return the response
+    assert r.status_code == 200
+
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_response_with_none_message(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    client, payload_basic, auth_headers
+):
+    """Test that responses with None message in choices are handled safely"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    # Response with message set to None
+    mock_process.return_value = {
+        "choices": [{"message": None, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
+    mock_calculate_cost.return_value = 0.001
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
+
+    # Should not raise NoneType error - should return the response
+    assert r.status_code == 200

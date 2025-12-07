@@ -2071,7 +2071,7 @@ async def chat_completions(
                     tokens=total_tokens,
                     cost=cost if not trial.get("is_trial", False) else 0.0,
                     speed=speed,
-                    finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                    finish_reason=(processed.get("choices") or [{}])[0].get("finish_reason", "stop"),
                     app="API",
                     metadata={
                         "prompt_tokens": prompt_tokens,
@@ -2109,9 +2109,11 @@ async def chat_completions(
                             user["id"],
                         )
 
-                    assistant_content = (
-                        processed.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    )
+                    # Safely extract assistant content (handle None values in choices)
+                    choices = processed.get("choices") or [{}]
+                    first_choice = choices[0] if choices else {}
+                    message = first_choice.get("message") or {}
+                    assistant_content = message.get("content", "")
                     if assistant_content:
                         await _to_thread(
                             save_chat_message,
@@ -2147,9 +2149,14 @@ async def chat_completions(
             messages_for_log = [
                 m.model_dump() if hasattr(m, "model_dump") else m for m in req.messages
             ]
+            # Safely extract output content for Braintrust logging
+            bt_choices = processed.get("choices") or [{}]
+            bt_first_choice = bt_choices[0] if bt_choices else {}
+            bt_message = bt_first_choice.get("message") or {}
+            bt_output = bt_message.get("content", "")
             span.log(
                 input=messages_for_log,
-                output=processed.get("choices", [{}])[0].get("message", {}).get("content", ""),
+                output=bt_output,
                 metrics={
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
@@ -3083,7 +3090,7 @@ async def unified_responses(
                 tokens=total_tokens,
                 cost=cost if not trial.get("is_trial", False) else 0.0,
                 speed=speed,
-                finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                finish_reason=(processed.get("choices") or [{}])[0].get("finish_reason", "stop"),
                 app="API",
                 metadata={
                     "prompt_tokens": prompt_tokens,
@@ -3131,9 +3138,11 @@ async def unified_responses(
                             user["id"],
                         )
 
-                    assistant_content = (
-                        processed.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    )
+                    # Safely extract assistant content (handle None values in choices)
+                    choices = processed.get("choices") or [{}]
+                    first_choice = choices[0] if choices else {}
+                    message = first_choice.get("message") or {}
+                    assistant_content = message.get("content", "")
                     if assistant_content:
                         await _to_thread(
                             save_chat_message,
