@@ -19,7 +19,10 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_api_key(
-    credentials: HTTPAuthorizationCredentials = Depends(security), request: Request = None
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None,
+    *,
+    log_security_violations: bool = True,
 ) -> str:
     """
     Validate API key from Authorization header
@@ -35,6 +38,9 @@ async def get_api_key(
     Args:
         credentials: HTTP Authorization credentials
         request: FastAPI request object
+        log_security_violations: Whether to log security violations for invalid keys.
+            Set to False for optional auth endpoints where invalid credentials
+            should silently fall back to anonymous access.
 
     Returns:
         Validated API key string
@@ -97,8 +103,8 @@ async def get_api_key(
                 status_code = code
                 break
 
-        # Log security violation
-        if client_ip:
+        # Log security violation (only for required auth endpoints)
+        if log_security_violations and client_ip:
             audit_logger.log_security_violation(
                 violation_type="INVALID_API_KEY", details=error_message, ip_address=client_ip
             )
@@ -169,6 +175,10 @@ async def get_optional_api_key(
     Use for endpoints that work for both auth and non-auth users
     but need the raw API key string (not the user object).
 
+    Note: Invalid credentials are silently ignored (returning None) without
+    logging security violations, since authentication is optional for these
+    endpoints and invalid credentials should fall back to anonymous access.
+
     Args:
         credentials: Optional credentials
         request: Request object
@@ -180,7 +190,9 @@ async def get_optional_api_key(
         return None
 
     try:
-        return await get_api_key(credentials, request)
+        # Don't log security violations for optional auth - invalid credentials
+        # should silently fall back to anonymous access
+        return await get_api_key(credentials, request, log_security_violations=False)
     except HTTPException:
         return None
 
@@ -194,6 +206,10 @@ async def get_optional_user(
 
     Use for endpoints that work for both auth and non-auth users.
 
+    Note: Invalid credentials are silently ignored (returning None) without
+    logging security violations, since authentication is optional for these
+    endpoints and invalid credentials should fall back to anonymous access.
+
     Args:
         credentials: Optional credentials
         request: Request object
@@ -205,7 +221,9 @@ async def get_optional_user(
         return None
 
     try:
-        api_key = await get_api_key(credentials, request)
+        # Don't log security violations for optional auth - invalid credentials
+        # should silently fall back to anonymous access
+        api_key = await get_api_key(credentials, request, log_security_violations=False)
         return get_user(api_key)
     except HTTPException:
         return None
