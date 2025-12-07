@@ -367,47 +367,46 @@ async def test_tier_update_loop_handles_missing_function():
             )
             mock_supabase.rpc.return_value = mock_rpc
 
-            # Create a task that will run the tier update loop
-            async def run_single_iteration():
-                """Run a single iteration of the tier update loop"""
-                try:
-                    from src.config.supabase_config import supabase
+            # Mock asyncio.sleep to avoid delays in test
+            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                # Create a task that runs one iteration of the actual _tier_update_loop
+                async def run_one_iteration():
+                    """Run one iteration and then stop"""
+                    iteration_count = 0
 
-                    # Simulate the logic in _tier_update_loop
+                    # Run the loop once by making it think it's active for just one iteration
+                    original_active = monitor.monitoring_active
+                    monitor.monitoring_active = True
+
+                    # Start the tier update loop task
+                    task = asyncio.create_task(monitor._tier_update_loop())
+
+                    # Wait for one sleep call (start of loop)
+                    await asyncio.sleep(0.01)
+
+                    # Stop the loop
+                    monitor.monitoring_active = False
+
+                    # Wait for task to finish
                     try:
-                        supabase.rpc("update_model_tier").execute()
-                    except Exception as rpc_error:
-                        error_msg = str(rpc_error)
-                        if "PGRST202" in error_msg or "Could not find the function" in error_msg:
-                            mock_logger.warning(
-                                f"Database function 'update_model_tier' not found in schema cache. "
-                                f"This may indicate the migration hasn't been applied or PostgREST needs a schema reload. "
-                                f"Error: {error_msg}"
-                            )
-                            return "handled"
-                        else:
-                            raise
-                except Exception as e:
-                    return f"error: {e}"
+                        await asyncio.wait_for(task, timeout=0.5)
+                    except asyncio.TimeoutError:
+                        task.cancel()
 
-            result = await run_single_iteration()
+                await run_one_iteration()
 
-            # Verify the error was handled gracefully with a warning
-            assert result == "handled"
-            assert mock_logger.warning.called
-            warning_call = mock_logger.warning.call_args[0][0]
-            assert "update_model_tier" in warning_call
-            assert "not found in schema cache" in warning_call
-            assert "PGRST202" in warning_call
-
-    monitor.monitoring_active = False
+                # Verify the error was handled gracefully with a warning
+                assert mock_logger.warning.called
+                warning_call = mock_logger.warning.call_args[0][0]
+                assert "update_model_tier" in warning_call
+                assert "not found in schema cache" in warning_call
+                assert "PGRST202" in warning_call or "Could not find the function" in warning_call
 
 
 @pytest.mark.asyncio
 async def test_tier_update_loop_handles_other_errors():
     """Test that tier update loop properly logs other unexpected errors"""
     monitor = IntelligentHealthMonitor(batch_size=10, max_concurrent_checks=5, redis_coordination=False)
-    monitor.monitoring_active = True
 
     # Mock supabase to simulate a different error
     with patch("src.services.intelligent_health_monitor.logger") as mock_logger:
@@ -417,33 +416,33 @@ async def test_tier_update_loop_handles_other_errors():
             mock_rpc.execute.side_effect = Exception("Network timeout error")
             mock_supabase.rpc.return_value = mock_rpc
 
-            # Create a task that will run the tier update loop
-            async def run_single_iteration():
-                """Run a single iteration of the tier update loop"""
-                try:
-                    from src.config.supabase_config import supabase
+            # Mock asyncio.sleep to avoid delays in test
+            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                # Create a task that runs one iteration of the actual _tier_update_loop
+                async def run_one_iteration():
+                    """Run one iteration and then stop"""
+                    # Run the loop once
+                    monitor.monitoring_active = True
 
-                    # Simulate the logic in _tier_update_loop
+                    # Start the tier update loop task
+                    task = asyncio.create_task(monitor._tier_update_loop())
+
+                    # Wait briefly for execution
+                    await asyncio.sleep(0.01)
+
+                    # Stop the loop
+                    monitor.monitoring_active = False
+
+                    # Wait for task to finish
                     try:
-                        supabase.rpc("update_model_tier").execute()
-                    except Exception as rpc_error:
-                        error_msg = str(rpc_error)
-                        if "PGRST202" in error_msg or "Could not find the function" in error_msg:
-                            mock_logger.warning(f"Function not found: {error_msg}")
-                            return "handled"
-                        else:
-                            raise
-                except Exception as e:
-                    mock_logger.error(f"Error in tier update loop: {e}", exc_info=True)
-                    return "logged_error"
+                        await asyncio.wait_for(task, timeout=0.5)
+                    except asyncio.TimeoutError:
+                        task.cancel()
 
-            result = await run_single_iteration()
+                await run_one_iteration()
 
-            # Verify the error was logged properly
-            assert result == "logged_error"
-            assert mock_logger.error.called
-            error_call = mock_logger.error.call_args[0][0]
-            assert "Error in tier update loop" in error_call
-            assert "Network timeout error" in error_call
-
-    monitor.monitoring_active = False
+                # Verify the error was logged properly as an ERROR (not a warning)
+                assert mock_logger.error.called
+                error_call = mock_logger.error.call_args[0][0]
+                assert "Error in tier update loop" in error_call
+                assert "Network timeout error" in error_call

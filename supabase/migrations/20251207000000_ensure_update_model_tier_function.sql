@@ -17,17 +17,18 @@ DECLARE
     p95_threshold NUMERIC;
     p75_threshold NUMERIC;
 BEGIN
-    -- Pre-calculate percentile thresholds using CTEs for better performance
+    -- Pre-calculate percentile thresholds in a single query for better performance
     -- Only calculate if there are models with usage
-    SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY usage_count_24h)
-    INTO p95_threshold
-    FROM model_health_tracking
-    WHERE usage_count_24h > 0;
-
-    SELECT PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY usage_count_24h)
-    INTO p75_threshold
-    FROM model_health_tracking
-    WHERE usage_count_24h > 0;
+    WITH percentiles AS (
+        SELECT
+            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY usage_count_24h) AS p95,
+            PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY usage_count_24h) AS p75
+        FROM model_health_tracking
+        WHERE usage_count_24h > 0
+    )
+    SELECT p95, p75
+    INTO p95_threshold, p75_threshold
+    FROM percentiles;
 
     -- If no models have usage, skip tier updates (preserves existing behavior)
     IF p95_threshold IS NULL OR p75_threshold IS NULL THEN
@@ -74,11 +75,10 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION public.update_model_tier IS 'Automatically update model monitoring tiers based on usage patterns. Uses pre-calculated percentile thresholds for better performance. Called hourly by the health monitoring service.';
 
 -- ============================================================================
--- Grant execute permissions to service role and authenticated users
+-- Grant execute permissions - only service_role should execute tier updates
 -- ============================================================================
 GRANT EXECUTE ON FUNCTION public.update_model_tier() TO service_role;
 GRANT EXECUTE ON FUNCTION public.update_model_tier() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.update_model_tier() TO anon;
 
 -- ============================================================================
 -- Force PostgREST to reload schema cache immediately

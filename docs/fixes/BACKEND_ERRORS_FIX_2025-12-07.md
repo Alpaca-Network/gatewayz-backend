@@ -15,7 +15,7 @@ Error in tier update loop: {'code': 'PGRST202', 'details': 'Searched for the fun
 **Observed In:**
 - Railway deployment logs (health-service and api deployments)
 - Occurs every hour when the tier update loop attempts to run
-- First observed: 2025-12-07 14:54:35 PM (deployment logs)
+- First observed: 2025-12-07 14:54:35 (deployment logs)
 
 **Root Cause:**
 The `update_model_tier()` database function exists in the migrations but PostgREST's schema cache was not refreshed after the migration was applied. This caused the RPC call from the Python application to fail because PostgREST couldn't find the function in its internal cache.
