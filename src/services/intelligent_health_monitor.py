@@ -821,9 +821,23 @@ class IntelligentHealthMonitor:
                 from src.config.supabase_config import supabase
 
                 # Call the database function to update tiers
-                supabase.rpc("update_model_tier").execute()
-
-                logger.info("Updated model monitoring tiers based on usage")
+                try:
+                    supabase.rpc("update_model_tier").execute()
+                    logger.info("Updated model monitoring tiers based on usage")
+                except Exception as rpc_error:
+                    # Handle database function not found or schema cache issues
+                    error_msg = str(rpc_error)
+                    if "PGRST202" in error_msg or "Could not find the function" in error_msg:
+                        logger.warning(
+                            f"Database function 'update_model_tier' not found in schema cache. "
+                            f"This may indicate the migration hasn't been applied or PostgREST needs a schema reload. "
+                            f"Error: {error_msg}"
+                        )
+                        # Skip this iteration and try again next hour
+                        continue
+                    else:
+                        # Re-raise other errors for proper logging
+                        raise
 
             except Exception as e:
                 logger.error(f"Error in tier update loop: {e}", exc_info=True)
