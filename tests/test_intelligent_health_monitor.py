@@ -372,10 +372,7 @@ async def test_tier_update_loop_handles_missing_function():
                 # Create a task that runs one iteration of the actual _tier_update_loop
                 async def run_one_iteration():
                     """Run one iteration and then stop"""
-                    iteration_count = 0
-
                     # Run the loop once by making it think it's active for just one iteration
-                    original_active = monitor.monitoring_active
                     monitor.monitoring_active = True
 
                     # Start the tier update loop task
