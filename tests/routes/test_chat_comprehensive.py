@@ -676,6 +676,36 @@ def test_chat_completions_streaming_success(client, sb):
     assert "[DONE]" in content
 
 
+def test_chat_completions_streaming_anonymous_success(client):
+    """Test streaming chat completion for anonymous users (no API key).
+
+    This is a critical regression test for the bug where anonymous users
+    would get "Streaming error occurred" because the code attempted to
+    call enforce_plan_limits(user["id"], ...) when user is None.
+
+    The fix skips plan limit enforcement for anonymous users (is_anonymous=True).
+    """
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Hello from anonymous user"}],
+            "stream": True
+        }
+        # No Authorization header = anonymous request
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+    # Parse SSE stream - should NOT contain "Streaming error occurred"
+    content = response.text
+    assert "data:" in content
+    assert "[DONE]" in content
+    assert "Streaming error occurred" not in content
+    assert "stream_error" not in content
+
+
 # ==================================================
 # BUSINESS LOGIC ERROR TESTS
 # ==================================================
