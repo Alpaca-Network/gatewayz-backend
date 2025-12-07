@@ -142,6 +142,54 @@ async def test_get_api_key_unexpected(monkeypatch, mod):
     assert "Internal authentication error" in ei.value.detail
 
 
+@pytest.mark.anyio
+async def test_get_api_key_no_violation_log_when_disabled(monkeypatch, mod):
+    """Verify that log_security_violations=False prevents security violation logging."""
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+
+    # Make validator raise value error
+    def _raise(*a, **k):
+        raise ValueError("Invalid API key")
+    monkeypatch.setattr(mod, "validate_api_key_security", _raise)
+    monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
+
+    req = make_request(client_ip="5.6.7.8")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+
+    # Should raise HTTPException but NOT log security violation
+    with pytest.raises(HTTPException) as ei:
+        await mod.get_api_key(credentials=creds, request=req, log_security_violations=False)
+
+    assert ei.value.status_code == 401
+    # Critically: no security violation should be logged when log_security_violations=False
+    assert len(fake_audit.violation_calls) == 0
+
+
+@pytest.mark.anyio
+async def test_get_api_key_logs_violation_by_default(monkeypatch, mod):
+    """Verify that log_security_violations=True (default) logs security violations."""
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+
+    # Make validator raise value error
+    def _raise(*a, **k):
+        raise ValueError("Invalid API key")
+    monkeypatch.setattr(mod, "validate_api_key_security", _raise)
+    monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
+
+    req = make_request(client_ip="5.6.7.8")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+
+    # Should raise HTTPException AND log security violation (default behavior)
+    with pytest.raises(HTTPException):
+        await mod.get_api_key(credentials=creds, request=req)
+
+    # Security violation SHOULD be logged with default behavior
+    assert len(fake_audit.violation_calls) == 1
+    assert fake_audit.violation_calls[0]["violation_type"] == "INVALID_API_KEY"
+
+
 # ---------------- get_current_user ----------------
 
 @pytest.mark.anyio
@@ -203,7 +251,7 @@ async def test_get_optional_api_key_no_credentials_returns_none(mod):
 @pytest.mark.anyio
 async def test_get_optional_api_key_invalid_returns_none(monkeypatch, mod):
     # Make inner get_api_key raise HTTPException
-    async def _raise(creds, request=None):
+    async def _raise(creds, request=None, *, log_security_violations=True):
         raise HTTPException(status_code=401, detail="bad key")
     monkeypatch.setattr(mod, "get_api_key", _raise)
 
@@ -215,13 +263,41 @@ async def test_get_optional_api_key_invalid_returns_none(monkeypatch, mod):
 @pytest.mark.anyio
 async def test_get_optional_api_key_valid_returns_key(monkeypatch, mod):
     # normal flow
-    async def _ok(creds, request=None):
+    async def _ok(creds, request=None, *, log_security_violations=True):
         return creds.credentials
     monkeypatch.setattr(mod, "get_api_key", _ok)
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-good")
     out = await mod.get_optional_api_key(credentials=creds, request=None)
     assert out == "sk-good"
+
+
+@pytest.mark.anyio
+async def test_get_optional_api_key_does_not_log_violations(monkeypatch, mod):
+    """Verify that get_optional_api_key does NOT log security violations.
+
+    When authentication is optional, invalid credentials should silently
+    fall back to anonymous access without triggering security audit logs.
+    """
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+
+    # Make validator raise value error (simulating invalid API key)
+    def _raise(*a, **k):
+        raise ValueError("Invalid API key")
+    monkeypatch.setattr(mod, "validate_api_key_security", _raise)
+    monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
+
+    req = make_request(client_ip="5.6.7.8")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+
+    # Should return None (anonymous fallback) without logging violation
+    out = await mod.get_optional_api_key(credentials=creds, request=req)
+
+    assert out is None
+    # Critically: no security violation should be logged for optional auth
+    assert len(fake_audit.violation_calls) == 0, \
+        "get_optional_api_key should NOT log security violations for invalid credentials"
 
 
 # ---------------- get_optional_user ----------------
@@ -235,7 +311,7 @@ async def test_get_optional_user_no_credentials_returns_none(mod):
 @pytest.mark.anyio
 async def test_get_optional_user_invalid_returns_none(monkeypatch, mod):
     # Make inner get_api_key raise HTTPException
-    async def _raise(creds, request=None):
+    async def _raise(creds, request=None, *, log_security_violations=True):
         raise HTTPException(status_code=401, detail="bad key")
     monkeypatch.setattr(mod, "get_api_key", _raise)
 
@@ -247,7 +323,7 @@ async def test_get_optional_user_invalid_returns_none(monkeypatch, mod):
 @pytest.mark.anyio
 async def test_get_optional_user_valid_returns_user(monkeypatch, mod):
     # normal flow
-    async def _ok(creds, request=None):
+    async def _ok(creds, request=None, *, log_security_violations=True):
         return creds.credentials
     monkeypatch.setattr(mod, "get_api_key", _ok)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 11, "credits": 3.14})
@@ -255,6 +331,34 @@ async def test_get_optional_user_valid_returns_user(monkeypatch, mod):
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-good")
     out = await mod.get_optional_user(credentials=creds, request=None)
     assert out["id"] == 11
+
+
+@pytest.mark.anyio
+async def test_get_optional_user_does_not_log_violations(monkeypatch, mod):
+    """Verify that get_optional_user does NOT log security violations.
+
+    When authentication is optional, invalid credentials should silently
+    fall back to anonymous access without triggering security audit logs.
+    """
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+
+    # Make validator raise value error (simulating invalid API key)
+    def _raise(*a, **k):
+        raise ValueError("Invalid API key")
+    monkeypatch.setattr(mod, "validate_api_key_security", _raise)
+    monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
+
+    req = make_request(client_ip="5.6.7.8")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
+
+    # Should return None (anonymous fallback) without logging violation
+    out = await mod.get_optional_user(credentials=creds, request=req)
+
+    assert out is None
+    # Critically: no security violation should be logged for optional auth
+    assert len(fake_audit.violation_calls) == 0, \
+        "get_optional_user should NOT log security violations for invalid credentials"
 
 
 # ---------------- require_active_subscription ----------------
