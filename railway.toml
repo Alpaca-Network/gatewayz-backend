@@ -10,6 +10,7 @@ restartPolicyMaxRetries = 10
 # The /health endpoint returns 200 when the service is healthy
 # Timeout increased to 30s to allow for app initialization
 # Initial delay increased to 60s to match railway.json configuration
+# Note: Service takes ~15-20s to start due to connection warmup
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 healthcheckInterval = 30
