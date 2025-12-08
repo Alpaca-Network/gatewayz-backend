@@ -7,7 +7,6 @@ critical for deployment success.
 """
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -128,14 +127,14 @@ class TestRailwayConfiguration:
             json_initial_delay = json_liveness.get("initialDelay")
 
             # Verify timeouts are consistent (allow 10s tolerance)
-            if json_timeout:
+            if json_timeout and toml_timeout:
                 assert abs(toml_timeout - json_timeout) <= 10, (
                     f"Healthcheck timeouts should be consistent. "
                     f"railway.toml: {toml_timeout}s, railway.json: {json_timeout}s"
                 )
 
             # Verify initial delays are consistent (allow 15s tolerance)
-            if json_initial_delay:
+            if json_initial_delay and toml_initial_delay:
                 assert abs(toml_initial_delay - json_initial_delay) <= 15, (
                     f"Initial delays should be consistent. "
                     f"railway.toml: {toml_initial_delay}s, railway.json: {json_initial_delay}s"

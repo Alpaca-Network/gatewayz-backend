@@ -85,6 +85,8 @@ log_info "Source: $SUPERPOWERS_DIR/.claude/"
 log_info "Target: $TARGET_CLAUDE_DIR/"
 
 if ! rsync -av --delete \
+    --exclude=".git" \
+    --exclude="settings.local.json" \
     "$SUPERPOWERS_DIR/.claude/" \
     "$TARGET_CLAUDE_DIR/"; then
     log_error "Failed to sync .claude folder"
