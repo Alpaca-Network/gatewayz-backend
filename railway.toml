@@ -8,7 +8,8 @@ restartPolicyMaxRetries = 10
 
 # Health check configuration for Railway
 # The /health endpoint returns 200 when the service is healthy
+# Note: Service takes ~15-20s to start due to connection warmup
 healthcheckPath = "/health"
-healthcheckTimeout = 10
+healthcheckTimeout = 30
 healthcheckInterval = 30
-initialDelaySeconds = 30
+initialDelaySeconds = 60
