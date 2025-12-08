@@ -23,7 +23,7 @@ from src.config.opentelemetry_config import instrument_fastapi_application
 logger = logging.getLogger(__name__)
 
 
-def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 1.0) -> bool:
     """
     Check if the Tempo OTLP endpoint is reachable.
 
