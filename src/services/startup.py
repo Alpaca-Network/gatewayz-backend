@@ -27,6 +27,17 @@ from src.services.tempo_otlp import init_tempo_otlp, init_tempo_otlp_fastapi
 
 logger = logging.getLogger(__name__)
 
+# Track background tasks to prevent GC and enable cleanup
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _create_background_task(coro, name: str = None) -> asyncio.Task:
+    """Create a background task and track it to prevent garbage collection."""
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -55,8 +66,8 @@ async def lifespan(app):
     from src.config.supabase_config import get_supabase_client
     import time
 
-    max_retries = 3
-    retry_delay = 2.0  # seconds
+    max_retries = 2
+    retry_delay = 1.0  # seconds - reduced for faster startup
     last_error = None
     db_initialized = False
 
@@ -108,20 +119,33 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Fal.ai cache initialization warning: {e}")
 
-        # Initialize Tempo/OpenTelemetry OTLP tracing
+        # Initialize FastAPI instrumentation synchronously (must complete before serving)
+        # This instruments middleware which cannot be safely modified after app starts
         try:
-            init_tempo_otlp()
             init_tempo_otlp_fastapi(app)
-            logger.info("Tempo/OTLP tracing initialized")
         except Exception as e:
-            logger.warning(f"Tempo/OTLP initialization warning: {e}")
+            logger.warning(f"FastAPI instrumentation warning: {e}")
 
-        # Initialize Prometheus remote write
-        try:
-            await init_prometheus_remote_write()
-            logger.info("Prometheus remote write initialized")
-        except Exception as e:
-            logger.warning(f"Prometheus remote write initialization warning: {e}")
+        # Initialize Tempo/OpenTelemetry OTLP exporter in background
+        # The endpoint check has 1s timeout, so defer to not block healthcheck
+        async def init_tempo_exporter_background():
+            try:
+                init_tempo_otlp()
+                logger.info("Tempo/OTLP tracing initialized")
+            except Exception as e:
+                logger.warning(f"Tempo/OTLP initialization warning: {e}")
+
+        _create_background_task(init_tempo_exporter_background(), name="init_tempo_exporter")
+
+        # Initialize Prometheus remote write in background
+        async def init_prometheus_background():
+            try:
+                await init_prometheus_remote_write()
+                logger.info("Prometheus remote write initialized")
+            except Exception as e:
+                logger.warning(f"Prometheus remote write initialization warning: {e}")
+
+        _create_background_task(init_prometheus_background(), name="init_prometheus")
 
         # Health monitoring is handled by the dedicated health-service container
         # The main API reads health data from Redis cache populated by health-service
@@ -134,39 +158,46 @@ async def lifespan(app):
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
-        # PERF: Pre-warm connections to frequently used AI providers
+        # PERF: Pre-warm connections to frequently used AI providers in background
         # This eliminates cold-start penalty (~100-200ms) for first requests
-        try:
-            logger.info("🔥 Pre-warming provider connections...")
-            warmup_results = await warmup_provider_connections_async()
-            warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
-            logger.info(f"✅ Warmed {warmed_count}/{len(warmup_results)} provider connections")
-            pool_stats = get_pool_stats()
-            logger.info(f"Connection pool after warmup: {pool_stats}")
-        except Exception as e:
-            logger.warning(f"Provider connection warmup warning: {e}")
+        # Moved to background to not block healthcheck
+        async def warmup_connections_background():
+            try:
+                logger.info("🔥 Pre-warming provider connections (background)...")
+                warmup_results = await warmup_provider_connections_async()
+                warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
+                logger.info(f"✅ Warmed {warmed_count}/{len(warmup_results)} provider connections")
+                pool_stats = get_pool_stats()
+                logger.info(f"Connection pool after warmup: {pool_stats}")
+            except Exception as e:
+                logger.warning(f"Provider connection warmup warning: {e}")
+
+        _create_background_task(warmup_connections_background(), name="warmup_connections")
 
         # Initialize response cache
         get_cache()
         logger.info("Response cache initialized")
 
-        # Initialize autonomous error monitoring
-        try:
-            error_monitoring_enabled = (
-                os.environ.get("ERROR_MONITORING_ENABLED", "true").lower() == "true"
-            )
-            auto_fix_enabled = os.environ.get("AUTO_FIX_ENABLED", "true").lower() == "true"
-            scan_interval = int(os.environ.get("ERROR_MONITOR_INTERVAL", "300"))
-
-            if error_monitoring_enabled:
-                await initialize_autonomous_monitor(
-                    enabled=True,
-                    scan_interval=scan_interval,
-                    auto_fix_enabled=auto_fix_enabled,
+        # Initialize autonomous error monitoring in background
+        async def init_error_monitoring_background():
+            try:
+                error_monitoring_enabled = (
+                    os.environ.get("ERROR_MONITORING_ENABLED", "true").lower() == "true"
                 )
-                logger.info("✓ Autonomous error monitoring started")
-        except Exception as e:
-            logger.warning(f"Error monitoring initialization warning: {e}")
+                auto_fix_enabled = os.environ.get("AUTO_FIX_ENABLED", "true").lower() == "true"
+                scan_interval = int(os.environ.get("ERROR_MONITOR_INTERVAL", "300"))
+
+                if error_monitoring_enabled:
+                    await initialize_autonomous_monitor(
+                        enabled=True,
+                        scan_interval=scan_interval,
+                        auto_fix_enabled=auto_fix_enabled,
+                    )
+                    logger.info("✓ Autonomous error monitoring started")
+            except Exception as e:
+                logger.warning(f"Error monitoring initialization warning: {e}")
+
+        _create_background_task(init_error_monitoring_background(), name="init_error_monitoring")
 
         logger.info("All monitoring and health services started successfully")
 
@@ -178,6 +209,14 @@ async def lifespan(app):
 
     # Shutdown
     logger.info("Shutting down monitoring and observability services...")
+
+    # Cancel any pending background tasks
+    if _background_tasks:
+        logger.info(f"Cancelling {len(_background_tasks)} pending background tasks...")
+        for task in _background_tasks:
+            task.cancel()
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
+        _background_tasks.clear()
 
     try:
         # Stop autonomous error monitoring
