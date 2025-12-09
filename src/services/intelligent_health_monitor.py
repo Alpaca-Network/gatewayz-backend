@@ -780,30 +780,29 @@ class IntelligentHealthMonitor:
             degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
             unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
 
-            # Get total counts from catalog tables (not just tracked)
+            # Get total counts from openrouter_models table (not just tracked)
             try:
-                catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
+                catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
                 total_models = catalog_models_response.count or tracked_models
             except Exception as e:
-                logger.warning(f"Failed to get models from 'models' table: {e}, trying latest_models")
+                logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
                 try:
-                    catalog_models_response = supabase.table("latest_models").select("id", count="exact", head=True).execute()
+                    catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
                     total_models = catalog_models_response.count or tracked_models
                 except Exception as e2:
                     logger.warning(f"Failed to get models catalog count: {e2}")
                     total_models = tracked_models
                 
             try:
-                # Get providers from providers table
-                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-                total_providers = providers_response.count or tracked_providers
+                # Get distinct providers from openrouter_models table
+                providers_response = supabase.table("openrouter_models").select("top_provider").execute()
+                providers = set(row.get("top_provider") for row in (providers_response.data or []) if row.get("top_provider"))
+                total_providers = len(providers) if providers else tracked_providers
             except Exception as e:
-                logger.warning(f"Failed to get providers from 'providers' table: {e}, trying latest_models")
+                logger.warning(f"Failed to get providers from 'openrouter_models' table: {e}, trying providers table")
                 try:
-                    # Fallback to distinct authors from latest_models
-                    providers_response = supabase.table("latest_models").select("author").execute()
-                    providers = set(row.get("author") for row in (providers_response.data or []) if row.get("author"))
-                    total_providers = len(providers) if providers else tracked_providers
+                    providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+                    total_providers = providers_response.count or tracked_providers
                 except Exception as e2:
                     logger.warning(f"Failed to get providers catalog count: {e2}")
                     total_providers = tracked_providers

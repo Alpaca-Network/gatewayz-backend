@@ -222,51 +222,51 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of all models from the models table
+        # Get count of all models from openrouter_models table (9000+ models)
         try:
             models_response = (
-                supabase.table("models")
+                supabase.table("openrouter_models")
                 .select("id", count="exact", head=True)
                 .execute()
             )
             models_count = models_response.count if models_response.count is not None else 0
-            logger.info(f"Models catalog query successful: {models_count} models")
+            logger.info(f"Models catalog query successful: {models_count} models from openrouter_models")
         except Exception as e:
-            logger.warning(f"Failed to get models from 'models' table: {e}, trying latest_models")
-            # Fallback to latest_models
+            logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
+            # Fallback to models table
             try:
                 models_response = (
-                    supabase.table("latest_models")
+                    supabase.table("models")
                     .select("id", count="exact", head=True)
                     .execute()
                 )
                 models_count = models_response.count if models_response.count is not None else 0
-                logger.info(f"Models from latest_models: {models_count} models")
+                logger.info(f"Models from models table: {models_count} models")
             except Exception as e2:
                 logger.error(f"Failed to get models count: {e2}")
                 models_count = 0
 
-        # Get provider count from providers table
+        # Get distinct provider count from openrouter_models table (3000+ providers)
         try:
             providers_response = (
-                supabase.table("providers")
-                .select("id", count="exact", head=True)
+                supabase.table("openrouter_models")
+                .select("top_provider")
                 .execute()
             )
-            providers_count = providers_response.count if providers_response.count is not None else 0
-            logger.info(f"Providers catalog query successful: {providers_count} providers")
+            providers = set(row.get("top_provider") for row in (providers_response.data or []) if row.get("top_provider"))
+            providers_count = len(providers)
+            logger.info(f"Providers catalog query successful: {providers_count} distinct providers from openrouter_models")
         except Exception as e:
-            logger.warning(f"Failed to get providers from 'providers' table: {e}, trying latest_models")
-            # Fallback to distinct authors from latest_models
+            logger.warning(f"Failed to get providers from 'openrouter_models' table: {e}, trying providers table")
+            # Fallback to providers table
             try:
                 providers_response = (
-                    supabase.table("latest_models")
-                    .select("author")
+                    supabase.table("providers")
+                    .select("id", count="exact", head=True)
                     .execute()
                 )
-                providers = set(row.get("author") for row in (providers_response.data or []) if row.get("author"))
-                providers_count = len(providers)
-                logger.info(f"Providers from latest_models: {providers_count} distinct authors")
+                providers_count = providers_response.count if providers_response.count is not None else 0
+                logger.info(f"Providers from providers table: {providers_count} providers")
             except Exception as e2:
                 logger.error(f"Failed to get providers count: {e2}")
                 providers_count = 0
@@ -420,30 +420,29 @@ async def _get_intelligent_monitor_summary() -> dict:
     try:
         from src.config.supabase_config import supabase
 
-        # Get total counts from catalog tables
+        # Get total counts from openrouter_models table
         try:
-            catalog_models = supabase.table("models").select("id", count="exact", head=True).execute()
+            catalog_models = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
             total_models = catalog_models.count or 0
         except Exception as e:
-            logger.warning(f"Failed to get models from 'models' table: {e}, trying latest_models")
+            logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
             try:
-                catalog_models = supabase.table("latest_models").select("id", count="exact", head=True).execute()
+                catalog_models = supabase.table("models").select("id", count="exact", head=True).execute()
                 total_models = catalog_models.count or 0
             except Exception as e2:
                 logger.warning(f"Failed to get models count: {e2}")
                 total_models = 0
             
         try:
-            # Get providers from providers table
-            providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-            total_providers = providers_response.count or 0
+            # Get distinct providers from openrouter_models table
+            providers_response = supabase.table("openrouter_models").select("top_provider").execute()
+            providers = set(row.get("top_provider") for row in (providers_response.data or []) if row.get("top_provider"))
+            total_providers = len(providers)
         except Exception as e:
-            logger.warning(f"Failed to get providers from 'providers' table: {e}, trying latest_models")
+            logger.warning(f"Failed to get providers from 'openrouter_models' table: {e}, trying providers table")
             try:
-                # Fallback to distinct authors from latest_models
-                providers_response = supabase.table("latest_models").select("author").execute()
-                providers = set(row.get("author") for row in (providers_response.data or []) if row.get("author"))
-                total_providers = len(providers)
+                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+                total_providers = providers_response.count or 0
             except Exception as e2:
                 logger.warning(f"Failed to get providers count: {e2}")
                 total_providers = 0
