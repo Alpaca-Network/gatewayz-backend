@@ -780,17 +780,19 @@ class IntelligentHealthMonitor:
             degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
             unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
 
-            # Get total counts from catalog tables (not just tracked)
+            # Get total counts from latest_models table (not just tracked)
             try:
-                catalog_models_response = supabase.table("models").select("*", count="exact").execute()
+                catalog_models_response = supabase.table("latest_models").select("id", count="exact", head=True).execute()
                 total_models = catalog_models_response.count or tracked_models
             except Exception as e:
                 logger.warning(f"Failed to get models catalog count: {e}")
                 total_models = tracked_models
                 
             try:
-                catalog_providers_response = supabase.table("providers").select("*", count="exact").execute()
-                total_providers = catalog_providers_response.count or tracked_providers
+                # Get distinct providers from latest_models
+                providers_response = supabase.table("latest_models").select("provider").execute()
+                providers = set(row.get("provider") for row in (providers_response.data or []) if row.get("provider"))
+                total_providers = len(providers) if providers else tracked_providers
             except Exception as e:
                 logger.warning(f"Failed to get providers catalog count: {e}")
                 total_providers = tracked_providers
