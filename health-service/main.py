@@ -213,12 +213,16 @@ async def health_check():
     }
 
 
-async def _get_intelligent_monitor_counts() -> tuple[int, int]:
-    """Get model and provider counts from database for intelligent monitor."""
+async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
+    """Get model, provider, and gateway counts from database for intelligent monitor.
+    
+    Uses pagination to handle Supabase's default 1000 row limit, ensuring we get
+    accurate counts for 9000+ models, 3000+ providers, and 20+ gateways.
+    """
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of tracked models
+        # Get count of tracked models (count="exact" bypasses row limit)
         models_response = (
             supabase.table("model_health_tracking")
             .select("id", count="exact")
@@ -227,20 +231,50 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int]:
         )
         models_count = models_response.count or 0
 
-        # Get distinct provider count
-        providers_response = (
-            supabase.table("model_health_tracking")
-            .select("provider")
-            .eq("is_enabled", True)
-            .execute()
-        )
-        providers = set(row.get("provider") for row in (providers_response.data or []))
-        providers_count = len(providers)
+        # Get distinct provider and gateway counts with pagination
+        # Supabase has a default 1000 row limit, so we must paginate
+        all_providers = set()
+        all_gateways = set()
+        
+        batch_size = 1000
+        offset = 0
+        
+        while True:
+            response = (
+                supabase.table("model_health_tracking")
+                .select("provider, gateway")
+                .eq("is_enabled", True)
+                .range(offset, offset + batch_size - 1)
+                .execute()
+            )
+            
+            rows = response.data or []
+            if not rows:
+                break
+            
+            for row in rows:
+                provider = row.get("provider")
+                gateway = row.get("gateway")
+                if provider:
+                    all_providers.add(provider)
+                if gateway:
+                    all_gateways.add(gateway)
+            
+            # If we got fewer rows than batch_size, we've reached the end
+            if len(rows) < batch_size:
+                break
+            
+            offset += batch_size
+        
+        providers_count = len(all_providers)
+        gateways_count = len(all_gateways)
+        
+        logger.debug(f"Counts: {models_count} models, {providers_count} providers, {gateways_count} gateways")
 
-        return models_count, providers_count
+        return models_count, providers_count, gateways_count
     except Exception as e:
         logger.warning(f"Failed to get intelligent monitor counts: {e}")
-        return 0, 0
+        return 0, 0, 0
 
 
 @app.get("/status")
@@ -272,13 +306,14 @@ async def get_status():
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             monitor = intelligent_health_monitor
             # Intelligent monitor stores data in database, not memory
-            models_count, providers_count = await _get_intelligent_monitor_counts()
+            models_count, providers_count, gateways_count = await _get_intelligent_monitor_counts()
         else:
             from src.services.model_health_monitor import health_monitor
             monitor = health_monitor
             # Simple monitor stores data in memory
             models_count = len(getattr(monitor, "health_data", {}))
             providers_count = len(getattr(monitor, "provider_data", {}))
+            gateways_count = len(getattr(monitor, "gateway_data", {}))
 
         from src.services.model_availability import availability_service
 
@@ -290,6 +325,7 @@ async def get_status():
             "availability_monitoring_active": availability_service.monitoring_active,
             "models_tracked": models_count,
             "providers_tracked": providers_count,
+            "gateways_tracked": gateways_count,
             "availability_cache_size": len(availability_service.availability_cache),
             "health_check_interval": HEALTH_CHECK_INTERVAL,
             "timestamp": datetime.now(timezone.utc).isoformat(),
