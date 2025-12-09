@@ -218,36 +218,52 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
     
     Queries the 'models' catalog table (which has 9000+ models) for total counts,
     NOT the 'model_health_tracking' table (which only has models that have been called).
-    
-    Uses pagination to handle Supabase's default 1000 row limit.
     """
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of all models from the CATALOG table (not health tracking)
+        # Get count of all models from the CATALOG table
         # The 'models' table contains all 9000+ models
-        models_response = (
-            supabase.table("models")
-            .select("id", count="exact")
-            .execute()
-        )
-        models_count = models_response.count or 0
+        try:
+            models_response = (
+                supabase.table("models")
+                .select("*", count="exact")
+                .execute()
+            )
+            models_count = models_response.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get models count: {e}")
+            models_count = 0
 
         # Get provider count from the providers table
-        providers_response = (
-            supabase.table("providers")
-            .select("id", count="exact")
-            .execute()
-        )
-        providers_count = providers_response.count or 0
+        try:
+            providers_response = (
+                supabase.table("providers")
+                .select("*", count="exact")
+                .execute()
+            )
+            providers_count = providers_response.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get providers count: {e}")
+            providers_count = 0
 
-        # Get gateway count from the gateways table
-        gateways_response = (
-            supabase.table("gateways")
-            .select("id", count="exact")
-            .execute()
-        )
-        gateways_count = gateways_response.count or 0
+        # Get gateway count - gateways are defined in GATEWAY_CONFIG, not a database table
+        # Count distinct gateways from the models table's gateway column
+        try:
+            from src.services.gateway_health_service import GATEWAY_CONFIG
+            gateways_count = len(GATEWAY_CONFIG)
+        except Exception:
+            # Fallback: count distinct gateways from models table
+            try:
+                gateways_response = (
+                    supabase.table("models")
+                    .select("gateway")
+                    .execute()
+                )
+                gateways = set(row.get("gateway") for row in (gateways_response.data or []) if row.get("gateway"))
+                gateways_count = len(gateways)
+            except Exception:
+                gateways_count = 0
         
         logger.debug(f"Catalog counts: {models_count} models, {providers_count} providers, {gateways_count} gateways")
 
@@ -382,17 +398,24 @@ async def _get_intelligent_monitor_summary() -> dict:
 
         # Get total counts from catalog tables
         try:
-            catalog_models = supabase.table("models").select("id", count="exact").execute()
-            catalog_providers = supabase.table("providers").select("id", count="exact").execute()
-            catalog_gateways = supabase.table("gateways").select("id", count="exact").execute()
-            
+            catalog_models = supabase.table("models").select("*", count="exact").execute()
             total_models = catalog_models.count or 0
-            total_providers = catalog_providers.count or 0
-            total_gateways = catalog_gateways.count or 0
-        except Exception as catalog_err:
-            logger.warning(f"Failed to get catalog counts: {catalog_err}")
+        except Exception as e:
+            logger.warning(f"Failed to get models count: {e}")
             total_models = 0
+            
+        try:
+            catalog_providers = supabase.table("providers").select("*", count="exact").execute()
+            total_providers = catalog_providers.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get providers count: {e}")
             total_providers = 0
+            
+        # Get gateway count from GATEWAY_CONFIG (not a database table)
+        try:
+            from src.services.gateway_health_service import GATEWAY_CONFIG
+            total_gateways = len(GATEWAY_CONFIG)
+        except Exception:
             total_gateways = 0
 
         # Get recent health data sample from model_health_tracking
