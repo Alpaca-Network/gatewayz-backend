@@ -222,29 +222,32 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of all models from the CATALOG table
-        # The 'models' table contains all 9000+ models
+        # Get count of all models from the latest_models table
         try:
             models_response = (
-                supabase.table("models")
-                .select("*", count="exact")
+                supabase.table("latest_models")
+                .select("id", count="exact", head=True)
                 .execute()
             )
-            models_count = models_response.count or 0
+            models_count = models_response.count if models_response.count is not None else 0
+            logger.info(f"Models catalog query successful: {models_count} models")
         except Exception as e:
-            logger.warning(f"Failed to get models count: {e}")
+            logger.error(f"Failed to get models count from catalog: {e}")
             models_count = 0
 
-        # Get provider count from the providers table
+        # Get distinct provider count from latest_models table
         try:
+            # Fetch provider column and count distinct values
             providers_response = (
-                supabase.table("providers")
-                .select("*", count="exact")
+                supabase.table("latest_models")
+                .select("provider")
                 .execute()
             )
-            providers_count = providers_response.count or 0
+            providers = set(row.get("provider") for row in (providers_response.data or []) if row.get("provider"))
+            providers_count = len(providers)
+            logger.info(f"Providers count from latest_models: {providers_count} distinct providers")
         except Exception as e:
-            logger.warning(f"Failed to get providers count: {e}")
+            logger.error(f"Failed to get providers count: {e}")
             providers_count = 0
 
         # Get gateway count - gateways are defined in GATEWAY_CONFIG, not a database table
@@ -396,17 +399,19 @@ async def _get_intelligent_monitor_summary() -> dict:
     try:
         from src.config.supabase_config import supabase
 
-        # Get total counts from catalog tables
+        # Get total counts from latest_models table
         try:
-            catalog_models = supabase.table("models").select("*", count="exact").execute()
+            catalog_models = supabase.table("latest_models").select("id", count="exact", head=True).execute()
             total_models = catalog_models.count or 0
         except Exception as e:
             logger.warning(f"Failed to get models count: {e}")
             total_models = 0
             
         try:
-            catalog_providers = supabase.table("providers").select("*", count="exact").execute()
-            total_providers = catalog_providers.count or 0
+            # Get distinct providers from latest_models
+            providers_response = supabase.table("latest_models").select("provider").execute()
+            providers = set(row.get("provider") for row in (providers_response.data or []) if row.get("provider"))
+            total_providers = len(providers)
         except Exception as e:
             logger.warning(f"Failed to get providers count: {e}")
             total_providers = 0
