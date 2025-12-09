@@ -952,8 +952,18 @@ async def stream_generator(
                 async for chunk in stream:
                     yield chunk
             else:
-                for chunk in stream:
-                    yield chunk
+                # Use non-blocking iteration for sync streams to avoid blocking the event loop
+                iterator = iter(stream)
+                while True:
+                    try:
+                        # Run the blocking next() call in a thread
+                        chunk = await asyncio.to_thread(next, iterator)
+                        yield chunk
+                    except StopIteration:
+                        break
+                    except Exception as e:
+                        logger.error(f"Error during sync stream iteration: {e}")
+                        raise e
 
         async for chunk in iterate_stream():
             chunk_count += 1
