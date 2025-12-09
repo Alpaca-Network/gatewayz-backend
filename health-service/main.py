@@ -246,30 +246,19 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
                 logger.error(f"Failed to get models count: {e2}")
                 models_count = 0
 
-        # Get distinct provider count from openrouter_models table (3000+ providers)
+        # Get all provider count from providers table (3000+ providers)
         try:
             providers_response = (
-                supabase.table("openrouter_models")
-                .select("top_provider")
+                supabase.table("providers")
+                .select("id", count="exact", head=True)
                 .execute()
             )
-            providers = set(row.get("top_provider") for row in (providers_response.data or []) if row.get("top_provider"))
-            providers_count = len(providers)
-            logger.info(f"Providers catalog query successful: {providers_count} distinct providers from openrouter_models")
+            providers_count = providers_response.count if providers_response.count is not None else 0
+            logger.info(f"Providers catalog query successful: {providers_count} total providers from providers table")
         except Exception as e:
-            logger.warning(f"Failed to get providers from 'openrouter_models' table: {e}, trying providers table")
-            # Fallback to providers table
-            try:
-                providers_response = (
-                    supabase.table("providers")
-                    .select("id", count="exact", head=True)
-                    .execute()
-                )
-                providers_count = providers_response.count if providers_response.count is not None else 0
-                logger.info(f"Providers from providers table: {providers_count} providers")
-            except Exception as e2:
-                logger.error(f"Failed to get providers count: {e2}")
-                providers_count = 0
+            logger.warning(f"Failed to get providers from 'providers' table: {e}")
+            logger.error(f"Failed to get providers count: {e}")
+            providers_count = 0
 
         # Get gateway count - gateways are defined in GATEWAY_CONFIG, not a database table
         # Count distinct gateways from the models table's gateway column
@@ -379,7 +368,49 @@ async def get_status():
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             monitor = intelligent_health_monitor
             # Intelligent monitor stores data in database, not memory
-            models_count, providers_count, gateways_count = await _get_intelligent_monitor_counts()
+            # Get TRACKED counts (not catalog totals)
+            try:
+                from src.config.supabase_config import supabase
+                # Get tracked models count
+                tracked_models_response = (
+                    supabase.table("model_health_tracking")
+                    .select("id", count="exact", head=True)
+                    .execute()
+                )
+                models_count = tracked_models_response.count or 0
+                
+                # Get tracked providers count (distinct providers from model_health_tracking)
+                # Use pagination to handle large datasets
+                providers = set()
+                offset = 0
+                batch_size = 1000
+                while True:
+                    tracked_providers_response = (
+                        supabase.table("model_health_tracking")
+                        .select("provider")
+                        .range(offset, offset + batch_size - 1)
+                        .execute()
+                    )
+                    rows = tracked_providers_response.data or []
+                    if not rows:
+                        break
+                    for row in rows:
+                        provider = row.get("provider")
+                        if provider:
+                            providers.add(provider)
+                    if len(rows) < batch_size:
+                        break
+                    offset += batch_size
+                
+                providers_count = len(providers)
+                logger.info(f"Tracked: {models_count} models, {providers_count} distinct providers")
+                
+                # Get gateway count from GATEWAY_CONFIG
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                gateways_count = len(GATEWAY_CONFIG)
+            except Exception as e:
+                logger.error(f"Failed to get tracked counts: {e}")
+                models_count, providers_count, gateways_count = 0, 0, 0
         else:
             from src.services.model_health_monitor import health_monitor
             monitor = health_monitor
@@ -434,18 +465,12 @@ async def _get_intelligent_monitor_summary() -> dict:
                 total_models = 0
             
         try:
-            # Get distinct providers from openrouter_models table
-            providers_response = supabase.table("openrouter_models").select("top_provider").execute()
-            providers = set(row.get("top_provider") for row in (providers_response.data or []) if row.get("top_provider"))
-            total_providers = len(providers)
+            # Get all providers from providers table
+            providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+            total_providers = providers_response.count or 0
         except Exception as e:
-            logger.warning(f"Failed to get providers from 'openrouter_models' table: {e}, trying providers table")
-            try:
-                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-                total_providers = providers_response.count or 0
-            except Exception as e2:
-                logger.warning(f"Failed to get providers count: {e2}")
-                total_providers = 0
+            logger.warning(f"Failed to get providers count: {e}")
+            total_providers = 0
             
         # Get gateway count from GATEWAY_CONFIG (not a database table)
         try:

@@ -794,18 +794,12 @@ class IntelligentHealthMonitor:
                     total_models = tracked_models
                 
             try:
-                # Get distinct providers from openrouter_models table
-                providers_response = supabase.table("openrouter_models").select("top_provider").execute()
-                providers = set(row.get("top_provider") for row in (providers_response.data or []) if row.get("top_provider"))
-                total_providers = len(providers) if providers else tracked_providers
+                # Get all providers from providers table
+                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+                total_providers = providers_response.count or tracked_providers
             except Exception as e:
-                logger.warning(f"Failed to get providers from 'openrouter_models' table: {e}, trying providers table")
-                try:
-                    providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-                    total_providers = providers_response.count or tracked_providers
-                except Exception as e2:
-                    logger.warning(f"Failed to get providers catalog count: {e2}")
-                    total_providers = tracked_providers
+                logger.warning(f"Failed to get providers catalog count: {e}")
+                total_providers = tracked_providers
                 
             # Get gateway count from GATEWAY_CONFIG (not a database table)
             try:
