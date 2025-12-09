@@ -216,65 +216,101 @@ async def health_check():
 async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
     """Get model, provider, and gateway counts from database for intelligent monitor.
     
-    Uses pagination to handle Supabase's default 1000 row limit, ensuring we get
-    accurate counts for 9000+ models, 3000+ providers, and 20+ gateways.
+    Queries the 'models' catalog table (which has 9000+ models) for total counts,
+    NOT the 'model_health_tracking' table (which only has models that have been called).
+    
+    Uses pagination to handle Supabase's default 1000 row limit.
     """
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of tracked models (count="exact" bypasses row limit)
+        # Get count of all active models from the CATALOG table (not health tracking)
+        # The 'models' table contains all 9000+ models
         models_response = (
-            supabase.table("model_health_tracking")
+            supabase.table("models")
             .select("id", count="exact")
-            .eq("is_enabled", True)
+            .eq("is_active", True)
             .execute()
         )
         models_count = models_response.count or 0
 
-        # Get distinct provider and gateway counts with pagination
-        # Supabase has a default 1000 row limit, so we must paginate
-        all_providers = set()
-        all_gateways = set()
+        # Get distinct provider count from the providers table
+        providers_response = (
+            supabase.table("providers")
+            .select("id", count="exact")
+            .eq("is_active", True)
+            .execute()
+        )
+        providers_count = providers_response.count or 0
+
+        # Get distinct gateway count from the gateways table
+        gateways_response = (
+            supabase.table("gateways")
+            .select("id", count="exact")
+            .eq("is_active", True)
+            .execute()
+        )
+        gateways_count = gateways_response.count or 0
         
-        batch_size = 1000
-        offset = 0
-        
-        while True:
-            response = (
-                supabase.table("model_health_tracking")
-                .select("provider, gateway")
-                .eq("is_enabled", True)
-                .range(offset, offset + batch_size - 1)
-                .execute()
-            )
-            
-            rows = response.data or []
-            if not rows:
-                break
-            
-            for row in rows:
-                provider = row.get("provider")
-                gateway = row.get("gateway")
-                if provider:
-                    all_providers.add(provider)
-                if gateway:
-                    all_gateways.add(gateway)
-            
-            # If we got fewer rows than batch_size, we've reached the end
-            if len(rows) < batch_size:
-                break
-            
-            offset += batch_size
-        
-        providers_count = len(all_providers)
-        gateways_count = len(all_gateways)
-        
-        logger.debug(f"Counts: {models_count} models, {providers_count} providers, {gateways_count} gateways")
+        logger.debug(f"Catalog counts: {models_count} models, {providers_count} providers, {gateways_count} gateways")
 
         return models_count, providers_count, gateways_count
     except Exception as e:
-        logger.warning(f"Failed to get intelligent monitor counts: {e}")
-        return 0, 0, 0
+        logger.warning(f"Failed to get catalog counts: {e}")
+        # Fallback: try to get counts from model_health_tracking if catalog tables don't exist
+        try:
+            return await _get_health_tracking_counts()
+        except Exception:
+            return 0, 0, 0
+
+
+async def _get_health_tracking_counts() -> tuple[int, int, int]:
+    """Fallback: Get counts from model_health_tracking table if catalog tables unavailable."""
+    from src.config.supabase_config import supabase
+    
+    # Get count of tracked models
+    models_response = (
+        supabase.table("model_health_tracking")
+        .select("id", count="exact")
+        .eq("is_enabled", True)
+        .execute()
+    )
+    models_count = models_response.count or 0
+
+    # Get distinct provider and gateway counts with pagination
+    all_providers = set()
+    all_gateways = set()
+    
+    batch_size = 1000
+    offset = 0
+    
+    while True:
+        response = (
+            supabase.table("model_health_tracking")
+            .select("provider, gateway")
+            .eq("is_enabled", True)
+            .range(offset, offset + batch_size - 1)
+            .execute()
+        )
+        
+        rows = response.data or []
+        if not rows:
+            break
+        
+        for row in rows:
+            provider = row.get("provider")
+            gateway = row.get("gateway")
+            if provider:
+                all_providers.add(provider)
+            if gateway:
+                all_gateways.add(gateway)
+        
+        if len(rows) < batch_size:
+            break
+        
+        offset += batch_size
+    
+    return models_count, len(all_providers), len(all_gateways)
 
 
 @app.get("/status")
