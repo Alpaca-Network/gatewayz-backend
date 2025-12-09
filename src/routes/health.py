@@ -182,9 +182,12 @@ async def get_providers_health(
             if gateway:
                 cached = [p for p in cached if p.get("gateway") == gateway]
             
-            # Return with metadata
+            # Return format that frontend expects
             return {
                 "data": cached,
+                "providers": cached,  # Also include as 'providers' for compatibility
+                "total_providers": total_providers,
+                "tracked_providers": tracked_providers,
                 "metadata": {
                     "total_providers": total_providers,
                     "tracked_providers": tracked_providers,
@@ -196,6 +199,9 @@ async def get_providers_health(
         logger.debug("No providers health in cache - health-service may not be running")
         return {
             "data": [],
+            "providers": [],
+            "total_providers": total_providers,
+            "tracked_providers": 0,
             "metadata": {
                 "total_providers": total_providers,
                 "tracked_providers": 0,
@@ -212,6 +218,9 @@ async def get_providers_health(
         )
         return {
             "data": [],
+            "providers": [],
+            "total_providers": 0,
+            "tracked_providers": 0,
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
@@ -265,9 +274,12 @@ async def get_models_health(
             if status:
                 cached = [m for m in cached if m.get("status") == status]
             
-            # Return with metadata
+            # Return format that frontend expects
             return {
                 "data": cached,
+                "models": cached,  # Also include as 'models' for compatibility
+                "total_models": total_models,
+                "tracked_models": tracked_models,
                 "metadata": {
                     "total_models": total_models,
                     "tracked_models": tracked_models,
@@ -279,6 +291,9 @@ async def get_models_health(
         logger.debug("No models health in cache - health-service may not be running")
         return {
             "data": [],
+            "models": [],
+            "total_models": total_models,
+            "tracked_models": 0,
             "metadata": {
                 "total_models": total_models,
                 "tracked_models": 0,
@@ -295,6 +310,9 @@ async def get_models_health(
         )
         return {
             "data": [],
+            "models": [],
+            "total_models": 0,
+            "tracked_models": 0,
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
