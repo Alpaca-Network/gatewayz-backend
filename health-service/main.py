@@ -224,30 +224,27 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of all active models from the CATALOG table (not health tracking)
+        # Get count of all models from the CATALOG table (not health tracking)
         # The 'models' table contains all 9000+ models
         models_response = (
             supabase.table("models")
             .select("id", count="exact")
-            .eq("is_active", True)
             .execute()
         )
         models_count = models_response.count or 0
 
-        # Get distinct provider count from the providers table
+        # Get provider count from the providers table
         providers_response = (
             supabase.table("providers")
             .select("id", count="exact")
-            .eq("is_active", True)
             .execute()
         )
         providers_count = providers_response.count or 0
 
-        # Get distinct gateway count from the gateways table
+        # Get gateway count from the gateways table
         gateways_response = (
             supabase.table("gateways")
             .select("id", count="exact")
-            .eq("is_active", True)
             .execute()
         )
         gateways_count = gateways_response.count or 0
