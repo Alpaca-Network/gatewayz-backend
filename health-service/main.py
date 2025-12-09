@@ -265,10 +265,10 @@ async def _get_health_tracking_counts() -> tuple[int, int, int]:
     """Fallback: Get counts from model_health_tracking table if catalog tables unavailable."""
     from src.config.supabase_config import supabase
     
-    # Get count of tracked models
+    # Get count of tracked models (use * for count since id column may not exist)
     models_response = (
         supabase.table("model_health_tracking")
-        .select("id", count="exact")
+        .select("*", count="exact")
         .eq("is_enabled", True)
         .execute()
     )
@@ -380,37 +380,49 @@ async def _get_intelligent_monitor_summary() -> dict:
     try:
         from src.config.supabase_config import supabase
 
-        # Get accurate total count of tracked models
-        count_response = (
-            supabase.table("model_health_tracking")
-            .select("id", count="exact")
-            .eq("is_enabled", True)
-            .execute()
-        )
-        total_models = count_response.count or 0
+        # Get total counts from catalog tables
+        try:
+            catalog_models = supabase.table("models").select("id", count="exact").execute()
+            catalog_providers = supabase.table("providers").select("id", count="exact").execute()
+            catalog_gateways = supabase.table("gateways").select("id", count="exact").execute()
+            
+            total_models = catalog_models.count or 0
+            total_providers = catalog_providers.count or 0
+            total_gateways = catalog_gateways.count or 0
+        except Exception as catalog_err:
+            logger.warning(f"Failed to get catalog counts: {catalog_err}")
+            total_models = 0
+            total_providers = 0
+            total_gateways = 0
 
-        # Get recent health data sample from database
-        models_response = (
-            supabase.table("model_health_tracking")
-            .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
-            .eq("is_enabled", True)
-            .order("last_check_at", desc=True)
-            .limit(100)
-            .execute()
-        )
-
-        models_data = models_response.data or []
+        # Get recent health data sample from model_health_tracking
+        try:
+            models_response = (
+                supabase.table("model_health_tracking")
+                .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
+                .eq("is_enabled", True)
+                .order("last_check_at", desc=True)
+                .limit(100)
+                .execute()
+            )
+            models_data = models_response.data or []
+        except Exception as tracking_err:
+            logger.warning(f"Failed to get health tracking data: {tracking_err}")
+            models_data = []
 
         # Get active incidents
-        incidents_response = (
-            supabase.table("model_health_incidents")
-            .select("*")
-            .eq("resolved", False)
-            .execute()
-        )
-        incidents = incidents_response.data or []
+        try:
+            incidents_response = (
+                supabase.table("model_health_incidents")
+                .select("*")
+                .eq("resolved", False)
+                .execute()
+            )
+            incidents = incidents_response.data or []
+        except Exception:
+            incidents = []
 
-        # Calculate summary stats from sample (note: this is from the 100 most recent)
+        # Calculate summary stats from sample
         status_counts = {}
         for model in models_data:
             status = model.get("current_status", "unknown")
@@ -419,9 +431,12 @@ async def _get_intelligent_monitor_summary() -> dict:
         return {
             "monitoring_active": True,
             "monitor_type": "intelligent",
-            "models_sample": models_data[:20],  # Return sample of recent models
-            "total_models_tracked": total_models,  # Accurate count from database
-            "status_distribution": status_counts,  # Distribution from recent 100 models
+            "models_sample": models_data[:20],
+            "total_models": total_models,
+            "total_providers": total_providers,
+            "total_gateways": total_gateways,
+            "tracked_models": len(models_data),
+            "status_distribution": status_counts,
             "active_incidents": len(incidents),
             "last_check": datetime.now(timezone.utc).isoformat(),
         }
