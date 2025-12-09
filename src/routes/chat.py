@@ -1080,9 +1080,43 @@ async def stream_generator(
 
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
+
+        # Extract meaningful error message for the client
+        error_str = str(e).lower()
+        error_message = "Streaming error occurred"
+        error_type = "stream_error"
+
+        # Check for rate limit errors
+        if "rate limit" in error_str or "429" in error_str or "too many" in error_str:
+            error_message = "Rate limit exceeded. Please wait a moment and try again."
+            error_type = "rate_limit_error"
+        # Check for authentication errors
+        elif "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
+            error_message = "Authentication failed. Please check your API key or sign in again."
+            error_type = "auth_error"
+        # Check for provider/upstream errors
+        elif "upstream" in error_str or "provider" in error_str or "503" in error_str or "502" in error_str:
+            error_message = f"Provider temporarily unavailable: {str(e)[:200]}"
+            error_type = "provider_error"
+        # Check for timeout errors
+        elif "timeout" in error_str or "timed out" in error_str:
+            error_message = "Request timed out. The model may be overloaded. Please try again."
+            error_type = "timeout_error"
+        # Check for model not found errors
+        elif "not found" in error_str or "404" in error_str:
+            error_message = f"Model or resource not found: {str(e)[:200]}"
+            error_type = "not_found_error"
+        # For other errors, include a sanitized version of the error message
+        else:
+            # Include the actual error message but truncate it for safety
+            sanitized_msg = str(e)[:300].replace('\n', ' ').replace('\r', ' ')
+            error_message = f"Streaming error: {sanitized_msg}"
+
         yield create_error_sse_chunk(
-            error_message="Streaming error occurred",
-            error_type="stream_error"
+            error_message=error_message,
+            error_type=error_type,
+            provider=provider if 'provider' in dir() else None,
+            model=model if 'model' in dir() else None
         )
         yield create_done_sse()
     finally:
