@@ -783,22 +783,25 @@ class IntelligentHealthMonitor:
             # Get total counts from openrouter_models table (not just tracked)
             try:
                 catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
-                total_models = catalog_models_response.count or tracked_models
+                total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                logger.info(f"Got {total_models} total models from openrouter_models table")
             except Exception as e:
                 logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
                 try:
                     catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
-                    total_models = catalog_models_response.count or tracked_models
+                    total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                    logger.info(f"Got {total_models} total models from models table")
                 except Exception as e2:
-                    logger.warning(f"Failed to get models catalog count: {e2}")
+                    logger.warning(f"Failed to get models catalog count: {e2}, using tracked count: {tracked_models}")
                     total_models = tracked_models
                 
             try:
                 # Get all providers from providers table
                 providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-                total_providers = providers_response.count or tracked_providers
+                total_providers = providers_response.count if providers_response.count is not None else tracked_providers
+                logger.info(f"Got {total_providers} total providers from providers table")
             except Exception as e:
-                logger.warning(f"Failed to get providers catalog count: {e}")
+                logger.warning(f"Failed to get providers catalog count: {e}, using tracked count: {tracked_providers}")
                 total_providers = tracked_providers
                 
             # Get gateway count from GATEWAY_CONFIG (not a database table)
