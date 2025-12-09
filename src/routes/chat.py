@@ -946,6 +946,22 @@ async def stream_generator(
         # PERF: Use async iteration for async streams to avoid blocking the event loop
         # This is critical for reducing perceived TTFC as it allows the server to handle
         # other requests while waiting for the AI provider to start streaming
+
+        # Sentinel value to signal iterator exhaustion (PEP 479 compliance)
+        # StopIteration cannot be raised into a Future, so we use a sentinel instead
+        _STREAM_EXHAUSTED = object()
+
+        def _safe_next(iterator):
+            """Wrapper for next() that returns a sentinel instead of raising StopIteration.
+
+            This is necessary because StopIteration cannot be raised into a Future
+            (PEP 479), which causes issues when using asyncio.to_thread(next, iterator).
+            """
+            try:
+                return next(iterator)
+            except StopIteration:
+                return _STREAM_EXHAUSTED
+
         async def iterate_stream():
             """Helper to support both sync and async iteration"""
             if is_async_stream:
@@ -956,11 +972,12 @@ async def stream_generator(
                 iterator = iter(stream)
                 while True:
                     try:
-                        # Run the blocking next() call in a thread
-                        chunk = await asyncio.to_thread(next, iterator)
+                        # Run the blocking next() call in a thread using safe wrapper
+                        # to avoid "StopIteration interacts badly with generators" error
+                        chunk = await asyncio.to_thread(_safe_next, iterator)
+                        if chunk is _STREAM_EXHAUSTED:
+                            break
                         yield chunk
-                    except StopIteration:
-                        break
                     except Exception as e:
                         logger.error(f"Error during sync stream iteration: {e}")
                         raise e
