@@ -782,17 +782,24 @@ class IntelligentHealthMonitor:
 
             # Get total counts from catalog tables (not just tracked)
             try:
-                catalog_models_response = supabase.table("models").select("id", count="exact").execute()
-                catalog_providers_response = supabase.table("providers").select("id", count="exact").execute()
-                catalog_gateways_response = supabase.table("gateways").select("id", count="exact").execute()
-                
+                catalog_models_response = supabase.table("models").select("*", count="exact").execute()
                 total_models = catalog_models_response.count or tracked_models
-                total_providers = catalog_providers_response.count or tracked_providers
-                total_gateways = catalog_gateways_response.count or 0
-            except Exception as catalog_err:
-                logger.warning(f"Failed to get catalog counts, using tracked counts: {catalog_err}")
+            except Exception as e:
+                logger.warning(f"Failed to get models catalog count: {e}")
                 total_models = tracked_models
+                
+            try:
+                catalog_providers_response = supabase.table("providers").select("*", count="exact").execute()
+                total_providers = catalog_providers_response.count or tracked_providers
+            except Exception as e:
+                logger.warning(f"Failed to get providers catalog count: {e}")
                 total_providers = tracked_providers
+                
+            # Get gateway count from GATEWAY_CONFIG (not a database table)
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                total_gateways = len(GATEWAY_CONFIG)
+            except Exception:
                 total_gateways = 0
 
             if unhealthy_providers == 0 and degraded_providers == 0:
