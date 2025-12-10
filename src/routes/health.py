@@ -184,7 +184,7 @@ async def get_providers_health(
                 "metadata": {
                     "total_providers": total_providers,
                     "tracked_providers": tracked_providers,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 }
             }
 
@@ -198,7 +198,7 @@ async def get_providers_health(
             "metadata": {
                 "total_providers": total_providers,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         }
     except Exception as e:
@@ -217,7 +217,7 @@ async def get_providers_health(
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         }
 
@@ -276,7 +276,7 @@ async def get_models_health(
                 "metadata": {
                     "total_models": total_models,
                     "tracked_models": tracked_models,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 }
             }
 
@@ -290,7 +290,7 @@ async def get_models_health(
             "metadata": {
                 "total_models": total_models,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         }
     except Exception as e:
@@ -309,7 +309,7 @@ async def get_models_health(
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         }
 

@@ -85,7 +85,7 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
                 timeout=self.timeout_seconds
             )
             return response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Request exceeded timeout - log and return 504
             logger.error(
                 f"Request timeout after {self.timeout_seconds}s: "
