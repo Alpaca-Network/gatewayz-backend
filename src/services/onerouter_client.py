@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import httpx
 
@@ -132,7 +132,7 @@ def fetch_models_from_onerouter():
     def _cache_and_return(models: list[dict]) -> list[dict]:
         """Cache models and return them"""
         _onerouter_models_cache["data"] = models
-        _onerouter_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _onerouter_models_cache["timestamp"] = datetime.now(UTC)
         return models
 
     try:

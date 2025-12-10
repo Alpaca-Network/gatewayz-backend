@@ -4,7 +4,6 @@ Handles CRUD operations for AI models with provider relationships
 """
 
 import logging
-from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from src.schemas.models_catalog import (
@@ -46,13 +45,13 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=List[ModelWithProvider])
+@router.get("/", response_model=list[ModelWithProvider])
 async def list_models(
-    provider_id: Optional[int] = Query(None, description="Filter by provider ID"),
-    provider_slug: Optional[str] = Query(None, description="Filter by provider slug"),
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    provider_slug: str | None = Query(None, description="Filter by provider slug"),
     is_active_only: bool = Query(True, description="Only return active models"),
-    health_status: Optional[str] = Query(None, description="Filter by health status"),
-    modality: Optional[str] = Query(None, description="Filter by modality"),
+    health_status: str | None = Query(None, description="Filter by health status"),
+    modality: str | None = Query(None, description="Filter by modality"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
@@ -99,7 +98,7 @@ async def list_models(
 
 @router.get("/stats", response_model=ModelStats)
 async def get_model_statistics(
-    provider_id: Optional[int] = Query(None, description="Filter by provider ID"),
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
 ):
     """
     Get model statistics
@@ -121,10 +120,10 @@ async def get_model_statistics(
         )
 
 
-@router.get("/search", response_model=List[ModelWithProvider])
+@router.get("/search", response_model=list[ModelWithProvider])
 async def search_models_endpoint(
     q: str = Query(..., min_length=1, description="Search query"),
-    provider_id: Optional[int] = Query(None, description="Optional provider filter"),
+    provider_id: int | None = Query(None, description="Optional provider filter"),
 ):
     """
     Search models by name, model_id, or description
@@ -146,7 +145,7 @@ async def search_models_endpoint(
         )
 
 
-@router.get("/health/{health_status}", response_model=List[ModelWithProvider])
+@router.get("/health/{health_status}", response_model=list[ModelWithProvider])
 async def get_models_by_health(
     health_status: str = Path(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
 ):
@@ -177,7 +176,7 @@ async def get_models_by_health(
         )
 
 
-@router.get("/provider/{provider_slug}", response_model=List[ModelWithProvider])
+@router.get("/provider/{provider_slug}", response_model=list[ModelWithProvider])
 async def get_models_by_provider(
     provider_slug: str,
     is_active_only: bool = Query(True, description="Only return active models"),
@@ -240,7 +239,7 @@ async def get_model(model_id: int):
         )
 
 
-@router.get("/{model_id}/health/history", response_model=List[ModelHealthHistoryResponse])
+@router.get("/{model_id}/health/history", response_model=list[ModelHealthHistoryResponse])
 async def get_model_health_history_endpoint(
     model_id: int,
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
@@ -322,7 +321,7 @@ async def create_model_endpoint(model: ModelCreate):
         )
 
 
-@router.post("/bulk", response_model=List[ModelResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/bulk", response_model=list[ModelResponse], status_code=status.HTTP_201_CREATED)
 async def bulk_create_models_endpoint(bulk_data: ModelBulkCreate):
     """
     Create multiple models at once
@@ -405,7 +404,7 @@ async def upsert_model_endpoint(model: ModelCreate):
         )
 
 
-@router.post("/bulk-upsert", response_model=List[ModelResponse], status_code=status.HTTP_200_OK)
+@router.post("/bulk-upsert", response_model=list[ModelResponse], status_code=status.HTTP_200_OK)
 async def bulk_upsert_models_endpoint(bulk_data: ModelBulkCreate):
     """
     Upsert multiple models at once (insert or update if exists)

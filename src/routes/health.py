@@ -9,9 +9,8 @@ This API reads health data from Redis cache populated by health-service.
 See: health-service/main.py
 """
 
-import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -24,7 +23,6 @@ from src.models.health_models import (
     ModelHealthResponse,
     ModelStatusResponse,
     ProviderHealthResponse,
-    ProviderStatus,
     ProviderStatusResponse,
     SystemHealthResponse,
     UptimeMetricsResponse,
@@ -32,11 +30,6 @@ from src.models.health_models import (
 from src.security.deps import get_api_key
 from src.services.simple_health_cache import (
     simple_health_cache,
-    DEFAULT_TTL_SYSTEM,
-    DEFAULT_TTL_PROVIDERS,
-    DEFAULT_TTL_MODELS,
-    DEFAULT_TTL_SUMMARY,
-    DEFAULT_TTL_DASHBOARD,
 )
 from src.utils.sentry_context import capture_error
 
@@ -64,7 +57,7 @@ async def health_check():
     # Degraded mode means DB is unavailable but app is still serving traffic
     response = {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     # Add database status if there are issues
@@ -120,7 +113,7 @@ async def get_system_health(
             degraded_models=0,
             unhealthy_models=0,
             system_uptime=0.0,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get system health: {e}")
@@ -141,7 +134,7 @@ async def get_system_health(
             degraded_models=0,
             unhealthy_models=0,
             system_uptime=0.0,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
 
 
@@ -443,7 +436,7 @@ async def get_health_summary(
                 degraded_models=0,
                 unhealthy_models=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Check if cache is stale (no update in last 5 minutes)
@@ -456,7 +449,7 @@ async def get_health_summary(
                         last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
                     else:
                         last_updated = last_updated_str
-                    age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
+                    age_seconds = (datetime.now(UTC) - last_updated).total_seconds()
                     monitoring_active = age_seconds < 300  # 5 minutes
                 except Exception:
                     monitoring_active = False
@@ -466,7 +459,7 @@ async def get_health_summary(
             providers=[ProviderHealthResponse(**p) for p in cached_providers] if cached_providers else [],
             models=[ModelHealthResponse(**m) for m in cached_models] if cached_models else [],
             monitoring_active=monitoring_active,
-            last_check=datetime.now(timezone.utc),
+            last_check=datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get health summary: {e}")
@@ -489,7 +482,7 @@ async def perform_health_check(
     return {
         "message": "Health checks are handled by health-service container",
         "note": "Use health-service /check/trigger endpoint to trigger manual checks",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "force_refresh": request.force_refresh,
     }
 
@@ -511,7 +504,7 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
     return {
         "message": "Health checks are handled by health-service container",
         "note": "Use health-service /check/trigger endpoint to trigger manual checks",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "models_in_cache": len(cached_models),
         "providers_in_cache": len(cached_providers),
         "system_status": cached_system.get("overall_status", "unknown") if cached_system else "unknown",
@@ -550,7 +543,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Calculate uptime metrics from cached models
@@ -591,7 +584,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=successful_requests,
             failed_requests=failed_requests,
             error_rate=error_rate,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
@@ -611,7 +604,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=0,
             failed_requests=0,
             error_rate=0.0,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
 
 
@@ -663,7 +656,7 @@ async def get_health_dashboard(
                 degraded_models=0,
                 unhealthy_models=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Get providers health from cache
@@ -773,7 +766,7 @@ async def get_health_dashboard(
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Determine if monitoring is active based on cache availability
@@ -784,7 +777,7 @@ async def get_health_dashboard(
             providers=providers_status,
             models=models_status,
             uptime_metrics=uptime_metrics,
-            last_updated=system_health.last_updated or datetime.now(timezone.utc),
+            last_updated=system_health.last_updated or datetime.now(UTC),
             monitoring_active=monitoring_active,
         )
 
@@ -822,7 +815,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                 "message": "Health data not available - health-service may not be running",
                 "monitoring_active": False,
                 "data_source": "health-service (via Redis cache)",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Check if cache is stale (no update in last 5 minutes)
@@ -834,7 +827,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                     last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
                 else:
                     last_updated = last_updated_str
-                age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
+                age_seconds = (datetime.now(UTC) - last_updated).total_seconds()
                 monitoring_active = age_seconds < 300  # 5 minutes
             except Exception:
                 monitoring_active = False
@@ -846,14 +839,14 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
             "total_models": cached_system.get("total_models", 0),
             "monitoring_active": monitoring_active,
             "data_source": "health-service (via Redis cache)",
-            "timestamp": cached_system.get("last_updated", datetime.now(timezone.utc).isoformat()),
+            "timestamp": cached_system.get("last_updated", datetime.now(UTC).isoformat()),
         }
     except Exception as e:
         logger.error(f"Failed to get health status: {e}")
         return {
             "status": "error",
             "message": "Failed to retrieve health status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -879,13 +872,13 @@ async def get_monitoring_status(api_key: str = Depends(get_api_key)):
             "health_providers_count": len(cached_providers),
             "cache_status": "populated" if cached_system else "empty",
             "note": "Health monitoring is handled by dedicated health-service container",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get monitoring status: {e}")
         return {
             "error": "Failed to retrieve monitoring status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -900,7 +893,7 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     return {
         "message": "Health monitoring is handled by health-service container",
         "note": "To start monitoring, ensure the health-service container is running",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -915,7 +908,7 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     return {
         "message": "Health monitoring is handled by health-service container",
         "note": "To stop monitoring, stop the health-service container",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -963,7 +956,7 @@ async def check_google_vertex_health():
             "health_status": diagnosis.get("health_status", "unhealthy"),
             "status": diagnosis.get("health_status", "unhealthy"),
             "diagnosis": diagnosis,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -973,7 +966,7 @@ async def check_google_vertex_health():
             "health_status": "unhealthy",
             "status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1002,7 +995,7 @@ async def database_health():
             "database": "supabase",
             "connection": "verified",
             "initialization": init_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         from src.config.supabase_config import get_initialization_status
@@ -1024,7 +1017,7 @@ async def database_health():
             "error": str(e),
             "error_type": type(e).__name__,
             "initialization": get_initialization_status(),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1054,12 +1047,12 @@ async def provider_health():
             "loaded_providers": loaded_count,
             "failed_providers": failed_count,
             "failures": _provider_import_errors if _provider_import_errors else None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error checking provider health: {str(e)}")
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }

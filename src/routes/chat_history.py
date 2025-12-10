@@ -3,7 +3,6 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.db.activity import log_activity
 from src.db.chat_history import (
     create_chat_session,
     delete_chat_session,

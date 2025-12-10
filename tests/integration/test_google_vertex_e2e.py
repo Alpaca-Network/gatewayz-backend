@@ -72,7 +72,7 @@ def test_user():
 
 
 @pytest.fixture
-def gemini_models() -> List[Dict[str, Any]]:
+def gemini_models() -> list[dict[str, Any]]:
     """Get all Google Gemini models configured for Vertex AI"""
     all_models = get_google_models()
 
@@ -271,7 +271,7 @@ class TestGoogleVertexE2E:
                     total_cost += request_cost
 
                     # Log results
-                    logger.info(f"✓ SUCCESS")
+                    logger.info("✓ SUCCESS")
                     logger.info(f"  Response: {message_content[:100]}...")
                     logger.info(f"  Finish reason: {finish_reason}")
                     logger.info(f"  Tokens: {prompt_tokens} input + {completion_tokens} output = {total_tokens} total")
@@ -293,7 +293,7 @@ class TestGoogleVertexE2E:
                 else:
                     # Request failed
                     error_detail = response.json() if response.text else {'error': 'No response body'}
-                    logger.error(f"✗ FAILED")
+                    logger.error("✗ FAILED")
                     logger.error(f"  Status: {response.status_code}")
                     logger.error(f"  Error: {error_detail}")
 
@@ -434,7 +434,7 @@ class TestGoogleVertexE2E:
                 content_type = response.headers.get('content-type', '')
                 is_streaming = 'text/event-stream' in content_type or 'stream' in content_type.lower()
 
-                logger.info(f"✓ Streaming request accepted")
+                logger.info("✓ Streaming request accepted")
                 logger.info(f"  Content-Type: {content_type}")
                 logger.info(f"  Is streaming: {is_streaming}")
             else:
@@ -474,7 +474,7 @@ class TestVertexAIDirectCall:
 
             assert response is not None, "Response should not be None"
             assert 'choices' in response, "Response should have choices"
-            logger.info(f"✓ Direct Vertex AI call successful")
+            logger.info("✓ Direct Vertex AI call successful")
             logger.info(f"  Response: {response['choices'][0]['message']['content']}")
 
         except Exception as e:

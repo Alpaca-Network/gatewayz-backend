@@ -13,12 +13,11 @@ Features:
 - Rollback capability
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 import shutil
 
 from src.config.config import Config
@@ -40,7 +39,7 @@ class PricingSyncConfig:
     """Configuration for pricing sync"""
 
     # Which providers to auto-sync
-    AUTO_SYNC_PROVIDERS: List[str] = [
+    AUTO_SYNC_PROVIDERS: list[str] = [
         "openrouter",
         "featherless",
         "nearai",
@@ -66,7 +65,7 @@ class PricingSyncConfig:
 class PricingSyncService:
     """Service for syncing prices from provider APIs"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self.auditor = PricingProviderAuditor()
         self.audit_service = get_pricing_audit_service()
@@ -74,7 +73,7 @@ class PricingSyncService:
 
     async def sync_provider_pricing(
         self, provider_name: str, dry_run: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Sync pricing for a specific provider.
 
@@ -138,7 +137,7 @@ class PricingSyncService:
             result["errors"].append(str(e))
             return result
 
-    async def _fetch_provider_pricing(self, provider_name: str) -> Dict[str, Any]:
+    async def _fetch_provider_pricing(self, provider_name: str) -> dict[str, Any]:
         """Fetch pricing from provider API."""
         methods = {
             "openrouter": self.auditor.audit_openrouter,
@@ -166,8 +165,8 @@ class PricingSyncService:
             return {"status": "error", "error_message": str(e)}
 
     def _merge_pricing(
-        self, stored_pricing: Dict[str, Any], api_pricing: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+        self, stored_pricing: dict[str, Any], api_pricing: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """
         Merge API pricing with stored pricing, applying rules.
 
@@ -239,7 +238,7 @@ class PricingSyncService:
         return changes
 
     def _has_price_change(
-        self, existing: Dict[str, Any], new: Dict[str, Any]
+        self, existing: dict[str, Any], new: dict[str, Any]
     ) -> bool:
         """Check if prices have changed significantly."""
         min_threshold = PricingSyncConfig.MIN_CHANGE_THRESHOLD
@@ -274,7 +273,7 @@ class PricingSyncService:
         return False
 
     async def _write_pricing_changes(
-        self, pricing_data: Dict[str, Any], provider_name: str
+        self, pricing_data: dict[str, Any], provider_name: str
     ) -> None:
         """Write updated pricing to file."""
         # Create backup first
@@ -349,7 +348,7 @@ class PricingSyncService:
 
         logger.info(f"[{provider}] {status}: {message}")
 
-    async def sync_all_providers(self, dry_run: bool = False) -> Dict[str, Any]:
+    async def sync_all_providers(self, dry_run: bool = False) -> dict[str, Any]:
         """
         Sync pricing from all configured providers.
 
@@ -386,12 +385,12 @@ class PricingSyncService:
 
         return summary
 
-    def get_sync_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_sync_history(self, limit: int = 100) -> list[dict[str, Any]]:
         """Get recent sync history."""
         history = []
 
         if SYNC_LOG_FILE.exists():
-            with open(SYNC_LOG_FILE, "r") as f:
+            with open(SYNC_LOG_FILE) as f:
                 lines = f.readlines()
 
             for line in lines[-limit:]:
@@ -403,7 +402,7 @@ class PricingSyncService:
         return history
 
 
-async def run_scheduled_sync() -> Dict[str, Any]:
+async def run_scheduled_sync() -> dict[str, Any]:
     """Run scheduled pricing sync (for background tasks)."""
     service = PricingSyncService()
     result = await service.sync_all_providers(dry_run=False)
@@ -411,7 +410,7 @@ async def run_scheduled_sync() -> Dict[str, Any]:
     return result
 
 
-async def run_dry_run_sync() -> Dict[str, Any]:
+async def run_dry_run_sync() -> dict[str, Any]:
     """Run dry-run sync to see what would change."""
     service = PricingSyncService()
     return await service.sync_all_providers(dry_run=True)

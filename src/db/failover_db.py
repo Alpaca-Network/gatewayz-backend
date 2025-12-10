@@ -4,7 +4,7 @@ Handles queries for finding alternative providers for models
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
@@ -16,7 +16,7 @@ def get_providers_for_model(
     active_only: bool = True,
     healthy_only: bool = False,
     min_success_rate: float = 0.0
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get all providers that offer a specific model, sorted by health and performance
 
@@ -172,7 +172,7 @@ def get_providers_for_model(
         return []
 
 
-def get_provider_model_id(canonical_model_id: str, provider_slug: str) -> Optional[str]:
+def get_provider_model_id(canonical_model_id: str, provider_slug: str) -> str | None:
     """
     Get the provider-specific model ID for a canonical model ID
 
@@ -211,7 +211,7 @@ def get_provider_model_id(canonical_model_id: str, provider_slug: str) -> Option
         return None
 
 
-def get_healthy_providers(min_success_rate: float = 80.0) -> List[dict[str, Any]]:
+def get_healthy_providers(min_success_rate: float = 80.0) -> list[dict[str, Any]]:
     """
     Get all healthy providers sorted by performance
 

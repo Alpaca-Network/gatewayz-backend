@@ -15,7 +15,7 @@ Features:
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
@@ -37,8 +37,8 @@ class PricingRecord:
     completion_price: float
     request_price: float = 0.0
     image_price: float = 0.0
-    context_length: Optional[int] = None
-    pricing_model: Optional[str] = None
+    context_length: int | None = None
+    pricing_model: str | None = None
     timestamp: str = ""  # ISO format datetime
     source: str = "manual"  # "manual", "api", "cached"
 
@@ -87,7 +87,7 @@ class PricingAuditService:
         self.snapshot_dir = PRICING_HISTORY_DIR / "snapshots"
         self.snapshot_dir.mkdir(exist_ok=True)
 
-    def record_pricing_snapshot(self, pricing_data: Dict[str, Any]) -> str:
+    def record_pricing_snapshot(self, pricing_data: dict[str, Any]) -> str:
         """
         Record a complete pricing snapshot with timestamp.
 
@@ -122,13 +122,13 @@ class PricingAuditService:
         with open(self.history_file, "a") as f:
             f.write(json.dumps(asdict(record)) + "\n")
 
-    def batch_log_records(self, records: List[PricingRecord]) -> None:
+    def batch_log_records(self, records: list[PricingRecord]) -> None:
         """Log multiple pricing records efficiently."""
         with open(self.history_file, "a") as f:
             for record in records:
                 f.write(json.dumps(asdict(record)) + "\n")
 
-    def record_all_pricing(self, pricing_data: Dict[str, Any]) -> int:
+    def record_all_pricing(self, pricing_data: dict[str, Any]) -> int:
         """
         Record all pricing from manual_pricing.json as individual records.
 
@@ -165,8 +165,8 @@ class PricingAuditService:
         return count
 
     def get_pricing_history(
-        self, gateway: Optional[str] = None, model_id: Optional[str] = None
-    ) -> List[PricingRecord]:
+        self, gateway: str | None = None, model_id: str | None = None
+    ) -> list[PricingRecord]:
         """
         Retrieve pricing history with optional filters.
 
@@ -182,7 +182,7 @@ class PricingAuditService:
         if not self.history_file.exists():
             return records
 
-        with open(self.history_file, "r") as f:
+        with open(self.history_file) as f:
             for line in f:
                 try:
                     data = json.loads(line.strip())
@@ -202,7 +202,7 @@ class PricingAuditService:
 
     def detect_price_changes(
         self, gateway: str, model_id: str, threshold_pct: float = 5.0
-    ) -> List[PricingChangeAlert]:
+    ) -> list[PricingChangeAlert]:
         """
         Detect significant price changes for a model.
 
@@ -254,7 +254,7 @@ class PricingAuditService:
 
     def compare_gateway_pricing(
         self, model_id: str, variance_threshold_pct: float = 10.0
-    ) -> List[PricingComparison]:
+    ) -> list[PricingComparison]:
         """
         Compare pricing for same model across different gateways.
 
@@ -347,7 +347,7 @@ class PricingAuditService:
 
     def find_pricing_anomalies(
         self, variance_threshold_pct: float = 50.0
-    ) -> Dict[str, List[PricingComparison]]:
+    ) -> dict[str, list[PricingComparison]]:
         """
         Find all pricing anomalies (large variances for same model).
 
@@ -379,7 +379,7 @@ class PricingAuditService:
 
         return anomalies
 
-    def generate_audit_report(self, days: int = 30) -> Dict[str, Any]:
+    def generate_audit_report(self, days: int = 30) -> dict[str, Any]:
         """
         Generate comprehensive audit report for specified period.
 
@@ -440,8 +440,8 @@ class PricingAuditService:
         return report
 
     def _generate_recommendations(
-        self, anomalies: List[PricingComparison]
-    ) -> List[str]:
+        self, anomalies: list[PricingComparison]
+    ) -> list[str]:
         """Generate recommendations based on anomalies."""
         recommendations = []
 
@@ -476,7 +476,7 @@ class PricingAuditService:
         return recommendations
 
     def save_audit_report(
-        self, report: Dict[str, Any], filename: Optional[str] = None
+        self, report: dict[str, Any], filename: str | None = None
     ) -> str:
         """
         Save audit report to file.
@@ -502,7 +502,7 @@ class PricingAuditService:
 
     def get_cost_impact_analysis(
         self, model_id: str, monthly_tokens: int = 1_000_000_000
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate cost impact of pricing differences.
 
