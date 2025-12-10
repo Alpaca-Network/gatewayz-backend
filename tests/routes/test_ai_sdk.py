@@ -129,8 +129,6 @@ class TestAISDKEndpoint:
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream_async")
     def test_ai_sdk_streaming_request(self, mock_stream, mock_validate):
         """Test streaming response from AI SDK endpoint"""
-        from unittest.mock import AsyncMock
-
         mock_validate.return_value = "test-api-key"
 
         # Mock streaming response with async iterator
@@ -145,7 +143,6 @@ class TestAISDKEndpoint:
             for chunk in [mock_chunk1, mock_chunk2]:
                 yield chunk
 
-        # Use AsyncMock so the await works, then return the async generator
         mock_stream.return_value = mock_async_iter()
 
         # Make streaming request using Vercel AI Gateway model format
@@ -412,7 +409,6 @@ class TestAISDKModelRouting:
             for chunk in [mock_chunk1, mock_chunk2]:
                 yield chunk
 
-        # Use return_value for the async function mock
         mock_stream.return_value = mock_async_iter()
 
         response = client.post(
