@@ -13,7 +13,6 @@ Useful for:
 
 import json
 import os
-from typing import Optional
 
 # Note: In production, adjust imports based on your project structure
 from src.services.google_oauth2_jwt import (
@@ -43,7 +42,7 @@ def example_basic_token_exchange():
         # One-liner to get an access token
         access_token = get_access_token_from_service_account(service_account_json)
 
-        print(f"✓ Access token obtained successfully")
+        print("✓ Access token obtained successfully")
         print(f"  Token length: {len(access_token)} characters")
         print(f"  Token preview: {access_token[:20]}...")
 
@@ -76,8 +75,8 @@ def example_custom_scope():
             scope="https://www.googleapis.com/auth/aiplatform"  # AI Platform only
         )
 
-        print(f"✓ Access token obtained with custom scope")
-        print(f"  Scope: https://www.googleapis.com/auth/aiplatform")
+        print("✓ Access token obtained with custom scope")
+        print("  Scope: https://www.googleapis.com/auth/aiplatform")
 
         return access_token
 
@@ -116,14 +115,14 @@ def example_manual_jwt_building():
             expiry_seconds=3600,  # 1 hour
         )
 
-        print(f"✓ JWT assertion built")
+        print("✓ JWT assertion built")
         print(f"  JWT length: {len(jwt_assertion)} characters")
         print(f"  JWT parts: {len(jwt_assertion.split('.'))} (header.payload.signature)")
 
         # Step 2: Exchange JWT for access token
         token_response = exchange_jwt_for_access_token(jwt_assertion)
 
-        print(f"✓ Access token obtained")
+        print("✓ Access token obtained")
         print(f"  Token type: {token_response['token_type']}")
         print(f"  Expires in: {token_response['expires_in']} seconds")
         print(f"  Access token: {token_response['access_token'][:20]}...")
@@ -153,7 +152,6 @@ def example_with_vertex_ai():
         return
 
     try:
-        import httpx
 
         # Get access token
         access_token = get_access_token_from_service_account(service_account_json)
@@ -165,10 +163,6 @@ def example_with_vertex_ai():
             f"publishers/google/models/{model}:generateContent"
         )
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        }
 
         # Example request body for Vertex AI API:
         # request_body = {
@@ -180,7 +174,7 @@ def example_with_vertex_ai():
         #     ],
         # }
 
-        print(f"✓ Access token ready")
+        print("✓ Access token ready")
         print(f"  URL: {url}")
         print(f"  Authorization: Bearer {access_token[:20]}...")
 
@@ -192,7 +186,7 @@ def example_with_vertex_ai():
         #     print(f"✓ API call successful")
         #     return result
 
-        print(f"\n  (Actual API call commented out to avoid charges)")
+        print("\n  (Actual API call commented out to avoid charges)")
         return {"status": "ready", "token_preview": access_token[:20]}
 
     except Exception as e:
@@ -240,7 +234,7 @@ def example_token_caching():
 
         # Verify tokens are the same
         assert token1 == token2, "Tokens should be identical"
-        print(f"\n✓ Token caching works")
+        print("\n✓ Token caching works")
         print(f"  Speed improvement: {elapsed1 / elapsed2:.1f}x faster")
 
     except Exception as e:
@@ -279,7 +273,7 @@ def example_error_handling():
     except ValueError as e:
         print(f"  ✓ Caught error: {str(e)[:60]}...")
 
-    print(f"\n✓ Error handling working correctly")
+    print("\n✓ Error handling working correctly")
 
 
 # ==================== Example 7: Custom Expiry ====================
@@ -307,14 +301,14 @@ def example_custom_expiry():
         expiry_times = [1800, 3600, 7200]  # 30 min, 1 hour, 2 hours
 
         for expiry_seconds in expiry_times:
-            jwt = build_jwt_assertion(
+            build_jwt_assertion(
                 service_account_email=service_account_email,
                 private_key=private_key,
                 expiry_seconds=expiry_seconds,
             )
             print(f"  ✓ JWT built with {expiry_seconds}s expiry")
 
-        print(f"\n✓ Custom expiry times work")
+        print("\n✓ Custom expiry times work")
 
     except Exception as e:
         print(f"✗ Failed: {e}")

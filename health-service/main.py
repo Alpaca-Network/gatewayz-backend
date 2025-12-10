@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 60)
         logger.info("Starting Gatewayz Health Monitoring Service")
         logger.info("=" * 60)
-        
+
         # Log memory configuration
         logger.info(f"Memory limit: {MEMORY_LIMIT_MB}MB")
         logger.info(f"Using Intelligent Monitor: {USE_INTELLIGENT_MONITOR}")
@@ -209,7 +209,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "health-monitor",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -234,7 +234,7 @@ async def _get_intelligent_monitor_counts() -> tuple[int, int]:
             .eq("is_enabled", True)
             .execute()
         )
-        providers = set(row.get("provider") for row in (providers_response.data or []))
+        providers = {row.get("provider") for row in (providers_response.data or [])}
         providers_count = len(providers)
 
         return models_count, providers_count
@@ -263,7 +263,7 @@ async def get_status():
                     "models_tracked": 0,
                     "providers_tracked": 0,
                     "message": "Health monitoring failed to start",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -292,7 +292,7 @@ async def get_status():
             "providers_tracked": providers_count,
             "availability_cache_size": len(availability_service.availability_cache),
             "health_check_interval": HEALTH_CHECK_INTERVAL,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting status: {e}")
@@ -301,7 +301,7 @@ async def get_status():
             content={
                 "status": "error",
                 "message": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -354,14 +354,14 @@ async def _get_intelligent_monitor_summary() -> dict:
             "total_models_tracked": total_models,  # Accurate count from database
             "status_distribution": status_counts,  # Distribution from recent 100 models
             "active_incidents": len(incidents),
-            "last_check": datetime.now(timezone.utc).isoformat(),
+            "last_check": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.warning(f"Failed to get intelligent monitor summary: {e}")
         return {
             "monitoring_active": False,
             "error": str(e),
-            "last_check": datetime.now(timezone.utc).isoformat(),
+            "last_check": datetime.now(UTC).isoformat(),
         }
 
 
@@ -380,7 +380,7 @@ async def get_metrics():
                     "monitoring_active": False,
                     "monitor_type": "none",
                     "message": "Health monitoring failed to start",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -400,7 +400,7 @@ async def get_metrics():
             content={
                 "status": "error",
                 "message": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -429,14 +429,14 @@ async def trigger_health_check():
                 content={
                     "status": "error",
                     "message": "No health monitor is currently active",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
 
         return {
             "status": "success",
             "message": "Health check triggered",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error triggering health check: {e}")
@@ -445,7 +445,7 @@ async def trigger_health_check():
             content={
                 "status": "error",
                 "message": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -463,7 +463,7 @@ async def get_cache_stats():
             "system_health_cached": simple_health_cache.get_system_health() is not None,
             "providers_health_cached": simple_health_cache.get_providers_health() is not None,
             "models_health_cached": simple_health_cache.get_models_health() is not None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting cache stats: {e}")
@@ -472,7 +472,7 @@ async def get_cache_stats():
             content={
                 "status": "error",
                 "message": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
