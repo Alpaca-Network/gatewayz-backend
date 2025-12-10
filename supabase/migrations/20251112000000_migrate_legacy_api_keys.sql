@@ -48,6 +48,10 @@ WHERE
     )
     -- And it's a valid Gatewayz API key format
     AND u.api_key LIKE 'gw_%'
+    -- Skip temporary keys (short keys < 40 chars that should be replaced, not migrated)
+    -- Temporary keys: gw_live_ (8) + token_urlsafe(16) (22) = 30 chars
+    -- Proper keys: gw_live_ (8) + token_urlsafe(32) (43) = 51 chars
+    AND LENGTH(u.api_key) >= 40
 ON CONFLICT (api_key) DO NOTHING;
 
 -- Step 2: Log the migration results
@@ -64,25 +68,41 @@ DO $$
 DECLARE
     legacy_count INTEGER;
     migrated_count INTEGER;
+    temp_key_count INTEGER;
 BEGIN
-    -- Count users with legacy API keys
+    -- Count users with proper legacy API keys (>= 40 chars)
     SELECT COUNT(*) INTO legacy_count
     FROM public.users
     WHERE api_key IS NOT NULL
         AND api_key != ''
-        AND api_key LIKE 'gw_%';
+        AND api_key LIKE 'gw_%'
+        AND LENGTH(api_key) >= 40;
+
+    -- Count users with temporary API keys (< 40 chars) that need new keys
+    SELECT COUNT(*) INTO temp_key_count
+    FROM public.users
+    WHERE api_key IS NOT NULL
+        AND api_key != ''
+        AND api_key LIKE 'gw_live_%'
+        AND LENGTH(api_key) < 40;
 
     -- Count keys in api_keys_new
     SELECT COUNT(*) INTO migrated_count
     FROM public.api_keys_new;
 
     -- Log the results
-    RAISE NOTICE 'Migration complete: % users with API keys, % total keys in api_keys_new',
+    RAISE NOTICE 'Migration complete: % proper legacy keys migrated, % total keys in api_keys_new',
         legacy_count, migrated_count;
 
-    -- If there are users with keys but no entries in api_keys_new, raise a warning
+    -- Log users with temporary keys that need attention
+    IF temp_key_count > 0 THEN
+        RAISE WARNING 'Found % users with temporary API keys (< 40 chars). These keys were NOT migrated and will be replaced with proper keys when users next authenticate.',
+            temp_key_count;
+    END IF;
+
+    -- If there are users with proper keys but no entries in api_keys_new, raise a warning
     IF legacy_count > 0 AND migrated_count = 0 THEN
-        RAISE WARNING 'Found % users with API keys but api_keys_new is empty. This may indicate a migration issue.',
+        RAISE WARNING 'Found % users with proper API keys but api_keys_new is empty. This may indicate a migration issue.',
             legacy_count;
     END IF;
 END $$;
