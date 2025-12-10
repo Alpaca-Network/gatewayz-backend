@@ -109,6 +109,8 @@ exclude = [
     "examples",
     "health-service",
     "validate_openrouter_auto_access.py",
+    "check_and_fix_gateway_models.py",  # Diagnostic script
+    "scripts/diagnostic",  # Diagnostic scripts
 ]
 
 # Enable specific rule sets
@@ -157,7 +159,7 @@ unfixable = []
 # Ignore import errors in __init__.py files
 "__init__.py" = ["F401", "F403"]
 # Ignore unused imports and unused variables in test files
-"tests/**/*.py" = ["F401", "F811", "F841"]
+"tests/**/*.py" = ["F401", "F811", "F841", "E402"]
 # Ignore unused imports in try/except blocks for optional dependencies (sentry)
 "src/middleware/auto_sentry_middleware.py" = ["F401"]
 "src/utils/auto_sentry.py" = ["F401"]
