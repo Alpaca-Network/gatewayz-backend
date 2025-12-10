@@ -390,7 +390,7 @@ async def test_tier_update_loop_handles_missing_function():
                 # Wait for execution to complete
                 try:
                     await asyncio.wait_for(task, timeout=1.0)
-                except (TimeoutError, asyncio.CancelledError, asyncio.TimeoutError):
+                except (TimeoutError, asyncio.CancelledError):
                     task.cancel()
                     try:
                         await task
@@ -441,7 +441,7 @@ async def test_tier_update_loop_handles_other_errors():
                 # Wait for execution to complete
                 try:
                     await asyncio.wait_for(task, timeout=1.0)
-                except (TimeoutError, asyncio.CancelledError, asyncio.TimeoutError):
+                except (TimeoutError, asyncio.CancelledError):
                     task.cancel()
                     try:
                         await task
