@@ -8,7 +8,7 @@ Nebius Token Factory provides access to various LLM models including DeepSeek, L
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import logging
 from typing import Any
 
@@ -189,7 +189,7 @@ def fetch_models_from_nebius():
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _nebius_models_cache["data"] = models
-        _nebius_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _nebius_models_cache["timestamp"] = datetime.now(UTC)
         return models
 
     try:

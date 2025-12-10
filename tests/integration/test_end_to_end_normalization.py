@@ -33,7 +33,7 @@ def test_fireworks_with_transform():
     print(f"Is lowercase: {transformed_id == transformed_id.lower()}")
 
     # Try to use it with Fireworks
-    print(f"\nSending to Fireworks API...")
+    print("\nSending to Fireworks API...")
     try:
         client = OpenAI(
             base_url='https://api.fireworks.ai/inference/v1',
@@ -77,7 +77,7 @@ def test_openrouter_with_transform():
     print(f"Is lowercase: {transformed_id == transformed_id.lower()}")
 
     # Try to use it with OpenRouter
-    print(f"\nSending to OpenRouter API...")
+    print("\nSending to OpenRouter API...")
     try:
         client = OpenAI(
             base_url='https://openrouter.ai/api/v1',

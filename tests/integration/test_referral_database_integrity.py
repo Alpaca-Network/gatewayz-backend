@@ -12,7 +12,7 @@ import os
 import pytest
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.config.supabase_config import get_supabase_client
@@ -57,7 +57,7 @@ def test_db_users(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         if referred_by_code is not None:
@@ -85,7 +85,7 @@ def test_db_users(supabase_client, test_prefix):
             "is_active": True,
             "environment_tag": "test",
             "scope_permissions": ["chat", "images"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()
@@ -329,7 +329,7 @@ class TestReferralStatusTransitions:
         assert len(pending.data) == 1
         referral_id = pending.data[0]['id']
         assert pending.data[0]['completed_at'] is None
-        print(f"✓ Referral created with pending status")
+        print("✓ Referral created with pending status")
 
         # Apply bonus
         apply_referral_bonus(
@@ -346,7 +346,7 @@ class TestReferralStatusTransitions:
         assert len(completed.data) == 1
         assert completed.data[0]['status'] == 'completed'
         assert completed.data[0]['completed_at'] is not None
-        print(f"✓ Referral transitioned to completed with timestamp")
+        print("✓ Referral transitioned to completed with timestamp")
 
         # Verify no pending record remains for this user
         pending_after = supabase_client.table("referrals").select("*").eq(
@@ -354,7 +354,7 @@ class TestReferralStatusTransitions:
         ).eq("status", "pending").execute()
 
         assert len(pending_after.data) == 0
-        print(f"✓ No pending record remains after completion")
+        print("✓ No pending record remains after completion")
 
     def test_cannot_complete_twice(self, supabase_client, test_db_users):
         """
@@ -374,7 +374,7 @@ class TestReferralStatusTransitions:
         )
 
         assert success1 is True
-        print(f"✓ First bonus application succeeded")
+        print("✓ First bonus application succeeded")
 
         # Mark first purchase
         from src.services.referral import mark_first_purchase
@@ -388,7 +388,7 @@ class TestReferralStatusTransitions:
         )
 
         assert success2 is False
-        print(f"✓ Second bonus application rejected")
+        print("✓ Second bonus application rejected")
 
         # Verify only one completed record
         completed = supabase_client.table("referrals").select("*").eq(
@@ -396,7 +396,7 @@ class TestReferralStatusTransitions:
         ).eq("status", "completed").execute()
 
         assert len(completed.data) == 1
-        print(f"✓ Only one completed referral record exists")
+        print("✓ Only one completed referral record exists")
 
 
 class TestDataIntegrity:
@@ -420,7 +420,7 @@ class TestDataIntegrity:
         assert len(referral.data) == 1
         assert referral.data[0]['referrer_id'] == alice['user_id']
         assert referral.data[0]['referred_user_id'] == bob['user_id']
-        print(f"✓ Referral correctly links referrer and referee")
+        print("✓ Referral correctly links referrer and referee")
 
     def test_referral_code_persistence(self, supabase_client, test_db_users):
         """

@@ -6,7 +6,7 @@ that may cause authentication timeouts.
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class ConnectionPoolStats:
             return "CRITICAL"
 
 
-def get_supabase_pool_stats() -> Optional[ConnectionPoolStats]:
+def get_supabase_pool_stats() -> ConnectionPoolStats | None:
     """Get connection pool statistics from Supabase client.
 
     Returns:

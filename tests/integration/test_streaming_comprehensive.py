@@ -48,7 +48,7 @@ def test_streaming_response(api_config):
 
     print(f"Status: {response.status_code}")
     print(f"Content-Type: {response.headers.get('content-type')}")
-    print(f"\nStreaming output:")
+    print("\nStreaming output:")
     print("-" * 80)
 
     full_content = ""
@@ -87,7 +87,7 @@ def test_streaming_response(api_config):
     elapsed = time.time() - start_time
 
     print(f"\n{'-' * 80}")
-    print(f"✅ Streaming Test 1 PASSED")
+    print("✅ Streaming Test 1 PASSED")
     print(f"   • Chunks received: {chunk_count}")
     print(f"   • Total content length: {len(full_content)} chars")
     print(f"   • Time elapsed: {elapsed:.2f}s")
@@ -99,7 +99,7 @@ def test_streaming_response(api_config):
 
 def test_non_streaming_response(api_config):
     """Test 2: Non-Streaming Response (for comparison)"""
-    print(f"\n📝 TEST 2: Non-Streaming Response (for comparison)")
+    print("\n📝 TEST 2: Non-Streaming Response (for comparison)")
     print("-" * 80)
 
     url = f"{api_config['base_url']}/v1/chat/completions"
@@ -125,7 +125,7 @@ def test_non_streaming_response(api_config):
     data = response.json()
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     print(f"\nResponse: {content}")
-    print(f"\n✅ Non-Streaming Test 2 PASSED")
+    print("\n✅ Non-Streaming Test 2 PASSED")
     print(f"   • Usage: {data.get('usage', {})}")
 
     assert content, "No content in response"

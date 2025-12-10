@@ -16,7 +16,7 @@ Key Features:
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def cache_user_by_privy_id(privy_id: str, user_data: dict[str, Any]) -> bool:
         return False
 
 
-def get_cached_user_by_privy_id(privy_id: str) -> Optional[dict[str, Any]]:
+def get_cached_user_by_privy_id(privy_id: str) -> dict[str, Any] | None:
     """Get cached user data by Privy ID.
 
     Args:
@@ -123,7 +123,7 @@ def cache_user_by_username(username: str, user_data: dict[str, Any]) -> bool:
         return False
 
 
-def get_cached_user_by_username(username: str) -> Optional[dict[str, Any]]:
+def get_cached_user_by_username(username: str) -> dict[str, Any] | None:
     """Get cached user data by username.
 
     Args:
@@ -151,7 +151,7 @@ def get_cached_user_by_username(username: str) -> Optional[dict[str, Any]]:
         return None
 
 
-def invalidate_user_cache(privy_id: Optional[str] = None, username: Optional[str] = None) -> bool:
+def invalidate_user_cache(privy_id: str | None = None, username: str | None = None) -> bool:
     """Invalidate cached user data.
 
     Args:
@@ -186,7 +186,7 @@ def invalidate_user_cache(privy_id: Optional[str] = None, username: Optional[str
 # API Key Caching Functions (NEW - High Performance Impact)
 
 
-def cache_user_by_api_key(api_key: str, user_data: dict[str, Any], ttl: Optional[int] = None) -> bool:
+def cache_user_by_api_key(api_key: str, user_data: dict[str, Any], ttl: int | None = None) -> bool:
     """Cache complete user data by API key for fast authentication.
 
     This is the HIGHEST IMPACT caching function, used on every API request.
@@ -218,7 +218,7 @@ def cache_user_by_api_key(api_key: str, user_data: dict[str, Any], ttl: Optional
         return False
 
 
-def get_cached_user_by_api_key(api_key: str) -> Optional[dict[str, Any]]:
+def get_cached_user_by_api_key(api_key: str) -> dict[str, Any] | None:
     """Get cached user data by API key (HIGHEST IMPACT - used on every request).
 
     This function is called on EVERY authenticated API request.
@@ -278,7 +278,7 @@ def invalidate_api_key_cache(api_key: str) -> bool:
         return False
 
 
-def cache_api_key_validation(api_key: str, is_valid: bool, reason: Optional[str] = None, ttl: Optional[int] = None) -> bool:
+def cache_api_key_validation(api_key: str, is_valid: bool, reason: str | None = None, ttl: int | None = None) -> bool:
     """Cache API key validation result.
 
     Caches whether an API key is valid/invalid to avoid repeated validation.
@@ -317,7 +317,7 @@ def cache_api_key_validation(api_key: str, is_valid: bool, reason: Optional[str]
         return False
 
 
-def get_cached_api_key_validation(api_key: str) -> Optional[dict[str, Any]]:
+def get_cached_api_key_validation(api_key: str) -> dict[str, Any] | None:
     """Get cached API key validation result.
 
     Args:
@@ -345,7 +345,7 @@ def get_cached_api_key_validation(api_key: str) -> Optional[dict[str, Any]]:
         return None
 
 
-def cache_user_by_id(user_id: int, user_data: dict[str, Any], ttl: Optional[int] = None) -> bool:
+def cache_user_by_id(user_id: int, user_data: dict[str, Any], ttl: int | None = None) -> bool:
     """Cache user data by user ID.
 
     Args:
@@ -374,7 +374,7 @@ def cache_user_by_id(user_id: int, user_data: dict[str, Any], ttl: Optional[int]
         return False
 
 
-def get_cached_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
+def get_cached_user_by_id(user_id: int) -> dict[str, Any] | None:
     """Get cached user data by user ID.
 
     Args:
@@ -432,7 +432,7 @@ def invalidate_user_by_id(user_id: int) -> bool:
         return False
 
 
-def invalidate_all_user_caches(user_id: int, api_key: Optional[str] = None, username: Optional[str] = None, privy_id: Optional[str] = None) -> bool:
+def invalidate_all_user_caches(user_id: int, api_key: str | None = None, username: str | None = None, privy_id: str | None = None) -> bool:
     """Invalidate all cached data for a user across all lookup methods.
 
     This is the comprehensive cache invalidation function to use when user data changes.

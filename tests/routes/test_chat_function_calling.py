@@ -146,7 +146,7 @@ class TestChatCompletionsFunctionCalling:
         )
 
         assert response.status_code == 200
-        
+
         # Verify tools were passed to provider
         assert mock_request.called
         call_args = mock_request.call_args
@@ -169,7 +169,7 @@ class TestChatCompletionsFunctionCalling:
                 "tools": "invalid",  # Should be a list
             },
         )
-        
+
         # Should either accept (if extra="allow" handles it) or reject
         # The important thing is it doesn't crash
         assert response.status_code in [200, 422]
@@ -290,7 +290,7 @@ class TestChatCompletionsFunctionCalling:
         )
 
         assert response.status_code == 200
-        
+
         # Verify all tools were passed
         call_args = mock_request.call_args
         if len(call_args) > 1:

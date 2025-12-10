@@ -7,7 +7,7 @@ without requiring proactive health checks or knowing user identity.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.db.model_health import record_model_call
 
@@ -19,8 +19,8 @@ async def capture_model_health(
     model: str,
     response_time_ms: float,
     status: str = "success",
-    error_message: Optional[str] = None,
-    usage: Optional[Dict[str, Any]] = None,
+    error_message: str | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> None:
     """
     Capture health metrics from a model call.
@@ -79,7 +79,7 @@ async def capture_model_health(
 
 def extract_provider_from_request(
     request_model: str,
-    used_provider: Optional[str] = None
+    used_provider: str | None = None
 ) -> str:
     """
     Extract the provider name from a model request.

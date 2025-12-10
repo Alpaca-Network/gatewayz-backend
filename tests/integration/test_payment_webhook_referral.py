@@ -15,7 +15,7 @@ Flow tested:
 """
 import os
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import patch, Mock, MagicMock
 from fastapi.testclient import TestClient
 
@@ -68,7 +68,7 @@ def test_users_for_webhook(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         if referred_by_code is not None:
@@ -96,7 +96,7 @@ def test_users_for_webhook(supabase_client, test_prefix):
             "is_active": True,
             "environment_tag": "test",
             "scope_permissions": ["chat", "images"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()
@@ -182,7 +182,7 @@ class TestPaymentWebhookReferralIntegration:
         # Step 3: Call the payment completion handler directly
         # Webhook processing is tested through the webhook endpoint
         # In integration tests, we verify webhook behavior indirectly
-        print(f"✓ Checkout completion handler executed")
+        print("✓ Checkout completion handler executed")
 
         # Step 4: Verify both users received bonuses
         alice_after = supabase_client.table("users").select("credits", "has_made_first_purchase").eq("id", alice['user_id']).execute()
@@ -203,7 +203,7 @@ class TestPaymentWebhookReferralIntegration:
 
         # Step 5: Verify has_made_first_purchase is set
         assert bob_after.data[0]['has_made_first_purchase'] is True
-        print(f"✓ Bob's first purchase flag set")
+        print("✓ Bob's first purchase flag set")
 
         # Step 6: Verify referral record is completed
         completed_referrals = supabase_client.table("referrals").select("*").eq(
@@ -213,16 +213,16 @@ class TestPaymentWebhookReferralIntegration:
         assert len(completed_referrals.data) == 1
         assert completed_referrals.data[0]['referrer_id'] == alice['user_id']
         assert completed_referrals.data[0]['completed_at'] is not None
-        print(f"✓ Referral record marked as completed")
+        print("✓ Referral record marked as completed")
 
         # Step 7: Verify payment record was created
         payments = supabase_client.table("payments").select("*").eq("user_id", bob['user_id']).execute()
         assert len(payments.data) >= 1
-        print(f"✓ Payment record created")
+        print("✓ Payment record created")
 
         # Step 8: Verify bonus notification was called
         assert mock_notification.called
-        print(f"✓ Bonus notification sent")
+        print("✓ Bonus notification sent")
 
     @patch('src.services.payments.stripe.checkout.Session.retrieve')
     @patch('src.services.referral.send_referral_bonus_notification')
@@ -286,7 +286,7 @@ class TestPaymentWebhookReferralIntegration:
         ).eq("status", "pending").execute()
 
         assert len(pending_referrals.data) == 1
-        print(f"✓ Referral still pending for insufficient purchase")
+        print("✓ Referral still pending for insufficient purchase")
 
     @patch('src.services.payments.stripe.checkout.Session.retrieve')
     @patch('src.services.referral.send_referral_bonus_notification')
@@ -431,12 +431,12 @@ class TestPaymentWebhookReferralIntegration:
         # This should NOT raise an exception even though referral bonus fails
         # Note: handle_checkout_completed is internal to StripeService
         # In a real webhook, this would be called through the webhook endpoint
-        print(f"✓ Payment handler behavior tested (webhook integration)")
+        print("✓ Payment handler behavior tested (webhook integration)")
 
         # Verify payment was still recorded
         payments = supabase_client.table("payments").select("*").eq("user_id", bob['user_id']).execute()
         assert len(payments.data) >= 1, "Payment should be recorded even if referral fails"
-        print(f"✓ Payment recorded despite referral failure")
+        print("✓ Payment recorded despite referral failure")
 
 
 class TestWebhookEdgeCases:
@@ -462,7 +462,7 @@ class TestWebhookEdgeCases:
         # Should handle gracefully without crashing
         try:
             stripe_service._handle_checkout_completed(mock_session)
-            print(f"✓ Webhook handled missing metadata gracefully")
+            print("✓ Webhook handled missing metadata gracefully")
         except Exception as e:
             # Expected to fail but shouldn't crash the server
             print(f"✓ Webhook failed gracefully with missing metadata: {e}")

@@ -64,7 +64,6 @@ async def lifespan(app):
     # Retry logic handles transient network issues during deployment
     # However, we allow the app to start in degraded mode if DB is unavailable after retries
     from src.config.supabase_config import get_supabase_client
-    import time
 
     max_retries = 2
     retry_delay = 1.0  # seconds - reduced for faster startup

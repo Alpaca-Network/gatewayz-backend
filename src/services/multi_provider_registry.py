@@ -171,7 +171,7 @@ class MultiProviderRegistry:
 
     def __init__(self):
         self._models: dict[str, MultiProviderModel] = {}
-        self._canonical_models: dict[str, "CanonicalModel"] = {}
+        self._canonical_models: dict[str, CanonicalModel] = {}
         self._canonical_slug_index: dict[str, str] = {}
         logger.info("Initialized MultiProviderRegistry")
 

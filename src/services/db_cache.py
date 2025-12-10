@@ -11,10 +11,9 @@ This module significantly improves performance by:
 
 import json
 import logging
-import time
-from datetime import timedelta
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from src.config.redis_config import get_redis_client, is_redis_available
 
@@ -58,7 +57,7 @@ class DBCache:
         """Generate cache key with prefix and identifier"""
         return f"{prefix}:{identifier}"
 
-    def get(self, prefix: str, identifier: str) -> Optional[dict[str, Any]]:
+    def get(self, prefix: str, identifier: str) -> dict[str, Any] | None:
         """
         Get cached data from Redis.
 
@@ -95,7 +94,7 @@ class DBCache:
         prefix: str,
         identifier: str,
         data: dict[str, Any],
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> bool:
         """
         Store data in Redis cache.
@@ -228,7 +227,7 @@ class DBCache:
 
 
 # Global cache instance
-_db_cache: Optional[DBCache] = None
+_db_cache: DBCache | None = None
 
 
 def get_db_cache() -> DBCache:
@@ -242,7 +241,7 @@ def get_db_cache() -> DBCache:
 def cached_query(
     prefix: str,
     key_func: Callable,
-    ttl: Optional[int] = None,
+    ttl: int | None = None,
     cache_none: bool = False,
 ):
     """
@@ -300,13 +299,13 @@ def cached_query(
 # Convenience functions for common cache operations
 
 
-def cache_user(api_key: str, user_data: dict[str, Any], ttl: Optional[int] = None) -> bool:
+def cache_user(api_key: str, user_data: dict[str, Any], ttl: int | None = None) -> bool:
     """Cache user data by API key"""
     cache = get_db_cache()
     return cache.set(DBCache.PREFIX_USER, api_key, user_data, ttl=ttl)
 
 
-def get_cached_user(api_key: str) -> Optional[dict[str, Any]]:
+def get_cached_user(api_key: str) -> dict[str, Any] | None:
     """Get cached user data by API key"""
     cache = get_db_cache()
     return cache.get(DBCache.PREFIX_USER, api_key)
@@ -318,13 +317,13 @@ def invalidate_user(api_key: str) -> bool:
     return cache.invalidate(DBCache.PREFIX_USER, api_key)
 
 
-def cache_api_key(key_hash: str, key_data: dict[str, Any], ttl: Optional[int] = None) -> bool:
+def cache_api_key(key_hash: str, key_data: dict[str, Any], ttl: int | None = None) -> bool:
     """Cache API key data by hash"""
     cache = get_db_cache()
     return cache.set(DBCache.PREFIX_API_KEY, key_hash, key_data, ttl=ttl)
 
 
-def get_cached_api_key(key_hash: str) -> Optional[dict[str, Any]]:
+def get_cached_api_key(key_hash: str) -> dict[str, Any] | None:
     """Get cached API key data by hash"""
     cache = get_db_cache()
     return cache.get(DBCache.PREFIX_API_KEY, key_hash)
@@ -336,13 +335,13 @@ def invalidate_api_key(key_hash: str) -> bool:
     return cache.invalidate(DBCache.PREFIX_API_KEY, key_hash)
 
 
-def cache_plan(plan_id: str, plan_data: dict[str, Any], ttl: Optional[int] = None) -> bool:
+def cache_plan(plan_id: str, plan_data: dict[str, Any], ttl: int | None = None) -> bool:
     """Cache plan data"""
     cache = get_db_cache()
     return cache.set(DBCache.PREFIX_PLAN, plan_id, plan_data, ttl=ttl)
 
 
-def get_cached_plan(plan_id: str) -> Optional[dict[str, Any]]:
+def get_cached_plan(plan_id: str) -> dict[str, Any] | None:
     """Get cached plan data"""
     cache = get_db_cache()
     return cache.get(DBCache.PREFIX_PLAN, plan_id)

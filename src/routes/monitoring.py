@@ -29,7 +29,7 @@ it will be validated. If not provided, public access is allowed with rate limiti
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from urllib.parse import urlparse
 
@@ -265,7 +265,7 @@ async def get_all_provider_health(api_key: str | None = Depends(get_optional_api
                 provider=provider,
                 health_score=score,
                 status=status,
-                last_updated=datetime.now(timezone.utc).isoformat()
+                last_updated=datetime.now(UTC).isoformat()
             ))
 
         return results
@@ -300,7 +300,7 @@ async def get_provider_health(provider: str, api_key: str | None = Depends(get_o
             provider=provider,
             health_score=score,
             status=status,
-            last_updated=datetime.now(timezone.utc).isoformat()
+            last_updated=datetime.now(UTC).isoformat()
         )
     except Exception as e:
         logger.error(f"Failed to get health for {provider}: {e}", exc_info=True)
@@ -381,7 +381,7 @@ async def get_realtime_stats(
         avg_health = sum(health_scores.values()) / len(health_scores) if health_scores else 0.0
 
         return RealtimeStatsResponse(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             providers=provider_stats,
             total_requests=total_requests,
             total_cost=total_cost,
@@ -514,7 +514,7 @@ async def get_provider_comparison(api_key: str | None = Depends(get_optional_api
         providers = await analytics.get_provider_comparison()
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "providers": providers,
             "total_providers": len(providers)
         }
@@ -588,7 +588,7 @@ async def get_anomalies(api_key: str | None = Depends(get_optional_api_key)):
         anomalies = await analytics.detect_anomalies()
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "anomalies": anomalies,
             "total_count": len(anomalies),
             "critical_count": sum(1 for a in anomalies if a.get("severity") == "critical"),
@@ -618,7 +618,7 @@ async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key
         trial_data = analytics.get_trial_analytics()
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **trial_data
         }
     except Exception as e:
@@ -649,13 +649,13 @@ async def get_cost_analysis(
         from datetime import timedelta
 
         analytics = get_analytics_service()
-        end_date = datetime.now(timezone.utc)
+        end_date = datetime.now(UTC)
         start_date = end_date - timedelta(days=days)
 
         cost_data = await analytics.get_cost_by_provider(start_date, end_date)
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "period_days": days,
             **cost_data
         }
@@ -689,7 +689,7 @@ async def get_latency_trends(
         trends = await analytics.get_latency_trends(provider, hours=hours)
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **trends
         }
     except Exception as e:
@@ -720,7 +720,7 @@ async def get_error_rates(
         error_data = await analytics.get_error_rate_by_model(hours=hours)
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **error_data
         }
     except Exception as e:
@@ -750,7 +750,7 @@ async def get_token_efficiency(provider: str, model: str, api_key: str | None = 
         efficiency_data = await analytics.get_token_efficiency(provider, model)
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **efficiency_data
         }
     except Exception as e:

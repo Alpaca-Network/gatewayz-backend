@@ -12,8 +12,8 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode, urlparse
+from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 

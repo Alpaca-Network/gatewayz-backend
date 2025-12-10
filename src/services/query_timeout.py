@@ -6,7 +6,8 @@ the authentication endpoint from hanging indefinitely.
 
 import logging
 import threading
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ def safe_query_with_timeout(
             timeout_seconds=timeout_seconds,
             operation_name=f"{operation_name} on table {table_name}",
         )
-    except QueryTimeoutError as e:
+    except QueryTimeoutError:
         if log_errors:
             logger.warning(
                 f"Query timeout on {table_name}: {operation_name}. "

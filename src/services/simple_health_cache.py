@@ -7,7 +7,7 @@ Compression can be added later.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from src.config.redis_config import get_redis_client
 
@@ -73,7 +73,7 @@ class SimpleHealthCache:
             logger.error(f"Cache write error type: {type(e).__name__}, Data type: {type(data).__name__}")
             return False
 
-    def get_cache(self, key: str) -> Optional[dict]:
+    def get_cache(self, key: str) -> dict | None:
         """
         Retrieve data from Redis cache
 
@@ -135,7 +135,7 @@ class SimpleHealthCache:
         """Cache system health data"""
         return self.set_cache(CACHE_PREFIX_SYSTEM, data, ttl)
 
-    def get_system_health(self) -> Optional[dict]:
+    def get_system_health(self) -> dict | None:
         """Retrieve cached system health data"""
         return self.get_cache(CACHE_PREFIX_SYSTEM)
 
@@ -143,7 +143,7 @@ class SimpleHealthCache:
         """Cache providers health data"""
         return self.set_cache(CACHE_PREFIX_PROVIDERS, {"providers": data}, ttl)
 
-    def get_providers_health(self) -> Optional[list]:
+    def get_providers_health(self) -> list | None:
         """Retrieve cached providers health data"""
         cached = self.get_cache(CACHE_PREFIX_PROVIDERS)
         return cached.get("providers") if cached and isinstance(cached, dict) else None
@@ -152,7 +152,7 @@ class SimpleHealthCache:
         """Cache models health data"""
         return self.set_cache(CACHE_PREFIX_MODELS, {"models": data}, ttl)
 
-    def get_models_health(self) -> Optional[list]:
+    def get_models_health(self) -> list | None:
         """Retrieve cached models health data"""
         cached = self.get_cache(CACHE_PREFIX_MODELS)
         return cached.get("models") if cached and isinstance(cached, dict) else None
@@ -161,7 +161,7 @@ class SimpleHealthCache:
         """Cache complete health summary"""
         return self.set_cache(CACHE_PREFIX_SUMMARY, data, ttl)
 
-    def get_health_summary(self) -> Optional[dict]:
+    def get_health_summary(self) -> dict | None:
         """Retrieve cached health summary"""
         return self.get_cache(CACHE_PREFIX_SUMMARY)
 
@@ -169,7 +169,7 @@ class SimpleHealthCache:
         """Cache health dashboard data"""
         return self.set_cache(CACHE_PREFIX_DASHBOARD, data, ttl)
 
-    def get_health_dashboard(self) -> Optional[dict]:
+    def get_health_dashboard(self) -> dict | None:
         """Retrieve cached health dashboard data"""
         return self.get_cache(CACHE_PREFIX_DASHBOARD)
 

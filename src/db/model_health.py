@@ -7,7 +7,6 @@ including response times, success rates, and health status.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from postgrest.exceptions import APIError
 
@@ -21,11 +20,11 @@ def record_model_call(
     model: str,
     response_time_ms: float,
     status: str,
-    error_message: Optional[str] = None,
-    input_tokens: Optional[int] = None,
-    output_tokens: Optional[int] = None,
-    total_tokens: Optional[int] = None,
-) -> Dict:
+    error_message: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    total_tokens: int | None = None,
+) -> dict:
     """
     Record a model call and update health tracking metrics.
 
@@ -175,7 +174,7 @@ def record_model_call(
         return {}
 
 
-def get_model_health(provider: str, model: str) -> Optional[Dict]:
+def get_model_health(provider: str, model: str) -> dict | None:
     """
     Get health tracking data for a specific provider-model combination.
 
@@ -202,7 +201,7 @@ def get_model_health(provider: str, model: str) -> Optional[Dict]:
     except APIError as e:
         # Table doesn't exist
         if "PGRST205" in str(e) or "Could not find the table" in str(e):
-            logger.debug(f"model_health_tracking table not found")
+            logger.debug("model_health_tracking table not found")
             return None
         raise
     except Exception as e:
@@ -211,11 +210,11 @@ def get_model_health(provider: str, model: str) -> Optional[Dict]:
 
 
 def get_all_model_health(
-    provider: Optional[str] = None,
-    status: Optional[str] = None,
+    provider: str | None = None,
+    status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Get health tracking data for all models with optional filtering.
 
@@ -258,7 +257,7 @@ def get_all_model_health(
 def get_unhealthy_models(
     error_threshold: float = 0.2,  # 20% error rate
     min_calls: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Get models with high error rates (unhealthy models).
 
@@ -303,7 +302,7 @@ def get_unhealthy_models(
         return []
 
 
-def get_model_health_stats() -> Dict:
+def get_model_health_stats() -> dict:
     """
     Get aggregate statistics for model health tracking.
 
@@ -372,7 +371,7 @@ def get_model_health_stats() -> Dict:
         }
 
 
-def get_provider_health_summary(provider: str) -> Dict:
+def get_provider_health_summary(provider: str) -> dict:
     """
     Get health summary for all models from a specific provider.
 
