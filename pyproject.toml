@@ -75,6 +75,7 @@ test = [
     "pytest-mock>=3.12.0",
     "flask-sqlalchemy",
     "playwright>=1.40.0",
+    "python-snappy>=0.7.0",
 ]
 
 # Full production dependencies (Railway, self-hosted)
@@ -108,6 +109,9 @@ exclude = [
     "check_and_fix_gateway_models.py",  # Diagnostic script
     "scripts/diagnostic",  # Diagnostic scripts
     "scripts",  # Scripts directory
+    "examples",
+    "health-service",
+    "validate_openrouter_auto_access.py",
 ]
 
 # Enable specific rule sets
