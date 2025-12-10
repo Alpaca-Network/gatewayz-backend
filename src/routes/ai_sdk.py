@@ -20,14 +20,14 @@ from pydantic import BaseModel, Field
 
 from src.services.ai_sdk_client import (
     make_ai_sdk_request_openai,
-    make_ai_sdk_request_openai_stream,
+    make_ai_sdk_request_openai_stream_async,
     process_ai_sdk_response,
     validate_ai_sdk_api_key,
 )
 from src.services.openrouter_client import (
     get_openrouter_client,
     make_openrouter_request_openai,
-    make_openrouter_request_openai_stream,
+    make_openrouter_request_openai_stream_async,
     process_openrouter_response,
 )
 
@@ -289,13 +289,17 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
 
     async def stream_response():
         try:
-            # Make streaming request directly to OpenRouter
-            stream = await asyncio.to_thread(
-                make_openrouter_request_openai_stream, messages, request.model, **kwargs
+            # Make async streaming request directly to OpenRouter
+            # PERF: Using async client prevents blocking the event loop while waiting
+            # for chunks, ensuring proper real-time streaming to the client
+            stream = await make_openrouter_request_openai_stream_async(
+                messages, request.model, **kwargs
             )
 
-            # Stream response chunks
-            for chunk in stream:
+            # Stream response chunks using async iteration
+            # PERF: async for yields control to the event loop between chunks,
+            # allowing FastAPI to flush each chunk immediately instead of buffering
+            async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = getattr(chunk.choices[0], "delta", None)
                     if delta and hasattr(delta, "content") and delta.content:
@@ -357,13 +361,15 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
             # Convert messages to dict format
             messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
-            # Make streaming request
-            stream = await asyncio.to_thread(
-                make_ai_sdk_request_openai_stream, messages, model, **kwargs
-            )
+            # Make async streaming request
+            # PERF: Using async client prevents blocking the event loop while waiting
+            # for chunks, ensuring proper real-time streaming to the client
+            stream = await make_ai_sdk_request_openai_stream_async(messages, model, **kwargs)
 
-            # Stream response chunks
-            for chunk in stream:
+            # Stream response chunks using async iteration
+            # PERF: async for yields control to the event loop between chunks,
+            # allowing FastAPI to flush each chunk immediately instead of buffering
+            async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = getattr(chunk.choices[0], "delta", None)
                     if delta and hasattr(delta, "content") and delta.content:
