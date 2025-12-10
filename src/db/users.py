@@ -229,7 +229,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                 user["key_id"] = key_data["id"]
                 user["key_name"] = key_data["key_name"]
                 user["environment_tag"] = key_data["environment_tag"]
-                user["scope_permissions"] = key_data["scope_permissions"]
+                user["scope_permissions"] = key_data.get("scope_permissions")
                 user["is_primary"] = key_data["is_primary"]
                 return user
 
