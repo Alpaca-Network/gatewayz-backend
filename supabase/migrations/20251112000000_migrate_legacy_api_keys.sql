@@ -48,10 +48,11 @@ WHERE
     )
     -- And it's a valid Gatewayz API key format
     AND u.api_key LIKE 'gw_%'
-    -- Skip temporary keys (short keys < 40 chars that should be replaced, not migrated)
+    -- Skip temporary gw_live_ keys (short keys < 40 chars that should be replaced, not migrated)
     -- Temporary keys: gw_live_ (8) + token_urlsafe(16) (22) = 30 chars
     -- Proper keys: gw_live_ (8) + token_urlsafe(32) (43) = 51 chars
-    AND LENGTH(u.api_key) >= 40
+    -- Note: Only gw_live_ keys can be temporary; other prefixes (gw_test_, gw_dev_, etc.) are always valid
+    AND NOT (u.api_key LIKE 'gw_live_%' AND LENGTH(u.api_key) < 40)
 ON CONFLICT (api_key) DO NOTHING;
 
 -- Step 2: Log the migration results
