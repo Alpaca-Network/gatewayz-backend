@@ -367,30 +367,35 @@ async def test_tier_update_loop_handles_missing_function():
             )
             mock_supabase.rpc.return_value = mock_rpc
 
-            # Mock asyncio.sleep to avoid delays in test
-            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                # Create a task that runs one iteration of the actual _tier_update_loop
-                async def run_one_iteration():
-                    """Run one iteration and then stop"""
-                    # Run the loop once by making it think it's active for just one iteration
-                    monitor.monitoring_active = True
+            # We need to allow the loop to execute the RPC call
+            # Store original sleep to avoid recursion
+            original_sleep = asyncio.sleep
+            call_count = [0]
 
-                    # Start the tier update loop task
-                    task = asyncio.create_task(monitor._tier_update_loop())
-
-                    # Wait for one sleep call (start of loop)
-                    await asyncio.sleep(0.01)
-
-                    # Stop the loop
+            async def mock_sleep_fn(delay):
+                call_count[0] += 1
+                # First call is from the loop's initial sleep, let it proceed
+                # After that, we'll stop
+                if call_count[0] > 1:
+                    # Set flag to stop after first iteration executes
                     monitor.monitoring_active = False
+                await original_sleep(0)  # Yield to event loop
 
-                    # Wait for task to finish
+            with patch("src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn) as mock_sleep:
+                monitor.monitoring_active = True
+
+                # Start the tier update loop task
+                task = asyncio.create_task(monitor._tier_update_loop())
+
+                # Wait for execution to complete
+                try:
+                    await asyncio.wait_for(task, timeout=1.0)
+                except (TimeoutError, asyncio.CancelledError, asyncio.TimeoutError):
+                    task.cancel()
                     try:
-                        await asyncio.wait_for(task, timeout=0.5)
-                    except TimeoutError:
-                        task.cancel()
-
-                await run_one_iteration()
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
                 # Verify the error was handled gracefully with a warning
                 assert mock_logger.warning.called
@@ -413,30 +418,35 @@ async def test_tier_update_loop_handles_other_errors():
             mock_rpc.execute.side_effect = Exception("Network timeout error")
             mock_supabase.rpc.return_value = mock_rpc
 
-            # Mock asyncio.sleep to avoid delays in test
-            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                # Create a task that runs one iteration of the actual _tier_update_loop
-                async def run_one_iteration():
-                    """Run one iteration and then stop"""
-                    # Run the loop once
-                    monitor.monitoring_active = True
+            # We need to allow the loop to execute the RPC call
+            # Store original sleep to avoid recursion
+            original_sleep = asyncio.sleep
+            call_count = [0]
 
-                    # Start the tier update loop task
-                    task = asyncio.create_task(monitor._tier_update_loop())
-
-                    # Wait briefly for execution
-                    await asyncio.sleep(0.01)
-
-                    # Stop the loop
+            async def mock_sleep_fn(delay):
+                call_count[0] += 1
+                # First call is from the loop's initial sleep, let it proceed
+                # Second call is from error handler's sleep, then stop
+                if call_count[0] > 1:
+                    # Set flag to stop after first iteration executes
                     monitor.monitoring_active = False
+                await original_sleep(0)  # Yield to event loop
 
-                    # Wait for task to finish
+            with patch("src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn) as mock_sleep:
+                monitor.monitoring_active = True
+
+                # Start the tier update loop task
+                task = asyncio.create_task(monitor._tier_update_loop())
+
+                # Wait for execution to complete
+                try:
+                    await asyncio.wait_for(task, timeout=1.0)
+                except (TimeoutError, asyncio.CancelledError, asyncio.TimeoutError):
+                    task.cancel()
                     try:
-                        await asyncio.wait_for(task, timeout=0.5)
-                    except TimeoutError:
-                        task.cancel()
-
-                await run_one_iteration()
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
                 # Verify the error was logged properly as an ERROR (not a warning)
                 assert mock_logger.error.called
