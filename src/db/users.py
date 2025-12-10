@@ -490,6 +490,8 @@ def add_credits(api_key: str, credits: int) -> None:
         raise ValueError(f"User with API key {api_key} not found")
 
     add_credits_to_user(user["id"], credits)
+    # Invalidate cache to ensure fresh credit balance on next get_user call
+    invalidate_user_cache(api_key)
 
 
 def log_api_usage_transaction(
@@ -631,6 +633,9 @@ def deduct_credits(
                 sanitize_for_logging(str(balance_after)),
                 transaction_result.get("id", "unknown"),
             )
+
+        # Invalidate cache to ensure fresh credit balance on next get_user call
+        invalidate_user_cache(api_key)
 
     except Exception as e:
         logger.error("Failed to deduct credits: %s", sanitize_for_logging(str(e)), exc_info=True)
