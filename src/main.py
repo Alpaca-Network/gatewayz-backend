@@ -193,8 +193,14 @@ def create_app() -> FastAPI:
     logger.info(f"   Allowed Origins: {allowed_origins}")
     logger.info(f"   Allowed Headers: {allowed_headers}")
 
-    # OPTIMIZED: Add trace context middleware first (for distributed tracing)
+    # OPTIMIZED: Add request timeout middleware first to prevent 504 Gateway Timeouts
     # Middleware order matters! Last added = first executed
+    from src.middleware.request_timeout_middleware import RequestTimeoutMiddleware
+
+    app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
+    logger.info("  ⏱️  Request timeout middleware enabled (55s timeout to prevent 504 errors)")
+
+    # Add trace context middleware for distributed tracing
     from src.middleware.trace_context_middleware import TraceContextMiddleware
 
     app.add_middleware(TraceContextMiddleware)

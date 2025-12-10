@@ -771,25 +771,56 @@ class IntelligentHealthMonitor:
                 simple_health_cache.cache_providers_health(providers_data)
                 logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
 
-            # Calculate system health
-            total_models = len(models_data)
+            # Calculate system health from tracked models
+            tracked_models = len(models_data)
             healthy_models = sum(1 for m in models_data if m.get("status") == "healthy")
-            unhealthy_models = total_models - healthy_models
-            total_providers = len(providers_data)
+            unhealthy_models = tracked_models - healthy_models
+            tracked_providers = len(providers_data)
             healthy_providers = sum(1 for p in providers_data if p.get("status") == "online")
             degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
             unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
 
+            # Get total counts from openrouter_models table (not just tracked)
+            try:
+                catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
+                total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                logger.info(f"Got {total_models} total models from openrouter_models table")
+            except Exception as e:
+                logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
+                try:
+                    catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
+                    total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                    logger.info(f"Got {total_models} total models from models table")
+                except Exception as e2:
+                    logger.warning(f"Failed to get models catalog count: {e2}, using tracked count: {tracked_models}")
+                    total_models = tracked_models
+                
+            try:
+                # Get all providers from providers table
+                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+                total_providers = providers_response.count if providers_response.count is not None else tracked_providers
+                logger.info(f"Got {total_providers} total providers from providers table")
+            except Exception as e:
+                logger.warning(f"Failed to get providers catalog count: {e}, using tracked count: {tracked_providers}")
+                total_providers = tracked_providers
+                
+            # Get gateway count from GATEWAY_CONFIG (not a database table)
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                total_gateways = len(GATEWAY_CONFIG)
+            except Exception:
+                total_gateways = 0
+
             if unhealthy_providers == 0 and degraded_providers == 0:
                 overall_status = "healthy"
-            elif unhealthy_providers >= total_providers * 0.5:
+            elif tracked_providers > 0 and unhealthy_providers >= tracked_providers * 0.5:
                 overall_status = "unhealthy"
             elif unhealthy_providers > 0 or degraded_providers > 0:
                 overall_status = "degraded"
             else:
                 overall_status = "healthy"
 
-            system_uptime = (healthy_models / total_models * 100) if total_models > 0 else 0.0
+            system_uptime = (healthy_models / tracked_models * 100) if tracked_models > 0 else 100.0
 
             system_data = {
                 "overall_status": overall_status,
@@ -801,12 +832,15 @@ class IntelligentHealthMonitor:
                 "healthy_models": healthy_models,
                 "degraded_models": 0,  # Would need more complex calculation
                 "unhealthy_models": unhealthy_models,
+                "total_gateways": total_gateways,
+                "tracked_models": tracked_models,
+                "tracked_providers": tracked_providers,
                 "system_uptime": system_uptime,
                 "last_updated": datetime.now(UTC).isoformat(),
             }
 
             simple_health_cache.cache_system_health(system_data)
-            logger.info(f"Published health data to Redis cache: {total_models} models, {total_providers} providers")
+            logger.info(f"Published health data to Redis cache: {total_models} models, {total_providers} providers, {total_gateways} gateways (tracked: {tracked_models} models)")
 
         except Exception as e:
             logger.warning(f"Failed to publish health data to Redis cache: {e}")

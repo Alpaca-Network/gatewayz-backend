@@ -138,7 +138,7 @@ async def get_system_health(
         )
 
 
-@router.get("/health/providers", response_model=list[ProviderHealthResponse], tags=["health"])
+@router.get("/health/providers", tags=["health"])
 async def get_providers_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     api_key: str = Depends(get_api_key),
@@ -161,18 +161,46 @@ async def get_providers_health(
     - force_refresh: Currently ignored (data comes from health-service cache)
     """
     try:
+        # Get system health to get total provider count
+        system_health = simple_health_cache.get_system_health() or {}
+        total_providers = system_health.get("total_providers", 0)
+        
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_providers_health()
+        tracked_providers = len(cached) if cached else 0
+        
         if cached:
-            logger.debug(f"Returning cached providers health from health-service ({len(cached)} providers)")
+            logger.debug(f"Returning cached providers health from health-service ({tracked_providers} tracked of {total_providers} total)")
             # Apply gateway filter if specified
             if gateway:
                 cached = [p for p in cached if p.get("gateway") == gateway]
-            return cached
+            
+            # Return format that frontend expects
+            return {
+                "data": cached,
+                "providers": cached,  # Also include as 'providers' for compatibility
+                "total_providers": total_providers,
+                "tracked_providers": tracked_providers,
+                "metadata": {
+                    "total_providers": total_providers,
+                    "tracked_providers": tracked_providers,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            }
 
         # No cached data available
         logger.debug("No providers health in cache - health-service may not be running")
-        return []
+        return {
+            "data": [],
+            "providers": [],
+            "total_providers": total_providers,
+            "tracked_providers": 0,
+            "metadata": {
+                "total_providers": total_providers,
+                "tracked_providers": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
     except Exception as e:
         logger.error(f"Failed to get providers health: {e}", exc_info=True)
         capture_error(
@@ -181,10 +209,20 @@ async def get_providers_health(
             context_data={'endpoint': '/health/providers', 'operation': 'get_providers_health'},
             tags={'endpoint': 'providers_health', 'error_type': type(e).__name__}
         )
-        return []
+        return {
+            "data": [],
+            "providers": [],
+            "total_providers": 0,
+            "tracked_providers": 0,
+            "metadata": {
+                "total_providers": 0,
+                "tracked_providers": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
 
 
-@router.get("/health/models", response_model=list[ModelHealthResponse], tags=["health"])
+@router.get("/health/models", tags=["health"])
 async def get_models_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     provider: str | None = Query(None, description="Filter by specific provider"),
@@ -211,10 +249,16 @@ async def get_models_health(
     - force_refresh: Currently ignored (data comes from health-service cache)
     """
     try:
+        # Get system health to get total model count
+        system_health = simple_health_cache.get_system_health() or {}
+        total_models = system_health.get("total_models", 0)
+        
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_models_health()
+        tracked_models = len(cached) if cached else 0
+        
         if cached:
-            logger.debug(f"Returning cached models health from health-service ({len(cached)} models)")
+            logger.debug(f"Returning cached models health from health-service ({tracked_models} tracked of {total_models} total)")
             # Apply filters
             if gateway:
                 cached = [m for m in cached if m.get("gateway") == gateway]
@@ -222,11 +266,33 @@ async def get_models_health(
                 cached = [m for m in cached if m.get("provider") == provider]
             if status:
                 cached = [m for m in cached if m.get("status") == status]
-            return cached
+            
+            # Return format that frontend expects
+            return {
+                "data": cached,
+                "models": cached,  # Also include as 'models' for compatibility
+                "total_models": total_models,
+                "tracked_models": tracked_models,
+                "metadata": {
+                    "total_models": total_models,
+                    "tracked_models": tracked_models,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            }
 
         # No cached data available
         logger.debug("No models health in cache - health-service may not be running")
-        return []
+        return {
+            "data": [],
+            "models": [],
+            "total_models": total_models,
+            "tracked_models": 0,
+            "metadata": {
+                "total_models": total_models,
+                "tracked_models": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
     except Exception as e:
         logger.error(f"Failed to get models health: {e}", exc_info=True)
         capture_error(
@@ -235,7 +301,17 @@ async def get_models_health(
             context_data={'endpoint': '/health/models', 'operation': 'get_models_health'},
             tags={'endpoint': 'models_health', 'error_type': type(e).__name__}
         )
-        return []
+        return {
+            "data": [],
+            "models": [],
+            "total_models": 0,
+            "tracked_models": 0,
+            "metadata": {
+                "total_models": 0,
+                "tracked_models": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
 
 
 @router.get("/health/model/{model_id}", response_model=ModelHealthResponse, tags=["health"])

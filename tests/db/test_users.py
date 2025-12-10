@@ -1062,3 +1062,131 @@ def test_user_cache_not_found_user(sb):
 
     # Invalid keys should not be cached (to avoid filling cache with bad keys)
     assert users.get_user_cache_stats()["cached_users"] == 0
+
+
+# ============================================================================
+# TEMPORARY API KEY DETECTION TESTS
+# ============================================================================
+
+def test_is_temporary_api_key_empty():
+    """Test _is_temporary_api_key with empty/None values"""
+    import src.db.users as users
+
+    assert users._is_temporary_api_key("") is False
+    assert users._is_temporary_api_key(None) is False
+
+
+def test_is_temporary_api_key_short_gw_live():
+    """Test _is_temporary_api_key detects short gw_live_ keys as temporary"""
+    import src.db.users as users
+
+    # gw_live_ prefix (8 chars) + token_urlsafe(16) (22 chars) = 30 chars
+    temp_key = "gw_live_" + "a" * 22  # 30 chars total
+    assert users._is_temporary_api_key(temp_key) is True
+
+    # 39 chars total (still below 40 threshold)
+    temp_key_39 = "gw_live_" + "a" * 31
+    assert users._is_temporary_api_key(temp_key_39) is True
+
+
+def test_is_temporary_api_key_proper_length():
+    """Test _is_temporary_api_key does not flag proper-length keys as temporary"""
+    import src.db.users as users
+
+    # gw_live_ prefix (8 chars) + token_urlsafe(32) (43 chars) = 51 chars
+    proper_key = "gw_live_" + "a" * 43  # 51 chars total
+    assert users._is_temporary_api_key(proper_key) is False
+
+    # 40 chars total (exactly at threshold)
+    proper_key_40 = "gw_live_" + "a" * 32
+    assert users._is_temporary_api_key(proper_key_40) is False
+
+
+def test_is_temporary_api_key_non_gw_live_prefix():
+    """Test _is_temporary_api_key ignores keys without gw_live_ prefix"""
+    import src.db.users as users
+
+    # Short gw_test_ key should NOT be detected as temporary
+    test_key_short = "gw_test_" + "a" * 22
+    assert users._is_temporary_api_key(test_key_short) is False
+
+    # Short gw_dev_ key should NOT be detected as temporary
+    dev_key_short = "gw_dev_" + "a" * 22
+    assert users._is_temporary_api_key(dev_key_short) is False
+
+    # Random key without gw_ prefix
+    random_key = "random_key_12345"
+    assert users._is_temporary_api_key(random_key) is False
+
+
+def test_is_temporary_api_key_realistic_keys():
+    """Test _is_temporary_api_key with realistic key formats"""
+    import src.db.users as users
+    import secrets
+
+    # Simulate temporary key generation (what create_enhanced_user does)
+    temp_key = f"gw_live_{secrets.token_urlsafe(16)}"
+    assert len(temp_key) == 30  # gw_live_ (8) + urlsafe(16) produces 22 chars = 30
+    assert users._is_temporary_api_key(temp_key) is True
+
+    # Simulate proper key generation (what create_api_key does)
+    proper_key = f"gw_live_{secrets.token_urlsafe(32)}"
+    assert len(proper_key) == 51  # gw_live_ (8) + urlsafe(32) produces 43 chars = 51
+    assert users._is_temporary_api_key(proper_key) is False
+
+
+def test_migrate_legacy_api_key_skips_temporary_keys(sb):
+    """Test _migrate_legacy_api_key does not migrate temporary keys"""
+    import src.db.users as users
+
+    # Create a user with a temporary key
+    temp_key = "gw_live_" + "a" * 22  # 30 chars - temporary
+    sb.table("users").insert({
+        "id": 900,
+        "username": "temp_key_user",
+        "email": "temp@test.com",
+        "credits": 10.0,
+        "api_key": temp_key
+    }).execute()
+
+    user = [r for r in sb.tables["users"] if r["id"] == 900][0]
+
+    # Attempt migration
+    result = users._migrate_legacy_api_key(sb, user, temp_key)
+
+    # Should return False and not migrate
+    assert result is False
+
+    # api_keys_new should NOT have the temporary key
+    api_keys = [r for r in sb.tables["api_keys_new"] if r.get("api_key") == temp_key]
+    assert len(api_keys) == 0
+
+
+def test_get_user_detects_temporary_key_in_legacy(sb):
+    """Test get_user correctly detects and handles temporary keys in legacy lookup"""
+    import src.db.users as users
+
+    users.clear_user_cache()
+
+    # Create a user with a temporary key (simulating failed user creation)
+    temp_key = "gw_live_" + "b" * 22  # 30 chars - temporary
+    sb.table("users").insert({
+        "id": 901,
+        "username": "temp_user",
+        "email": "temp_user@test.com",
+        "credits": 10.0,
+        "api_key": temp_key
+    }).execute()
+
+    # get_user should find the user via legacy lookup
+    result = users.get_user(temp_key)
+
+    # Should return the user
+    assert result is not None
+    assert result["id"] == 901
+    # Should have the temporary key flag set
+    assert result.get("_has_temporary_key") is True
+
+    # api_keys_new should NOT have the temporary key (not migrated)
+    api_keys = [r for r in sb.tables["api_keys_new"] if r.get("api_key") == temp_key]
+    assert len(api_keys) == 0
