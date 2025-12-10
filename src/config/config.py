@@ -57,7 +57,16 @@ _default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query
 
 _project_root = Path(__file__).resolve().parents[2]
 _src_root = Path(__file__).resolve().parents[1]
-_default_data_dir = _src_root / "data"
+
+# Use /tmp for serverless environments (read-only file system), otherwise use src/data
+def _get_data_dir() -> Path:
+    """Get data directory, using /tmp in serverless environments."""
+    # Check if we're in a serverless environment (read-only /var/task)
+    if os.path.exists("/var/task") and not os.access("/var/task", os.W_OK):
+        return Path("/tmp/gatewayz_data")
+    return _src_root / "data"
+
+_default_data_dir = _get_data_dir()
 
 
 def _resolve_path_env(var_name: str, default: Path) -> Path:
@@ -70,7 +79,16 @@ def _resolve_path_env(var_name: str, default: Path) -> Path:
 
 def _ensure_directory(path: Path) -> Path:
     """Ensure a directory exists and return the path."""
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        # If we can't create the directory, use /tmp as fallback
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to create directory {path}: {e}. Using /tmp fallback.")
+        fallback = Path("/tmp") / path.name
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
     return path
 
 

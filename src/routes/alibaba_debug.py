@@ -5,6 +5,7 @@ These endpoints help diagnose issues with the Alibaba Cloud / Qwen integration.
 Usage: Call these endpoints with your API key to verify the integration is working.
 """
 
+import asyncio
 from fastapi import APIRouter, Depends
 from src.security.deps import get_api_key
 from src.services.alibaba_cloud_client import (
@@ -92,27 +93,35 @@ async def test_alibaba_stream(api_key: str = Depends(get_api_key)):
     """
     try:
         logger.info("Testing Alibaba Cloud streaming request")
-        stream = make_alibaba_cloud_request_openai_stream(
-            messages=[{"role": "user", "content": "Say 'hello' in 3 different languages"}],
-            model="qwen-flash",
-        )
 
-        chunks = []
-        chunk_count = 0
-        for chunk in stream:
-            chunk_count += 1
-            is_valid = validate_stream_chunk(chunk)
-            chunks.append(
-                {
-                    "chunk_num": chunk_count,
-                    "valid": is_valid,
-                    "has_choices": hasattr(chunk, "choices"),
-                    "choices_count": len(chunk.choices) if hasattr(chunk, "choices") else 0,
-                }
+        # Helper function to consume stream chunks in a thread to avoid blocking
+        def consume_stream():
+            stream = make_alibaba_cloud_request_openai_stream(
+                messages=[{"role": "user", "content": "Say 'hello' in 3 different languages"}],
+                model="qwen-flash",
             )
 
-            if chunk_count >= 5:  # Limit to first 5 chunks for testing
-                break
+            chunks = []
+            chunk_count = 0
+            for chunk in stream:
+                chunk_count += 1
+                is_valid = validate_stream_chunk(chunk)
+                chunks.append(
+                    {
+                        "chunk_num": chunk_count,
+                        "valid": is_valid,
+                        "has_choices": hasattr(chunk, "choices"),
+                        "choices_count": len(chunk.choices) if hasattr(chunk, "choices") else 0,
+                    }
+                )
+
+                if chunk_count >= 5:  # Limit to first 5 chunks for testing
+                    break
+
+            return chunks, chunk_count
+
+        # Run the stream consumption in a thread to prevent blocking the event loop
+        chunks, chunk_count = await asyncio.to_thread(consume_stream)
 
         logger.info(f"Streaming test successful: {chunk_count} chunks sampled")
         return {
