@@ -43,12 +43,36 @@ def invalidate_user_cache(api_key: str) -> None:
     logger.debug(f"Invalidated user cache for API key {api_key[:10]}...")
 
 
+def _is_temporary_api_key(api_key: str) -> bool:
+    """Check if an API key is a temporary key that should be replaced.
+
+    Temporary keys are created during user registration with a shorter token:
+    - Format: "gw_live_" (8 chars) + token_urlsafe(16) (22 chars) = 30 chars total
+
+    Proper keys from create_api_key use a longer token:
+    - Format: "gw_live_" (8 chars) + token_urlsafe(32) (43 chars) = 51 chars total
+
+    Threshold: Any gw_live_ key shorter than 40 chars is considered temporary.
+    """
+    if not api_key:
+        return False
+
+    if api_key.startswith("gw_live_"):
+        return len(api_key) < 40
+
+    return False
+
+
 def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
     """Migrate a legacy API key from users.api_key to api_keys_new table.
 
     This function is called automatically when a legacy key is detected during
     authentication. It creates a corresponding entry in api_keys_new with
     appropriate defaults, allowing the user to benefit from the new key features.
+
+    IMPORTANT: Temporary keys (short keys created during user registration that
+    should have been replaced) are NOT migrated. Instead, they will be handled
+    by the auth flow which creates a new proper key.
 
     Args:
         client: Supabase client instance
@@ -62,6 +86,16 @@ def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
         user_id = user.get("id")
         if not user_id:
             logger.error("Cannot migrate legacy key: user has no ID")
+            return False
+
+        # Don't migrate temporary keys - they should be replaced with proper keys
+        if _is_temporary_api_key(api_key):
+            logger.warning(
+                "Detected temporary API key for user %s (length: %d). "
+                "Skipping migration - this key should be replaced with a proper key.",
+                sanitize_for_logging(str(user_id)),
+                len(api_key),
+            )
             return False
 
         # Check if key already exists in api_keys_new (race condition protection)
@@ -238,6 +272,20 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
             legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
         if legacy_result.data:
             user = legacy_result.data[0]
+
+            # Check if this is a temporary key that should be replaced
+            if _is_temporary_api_key(api_key):
+                logger.warning(
+                    "Temporary API key detected for user %s (length: %d). "
+                    "This key was created during registration but never properly replaced. "
+                    "The auth flow should create a new proper key for this user.",
+                    user.get("id"),
+                    len(api_key),
+                )
+                # Mark the user as having an unmigrated temporary key
+                user["_has_temporary_key"] = True
+                return user
+
             logger.warning(
                 "Legacy API key %s detected for user %s - attempting automatic migration",
                 sanitize_for_logging(api_key[:20] + "..."),
