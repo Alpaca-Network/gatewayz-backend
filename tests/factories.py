@@ -20,15 +20,15 @@ class UserFactory:
 
     @staticmethod
     def create(
-        user_id: Optional[str] = None,
-        username: Optional[str] = None,
-        email: Optional[str] = None,
+        user_id: str | None = None,
+        username: str | None = None,
+        email: str | None = None,
         credits: float = 100.0,
         role: str = "user",
         is_admin: bool = False,
         subscription_status: str = "active",
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a test user
 
@@ -65,12 +65,12 @@ class UserFactory:
         return user
 
     @staticmethod
-    def create_admin(**kwargs) -> Dict[str, Any]:
+    def create_admin(**kwargs) -> dict[str, Any]:
         """Create an admin user"""
         return UserFactory.create(role="admin", is_admin=True, **kwargs)
 
     @staticmethod
-    def create_with_trial(**kwargs) -> Dict[str, Any]:
+    def create_with_trial(**kwargs) -> dict[str, Any]:
         """Create a user with trial subscription"""
         return UserFactory.create(
             subscription_status="trial",
@@ -79,7 +79,7 @@ class UserFactory:
         )
 
     @staticmethod
-    def create_low_balance(**kwargs) -> Dict[str, Any]:
+    def create_low_balance(**kwargs) -> dict[str, Any]:
         """Create a user with low balance"""
         return UserFactory.create(credits=0.5, **kwargs)
 
@@ -89,19 +89,19 @@ class ApiKeyFactory:
 
     @staticmethod
     def create(
-        api_key: Optional[str] = None,
-        user_id: Optional[str] = None,
+        api_key: str | None = None,
+        user_id: str | None = None,
         key_name: str = "Test API Key",
         environment_tag: str = "test",
         is_active: bool = True,
         is_primary: bool = False,
-        scope_permissions: Optional[Dict] = None,
-        expiration_date: Optional[str] = None,
-        max_requests: Optional[int] = None,
-        ip_allowlist: Optional[List[str]] = None,
-        domain_referrers: Optional[List[str]] = None,
+        scope_permissions: dict | None = None,
+        expiration_date: str | None = None,
+        max_requests: int | None = None,
+        ip_allowlist: list[str] | None = None,
+        domain_referrers: list[str] | None = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a test API key
 
@@ -150,18 +150,18 @@ class ApiKeyFactory:
         return key_data
 
     @staticmethod
-    def create_live(**kwargs) -> Dict[str, Any]:
+    def create_live(**kwargs) -> dict[str, Any]:
         """Create a live API key"""
         return ApiKeyFactory.create(environment_tag="live", **kwargs)
 
     @staticmethod
-    def create_expired(**kwargs) -> Dict[str, Any]:
+    def create_expired(**kwargs) -> dict[str, Any]:
         """Create an expired API key"""
         expiration = (datetime.utcnow() - timedelta(days=1)).isoformat()
         return ApiKeyFactory.create(expiration_date=expiration, **kwargs)
 
     @staticmethod
-    def create_with_ip_restrictions(**kwargs) -> Dict[str, Any]:
+    def create_with_ip_restrictions(**kwargs) -> dict[str, Any]:
         """Create API key with IP restrictions"""
         return ApiKeyFactory.create(
             ip_allowlist=["192.168.1.1", "10.0.0.1"],
@@ -175,12 +175,12 @@ class ChatCompletionFactory:
     @staticmethod
     def create_request(
         model: str = "anthropic/claude-3-opus",
-        messages: Optional[List[Dict]] = None,
+        messages: list[dict] | None = None,
         stream: bool = False,
         max_tokens: int = 1000,
         temperature: float = 1.0,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a chat completion request
 
@@ -215,7 +215,7 @@ class ChatCompletionFactory:
         content: str = "Hello! How can I help you?",
         finish_reason: str = "stop",
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a chat completion response
 
@@ -256,9 +256,9 @@ class ChatCompletionFactory:
     @staticmethod
     def create_streaming_chunk(
         content: str = "Hello",
-        finish_reason: Optional[str] = None,
+        finish_reason: str | None = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a streaming response chunk"""
         chunk = {
             "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
@@ -291,7 +291,7 @@ class ModelFactory:
         output_cost: float = 75.0,
         is_available: bool = True,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a test model
 
@@ -325,7 +325,7 @@ class ModelFactory:
         return model
 
     @staticmethod
-    def create_openai(**kwargs) -> Dict[str, Any]:
+    def create_openai(**kwargs) -> dict[str, Any]:
         """Create an OpenAI model"""
         return ModelFactory.create(
             model_id="gpt-4-turbo",
@@ -338,7 +338,7 @@ class ModelFactory:
         )
 
     @staticmethod
-    def create_unavailable(**kwargs) -> Dict[str, Any]:
+    def create_unavailable(**kwargs) -> dict[str, Any]:
         """Create an unavailable model"""
         return ModelFactory.create(is_available=False, **kwargs)
 
@@ -348,13 +348,13 @@ class PaymentFactory:
 
     @staticmethod
     def create_transaction(
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         amount: float = 10.0,
         currency: str = "usd",
         status: str = "succeeded",
         payment_method: str = "card",
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a payment transaction
 
@@ -383,7 +383,7 @@ class PaymentFactory:
         return transaction
 
     @staticmethod
-    def create_failed(**kwargs) -> Dict[str, Any]:
+    def create_failed(**kwargs) -> dict[str, Any]:
         """Create a failed payment"""
         return PaymentFactory.create_transaction(status="failed", **kwargs)
 
@@ -393,13 +393,13 @@ class ReferralFactory:
 
     @staticmethod
     def create(
-        referrer_id: Optional[str] = None,
-        referee_id: Optional[str] = None,
-        referral_code: Optional[str] = None,
+        referrer_id: str | None = None,
+        referee_id: str | None = None,
+        referral_code: str | None = None,
         reward_amount: float = 5.0,
         status: str = "pending",
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a referral
 
@@ -428,6 +428,6 @@ class ReferralFactory:
         return referral
 
     @staticmethod
-    def create_completed(**kwargs) -> Dict[str, Any]:
+    def create_completed(**kwargs) -> dict[str, Any]:
         """Create a completed referral"""
         return ReferralFactory.create(status="completed", **kwargs)

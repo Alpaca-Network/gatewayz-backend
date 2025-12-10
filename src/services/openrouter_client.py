@@ -1,8 +1,8 @@
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools

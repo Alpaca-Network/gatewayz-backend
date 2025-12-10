@@ -4,7 +4,7 @@ Tests for the Public Status Page API
 Tests the status page endpoints that provide public health information.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,7 +35,7 @@ def mock_supabase_data():
                 "avg_uptime_24h": 99.95,
                 "avg_uptime_7d": 99.90,
                 "avg_response_time_ms": 450.0,
-                "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                "last_checked_at": datetime.now(UTC).isoformat(),
                 "total_usage_24h": 1000,
             }
         ],
@@ -50,8 +50,8 @@ def mock_supabase_data():
                 "uptime_percentage_7d": 99.90,
                 "uptime_percentage_30d": 99.85,
                 "average_response_time_ms": 450.0,
-                "last_called_at": datetime.now(timezone.utc).isoformat(),
-                "last_success_at": datetime.now(timezone.utc).isoformat(),
+                "last_called_at": datetime.now(UTC).isoformat(),
+                "last_success_at": datetime.now(UTC).isoformat(),
                 "last_failure_at": None,
                 "circuit_breaker_state": "closed",
                 "consecutive_failures": 0,

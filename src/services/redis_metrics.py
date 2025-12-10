@@ -15,8 +15,8 @@ All data is stored in Redis with appropriate TTLs to prevent unbounded growth.
 import json
 import logging
 import time
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -102,7 +102,7 @@ class RedisMetrics:
 
         try:
             # Get current hour key for aggregation
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             hour_key = now.strftime("%Y-%m-%d:%H")
             metrics_key = f"metrics:{provider}:{hour_key}"
 
@@ -240,7 +240,7 @@ class RedisMetrics:
 
         try:
             stats = {}
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             for hour_offset in range(hours):
                 hour_time = (now - timedelta(hours=hour_offset)).replace(
@@ -383,7 +383,7 @@ class RedisMetrics:
 
         try:
             # Calculate cutoff time
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             cutoff_time = (now - timedelta(hours=hours)).replace(
                 minute=0,
                 second=0,

@@ -140,14 +140,14 @@ def test_model_info():
         info = get_huggingface_model_info(model_id)
 
         if info:
-            print(f"[OK] Found model:")
+            print("[OK] Found model:")
             print(f"  Name: {info.get('name')}")
             print(f"  Provider: {info.get('provider_slug')}")
             hf_metrics = info.get("huggingface_metrics", {})
             print(f"  Downloads: {hf_metrics.get('downloads')}")
             print()
         else:
-            print(f"[NOT FOUND] Model not found\n")
+            print("[NOT FOUND] Model not found\n")
 
     return True
 

@@ -1,7 +1,7 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, UTC
+from typing import Any
 
 from postgrest import APIError
 
@@ -17,7 +17,7 @@ ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
 
 
 # near the top of the module
-def _pct(used: int, limit: Optional[int]) -> Optional[float]:
+def _pct(used: int, limit: int | None) -> float | None:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
@@ -48,7 +48,7 @@ def refresh_postgrest_schema_cache(client) -> bool:
 
 
 def _insert_api_key_row(
-    client, api_key_payload: Dict[str, Any], include_encrypted_fields: bool = True
+    client, api_key_payload: dict[str, Any], include_encrypted_fields: bool = True
 ):
     """Insert API key data, optionally dropping encrypted columns for legacy schemas."""
     payload = dict(api_key_payload)
@@ -65,7 +65,7 @@ def _is_optional_column_error(error: Exception) -> bool:
 
 
 def _handle_schema_cache_insert_error(
-    client, api_key_payload: Dict[str, Any], original_error: APIError
+    client, api_key_payload: dict[str, Any], original_error: APIError
 ):
     """Retry API key insert after schema refresh or by omitting encrypted columns."""
     if not _is_schema_cache_error(original_error):
@@ -96,7 +96,7 @@ def _handle_schema_cache_insert_error(
 
 
 def check_key_name_uniqueness(
-    user_id: int, key_name: str, exclude_key_id: Optional[int] = None
+    user_id: int, key_name: str, exclude_key_id: int | None = None
 ) -> bool:
     """Check if a key name is unique within the user's scope"""
     try:
@@ -129,11 +129,11 @@ def create_api_key(
     user_id: int,
     key_name: str,
     environment_tag: str = "live",
-    scope_permissions: Optional[Dict[str, Any]] = None,
-    expiration_days: Optional[int] = None,
-    max_requests: Optional[int] = None,
-    ip_allowlist: Optional[List[str]] = None,
-    domain_referrers: Optional[List[str]] = None,
+    scope_permissions: dict[str, Any] | None = None,
+    expiration_days: int | None = None,
+    max_requests: int | None = None,
+    ip_allowlist: list[str] | None = None,
+    domain_referrers: list[str] | None = None,
     is_primary: bool = False,
 ) -> tuple[str, int]:
     """Create a new API key for a user"""
@@ -173,7 +173,7 @@ def create_api_key(
         expiration_date = None
         if expiration_days:
             expiration_date = (
-                datetime.now(timezone.utc) + timedelta(days=expiration_days)
+                datetime.now(UTC) + timedelta(days=expiration_days)
             ).isoformat()
 
         # Set default permissions if none provided
@@ -184,7 +184,7 @@ def create_api_key(
         # Set up trial for new users (if this is their first key)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(timezone.utc)
+            trial_start = datetime.now(UTC)
             trial_end = trial_start + timedelta(days=3)
             trial_data = {
                 "is_trial": True,
@@ -254,7 +254,7 @@ def create_api_key(
             "scope_permissions": scope_permissions,
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
-            "last_used_at": datetime.now(timezone.utc).isoformat(),
+            "last_used_at": datetime.now(UTC).isoformat(),
         }
 
         # Add trial data if this is a primary key
@@ -329,7 +329,7 @@ def create_api_key(
                         "max_requests": max_requests,
                         "is_primary": is_primary,
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:
@@ -346,7 +346,7 @@ def create_api_key(
         raise RuntimeError(f"Failed to create API key: {e}") from e
 
 
-def get_user_api_keys(user_id: int) -> List[Dict[str, Any]]:
+def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
     """Get all API keys for a user"""
     try:
         client = get_supabase_client()
@@ -382,7 +382,7 @@ def get_user_api_keys(user_id: int) -> List[Dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
                             days_remaining = max(0, (expiration - now).days)
                     except Exception as date_error:
                         logger.warning(
@@ -473,11 +473,11 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                         "action": "delete",
                         "api_key_id": result.data[0]["id"],
                         "details": {
-                            "deleted_at": datetime.now(timezone.utc).isoformat(),
+                            "deleted_at": datetime.now(UTC).isoformat(),
                             "key_name": result.data[0].get("key_name", "Unknown"),
                             "environment_tag": result.data[0].get("environment_tag", "unknown"),
                         },
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
                 ).execute()
             except Exception as e:
@@ -495,7 +495,7 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
         return False
 
 
-def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
+def validate_api_key(api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return user info if valid"""
     # Lazy import to avoid circular dependency
     from src.db.users import get_user
@@ -528,7 +528,7 @@ def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
 
                             if expiration < now:
                                 logger.warning(
@@ -601,7 +601,6 @@ def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
 def increment_api_key_usage(api_key: str) -> None:
     """Increment the request count for an API key"""
     # Lazy import to avoid circular dependency
-    from src.db.users import get_user
 
     try:
         client = get_supabase_client()
@@ -617,8 +616,8 @@ def increment_api_key_usage(api_key: str) -> None:
                 client.table("api_keys_new").update(
                     {
                         "requests_used": current_usage + 1,
-                        "last_used_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "last_used_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("api_key", api_key).execute()
                 return
@@ -632,7 +631,7 @@ def increment_api_key_usage(api_key: str) -> None:
         logger.error("Failed to increment API key usage: %s", sanitize_for_logging(str(e)))
 
 
-def get_api_key_usage_stats(api_key: str) -> Dict[str, Any]:
+def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
     """Get usage statistics for a specific API key"""
     try:
         client = get_supabase_client()
@@ -701,7 +700,7 @@ def get_api_key_usage_stats(api_key: str) -> Dict[str, Any]:
         }
 
 
-def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
+def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
     """Update an API key's details"""
     try:
         client = get_supabase_client()
@@ -750,7 +749,7 @@ def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
         if "expiration_days" in update_data:
             if update_data["expiration_days"] is not None:
                 update_data["expiration_date"] = (
-                    datetime.now(timezone.utc) + timedelta(days=update_data["expiration_days"])
+                    datetime.now(UTC) + timedelta(days=update_data["expiration_days"])
                 ).isoformat()
             else:
                 update_data["expiration_date"] = None
@@ -758,7 +757,7 @@ def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
             del update_data["expiration_days"]
 
         # Add timestamp
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Update the API key
         result = client.table("api_keys_new").update(update_data).eq("id", key_id).execute()
@@ -772,7 +771,7 @@ def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
                 client.table("rate_limit_configs").update(
                     {
                         "max_requests": updates["max_requests"],
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("api_key_id", key_id).execute()
             except Exception as e:
@@ -791,9 +790,9 @@ def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
                         "updated_fields": list(updates.keys()),
                         "old_values": {k: key_data.get(k) for k in updates.keys() if k in key_data},
                         "new_values": updates,
-                        "update_timestamp": datetime.now(timezone.utc).isoformat(),
+                        "update_timestamp": datetime.now(UTC).isoformat(),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as e:
@@ -917,7 +916,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         return False
 
 
-def get_api_key_by_id(key_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
     """Get API key details by ID, ensuring user ownership"""
     try:
         client = get_supabase_client()
@@ -951,7 +950,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> Optional[Dict[str, Any]]:
                         expiration_str = expiration_str + "+00:00"
 
                     expiration = datetime.fromisoformat(expiration_str)
-                    now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                    now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
                     days_remaining = max(0, (expiration - now).days)
             except Exception as date_error:
                 logger.warning(
@@ -997,7 +996,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_all_api_keys_usage(user_id: int) -> Dict[str, Any]:
+def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
     """Get usage statistics for all API keys of a user"""
     try:
         client = get_supabase_client()

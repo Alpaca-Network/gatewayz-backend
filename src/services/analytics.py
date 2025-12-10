@@ -17,7 +17,7 @@ Provides analytics for:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -147,9 +147,9 @@ class AnalyticsService:
             Dictionary with cost breakdown by provider
         """
         if not start_date:
-            start_date = datetime.now(timezone.utc) - timedelta(days=7)
+            start_date = datetime.now(UTC) - timedelta(days=7)
         if not end_date:
-            end_date = datetime.now(timezone.utc)
+            end_date = datetime.now(UTC)
 
         try:
             # Query aggregated metrics
@@ -213,7 +213,7 @@ class AnalyticsService:
         """
         try:
             # Get hourly aggregates
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
             result = (
                 self.supabase.table("metrics_hourly_aggregates")
@@ -259,7 +259,7 @@ class AnalyticsService:
             Dictionary with error rates by model
         """
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
             result = (
                 self.supabase.table("metrics_hourly_aggregates")
@@ -320,7 +320,7 @@ class AnalyticsService:
         """
         try:
             # Get last 7 days of data
-            cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+            cutoff = datetime.now(UTC) - timedelta(days=7)
 
             result = (
                 self.supabase.table("metrics_hourly_aggregates")
@@ -414,7 +414,7 @@ class AnalyticsService:
 
         try:
             # Get last 24 hours of data
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            cutoff = datetime.now(UTC) - timedelta(hours=24)
 
             result = (
                 self.supabase.table("metrics_hourly_aggregates")

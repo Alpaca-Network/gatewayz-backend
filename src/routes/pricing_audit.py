@@ -17,7 +17,6 @@ Endpoints:
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 
@@ -27,7 +26,6 @@ from src.services.pricing_provider_auditor import (
     PricingProviderAuditor,
     run_provider_audit,
 )
-from src.security.deps import get_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +59,7 @@ async def get_audit_report(
 @router.get("/anomalies")
 async def get_pricing_anomalies(
     threshold: float = Query(default=50.0, ge=0, le=1000),
-    severity: Optional[str] = Query(None),
+    severity: str | None = Query(None),
     api_key: str = Query(None),
 ):
     """

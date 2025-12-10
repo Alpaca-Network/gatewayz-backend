@@ -14,7 +14,7 @@ Features:
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware

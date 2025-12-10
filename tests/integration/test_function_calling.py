@@ -143,7 +143,7 @@ class TestFunctionCallingIntegration:
 
         # Verify request was made
         assert mock_request.called
-        
+
         # Get the call arguments - check both positional and keyword args
         call_args = mock_request.call_args
         # Function is called as: make_openrouter_request_openai(messages, model, **optional)
@@ -152,7 +152,7 @@ class TestFunctionCallingIntegration:
             kwargs = call_args[1]
         else:
             kwargs = {}
-        
+
         # Verify tools were passed
         assert "tools" in kwargs, "Tools should be passed to provider function"
         assert kwargs["tools"] == tools, "Tools should match input"
@@ -260,14 +260,14 @@ class TestFunctionCallingIntegration:
 
         # Verify request was made
         assert mock_request.called
-        
+
         # Get the call arguments - check both positional and keyword args
         call_args = mock_request.call_args
         if len(call_args) > 1:
             kwargs = call_args[1]
         else:
             kwargs = {}
-        
+
         # Verify tools were passed
         assert "tools" in kwargs, "Tools should be passed to HuggingFace client"
         assert kwargs["tools"] == tools, "Tools should match input"

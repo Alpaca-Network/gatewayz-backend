@@ -5,8 +5,7 @@ Handles activity logging and other I/O operations in the background
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Any
 
 from src.db.activity import log_activity as db_log_activity
 

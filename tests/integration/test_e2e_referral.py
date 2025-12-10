@@ -11,7 +11,7 @@ Tests cover:
 """
 import os
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from fastapi.testclient import TestClient
 from unittest.mock import patch, Mock
 
@@ -65,7 +65,7 @@ def test_users(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         # Only add optional fields if they have non-default values
@@ -96,7 +96,7 @@ def test_users(supabase_client, test_prefix):
             "is_active": True,
             "environment_tag": "test",
             "scope_permissions": ["chat", "images"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()
@@ -183,7 +183,7 @@ class TestEndToEndReferralFlow:
         assert error_msg is None
         assert referrer is not None
         assert referrer['id'] == alice['user_id']
-        print(f"✓ Bob signed up with Alice's code")
+        print("✓ Bob signed up with Alice's code")
 
         # Verify pending referral record was created
         pending_referrals = supabase_client.table("referrals").select("*").eq(
@@ -195,12 +195,12 @@ class TestEndToEndReferralFlow:
         assert pending_referral['referrer_id'] == alice['user_id']
         assert pending_referral['referral_code'] == alice_referral_code
         assert float(pending_referral['bonus_amount']) == REFERRAL_BONUS
-        print(f"✓ Pending referral record created")
+        print("✓ Pending referral record created")
 
         # Verify Bob's referred_by_code is set
         bob_user = supabase_client.table("users").select("*").eq("id", bob['user_id']).execute()
         assert bob_user.data[0]['referred_by_code'] == alice_referral_code
-        print(f"✓ Bob's referred_by_code is set correctly")
+        print("✓ Bob's referred_by_code is set correctly")
 
         # Step 3: Bob makes first purchase of $15
         purchase_amount = 15.0
@@ -215,7 +215,7 @@ class TestEndToEndReferralFlow:
         assert bonus_success is True
         assert bonus_error is None
         assert bonus_data is not None
-        print(f"✓ Referral bonus applied successfully")
+        print("✓ Referral bonus applied successfully")
 
         # Step 4: Verify both users received $10 bonus
         alice_after = supabase_client.table("users").select("credits").eq("id", alice['user_id']).execute()
@@ -237,7 +237,7 @@ class TestEndToEndReferralFlow:
         completed_referral = completed_referrals.data[0]
         assert completed_referral['referrer_id'] == alice['user_id']
         assert completed_referral['completed_at'] is not None
-        print(f"✓ Referral record marked as completed")
+        print("✓ Referral record marked as completed")
 
         # Step 6: Verify Bob's first purchase flag is set
         bob_final = supabase_client.table("users").select("has_made_first_purchase").eq("id", bob['user_id']).execute()
@@ -254,11 +254,11 @@ class TestEndToEndReferralFlow:
 
         assert len(alice_transactions.data) >= 1  # At least one transaction for referral bonus
         assert len(bob_transactions.data) >= 1  # At least one transaction for referral bonus
-        print(f"✓ Credit transactions recorded")
+        print("✓ Credit transactions recorded")
 
         # Verify email notifications were called
         assert mock_bonus_notification.called
-        print(f"✓ Complete referral flow SUCCESS")
+        print("✓ Complete referral flow SUCCESS")
 
     def test_referral_stats_accuracy(self, supabase_client, test_users, client):
         """Test that referral stats are accurate after multiple referrals"""
@@ -344,7 +344,7 @@ class TestEndToEndReferralFlow:
 
         assert success is False
         assert "minimum purchase" in error.lower()
-        print(f"✓ Bonus rejected for purchase < $10")
+        print("✓ Bonus rejected for purchase < $10")
 
         # Verify no credits were added
         alice_credits = supabase_client.table("users").select("credits").eq("id", alice['user_id']).execute()
@@ -352,7 +352,7 @@ class TestEndToEndReferralFlow:
 
         assert float(alice_credits.data[0]['credits']) == 0.0
         assert float(bob_credits.data[0]['credits']) == 0.0
-        print(f"✓ No credits added for insufficient purchase")
+        print("✓ No credits added for insufficient purchase")
 
         # Now try with exactly $10
         success, error, data = apply_referral_bonus(
@@ -363,7 +363,7 @@ class TestEndToEndReferralFlow:
 
         assert success is True
         assert error is None
-        print(f"✓ Bonus applied for purchase = $10")
+        print("✓ Bonus applied for purchase = $10")
 
     def test_self_referral_prevention(self, supabase_client, test_users):
         """Test that users cannot use their own referral code"""
@@ -378,7 +378,7 @@ class TestEndToEndReferralFlow:
 
         assert success is False
         assert "own referral code" in error.lower()
-        print(f"✓ Self-referral prevented")
+        print("✓ Self-referral prevented")
 
         # Try to validate Alice using her own code
         from src.services.referral import validate_referral_code
@@ -386,7 +386,7 @@ class TestEndToEndReferralFlow:
 
         assert valid is False
         assert "own referral code" in error.lower()
-        print(f"✓ Self-referral validation prevented")
+        print("✓ Self-referral validation prevented")
 
     def test_max_referral_uses_enforcement(self, supabase_client, test_users):
         """Test that referral codes cannot exceed maximum uses"""
@@ -436,7 +436,7 @@ class TestEndToEndReferralFlow:
         from src.services.referral import track_referral_signup
         track_referral_signup(alice_code, bob['user_id'])
 
-        print(f"✓ Bob signed up with Alice's code")
+        print("✓ Bob signed up with Alice's code")
 
         # Try to validate Charlie's code for Bob (should fail)
         from src.services.referral import validate_referral_code
@@ -444,7 +444,7 @@ class TestEndToEndReferralFlow:
 
         assert valid is False
         assert "already used a different referral code" in error.lower()
-        print(f"✓ Bob cannot use Charlie's code (already used Alice's)")
+        print("✓ Bob cannot use Charlie's code (already used Alice's)")
 
         # Verify Bob can still use Alice's code for bonus
         from src.services.referral import apply_referral_bonus
@@ -455,7 +455,7 @@ class TestEndToEndReferralFlow:
         )
 
         assert success is True
-        print(f"✓ Bob can still get bonus from Alice's code")
+        print("✓ Bob can still get bonus from Alice's code")
 
     def test_referral_code_uniqueness(self, supabase_client, test_users):
         """Test that all generated referral codes are unique"""
@@ -470,7 +470,7 @@ class TestEndToEndReferralFlow:
 
         # All codes should be unique
         assert len(codes) == 20
-        print(f"✓ All 20 generated referral codes are unique")
+        print("✓ All 20 generated referral codes are unique")
 
     @patch('src.services.referral.send_referral_bonus_notification')
     def test_bonus_only_on_first_purchase(
@@ -500,7 +500,7 @@ class TestEndToEndReferralFlow:
         )
 
         assert success1 is True
-        print(f"✓ First purchase bonus applied")
+        print("✓ First purchase bonus applied")
 
         # Mark first purchase
         mark_first_purchase(bob['user_id'])
@@ -514,12 +514,12 @@ class TestEndToEndReferralFlow:
 
         assert success2 is False
         assert error2 is not None
-        print(f"✓ Second purchase bonus rejected")
+        print("✓ Second purchase bonus rejected")
 
         # Verify Alice only got one bonus
         alice_credits = supabase_client.table("users").select("credits").eq("id", alice['user_id']).execute()
         assert float(alice_credits.data[0]['credits']) == REFERRAL_BONUS  # Only $10, not $20
-        print(f"✓ Alice received only one bonus")
+        print("✓ Alice received only one bonus")
 
 
 class TestReferralEdgeCases:
@@ -534,7 +534,7 @@ class TestReferralEdgeCases:
 
         assert success is False
         assert "invalid referral code" in error.lower()
-        print(f"✓ Invalid code rejected")
+        print("✓ Invalid code rejected")
 
     def test_deleted_referrer(self, supabase_client, test_users):
         """Test handling when referrer is deleted"""
@@ -561,7 +561,7 @@ class TestReferralEdgeCases:
 
         assert success is False
         assert error is not None
-        print(f"✓ Deleted referrer handled gracefully")
+        print("✓ Deleted referrer handled gracefully")
 
     @patch('src.services.referral.send_referral_bonus_notification')
     def test_partial_credit_failure_handling(
@@ -613,7 +613,7 @@ class TestReferralAPIEndpoints:
         assert 'share_message' in data
         assert len(data['referral_code']) == 8
         assert data['referral_code'] in data['invite_link']
-        print(f"✓ GET /referral/code successful")
+        print("✓ GET /referral/code successful")
 
     def test_get_referral_stats_endpoint(self, supabase_client, test_users, client):
         """Test GET /referral/stats endpoint"""
@@ -640,7 +640,7 @@ class TestReferralAPIEndpoints:
         assert 'total_earned' in data
         assert 'current_balance' in data
         assert 'referrals' in data
-        print(f"✓ GET /referral/stats successful")
+        print("✓ GET /referral/stats successful")
 
     def test_validate_referral_endpoint(self, supabase_client, test_users, client):
         """Test POST /referral/validate endpoint"""
@@ -661,7 +661,7 @@ class TestReferralAPIEndpoints:
         data = response.json()
         assert data['valid'] is True
         assert 'message' in data
-        print(f"✓ POST /referral/validate successful")
+        print("✓ POST /referral/validate successful")
 
     def test_generate_referral_endpoint(self, supabase_client, test_users, client):
         """Test POST /referral/generate endpoint"""
@@ -676,7 +676,7 @@ class TestReferralAPIEndpoints:
         data = response.json()
         assert 'referral_code' in data
         assert len(data['referral_code']) == 8
-        print(f"✓ POST /referral/generate successful")
+        print("✓ POST /referral/generate successful")
 
 
 if __name__ == "__main__":

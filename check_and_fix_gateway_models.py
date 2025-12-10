@@ -1,1 +1,0 @@
-scripts/diagnostic/check_and_fix_gateway_models.py

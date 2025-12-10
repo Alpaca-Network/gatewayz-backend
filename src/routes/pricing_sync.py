@@ -13,7 +13,6 @@ Endpoints:
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 
@@ -30,7 +29,7 @@ router = APIRouter(prefix="/pricing/sync", tags=["pricing-sync"])
 
 @router.post("/dry-run")
 async def run_pricing_sync_dry_run(
-    providers: Optional[str] = Query(None),
+    providers: str | None = Query(None),
     api_key: str = Query(None),
 ):
     """
@@ -88,7 +87,7 @@ async def run_pricing_sync_dry_run(
 @router.post("/run")
 async def run_pricing_sync(
     background: bool = Query(default=False),
-    providers: Optional[str] = Query(None),
+    providers: str | None = Query(None),
     api_key: str = Query(None),
     background_tasks: BackgroundTasks = None,
 ):

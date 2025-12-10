@@ -13,10 +13,9 @@ Features:
 """
 
 import asyncio
-import json
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any
 from dataclasses import dataclass, asdict
 import httpx
 
@@ -31,10 +30,10 @@ class ProviderPricingData:
     """Provider pricing data from API"""
 
     provider_name: str
-    models: Dict[str, Any]
+    models: dict[str, Any]
     fetched_at: str
     status: str  # "success", "error", "partial"
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -242,7 +241,7 @@ class PricingProviderAuditor:
                 error_message=str(e),
             )
 
-    async def audit_all_providers(self) -> List[ProviderPricingData]:
+    async def audit_all_providers(self) -> list[ProviderPricingData]:
         """Audit all provider APIs and return results."""
         tasks = [
             self.audit_deepinfra(),
@@ -265,8 +264,8 @@ class PricingProviderAuditor:
         return audit_results
 
     def compare_with_manual_pricing(
-        self, api_data: ProviderPricingData, manual_pricing: Dict[str, Any]
-    ) -> List[PricingDiscrepancy]:
+        self, api_data: ProviderPricingData, manual_pricing: dict[str, Any]
+    ) -> list[PricingDiscrepancy]:
         """
         Compare API pricing with manual_pricing.json.
 
@@ -340,8 +339,8 @@ class PricingProviderAuditor:
             return "minor"
 
     def generate_audit_report(
-        self, audit_results: List[ProviderPricingData], manual_pricing: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, audit_results: list[ProviderPricingData], manual_pricing: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Generate comprehensive audit report.
 
@@ -417,7 +416,7 @@ class PricingProviderAuditor:
 
         return report
 
-    def _generate_recommendations(self, discrepancies: List[PricingDiscrepancy]) -> List[str]:
+    def _generate_recommendations(self, discrepancies: list[PricingDiscrepancy]) -> list[str]:
         """Generate recommendations based on audit findings."""
         recommendations = []
 
@@ -469,7 +468,7 @@ class PricingProviderAuditor:
         return recommendations
 
 
-async def run_provider_audit() -> Dict[str, Any]:
+async def run_provider_audit() -> dict[str, Any]:
     """Run complete provider audit and return report."""
     from src.services.pricing_lookup import load_manual_pricing
 
@@ -488,7 +487,7 @@ async def run_provider_audit() -> Dict[str, Any]:
 
 
 # Synchronous wrapper for use in routes
-def get_provider_audit_report() -> Dict[str, Any]:
+def get_provider_audit_report() -> dict[str, Any]:
     """Get provider audit report (sync wrapper)."""
     import asyncio
 

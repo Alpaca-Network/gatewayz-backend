@@ -8,7 +8,7 @@ Supports multiple channels: email, Slack, Discord, PagerDuty, webhooks.
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 from typing import Any
 
@@ -62,7 +62,7 @@ class Alert:
 
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now(timezone.utc)
+            self.timestamp = datetime.now(UTC)
 
 
 class HealthAlertingService:
@@ -137,7 +137,7 @@ class HealthAlertingService:
             last_sent = self.alert_history[alert_key]
             cooldown = timedelta(minutes=self.alert_cooldown_minutes)
 
-            if datetime.now(timezone.utc) - last_sent < cooldown:
+            if datetime.now(UTC) - last_sent < cooldown:
                 return False
 
         return True
@@ -145,10 +145,10 @@ class HealthAlertingService:
     def _record_alert(self, alert: Alert):
         """Record alert in history for de-duplication"""
         alert_key = f"{alert.alert_type}:{alert.provider}:{alert.model}:{alert.gateway}"
-        self.alert_history[alert_key] = datetime.now(timezone.utc)
+        self.alert_history[alert_key] = datetime.now(UTC)
 
         # Clean up old history (keep last 24 hours)
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
         self.alert_history = {
             k: v for k, v in self.alert_history.items() if v > cutoff
         }

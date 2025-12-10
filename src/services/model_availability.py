@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Any
 
@@ -285,7 +285,7 @@ class ModelAvailabilityService:
             provider=model_health.provider,
             gateway=model_health.gateway,
             status=availability_status,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=model_health.success_rate,
             response_time_ms=model_health.response_time_ms,
             error_count=model_health.error_count,
@@ -342,7 +342,7 @@ class ModelAvailabilityService:
 
         # Check maintenance
         if availability.maintenance_until and availability.maintenance_until > datetime.now(
-            timezone.utc
+            UTC
         ):
             return False
 
@@ -421,7 +421,7 @@ class ModelAvailabilityService:
             ),
             "gateway_stats": gateway_stats,
             "monitoring_active": self.monitoring_active,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     def set_maintenance_mode(self, model_id: str, gateway: str, until: datetime):

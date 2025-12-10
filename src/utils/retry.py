@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from functools import wraps
-from typing import Callable, Type, Tuple
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def with_retry(
     initial_delay: float = 0.1,
     max_delay: float = 2.0,
     exponential_base: float = 2.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    exceptions: tuple[type[Exception], ...] = (Exception,),
 ):
     """
     Decorator that retries a function with exponential backoff.
@@ -49,13 +49,13 @@ def with_retry(
         @wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
-            
+
             for attempt in range(1, max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
                     last_exception = e
-                    
+
                     # Check if this is a retryable error
                     error_str = str(e).lower()
                     is_retryable = any(
@@ -70,35 +70,35 @@ def with_retry(
                             "connection reset",
                         ]
                     )
-                    
+
                     if not is_retryable:
                         # Don't retry non-transient errors
                         logger.warning(
                             f"{func.__name__} failed with non-retryable error: {e}"
                         )
                         raise
-                    
+
                     if attempt < max_attempts:
                         # Calculate delay with exponential backoff
                         delay = min(
                             initial_delay * (exponential_base ** (attempt - 1)),
                             max_delay
                         )
-                        
+
                         logger.warning(
                             f"{func.__name__} failed (attempt {attempt}/{max_attempts}): {e}. "
                             f"Retrying in {delay:.2f}s..."
                         )
-                        
+
                         time.sleep(delay)
                     else:
                         logger.error(
                             f"{func.__name__} failed after {max_attempts} attempts: {e}"
                         )
-            
+
             # All retries exhausted, raise the last exception
             raise last_exception
-        
+
         return wrapper
     return decorator
 
@@ -108,7 +108,7 @@ def with_async_retry(
     initial_delay: float = 0.1,
     max_delay: float = 2.0,
     exponential_base: float = 2.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    exceptions: tuple[type[Exception], ...] = (Exception,),
 ):
     """
     Async version of retry decorator with exponential backoff.
@@ -137,13 +137,13 @@ def with_async_retry(
         @wraps(func)
         async def wrapper(*args, **kwargs):
             last_exception = None
-            
+
             for attempt in range(1, max_attempts + 1):
                 try:
                     return await func(*args, **kwargs)
                 except exceptions as e:
                     last_exception = e
-                    
+
                     # Check if this is a retryable error
                     error_str = str(e).lower()
                     is_retryable = any(
@@ -158,34 +158,34 @@ def with_async_retry(
                             "connection reset",
                         ]
                     )
-                    
+
                     if not is_retryable:
                         # Don't retry non-transient errors
                         logger.warning(
                             f"{func.__name__} failed with non-retryable error: {e}"
                         )
                         raise
-                    
+
                     if attempt < max_attempts:
                         # Calculate delay with exponential backoff
                         delay = min(
                             initial_delay * (exponential_base ** (attempt - 1)),
                             max_delay
                         )
-                        
+
                         logger.warning(
                             f"{func.__name__} failed (attempt {attempt}/{max_attempts}): {e}. "
                             f"Retrying in {delay:.2f}s..."
                         )
-                        
+
                         await asyncio.sleep(delay)
                     else:
                         logger.error(
                             f"{func.__name__} failed after {max_attempts} attempts: {e}"
                         )
-            
+
             # All retries exhausted, raise the last exception
             raise last_exception
-        
+
         return wrapper
     return decorator

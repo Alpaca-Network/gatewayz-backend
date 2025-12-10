@@ -931,7 +931,7 @@ async def stream_generator(
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
-    
+
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
 
@@ -2830,7 +2830,7 @@ async def unified_responses(
                                     "sequence_number": sequence_number,
                                     "error": {
                                         "type": "invalid_response",
-                                        "message": f"Unexpected chunk format",
+                                        "message": "Unexpected chunk format",
                                     },
                                 }
                                 yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
