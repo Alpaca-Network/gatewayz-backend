@@ -97,12 +97,14 @@ exclude = [
     ".git",
     ".venv",
     "venv",
+    "gatewayz",
     "__pycache__",
     "*.pyc",
     ".pytest_cache",
     "node_modules",
     "build",
     "dist",
+    "scripts",
 ]
 
 # Enable specific rule sets
