@@ -97,7 +97,7 @@ class TestStreamNormalizer(unittest.TestCase):
         class Delta:
             def __init__(self, content):
                 self.content = content
-        
+
         chunk = MockChunk(
             id="test-obj",
             created=123,

@@ -12,7 +12,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Dict, Any, List
 
 from src.db.credit_transactions import (
@@ -62,7 +62,7 @@ def mock_transaction():
         'payment_id': None,
         'metadata': {'model': 'gpt-4', 'tokens': 500},
         'created_by': None,
-        'created_at': datetime.now(timezone.utc).isoformat()
+        'created_at': datetime.now(UTC).isoformat()
     }
 
 
@@ -128,7 +128,7 @@ class TestLogCreditTransaction:
             'payment_id': 123,
             'metadata': {'payment_intent': 'pi_123'},
             'created_by': 'stripe_webhook',
-            'created_at': datetime.now(timezone.utc).isoformat()
+            'created_at': datetime.now(UTC).isoformat()
         }
 
         result_mock = Mock()
@@ -346,7 +346,7 @@ class TestGetUserTransactions:
         assert len(result) == 10
         assert result[0]['id'] == 11  # First item after offset 10
         assert result[9]['id'] == 20  # Last item
-        
+
         # Verify database-side pagination was used
         order_mock.range.assert_called_once_with(10, 19)  # offset 10, limit 10 -> range(10, 19)
         range_mock.execute.assert_called_once()

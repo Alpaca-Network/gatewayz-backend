@@ -14,7 +14,7 @@ Flow tested:
 """
 import os
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import patch, Mock, MagicMock, call
 from fastapi.testclient import TestClient
 from fastapi import BackgroundTasks
@@ -61,7 +61,7 @@ def test_auth_users(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         # Try to add has_made_first_purchase, but don't fail if column doesn't exist
@@ -181,7 +181,7 @@ class TestAuthRegistrationReferralIntegration:
 
         # Verify response
         assert response.status_code in [200, 201]
-        print(f"✓ Auth request successful with referral code")
+        print("✓ Auth request successful with referral code")
 
         # Verify track_referral_signup was called
         assert mock_track_referral.called
@@ -255,11 +255,11 @@ class TestAuthRegistrationReferralIntegration:
 
         # Should still succeed (invalid referral doesn't block signup)
         assert response.status_code in [200, 201]
-        print(f"✓ Signup succeeded despite invalid referral code")
+        print("✓ Signup succeeded despite invalid referral code")
 
         # Verify track_referral_signup was called
         assert mock_track_referral.called
-        print(f"✓ Invalid referral code was attempted but didn't block signup")
+        print("✓ Invalid referral code was attempted but didn't block signup")
 
     @patch('src.db.users.get_user_by_privy_id')
     def test_existing_user_login_ignores_referral_code(
@@ -314,7 +314,7 @@ class TestAuthRegistrationReferralIntegration:
 
         # Should succeed
         assert response.status_code == 200
-        print(f"✓ Existing user login successful (referral code ignored)")
+        print("✓ Existing user login successful (referral code ignored)")
 
 
 class TestReferralTrackingIntegration:
@@ -343,7 +343,7 @@ class TestReferralTrackingIntegration:
         assert success is True
         assert error is None
         assert referrer['id'] == alice['user_id']
-        print(f"✓ Referral signup tracked successfully")
+        print("✓ Referral signup tracked successfully")
 
         # Verify pending record was created
         pending = supabase_client.table("referrals").select("*").eq(
@@ -356,7 +356,7 @@ class TestReferralTrackingIntegration:
         assert record['referral_code'] == alice_code
         assert record['status'] == 'pending'
         assert record['completed_at'] is None
-        print(f"✓ Pending referral record created in database")
+        print("✓ Pending referral record created in database")
 
     def test_store_referred_by_code_on_signup(
         self,
@@ -385,7 +385,7 @@ class TestReferralTrackingIntegration:
         ).execute()
 
         assert bob_user.data[0]['referred_by_code'] == alice_code
-        print(f"✓ referred_by_code stored correctly")
+        print("✓ referred_by_code stored correctly")
 
     def test_multiple_signups_same_code(
         self,
@@ -409,7 +409,7 @@ class TestReferralTrackingIntegration:
             assert success is True
             referees.append(user)
 
-        print(f"✓ 3 users signed up with same code")
+        print("✓ 3 users signed up with same code")
 
         # Verify 3 pending records
         pending = supabase_client.table("referrals").select("*").eq(
@@ -417,7 +417,7 @@ class TestReferralTrackingIntegration:
         ).eq("status", "pending").execute()
 
         assert len(pending.data) == 3
-        print(f"✓ 3 pending referral records created")
+        print("✓ 3 pending referral records created")
 
         # Verify stats
         from src.services.referral import get_referral_stats
@@ -426,7 +426,7 @@ class TestReferralTrackingIntegration:
         assert stats['total_uses'] == 3
         assert stats['pending_bonuses'] == 3
         assert stats['completed_bonuses'] == 0
-        print(f"✓ Stats show 3 pending referrals")
+        print("✓ Stats show 3 pending referrals")
 
 
 class TestReferralNotificationIntegration:
@@ -460,7 +460,7 @@ class TestReferralNotificationIntegration:
         )
 
         assert success is True
-        print(f"✓ Signup notification sent")
+        print("✓ Signup notification sent")
 
         # Verify email was sent
         assert mock_send_email.called
@@ -494,7 +494,7 @@ class TestReferralNotificationIntegration:
 
         # Returns False but doesn't raise exception
         assert success is False
-        print(f"✓ Notification failure handled gracefully")
+        print("✓ Notification failure handled gracefully")
 
 
 class TestReferralValidationDuringSignup:
@@ -523,7 +523,7 @@ class TestReferralValidationDuringSignup:
         assert valid is True
         assert error is None
         assert referrer['id'] == alice['user_id']
-        print(f"✓ Referral code validated before signup")
+        print("✓ Referral code validated before signup")
 
     def test_validate_prevents_self_referral_during_signup(
         self,
@@ -543,7 +543,7 @@ class TestReferralValidationDuringSignup:
 
         assert valid is False
         assert "own referral code" in error.lower()
-        print(f"✓ Self-referral prevented during validation")
+        print("✓ Self-referral prevented during validation")
 
     def test_validate_checks_usage_limit(
         self,
@@ -571,7 +571,7 @@ class TestReferralValidationDuringSignup:
 
         assert valid is False
         assert "usage limit" in error.lower()
-        print(f"✓ Validation enforces usage limit")
+        print("✓ Validation enforces usage limit")
 
 
 if __name__ == "__main__":

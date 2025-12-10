@@ -13,7 +13,7 @@ Vercel AI Gateway: https://vercel.com/ai-gateway
 """
 
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI, OpenAI
 

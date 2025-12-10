@@ -6,11 +6,10 @@ Optimized for performance with caching and pre-aggregated data.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
 
 from src.config.supabase_config import supabase
 
@@ -40,7 +39,7 @@ async def get_overall_status():
             return {
                 "status": "unknown",
                 "message": "Status data not available",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Calculate overall metrics
@@ -83,7 +82,7 @@ async def get_overall_status():
             "offline_models": offline_models,
             "total_providers": len(providers),
             "active_incidents": active_incidents,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -288,7 +287,7 @@ async def get_incidents(
             else:
                 # Calculate current duration for active incidents
                 started = datetime.fromisoformat(incident["started_at"])
-                duration = int((datetime.now(timezone.utc) - started).total_seconds())
+                duration = int((datetime.now(UTC) - started).total_seconds())
 
             formatted.append({
                 "id": incident["id"],
@@ -329,7 +328,7 @@ async def get_model_uptime_history(
     """
     try:
         # Determine time range
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if period == "24h":
             start_time = now - timedelta(hours=24)
             interval = "hour"
@@ -461,7 +460,7 @@ async def get_stats():
         active_incidents = len([i for i in incidents_response.data if i.get("status") == "active"])
 
         # Get check statistics from last 24h
-        yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
+        yesterday = datetime.now(UTC) - timedelta(hours=24)
         checks_response = (
             supabase.table("model_health_history")
             .select("status", count="exact")
@@ -493,7 +492,7 @@ async def get_stats():
                     (successful_checks / total_checks * 100) if total_checks > 0 else 0, 2
                 ),
             },
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:

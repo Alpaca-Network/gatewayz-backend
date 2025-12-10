@@ -347,7 +347,7 @@ class Config:
         if is_vercel:
             if invalid_vars:
                 raise RuntimeError(
-                    f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+                    "Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
                 )
             return True
 
@@ -371,7 +371,7 @@ class Config:
             )
         if invalid_vars:
             error_messages.append(
-                f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+                "Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
             )
 
         if error_messages:

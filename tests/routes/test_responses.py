@@ -136,7 +136,7 @@ def test_responses_with_json_format():
             json_content = json.loads(content)
             print(f"✅ Valid JSON response: {json_content}")
         except json.JSONDecodeError:
-            print(f"⚠️ Content is not valid JSON")
+            print("⚠️ Content is not valid JSON")
 
         print(f"📊 Usage: {result.get('usage', {})}")
 
@@ -214,11 +214,11 @@ def compare_endpoints():
         print("\n" + "="*60)
         print("KEY DIFFERENCES:")
         print("="*60)
-        print(f"Legacy uses: 'messages' → 'choices' → 'message'")
-        print(f"Unified uses: 'input' → 'output' → role/content")
+        print("Legacy uses: 'messages' → 'choices' → 'message'")
+        print("Unified uses: 'input' → 'output' → role/content")
         print(f"\nLegacy object type: {legacy.get('object')}")
         print(f"Unified object type: {unified.get('object')}")
-        print(f"\nBoth endpoints charge the same and provide equivalent responses.")
+        print("\nBoth endpoints charge the same and provide equivalent responses.")
 
 
 if __name__ == "__main__":

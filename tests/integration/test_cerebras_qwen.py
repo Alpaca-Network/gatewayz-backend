@@ -47,7 +47,7 @@ class TestCerebrasQwen:
         assert len(response.choices) > 0
         assert response.choices[0].message.content
         assert "hello" in response.choices[0].message.content.lower()
-        print(f"✓ Basic test passed")
+        print("✓ Basic test passed")
         print(f"  Content: {response.choices[0].message.content[:100]}...")
 
     def test_cerebras_qwen_streaming(self, cerebras_client):
@@ -72,7 +72,7 @@ class TestCerebrasQwen:
 
         assert chunk_count > 0
         assert len(full_content) > 0
-        print(f"✓ Streaming test passed")
+        print("✓ Streaming test passed")
         print(f"  Chunks received: {chunk_count}")
         print(f"  Total content length: {len(full_content)}")
 
@@ -92,7 +92,7 @@ class TestCerebrasQwen:
         content = response.choices[0].message.content
         assert content
         assert len(content) > 0
-        print(f"✓ System prompt test passed")
+        print("✓ System prompt test passed")
         print(f"  Response: {content}")
 
     def test_cerebras_qwen_multi_turn(self, cerebras_client):
@@ -112,7 +112,7 @@ class TestCerebrasQwen:
         content = response.choices[0].message.content
         assert content
         assert "8" in content or "eight" in content.lower()
-        print(f"✓ Multi-turn test passed")
+        print("✓ Multi-turn test passed")
         print(f"  Response: {content}")
 
     def test_cerebras_qwen_temperature_variation(self, cerebras_client):
@@ -157,7 +157,7 @@ class TestCerebrasQwen:
         assert short_len > 0
         assert long_len > 0
         assert long_len >= short_len  # Longer max_tokens should allow longer response
-        print(f"✓ Max tokens test passed")
+        print("✓ Max tokens test passed")
         print(f"  Short (20 tokens): {short_len} chars")
         print(f"  Long (100 tokens): {long_len} chars")
 
@@ -189,7 +189,7 @@ class TestCerebrasQwen:
         assert hasattr(choice.message, "content")
         assert hasattr(choice, "finish_reason")
 
-        print(f"✓ Response format test passed")
+        print("✓ Response format test passed")
         print(f"  Response ID: {response.id}")
         print(f"  Model: {response.model}")
         print(f"  Tokens used: {response.usage.total_tokens}")
