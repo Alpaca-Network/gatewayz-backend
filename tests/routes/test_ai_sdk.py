@@ -409,6 +409,7 @@ class TestAISDKModelRouting:
             for chunk in [mock_chunk1, mock_chunk2]:
                 yield chunk
 
+        # Use return_value for the async function mock
         mock_stream.return_value = mock_async_iter()
 
         response = client.post(
