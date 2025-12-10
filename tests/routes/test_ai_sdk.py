@@ -129,7 +129,7 @@ class TestAISDKEndpoint:
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream_async")
     def test_ai_sdk_streaming_request(self, mock_stream, mock_validate):
         """Test streaming response from AI SDK endpoint"""
-        import asyncio
+        from unittest.mock import AsyncMock
 
         mock_validate.return_value = "test-api-key"
 
@@ -145,6 +145,7 @@ class TestAISDKEndpoint:
             for chunk in [mock_chunk1, mock_chunk2]:
                 yield chunk
 
+        # Use AsyncMock so the await works, then return the async generator
         mock_stream.return_value = mock_async_iter()
 
         # Make streaming request using Vercel AI Gateway model format
@@ -160,6 +161,10 @@ class TestAISDKEndpoint:
         assert response.status_code == 200
         # Check content-type contains text/event-stream (may have charset appended)
         assert "text/event-stream" in response.headers["content-type"]
+        # Verify actual streaming content was received
+        content = response.text
+        assert "Hello" in content
+        assert "world" in content
 
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
@@ -407,6 +412,7 @@ class TestAISDKModelRouting:
             for chunk in [mock_chunk1, mock_chunk2]:
                 yield chunk
 
+        # Use return_value for the async function mock
         mock_stream.return_value = mock_async_iter()
 
         response = client.post(
@@ -420,6 +426,10 @@ class TestAISDKModelRouting:
 
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
+        # Verify actual streaming content was received
+        content = response.text
+        assert "Hello" in content
+        assert "OpenRouter" in content
         # Verify that the client was validated first
         mock_get_client.assert_called_once()
         # Verify that the request was made to OpenRouter
