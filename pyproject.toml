@@ -131,8 +131,8 @@ unfixable = []
 [tool.ruff.per-file-ignores]
 # Ignore import errors in __init__.py files
 "__init__.py" = ["F401", "F403"]
-# Ignore unused imports in test files
-"tests/**/*.py" = ["F401", "F811"]
+# Ignore unused imports and module-level import ordering in test files
+"tests/**/*.py" = ["F401", "F811", "E402"]
 
 # Black Configuration (Code Formatter)
 [tool.black]
