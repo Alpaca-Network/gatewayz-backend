@@ -97,6 +97,7 @@ exclude = [
     ".git",
     ".venv",
     "venv",
+    "gatewayz",
     "__pycache__",
     "*.pyc",
     ".pytest_cache",
@@ -106,6 +107,7 @@ exclude = [
     "gatewayz",  # Virtual environment
     "check_and_fix_gateway_models.py",  # Diagnostic script
     "scripts/diagnostic",  # Diagnostic scripts
+    "scripts",  # Scripts directory
 ]
 
 # Enable specific rule sets
