@@ -103,6 +103,9 @@ exclude = [
     "node_modules",
     "build",
     "dist",
+    "gatewayz",  # Virtual environment
+    "check_and_fix_gateway_models.py",  # Diagnostic script
+    "scripts/diagnostic",  # Diagnostic scripts
 ]
 
 # Enable specific rule sets
