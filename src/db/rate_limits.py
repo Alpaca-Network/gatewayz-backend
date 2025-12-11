@@ -476,7 +476,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                         {
                             "max_requests": config.get("requests_per_hour", 1000),
                             "max_tokens": config.get("tokens_per_hour", 1000000),
-                            "burst_limit": config.get("burst_limit", 10),
+                            "burst_limit": config.get("burst_limit", 100),
                             "concurrency_limit": config.get("concurrency_limit", 50),
                             "window_size": config.get("window_size_seconds", 60),
                             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -488,7 +488,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                             "api_key_id": api_key_id,
                             "max_requests": config.get("requests_per_hour", 1000),
                             "max_tokens": config.get("tokens_per_hour", 1000000),
-                            "burst_limit": config.get("burst_limit", 10),
+                            "burst_limit": config.get("burst_limit", 100),
                             "concurrency_limit": config.get("concurrency_limit", 50),
                             "window_size": config.get("window_size_seconds", 60),
                         }

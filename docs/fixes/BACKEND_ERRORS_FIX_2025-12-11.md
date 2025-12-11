@@ -46,13 +46,23 @@ The `burst_limit` configuration was incorrectly set to `10` instead of `100`.
 
 **Files Changed**: `src/db/rate_limits.py`
 
-```python
-# AFTER (src/db/rate_limits.py:411)
-"burst_limit": config.get("burst_limit", 100),  # ✅ FIXED
+**All 4 locations updated** (lines 411, 426, 479, 491):
 
-# AFTER (src/db/rate_limits.py:426)
-"burst_limit": 100,  # ✅ FIXED
+```python
+# Location 1: get_rate_limit_config() - database config (line 411)
+"burst_limit": config.get("burst_limit", 100),  # ✅ FIXED (was 10)
+
+# Location 2: get_rate_limit_config() - fallback default (line 426)
+"burst_limit": 100,  # ✅ FIXED (was 10)
+
+# Location 3: update_rate_limit_config() - UPDATE query (line 479)
+"burst_limit": config.get("burst_limit", 100),  # ✅ FIXED (was 10)
+
+# Location 4: update_rate_limit_config() - INSERT query (line 491)
+"burst_limit": config.get("burst_limit", 100),  # ✅ FIXED (was 10)
 ```
+
+**Critical**: Locations 3 & 4 were identified by Sentry AI bot as causing config updates via API to revert to the old default of 10, effectively undoing the fix. All locations must be updated to prevent regression.
 
 **Result**:
 - With `burst_limit=100`: Refill rate = 100/60 = 1.666 tokens/second
