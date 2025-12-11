@@ -408,7 +408,7 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
                         "tokens_per_minute": config.get("max_tokens", 1000000) // 60,
                         "tokens_per_hour": config.get("max_tokens", 1000000),
                         "tokens_per_day": config.get("max_tokens", 1000000) * 24,
-                        "burst_limit": config.get("burst_limit", 10),
+                        "burst_limit": config.get("burst_limit", 100),
                         "concurrency_limit": config.get("concurrency_limit", 50),
                         "window_size_seconds": config.get("window_size", 60),
                     }
@@ -423,7 +423,7 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
             "tokens_per_minute": 10000,
             "tokens_per_hour": 100000,
             "tokens_per_day": 1000000,
-            "burst_limit": 10,
+            "burst_limit": 100,
             "concurrency_limit": 50,
             "window_size_seconds": 60,
         }
