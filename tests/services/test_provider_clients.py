@@ -285,10 +285,9 @@ class TestGoogleVertexClient:
         result = _sanitize_system_content(123)
         assert result == "123"
 
-    @patch.dict(os.environ, {}, clear=False)
+    @patch.dict(os.environ, {"GOOGLE_PROJECT_ID": "", "GOOGLE_VERTEX_LOCATION": ""}, clear=False)
     def test_prepare_vertex_environment_missing_project(self):
         """Test environment preparation fails without project ID"""
-        # Clear the relevant env vars
         with patch('src.services.google_vertex_client.Config') as mock_config:
             mock_config.GOOGLE_PROJECT_ID = None
             mock_config.GOOGLE_VERTEX_LOCATION = "us-central1"

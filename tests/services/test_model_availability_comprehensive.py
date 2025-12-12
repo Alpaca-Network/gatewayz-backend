@@ -10,7 +10,6 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import patch
 from datetime import datetime, timedelta
 import os
 import time
