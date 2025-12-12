@@ -708,10 +708,17 @@ class IntelligentHealthMonitor:
 
             models_data = []
             for m in models_response.data or []:
+                # The 'provider' column in model_health_tracking actually stores the gateway name
+                # (e.g., openrouter, featherless, fireworks) due to how record_model_call works.
+                # Use 'provider' as fallback for 'gateway' when gateway is not set.
+                stored_provider = m.get("provider") or "unknown"
+                stored_gateway = m.get("gateway")
+                # If gateway is not set, use provider as gateway since that's what's stored
+                effective_gateway = stored_gateway if stored_gateway else stored_provider
                 models_data.append({
                     "model_id": m.get("model") or "unknown",
-                    "provider": m.get("provider") or "unknown",
-                    "gateway": m.get("gateway") or "unknown",
+                    "provider": stored_provider,
+                    "gateway": effective_gateway,
                     "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
                     "response_time_ms": m.get("last_response_time_ms"),
                     "avg_response_time_ms": m.get("last_response_time_ms"),
