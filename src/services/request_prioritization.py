@@ -3,6 +3,8 @@ Request prioritization system for chat completions.
 
 This module provides a priority queue and request classification system to
 fast-track high-priority chat completion requests for improved streaming performance.
+
+Includes low-latency model routing based on actual production metrics.
 """
 
 import logging
@@ -11,6 +13,65 @@ from enum import IntEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# LOW-LATENCY MODEL CONFIGURATION
+# Based on actual production metrics from model_health_tracking table
+# Updated: 2025-12-12
+# =============================================================================
+
+# Models with sub-100ms average response time (ultra-fast)
+ULTRA_LOW_LATENCY_MODELS: set[str] = {
+    "groq/moonshotai/kimi-k2-instruct-0905",  # 29ms
+    "groq/openai/gpt-oss-120b",  # 74ms
+}
+
+# Models with sub-500ms average response time (fast)
+LOW_LATENCY_MODELS: set[str] = {
+    # Groq models (fastest provider)
+    "groq/moonshotai/kimi-k2-instruct-0905",  # 29ms
+    "groq/openai/gpt-oss-120b",  # 74ms
+    "groq/llama-3.3-70b-versatile",  # 492ms
+    "groq/llama-3.1-70b-versatile",
+    "groq/llama-3.1-8b-instant",
+    "groq/mixtral-8x7b-32768",
+    "groq/gemma2-9b-it",
+    # OpenRouter fast models
+    "arcee-ai/trinity-mini:free",  # 214ms
+    "switchpoint/router",  # 217ms
+    "anthropic/claude-3.5-sonnet",  # 283ms
+    "google/gemma-2-9b-it",  # 368ms
+    "google/gemini-2.0-flash-001",  # 415ms
+    "google/gemini-2.0-flash-exp:free",
+    "mistralai/ministral-3b-2512",  # 421ms
+    # Fireworks fast models
+    "fireworks/accounts/fireworks/models/deepseek-v3-0324",  # 326ms
+}
+
+# Provider latency tiers based on production data (lower = faster)
+# Tier 1: <100ms typical, Tier 2: 100-500ms typical, Tier 3: 500ms+ typical
+PROVIDER_LATENCY_TIERS: dict[str, int] = {
+    # Tier 1 - Ultra-fast (specialized inference hardware)
+    "groq": 1,
+    "cerebras": 1,
+    # Tier 2 - Fast (optimized infrastructure)
+    "fireworks": 2,
+    "together": 2,
+    "cloudflare-workers-ai": 2,
+    # Tier 3 - Standard (good general performance)
+    "openrouter": 3,
+    "deepinfra": 3,
+    "google-vertex": 3,
+    # Tier 4 - Variable (depends on model/load)
+    "huggingface": 4,
+    "featherless": 4,
+    "near": 4,
+    "alibaba-cloud": 4,
+}
+
+# Default tier for unknown providers
+DEFAULT_PROVIDER_TIER = 3
 
 
 class RequestPriority(IntEnum):
@@ -236,6 +297,7 @@ def get_preferred_providers_for_priority(
     Get preferred providers ordered by priority.
 
     Higher priority requests get routed to faster/more reliable providers first.
+    Uses PROVIDER_LATENCY_TIERS based on actual production metrics.
 
     Args:
         priority: Request priority level
@@ -244,28 +306,36 @@ def get_preferred_providers_for_priority(
     Returns:
         Ordered list of provider names
     """
-    # Define provider speed/reliability tiers
-    tier_1_providers = {"fireworks", "together", "groq"}  # Fastest
-    tier_2_providers = {"openrouter", "deepinfra"}  # Fast
-    tier_3_providers = {"featherless", "huggingface"}  # Slower but reliable
+    # Sort providers by their latency tier
+    def get_tier(provider: str) -> int:
+        return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
+
+    # Group providers by tier
+    tier_1 = [p for p in available_providers if get_tier(p) == 1]  # Ultra-fast
+    tier_2 = [p for p in available_providers if get_tier(p) == 2]  # Fast
+    tier_3 = [p for p in available_providers if get_tier(p) == 3]  # Standard
+    tier_4 = [p for p in available_providers if get_tier(p) >= 4]  # Variable
 
     ordered = []
 
-    # High priority gets tier 1 first
+    # High priority gets fastest providers first
     if priority <= RequestPriority.HIGH:
-        ordered.extend([p for p in available_providers if p in tier_1_providers])
-        ordered.extend([p for p in available_providers if p in tier_2_providers])
-        ordered.extend([p for p in available_providers if p in tier_3_providers])
-    # Medium priority gets tier 2 first
+        ordered.extend(tier_1)
+        ordered.extend(tier_2)
+        ordered.extend(tier_3)
+        ordered.extend(tier_4)
+    # Medium priority balances speed and availability
     elif priority == RequestPriority.MEDIUM:
-        ordered.extend([p for p in available_providers if p in tier_2_providers])
-        ordered.extend([p for p in available_providers if p in tier_1_providers])
-        ordered.extend([p for p in available_providers if p in tier_3_providers])
-    # Low priority can use any provider
+        ordered.extend(tier_2)
+        ordered.extend(tier_1)
+        ordered.extend(tier_3)
+        ordered.extend(tier_4)
+    # Low priority can use any provider (prefer higher availability)
     else:
-        ordered.extend([p for p in available_providers if p in tier_3_providers])
-        ordered.extend([p for p in available_providers if p in tier_2_providers])
-        ordered.extend([p for p in available_providers if p in tier_1_providers])
+        ordered.extend(tier_3)
+        ordered.extend(tier_4)
+        ordered.extend(tier_2)
+        ordered.extend(tier_1)
 
     # Add any remaining providers not in our tiers
     for provider in available_providers:
@@ -273,3 +343,122 @@ def get_preferred_providers_for_priority(
             ordered.append(provider)
 
     return ordered
+
+
+def is_low_latency_model(model_id: str) -> bool:
+    """
+    Check if a model is classified as low-latency.
+
+    Args:
+        model_id: The model identifier
+
+    Returns:
+        True if the model is in the LOW_LATENCY_MODELS set
+    """
+    if not model_id:
+        return False
+    return model_id.lower() in {m.lower() for m in LOW_LATENCY_MODELS}
+
+
+def is_ultra_low_latency_model(model_id: str) -> bool:
+    """
+    Check if a model is classified as ultra-low-latency (<100ms).
+
+    Args:
+        model_id: The model identifier
+
+    Returns:
+        True if the model is in the ULTRA_LOW_LATENCY_MODELS set
+    """
+    if not model_id:
+        return False
+    return model_id.lower() in {m.lower() for m in ULTRA_LOW_LATENCY_MODELS}
+
+
+def get_provider_latency_tier(provider: str) -> int:
+    """
+    Get the latency tier for a provider.
+
+    Args:
+        provider: Provider name
+
+    Returns:
+        Tier number (1=fastest, 4=variable)
+    """
+    return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
+
+
+def get_low_latency_models() -> list[str]:
+    """
+    Get the list of all low-latency models.
+
+    Returns:
+        List of model IDs with sub-500ms response times
+    """
+    return sorted(LOW_LATENCY_MODELS)
+
+
+def get_ultra_low_latency_models() -> list[str]:
+    """
+    Get the list of ultra-low-latency models.
+
+    Returns:
+        List of model IDs with sub-100ms response times
+    """
+    return sorted(ULTRA_LOW_LATENCY_MODELS)
+
+
+def get_fastest_providers() -> list[str]:
+    """
+    Get providers sorted by latency tier (fastest first).
+
+    Returns:
+        List of provider names sorted by speed
+    """
+    sorted_providers = sorted(
+        PROVIDER_LATENCY_TIERS.items(),
+        key=lambda x: x[1]
+    )
+    return [provider for provider, _ in sorted_providers]
+
+
+def suggest_low_latency_alternative(model_id: str) -> str | None:
+    """
+    Suggest a low-latency alternative for a given model.
+
+    Maps common model types to their fastest equivalents.
+
+    Args:
+        model_id: The original model ID
+
+    Returns:
+        A suggested low-latency alternative, or None if no suggestion
+    """
+    model_lower = (model_id or "").lower()
+
+    # Map model families to fast alternatives
+    alternatives = {
+        # For Claude/Anthropic models
+        "claude": "groq/llama-3.3-70b-versatile",
+        "anthropic": "groq/llama-3.3-70b-versatile",
+        # For GPT models
+        "gpt-4": "groq/llama-3.3-70b-versatile",
+        "gpt-3.5": "groq/llama-3.1-8b-instant",
+        "openai": "groq/llama-3.3-70b-versatile",
+        # For reasoning models (slower by nature)
+        "deepseek-r1": "fireworks/accounts/fireworks/models/deepseek-v3-0324",
+        "o1": "groq/llama-3.3-70b-versatile",
+        "o3": "groq/llama-3.3-70b-versatile",
+        # For general chat
+        "llama": "groq/llama-3.3-70b-versatile",
+        "mistral": "groq/mixtral-8x7b-32768",
+        "gemini": "google/gemini-2.0-flash-001",
+        "gemma": "groq/gemma2-9b-it",
+    }
+
+    for pattern, alternative in alternatives.items():
+        if pattern in model_lower:
+            return alternative
+
+    # Default fast model for unknown types
+    return "groq/llama-3.3-70b-versatile"
