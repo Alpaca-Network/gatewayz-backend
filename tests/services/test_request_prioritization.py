@@ -178,8 +178,8 @@ class TestLowLatencyAlternatives:
         from src.services.request_prioritization import suggest_low_latency_alternative
 
         alternative = suggest_low_latency_alternative("unknown/random-model")
-        # Should return a default fast model
-        assert alternative is not None
+        # Should return None when no pattern matches
+        assert alternative is None
 
 
 class TestProviderSelection:

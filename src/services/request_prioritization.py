@@ -460,5 +460,4 @@ def suggest_low_latency_alternative(model_id: str) -> str | None:
         if pattern in model_lower:
             return alternative
 
-    # Default fast model for unknown types
-    return "groq/llama-3.3-70b-versatile"
+    return None
