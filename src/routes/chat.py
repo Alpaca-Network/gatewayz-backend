@@ -834,6 +834,15 @@ async def _process_stream_completion_background(
             )
 
         # Save chat history
+        # Validate session_id before attempting to save
+        if session_id:
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -1305,6 +1314,16 @@ async def chat_completions(
 
         # === 2.1) Inject conversation history if session_id provided ===
         # Chat history is only available for authenticated users
+        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
+        if session_id and not is_anonymous:
+            # Validate session_id is within valid PostgreSQL integer range
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s: out of PostgreSQL integer range. Ignoring session history.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None  # Ignore invalid session_id
+
         if session_id and not is_anonymous:
             try:
                 # Fetch the session with its message history
@@ -2113,6 +2132,16 @@ async def chat_completions(
 
         # === 5) History (use the last user message in this request only) ===
         # Chat history is only saved for authenticated users
+        # Validate session_id before attempting to save
+        if session_id and not is_anonymous:
+            # Re-validate session_id in case it was modified during request processing
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s during history save: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id and not is_anonymous:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -2384,6 +2413,16 @@ async def unified_responses(
             raise HTTPException(status_code=400, detail=f"Invalid input format: {str(e)}")
 
         # === 2.1) Inject conversation history if session_id provided ===
+        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
+        if session_id:
+            # Validate session_id is within valid PostgreSQL integer range
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s for /v1/responses: out of PostgreSQL integer range. Ignoring session history.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -3140,6 +3179,15 @@ async def unified_responses(
             )
 
         # === 5) History ===
+        # Validate session_id before attempting to save
+        if session_id:
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s during /v1/responses history save: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
