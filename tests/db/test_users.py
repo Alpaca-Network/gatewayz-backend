@@ -1,7 +1,7 @@
 import types
 import uuid
 import pytest
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timedelta, timezone
 
 # ---- In-memory Supabase stub ------------------------------------------------
 
@@ -171,7 +171,7 @@ class SupabaseStub:
                     total_requests = len(usage)
                     total_tokens = sum(r.get("tokens_used", 0) for r in usage)
                     total_cost = sum(r.get("cost", 0.0) for r in usage)
-                    now = datetime.now(UTC)
+                    now = datetime.now(timezone.utc)
                     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
                     month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -254,7 +254,7 @@ def sb(monkeypatch):
 # ---- Helpers ----------------------------------------------------------------
 
 def iso_now():
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 # ---- Tests ------------------------------------------------------------------
 
@@ -373,8 +373,8 @@ def test_admin_monitor_data(sb):
         {"id": 2, "credits": 0, "api_key": "b"},
     ]).execute()
     # usage
-    now = datetime.now(UTC).isoformat()
-    older = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    older = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     sb.table("usage_records").insert([
         {"api_key": "a", "model": "m1", "tokens_used": 100, "cost": 0.5, "timestamp": now},
         {"api_key": "a", "model": "m1", "tokens_used": 50, "cost": 0.2, "timestamp": older},

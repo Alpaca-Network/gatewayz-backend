@@ -424,7 +424,7 @@ def _extract_supported_parameters(payload: dict[str, Any]) -> list[str]:
 
     params: list[str] = []
 
-    if isinstance(supported, list | tuple | set):
+    if isinstance(supported, (list, tuple, set)):
         params.extend(str(item) for item in supported if item)
 
     if isinstance(capabilities, dict):
@@ -433,7 +433,7 @@ def _extract_supported_parameters(payload: dict[str, Any]) -> list[str]:
                 params.append(str(key))
             if isinstance(value, dict):
                 params.extend(str(inner) for inner in value.keys() if inner)
-            elif isinstance(value, list | tuple | set):
+            elif isinstance(value, (list, tuple, set)):
                 params.extend(str(inner) for inner in value if inner)
 
     if not params:

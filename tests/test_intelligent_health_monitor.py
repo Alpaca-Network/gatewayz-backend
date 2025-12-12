@@ -5,7 +5,7 @@ Tests the tiered monitoring, scheduling, and health check functionality.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -200,7 +200,7 @@ async def test_check_model_health_timeout(health_monitor):
                 response_time_ms=5000.0,
                 error_message="Request timeout after 5s",
                 http_status_code=None,
-                checked_at=datetime.now(UTC),
+                checked_at=datetime.now(timezone.utc),
             )
 
     health_monitor._check_model_health = timeout_wrapper
@@ -253,7 +253,7 @@ async def test_check_model_health_unauthorized(mock_client, health_monitor):
 @pytest.mark.asyncio
 async def test_health_check_result_creation():
     """Test HealthCheckResult dataclass creation"""
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     result = HealthCheckResult(
         provider="openai",
         model="gpt-4",
