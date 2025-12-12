@@ -231,6 +231,13 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
         model_id = stripped
 
+    # Special handling for OneRouter: strip 'onerouter/' prefix if present
+    # OneRouter API expects just the model name without the provider prefix
+    if provider_lower == "onerouter" and model_id.startswith("onerouter/"):
+        stripped = model_id[len("onerouter/") :]
+        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for OneRouter")
+        model_id = stripped
+
     # Get the mapping for this provider
     mapping = get_model_id_mapping(provider_lower)
 
@@ -895,6 +902,26 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "mistral-7b": "mistral-7b",
             "deepseek-r1": "deepseek-r1",
         },
+        "onerouter": {
+            # OneRouter uses OpenAI-compatible model identifiers with @ versioning
+            # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
+            # Models are dynamically fetched from OneRouter's /v1/models endpoint
+            # Strip onerouter/ prefix for actual API calls
+            "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+            "onerouter/gpt-4": "gpt-4@latest",
+            "onerouter/gpt-4o": "gpt-4o@latest",
+            "onerouter/gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+            # Direct model names (passthrough with @ version suffix)
+            "claude-3-5-sonnet@20240620": "claude-3-5-sonnet@20240620",
+            "gpt-4@latest": "gpt-4@latest",
+            "gpt-4o@latest": "gpt-4o@latest",
+            "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
+            # Models can also use simpler names - OneRouter handles routing
+            "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+            "gpt-4": "gpt-4@latest",
+            "gpt-4o": "gpt-4o@latest",
+            "gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+        },
     }
 
     return mappings.get(provider, {})
@@ -1123,6 +1150,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "groq",
         "cloudflare-workers-ai",
         "morpheus",
+        "onerouter",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -1167,6 +1195,10 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # Morpheus models (e.g., "morpheus/llama-3.1-8b")
         if org == "morpheus":
             return "morpheus"
+
+        # OneRouter models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
+        if org == "onerouter":
+            return "onerouter"
 
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
