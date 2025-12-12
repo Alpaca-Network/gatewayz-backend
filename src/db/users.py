@@ -43,6 +43,24 @@ def invalidate_user_cache(api_key: str) -> None:
     logger.debug(f"Invalidated user cache for API key {api_key[:10]}...")
 
 
+def invalidate_user_cache_by_id(user_id: int) -> None:
+    """Invalidate cache entries for a specific user by user ID.
+
+    Since cache is keyed by api_key, this scans the cache to find entries
+    matching the user_id and removes them.
+    """
+    global _user_cache
+    keys_to_remove = [
+        api_key
+        for api_key, entry in _user_cache.items()
+        if entry.get("user", {}).get("id") == user_id
+    ]
+    for api_key in keys_to_remove:
+        del _user_cache[api_key]
+    if keys_to_remove:
+        logger.debug(f"Invalidated {len(keys_to_remove)} cache entries for user ID {user_id}")
+
+
 def _is_temporary_api_key(api_key: str) -> bool:
     """Check if an API key is a temporary key that should be replaced.
 
@@ -477,6 +495,9 @@ def add_credits_to_user(
             sanitize_for_logging(str(balance_before)),
             sanitize_for_logging(str(balance_after)),
         )
+
+        # Invalidate cache to ensure fresh credit balance on next get_user call
+        invalidate_user_cache_by_id(user_id)
 
     except Exception as e:
         logger.error("Failed to add credits: %s", sanitize_for_logging(str(e)))
