@@ -5,7 +5,7 @@ Handles CRUD operations for AI models with provider relationships
 
 import logging
 from typing import Any
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.config.supabase_config import get_supabase_client
@@ -309,7 +309,7 @@ def update_model_health(
         # Update model health
         update_data = {
             "health_status": health_status,
-            "last_health_check_at": datetime.now(UTC).isoformat(),
+            "last_health_check_at": datetime.now(timezone.utc).isoformat(),
         }
 
         if response_time_ms is not None:

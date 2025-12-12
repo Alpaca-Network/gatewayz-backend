@@ -14,7 +14,7 @@ For LLM models, we use OpenAI SDK to access their OpenAI-compatible endpoint.
 
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -107,7 +107,7 @@ def fetch_models_from_novita():
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _novita_models_cache["data"] = models
-        _novita_models_cache["timestamp"] = datetime.now(UTC)
+        _novita_models_cache["timestamp"] = datetime.now(timezone.utc)
         return models
 
     try:

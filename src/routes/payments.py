@@ -6,7 +6,7 @@ Endpoints for handling Stripe webhooks and payment operations
 
 import inspect
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -164,7 +164,7 @@ async def stripe_webhook(
             "event_type": event_type,
             "event_id": event_id,
             "message": message,
-            "processed_at": datetime.now(UTC).isoformat(),
+            "processed_at": datetime.now(timezone.utc).isoformat(),
         },
     )
 

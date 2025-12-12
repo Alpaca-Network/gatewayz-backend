@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -281,7 +281,7 @@ def _handle_existing_user(
         display_name=existing_user.get("username") or display_name,
         email=user_email,
         credits=user_credits,
-        timestamp=datetime.now(UTC),
+        timestamp=datetime.now(timezone.utc),
         subscription_status=subscription_status_value,
         tier=tier,
         tier_display_name=tier_display_name,
@@ -732,7 +732,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     )
                     username = resolved_username
 
-                trial_start = datetime.now(UTC)
+                trial_start = datetime.now(timezone.utc)
                 trial_end = trial_start + timedelta(days=3)
 
                 user_payload = {
@@ -777,7 +777,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                             if field != "created_at" and partial_user.get(field) != value
                         }
                         if update_fields:
-                            update_fields["updated_at"] = datetime.now(UTC).isoformat()
+                            update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
                             updated_result = (
                                 client.table("users")
                                 .update(update_fields)
@@ -993,7 +993,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 display_name=display_name or user_data["username"],
                 email=email,
                 credits=new_user_credits,
-                timestamp=datetime.now(UTC),
+                timestamp=datetime.now(timezone.utc),
                 subscription_status=user_data.get("subscription_status", "trial"),
                 tier=tier_value,
                 tier_display_name=_get_tier_display_name(tier_value),
@@ -1086,7 +1086,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                 str(creation_error),
             )
 
-            trial_start = datetime.now(UTC)
+            trial_start = datetime.now(timezone.utc)
             trial_end = trial_start + timedelta(days=3)
 
             fallback_payload = {
@@ -1211,7 +1211,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
             auth_method=request.auth_method,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
         )
 
     except HTTPException:
@@ -1277,7 +1277,7 @@ async def reset_password(token: str):
         token_data = token_result.data[0]
         expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
 
-        if datetime.now(UTC).replace(tzinfo=expires_at.tzinfo) > expires_at:
+        if datetime.now(timezone.utc).replace(tzinfo=expires_at.tzinfo) > expires_at:
             raise HTTPException(status_code=400, detail="Reset token has expired")
 
         # Update password (in a real app, you'd hash this)
@@ -1319,7 +1319,7 @@ async def auth_health_check():
     health_status = {
         "service": "auth",
         "status": "healthy",
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "checks": {},
         "latency_ms": 0,
     }

@@ -1106,7 +1106,7 @@ def fetch_models_from_google_vertex():
     Google Vertex AI does not provide a public API to list available models.
     Returns a static list of known Google/Gemini models from the config.
     """
-    from datetime import UTC, datetime
+    from datetime import timezone, datetime
 
     from src.cache import _google_vertex_models_cache
     from src.services.google_models_config import get_google_models
@@ -1183,7 +1183,7 @@ def fetch_models_from_google_vertex():
 
         # Update cache
         _google_vertex_models_cache["data"] = normalized_models
-        _google_vertex_models_cache["timestamp"] = datetime.now(UTC)
+        _google_vertex_models_cache["timestamp"] = datetime.now(timezone.utc)
 
         logger.info(f"Loaded {len(normalized_models)} Google Vertex AI models from static catalog")
         return normalized_models

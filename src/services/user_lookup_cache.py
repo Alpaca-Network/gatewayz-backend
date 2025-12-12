@@ -4,7 +4,7 @@ Reduces database queries for frequently accessed users by 95%+
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.db.users import get_user as db_get_user
@@ -61,8 +61,8 @@ def get_user(api_key: str) -> dict[str, Any] | None:
         ttl = entry["ttl"]
 
         # Check if cache is still valid
-        if datetime.now(UTC) - cache_time < timedelta(seconds=ttl):
-            logger.debug(f"Cache hit for API key {api_key[:10]}... (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s)")
+        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=ttl):
+            logger.debug(f"Cache hit for API key {api_key[:10]}... (age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)")
             return entry["user"]
         else:
             # Cache expired, remove it
@@ -76,7 +76,7 @@ def get_user(api_key: str) -> dict[str, Any] | None:
     # Cache the result (even if None, to avoid repeated DB queries)
     _user_cache[api_key] = {
         "user": user,
-        "timestamp": datetime.now(UTC),
+        "timestamp": datetime.now(timezone.utc),
         "ttl": _cache_ttl,
     }
 
