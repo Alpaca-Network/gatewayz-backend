@@ -295,11 +295,12 @@ class TestPrometheusRemoteWrite:
     async def test_push_metrics_skipped_when_circuit_open(self, mock_serialize):
         """Test push_metrics is skipped when circuit is open"""
         from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        import time
 
         writer = PrometheusRemoteWriter(enabled=True)
         writer.client = AsyncMock()
         writer._circuit_open = True
-        writer._circuit_open_time = 0  # Recent, so it won't reset
+        writer._circuit_open_time = time.time()  # Recent, so it won't reset
 
         result = await writer.push_metrics()
 

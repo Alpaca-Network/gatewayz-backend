@@ -196,10 +196,10 @@ class TestSystemHealth:
         assert data['total_models'] == 0
 
     @patch('src.routes.health.capture_error')
-    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
+    @patch('src.routes.health.simple_health_cache.get_system_health')
     def test_system_health_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
         """Test that system health errors are captured to Sentry"""
-        # Simulate an error
+        # Simulate an error from the cache lookup
         mock_get_health.side_effect = Exception("Service unavailable")
 
         response = client.get('/health/system', headers=auth_headers)
@@ -231,7 +231,10 @@ class TestProvidersHealth:
         response = client.get('/health/providers', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
             if len(data) > 0:
                 assert 'provider' in data[0]
@@ -245,7 +248,10 @@ class TestProvidersHealth:
         response = client.get('/health/providers?gateway=openrouter', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
 
 
@@ -260,7 +266,10 @@ class TestModelsHealth:
         response = client.get('/health/models', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
             if len(data) > 0:
                 assert 'model_id' in data[0]
@@ -274,7 +283,10 @@ class TestModelsHealth:
         response = client.get('/health/models?provider=openai', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
 
     @patch('src.services.model_health_monitor.health_monitor.get_all_models_health')
@@ -285,7 +297,10 @@ class TestModelsHealth:
         response = client.get('/health/models?status=healthy', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
 
 
@@ -405,10 +420,10 @@ class TestUptimeMetrics:
             assert 'uptime_percentage' in data
 
     @patch('src.routes.health.capture_error')
-    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
+    @patch('src.routes.health.simple_health_cache.get_system_health')
     def test_get_uptime_metrics_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
         """Test that uptime metrics errors are captured to Sentry but return graceful degradation"""
-        # Simulate an error
+        # Simulate an error from the cache lookup
         mock_get_health.side_effect = Exception("Database connection failed")
 
         response = client.get('/health/uptime', headers=auth_headers)
@@ -469,11 +484,11 @@ class TestHealthDashboard:
             assert 'models' in data
 
     @patch('src.routes.health.capture_error')
-    @patch('src.services.model_health_monitor.health_monitor.get_system_health')
-    def test_get_health_dashboard_error_captured_to_sentry(self, mock_get_health, mock_capture_error, client, auth_headers):
+    @patch('src.routes.health.simple_health_cache.get_health_dashboard')
+    def test_get_health_dashboard_error_captured_to_sentry(self, mock_get_dashboard, mock_capture_error, client, auth_headers):
         """Test that dashboard errors are captured to Sentry"""
-        # Simulate an error
-        mock_get_health.side_effect = Exception("Dashboard data error")
+        # Simulate an error from the cache lookup
+        mock_get_dashboard.side_effect = Exception("Dashboard data error")
 
         response = client.get('/health/dashboard', headers=auth_headers)
 
@@ -575,7 +590,10 @@ class TestHealthEdgeCases:
         response = client.get('/health/models', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
             assert len(data) == 0
 
@@ -587,7 +605,10 @@ class TestHealthEdgeCases:
         response = client.get('/health/providers', headers=auth_headers)
 
         if response.status_code == 200:
-            data = response.json()
+            response_data = response.json()
+            # Response is now an object with data field containing the list
+            assert isinstance(response_data, dict)
+            data = response_data.get('data', [])
             assert isinstance(data, list)
             assert len(data) == 0
 

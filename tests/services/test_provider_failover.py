@@ -312,7 +312,7 @@ class TestMapProviderErrorHTTPX:
 
     def test_map_asyncio_timeout_error(self):
         """Test asyncio.TimeoutError maps to 504"""
-        error = asyncio.TimeoutError()
+        error = TimeoutError()
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
         assert mapped.status_code == 504

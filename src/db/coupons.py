@@ -4,7 +4,7 @@ Handles coupon creation, validation, and redemption
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -71,7 +71,7 @@ def create_coupon(
             "coupon_type": coupon_type,
             "created_by_type": created_by_type,
             "valid_until": valid_until.isoformat(),
-            "valid_from": (valid_from or datetime.now(timezone.utc)).isoformat(),
+            "valid_from": (valid_from or datetime.now(UTC)).isoformat(),
         }
 
         if created_by:
@@ -545,7 +545,7 @@ def get_coupon_analytics(coupon_id: int) -> dict[str, Any]:
             ),
             "remaining_uses": coupon["max_uses"] - coupon["times_used"],
             "is_expired": datetime.fromisoformat(coupon["valid_until"].replace("Z", "+00:00"))
-            < datetime.now(timezone.utc),
+            < datetime.now(UTC),
             "recent_redemptions": redemptions[:10],  # Last 10
         }
 

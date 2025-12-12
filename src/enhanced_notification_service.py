@@ -385,7 +385,7 @@ The {self.app_name} Team
         with self._email_rate_limit_lock:
             current_time = time.time()
             time_since_last_send = current_time - self._last_email_send_time
-            
+
             if time_since_last_send < self._min_email_interval:
                 sleep_time = self._min_email_interval - time_since_last_send
                 logger.debug(
@@ -393,7 +393,7 @@ The {self.app_name} Team
                     f"Resend API limit (2 req/sec)"
                 )
                 time.sleep(sleep_time)
-            
+
             # Update last send time
             self._last_email_send_time = time.time()
 

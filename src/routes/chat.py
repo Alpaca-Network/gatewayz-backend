@@ -931,7 +931,7 @@ async def stream_generator(
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
-    
+
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
 
@@ -1625,6 +1625,11 @@ async def chat_completions(
                     stream_headers["X-Provider"] = provider
                     stream_headers["X-Model"] = model
                     stream_headers["X-Requested-Model"] = original_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers["X-Accel-Buffering"] = "no"
+                    stream_headers["Cache-Control"] = "no-cache, no-transform"
+                    stream_headers["Connection"] = "keep-alive"
 
                     return StreamingResponse(
                         stream_generator(
@@ -2830,7 +2835,7 @@ async def unified_responses(
                                     "sequence_number": sequence_number,
                                     "error": {
                                         "type": "invalid_response",
-                                        "message": f"Unexpected chunk format",
+                                        "message": "Unexpected chunk format",
                                     },
                                 }
                                 yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
@@ -2840,9 +2845,18 @@ async def unified_responses(
                     stream_release_handled = True
                     provider = attempt_provider
                     model = request_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers = {
+                        "X-Accel-Buffering": "no",
+                        "Cache-Control": "no-cache, no-transform",
+                        "Connection": "keep-alive",
+                    }
+
                     return StreamingResponse(
                         response_stream_generator(),
                         media_type="text/event-stream",
+                        headers=stream_headers,
                     )
                 except Exception as exc:
                     http_exc = map_provider_error(attempt_provider, request_model, exc)

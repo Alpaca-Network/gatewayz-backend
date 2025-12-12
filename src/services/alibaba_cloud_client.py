@@ -1,7 +1,8 @@
 import logging
 import os
 from threading import Lock
-from typing import Callable, TypeVar
+from typing import TypeVar
+from collections.abc import Callable
 
 from openai import OpenAI
 

@@ -333,7 +333,25 @@ def client(sb, monkeypatch):
 
     monkeypatch.setattr(openrouter_module, "process_openrouter_response", mock_process_openrouter_response)
 
-    # Mock streaming endpoint
+    # Mock streaming endpoint - use plain classes, NOT MagicMock (for JSON serialization)
+    class MockDelta:
+        def __init__(self, role=None, content=None, tool_calls=None):
+            self.role = role
+            self.content = content
+            self.tool_calls = tool_calls
+
+    class MockStreamChoice:
+        def __init__(self, index, delta, finish_reason=None):
+            self.index = index
+            self.delta = delta
+            self.finish_reason = finish_reason
+
+    class MockStreamUsage:
+        def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0):
+            self.prompt_tokens = prompt_tokens
+            self.completion_tokens = completion_tokens
+            self.total_tokens = total_tokens
+
     class MockStreamChunk:
         def __init__(self, content_chunk, finish_reason=None):
             self.id = "chatcmpl-stream123"
@@ -341,17 +359,19 @@ def client(sb, monkeypatch):
             self.created = 1234567890
             self.model = "test-model"
 
-            delta = MagicMock()
-            delta.role = "assistant" if finish_reason is None else None
-            delta.content = content_chunk if finish_reason is None else None
+            delta = MockDelta(
+                role="assistant" if finish_reason is None else None,
+                content=content_chunk if finish_reason is None else None
+            )
 
-            choice = MagicMock()
-            choice.index = 0
-            choice.delta = delta
-            choice.finish_reason = finish_reason
+            choice = MockStreamChoice(
+                index=0,
+                delta=delta,
+                finish_reason=finish_reason
+            )
 
             self.choices = [choice]
-            self.usage = MagicMock(prompt_tokens=10, completion_tokens=15, total_tokens=25) if finish_reason else None
+            self.usage = MockStreamUsage(prompt_tokens=10, completion_tokens=15, total_tokens=25) if finish_reason else None
 
     def mock_openrouter_stream(messages, model, **kwargs):
         chunks = [
@@ -362,6 +382,18 @@ def client(sb, monkeypatch):
         return iter(chunks)
 
     monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream", mock_openrouter_stream)
+
+    # Mock async streaming endpoint (also needed for chat routes)
+    async def mock_openrouter_stream_async(messages, model, **kwargs):
+        chunks = [
+            MockStreamChunk("Hello"),
+            MockStreamChunk(" world"),
+            MockStreamChunk("!", finish_reason="stop")
+        ]
+        for chunk in chunks:
+            yield chunk
+
+    monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream_async", mock_openrouter_stream_async)
 
     # 3b) Mock Vercel AI Gateway (for failover compatibility)
     def mock_vercel_request(messages, model, **kwargs):
