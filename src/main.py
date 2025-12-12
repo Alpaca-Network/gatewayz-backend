@@ -5,7 +5,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import REGISTRY
@@ -230,9 +230,10 @@ def create_app() -> FastAPI:
 
     # OPTIMIZED: Add GZip compression last (larger threshold = 10KB for better CPU efficiency)
     # Only compress large responses (model catalogs, large JSON payloads)
-    # This significantly reduces payload size while avoiding compression overhead for small responses
-    app.add_middleware(GZipMiddleware, minimum_size=10000)
-    logger.info("  🗜  GZip compression middleware enabled (threshold: 10KB, optimized)")
+    # Uses SelectiveGZipMiddleware to skip compression for SSE streaming responses
+    # This prevents buffering issues where SSE chunks get bundled together
+    app.add_middleware(SelectiveGZipMiddleware, minimum_size=10000)
+    logger.info("  🗜  Selective GZip compression middleware enabled (threshold: 10KB, skips SSE)")
 
     # Security
     HTTPBearer()

@@ -208,25 +208,23 @@ def fetch_models_from_nebius():
     try:
         client = get_nebius_client()
         response = client.models.list()
-
-        # Parse and normalize response within try block to catch malformed responses
-        raw_models = _extract_models_from_response(response)
-        normalized_models = [
-            model for model in (_normalize_nebius_model(entry) for entry in raw_models) if model
-        ]
-
-        if not normalized_models:
-            logger.warning("Nebius API returned zero models; falling back to static catalog")
-            fallback = _fallback_nebius_models("empty_response")
-            return _cache_and_return(fallback) if fallback else None
-
-        logger.info("Fetched %s Nebius models from live API", len(normalized_models))
-        return _cache_and_return(normalized_models)
-
     except Exception as exc:
-        logger.error(f"Nebius models.list() or response parsing failed: {exc}")
+        logger.error(f"Nebius models.list() failed: {exc}")
         fallback = _fallback_nebius_models("api_error")
         return _cache_and_return(fallback) if fallback else None
+
+    raw_models = _extract_models_from_response(response)
+    normalized_models = [
+        model for model in (_normalize_nebius_model(entry) for entry in raw_models) if model
+    ]
+
+    if not normalized_models:
+        logger.warning("Nebius API returned zero models; falling back to static catalog")
+        fallback = _fallback_nebius_models("empty_response")
+        return _cache_and_return(fallback) if fallback else None
+
+    logger.info("Fetched %s Nebius models from live API", len(normalized_models))
+    return _cache_and_return(normalized_models)
 
 
 def _fallback_nebius_models(reason: str) -> list[dict[str, Any]] | None:
