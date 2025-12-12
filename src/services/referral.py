@@ -64,6 +64,11 @@ Best regards,
 The AI Gateway Team
 """
 
+        logger.info(
+            f"Attempting to send referral signup notification to user {referrer_id} "
+            f"at email {referrer_email}"
+        )
+
         success = enhanced_notification_service.send_email_notification(
             to_email=referrer_email,
             subject=subject,
@@ -72,7 +77,15 @@ The AI Gateway Team
         )
 
         if success:
-            logger.info(f"Sent referral signup notification to user {referrer_id}")
+            logger.info(
+                f"Successfully sent referral signup notification to user {referrer_id} "
+                f"at email {referrer_email}"
+            )
+        else:
+            logger.warning(
+                f"Failed to send referral signup notification to user {referrer_id} "
+                f"at email {referrer_email} - email service returned False"
+            )
 
         return success
 
