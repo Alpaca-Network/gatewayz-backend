@@ -8,7 +8,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timezone, UTC
+from datetime import datetime
 from unittest.mock import MagicMock, patch, call
 import httpx
 

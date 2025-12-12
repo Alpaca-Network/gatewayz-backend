@@ -8,7 +8,6 @@ of API endpoints using HTTP requests.
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
-from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, Mock
 
 import pytest

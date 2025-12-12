@@ -2,7 +2,7 @@
 import sys
 import types
 import importlib
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timedelta, UTC
 import pytest
 
 MODULE_PATH = "src.db.api_keys"  # <-- change if your file lives elsewhere

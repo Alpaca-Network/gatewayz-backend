@@ -14,7 +14,7 @@ Flow tested:
 """
 import os
 import pytest
-from datetime import datetime, timezone, UTC
+from datetime import datetime, UTC
 from unittest.mock import patch, Mock, MagicMock, call
 from fastapi.testclient import TestClient
 from fastapi import BackgroundTasks

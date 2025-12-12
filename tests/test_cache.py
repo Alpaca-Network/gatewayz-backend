@@ -8,7 +8,7 @@ Tests cover all cache management functions including:
 """
 
 import pytest
-from datetime import datetime, timezone, timedelta, UTC
+from datetime import datetime, timedelta, UTC
 from unittest.mock import patch, MagicMock
 import src.cache as cache_module
 
