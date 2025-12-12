@@ -31,6 +31,7 @@ def _extract_error_details(e: Exception, model: str, kwargs: dict) -> dict:
             try:
                 error_details["response_text"] = e.response.text[:500] if e.response.text else None
             except Exception:
+                # Response text extraction may fail if response is malformed; ignore as this is diagnostic only
                 pass
         if hasattr(e, "body") and e.body:
             error_details["error_body"] = str(e.body)[:500]
