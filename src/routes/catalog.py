@@ -1618,6 +1618,77 @@ async def get_trending_models_api(
     )
 
 
+@router.get("/models/low-latency", tags=["models"])
+async def get_low_latency_models_api(
+    include_ultra_only: bool = Query(
+        False,
+        description="Only include ultra-low-latency models (<100ms response time)",
+    ),
+    include_alternatives: bool = Query(
+        True,
+        description="Include suggested fast alternatives for common model families",
+    ),
+):
+    """
+    Get models optimized for low latency.
+
+    Returns models with sub-500ms average response times based on production metrics.
+    Useful for real-time applications, chatbots, and latency-sensitive use cases.
+
+    **Ultra-low-latency models** (<100ms):
+    - groq/moonshotai/kimi-k2-instruct-0905 (29ms)
+    - groq/openai/gpt-oss-120b (74ms)
+
+    **Low-latency models** (<500ms):
+    - Groq models (fastest provider)
+    - Select OpenRouter models (gemini-flash, gemma, etc.)
+    - Fireworks optimized models
+    """
+    from src.services.request_prioritization import (
+        get_low_latency_models,
+        get_ultra_low_latency_models,
+        get_fastest_providers,
+        PROVIDER_LATENCY_TIERS,
+        suggest_low_latency_alternative,
+    )
+
+    if include_ultra_only:
+        models = get_ultra_low_latency_models()
+    else:
+        models = get_low_latency_models()
+
+    result = {
+        "models": models,
+        "count": len(models),
+        "providers_by_speed": get_fastest_providers(),
+        "provider_tiers": {
+            provider: {
+                "tier": tier,
+                "description": {
+                    1: "Ultra-fast (<100ms typical)",
+                    2: "Fast (100-500ms typical)",
+                    3: "Standard (500ms-2s typical)",
+                    4: "Variable (depends on model/load)",
+                }.get(tier, "Unknown"),
+            }
+            for provider, tier in PROVIDER_LATENCY_TIERS.items()
+        },
+    }
+
+    if include_alternatives:
+        result["alternatives"] = {
+            "claude": suggest_low_latency_alternative("claude"),
+            "gpt-4": suggest_low_latency_alternative("gpt-4"),
+            "gpt-3.5": suggest_low_latency_alternative("gpt-3.5"),
+            "llama": suggest_low_latency_alternative("llama"),
+            "mistral": suggest_low_latency_alternative("mistral"),
+            "gemini": suggest_low_latency_alternative("gemini"),
+            "deepseek-r1": suggest_low_latency_alternative("deepseek-r1"),
+        }
+
+    return result
+
+
 @router.post("/models/batch-compare", tags=["comparison"])
 async def batch_compare_models_api(
     model_ids: list[str] = Query(
