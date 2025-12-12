@@ -10,7 +10,7 @@ Tests all provider clients for:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 import os
 
 os.environ['APP_ENV'] = 'testing'
@@ -49,13 +49,12 @@ class TestCerebrasClient:
         assert "stream" in DEFAULT_SUPPORTED_PARAMETERS
 
     def test_get_cerebras_client_no_api_key(self):
-        """Test client fails without API key"""
-        # Test that the function exists and is callable
+        """Test client raises ValueError without API key"""
         from src.services.cerebras_client import get_cerebras_client
-        assert callable(get_cerebras_client)
-
-        # Without mocking, we can't test the ValueError directly
-        # but we verify the function signature exists
+        with patch('src.config.Config') as mock_config:
+            mock_config.CEREBRAS_API_KEY = None
+            with pytest.raises(ValueError, match="Cerebras API key not configured"):
+                get_cerebras_client()
 
     def test_get_cerebras_client_fallback_info(self):
         """Test client fallback mechanism is documented"""
@@ -83,13 +82,14 @@ class TestCerebrasClient:
         assert "architecture" in result
 
     def test_normalize_cerebras_model_missing_id(self):
-        """Test normalization returns None for missing ID"""
+        """Test normalization uses name as fallback ID when id is missing"""
         from src.services.cerebras_client import _normalize_cerebras_model
 
         model = {"name": "Test Model"}
         result = _normalize_cerebras_model(model)
-        # Should still work if name is present
-        assert result is None or result.get("id") is not None
+        # When id is missing, name is used as fallback
+        assert result is not None
+        assert result.get("id") == "Test Model"
 
     def test_cleanup_model_id(self):
         """Test model ID cleanup"""
@@ -285,10 +285,9 @@ class TestGoogleVertexClient:
         result = _sanitize_system_content(123)
         assert result == "123"
 
-    @patch.dict(os.environ, {}, clear=False)
+    @patch.dict(os.environ, {"GOOGLE_PROJECT_ID": "", "GOOGLE_VERTEX_LOCATION": ""}, clear=False)
     def test_prepare_vertex_environment_missing_project(self):
         """Test environment preparation fails without project ID"""
-        # Clear the relevant env vars
         with patch('src.services.google_vertex_client.Config') as mock_config:
             mock_config.GOOGLE_PROJECT_ID = None
             mock_config.GOOGLE_VERTEX_LOCATION = "us-central1"
