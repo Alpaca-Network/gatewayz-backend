@@ -21,7 +21,6 @@ from src.services.model_transformations import (
     apply_model_alias,
     normalize_model_name,
     get_model_id_mapping,
-    MODEL_ID_ALIASES,
     OPENROUTER_AUTO_FALLBACKS,
     MODEL_PROVIDER_OVERRIDES,
 )

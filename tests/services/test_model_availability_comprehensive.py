@@ -10,10 +10,9 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from unittest.mock import patch
 from datetime import datetime, timedelta
 import os
-import asyncio
 import time
 
 os.environ['APP_ENV'] = 'testing'
@@ -73,8 +72,8 @@ class TestCircuitBreakerStateTransitions:
         cb.record_failure()
         assert cb.state == CircuitBreakerState.OPEN
 
-        # Wait for recovery timeout
-        time.sleep(1.1)
+        # Mock time to simulate recovery timeout elapsed
+        cb.last_failure_time = time.time() - 2
 
         # Should transition to HALF_OPEN
         assert cb.can_execute() is True
