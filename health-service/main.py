@@ -372,9 +372,10 @@ async def get_status():
             try:
                 from src.config.supabase_config import supabase
                 # Get tracked models count
+                # Note: model_health_tracking has composite PK (provider, model), no 'id' column
                 tracked_models_response = (
                     supabase.table("model_health_tracking")
-                    .select("id", count="exact", head=True)
+                    .select("*", count="exact", head=True)
                     .execute()
                 )
                 models_count = tracked_models_response.count or 0
