@@ -24,6 +24,7 @@ def record_model_call(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     total_tokens: int | None = None,
+    gateway: str | None = None,
 ) -> dict:
     """
     Record a model call and update health tracking metrics.
@@ -33,7 +34,7 @@ def record_model_call(
     race conditions under concurrent requests.
 
     Args:
-        provider: The AI provider name (e.g., 'openrouter', 'portkey')
+        provider: The AI provider/gateway name (e.g., 'openrouter', 'featherless')
         model: The model identifier
         response_time_ms: Response time in milliseconds
         status: Call status ('success', 'error', 'timeout', 'rate_limited', etc.)
@@ -41,6 +42,7 @@ def record_model_call(
         input_tokens: Optional number of input tokens used
         output_tokens: Optional number of output tokens generated
         total_tokens: Optional total tokens (input + output)
+        gateway: Optional gateway name (defaults to provider if not specified)
 
     Returns:
         Dictionary with the updated/created record, or empty dict if table doesn't exist
@@ -87,9 +89,13 @@ def record_model_call(
             else:
                 new_avg = response_time_ms
 
+            # Use provider as gateway if gateway not explicitly provided
+            effective_gateway = gateway if gateway else provider
+
             upsert_data = {
                 "provider": provider,
                 "model": model,
+                "gateway": effective_gateway,
                 "last_response_time_ms": response_time_ms,
                 "last_status": status,
                 "last_called_at": datetime.utcnow().isoformat(),
@@ -110,9 +116,13 @@ def record_model_call(
                 upsert_data["total_tokens"] = total_tokens
         else:
             # New record with initial values
+            # Use provider as gateway if gateway not explicitly provided
+            effective_gateway = gateway if gateway else provider
+
             upsert_data = {
                 "provider": provider,
                 "model": model,
+                "gateway": effective_gateway,
                 "last_response_time_ms": response_time_ms,
                 "last_status": status,
                 "last_called_at": datetime.utcnow().isoformat(),
