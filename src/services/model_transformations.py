@@ -190,17 +190,18 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         return model_id
 
     # Special handling for OpenRouter: strip 'openrouter/' prefix if present
-    # EXCEPT for openrouter/auto which needs to keep the prefix
+    # EXCEPT for OpenRouter meta-models which need to keep the prefix
+    OPENROUTER_META_MODELS = {"openrouter/auto", "openrouter/bodybuilder"}
     if provider_lower == "openrouter" and model_id.startswith("openrouter/"):
-        # Don't strip the prefix from openrouter/auto - it needs the full ID
-        if model_id != "openrouter/auto":
+        # Don't strip the prefix from OpenRouter meta-models - they need the full ID
+        if model_id not in OPENROUTER_META_MODELS:
             stripped = model_id[len("openrouter/") :]
             logger.info(
                 f"Stripped 'openrouter/' prefix: '{model_id}' -> '{stripped}' for OpenRouter"
             )
             model_id = stripped
         else:
-            logger.info("Preserving 'openrouter/auto' - this model requires the full ID")
+            logger.info(f"Preserving '{model_id}' - this OpenRouter meta-model requires the full ID")
 
     # Special handling for Near: strip 'near/' prefix if present
     if provider_lower == "near" and model_id.startswith("near/"):
