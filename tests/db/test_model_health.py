@@ -267,7 +267,7 @@ class TestRecordModelCall:
         ]
         mock_client.table.return_value.upsert.return_value.execute.return_value = mock_upsert
 
-        result = record_model_call(
+        record_model_call(
             provider="openrouter",
             model="gpt-4",
             response_time_ms=150.5,
@@ -304,7 +304,7 @@ class TestRecordModelCall:
         mock_client.table.return_value.upsert.return_value.execute.return_value = mock_upsert
 
         # Call without gateway parameter
-        result = record_model_call(
+        record_model_call(
             provider="featherless",
             model="meta-llama/Llama-3-70b",
             response_time_ms=200.0,

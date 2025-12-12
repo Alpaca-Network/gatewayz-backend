@@ -47,6 +47,9 @@ def record_model_call(
     Returns:
         Dictionary with the updated/created record, or empty dict if table doesn't exist
     """
+    # Use provider as gateway if gateway not explicitly provided
+    effective_gateway = gateway if gateway else provider
+
     try:
         supabase = get_supabase_client()
 
@@ -89,9 +92,6 @@ def record_model_call(
             else:
                 new_avg = response_time_ms
 
-            # Use provider as gateway if gateway not explicitly provided
-            effective_gateway = gateway if gateway else provider
-
             upsert_data = {
                 "provider": provider,
                 "model": model,
@@ -116,9 +116,6 @@ def record_model_call(
                 upsert_data["total_tokens"] = total_tokens
         else:
             # New record with initial values
-            # Use provider as gateway if gateway not explicitly provided
-            effective_gateway = gateway if gateway else provider
-
             upsert_data = {
                 "provider": provider,
                 "model": model,
