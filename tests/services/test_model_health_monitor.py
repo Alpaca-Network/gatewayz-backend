@@ -23,7 +23,6 @@ from src.services.model_health_monitor import (
     ModelHealthMonitor,
     ModelHealthMetrics,
     HealthStatus,
-    ProviderHealthMetrics,
     SystemHealthMetrics,
 )
 HEALTH_MONITOR_AVAILABLE = True
@@ -208,10 +207,7 @@ class TestRecoveryDetection:
 
     def test_health_status_transitions(self):
         """Test that health status can transition between states"""
-        # Start healthy
-        status = HealthStatus.HEALTHY
-
-        # Can change to unhealthy
+        # Can set to unhealthy
         status = HealthStatus.UNHEALTHY
         assert status == HealthStatus.UNHEALTHY
 
