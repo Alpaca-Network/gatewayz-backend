@@ -120,6 +120,18 @@ class TestOpenRouterTransformations:
         result = transform_model_id("openrouter/auto", "openrouter")
         assert result == "openrouter/auto"
 
+    def test_transform_openrouter_bodybuilder_preserved(self):
+        """Test openrouter/bodybuilder is preserved"""
+        result = transform_model_id("openrouter/bodybuilder", "openrouter")
+        assert result == "openrouter/bodybuilder"
+
+    def test_transform_openrouter_meta_models_preserved(self):
+        """Test all OpenRouter meta-models are preserved"""
+        meta_models = ["openrouter/auto", "openrouter/bodybuilder"]
+        for model in meta_models:
+            result = transform_model_id(model, "openrouter")
+            assert result == model, f"Expected {model} to be preserved but got {result}"
+
     def test_transform_claude_sonnet_variants(self):
         """Test Claude Sonnet 4.5 transformation variants"""
         result = transform_model_id("anthropic/claude-sonnet-4.5", "openrouter")
