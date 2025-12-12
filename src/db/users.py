@@ -1,7 +1,7 @@
 import logging
 import secrets
 import time
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -41,6 +41,24 @@ def invalidate_user_cache(api_key: str) -> None:
     """Invalidate cache for a specific user (e.g., after profile update)"""
     clear_user_cache(api_key)
     logger.debug(f"Invalidated user cache for API key {api_key[:10]}...")
+
+
+def invalidate_user_cache_by_id(user_id: int) -> None:
+    """Invalidate cache entries for a specific user by user ID.
+
+    Since cache is keyed by api_key, this scans the cache to find entries
+    matching the user_id and removes them.
+    """
+    global _user_cache
+    keys_to_remove = [
+        api_key
+        for api_key, entry in _user_cache.items()
+        if entry.get("user", {}).get("id") == user_id
+    ]
+    for api_key in keys_to_remove:
+        del _user_cache[api_key]
+    if keys_to_remove:
+        logger.debug(f"Invalidated {len(keys_to_remove)} cache entries for user ID {user_id}")
 
 
 def _is_temporary_api_key(api_key: str) -> bool:
@@ -127,8 +145,8 @@ def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
             "scope_permissions": {"read": ["*"], "write": ["*"], "admin": ["*"]},
             "ip_allowlist": [],
             "domain_referrers": [],
-            "created_at": user.get("created_at", datetime.now(UTC).isoformat()),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "created_at": user.get("created_at", datetime.now(timezone.utc).isoformat()),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Insert the migrated key
@@ -171,7 +189,7 @@ def create_enhanced_user(
         client = get_supabase_client()
 
         # Prepare user data with trial setup
-        trial_start = datetime.now(UTC)
+        trial_start = datetime.now(timezone.utc)
         trial_end = trial_start + timedelta(days=3)
 
         user_data = {
@@ -449,7 +467,7 @@ def add_credits_to_user(
         result = (
             client.table("users")
             .update(
-                {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
             )
             .eq("id", user_id)
             .execute()
@@ -477,6 +495,9 @@ def add_credits_to_user(
             sanitize_for_logging(str(balance_before)),
             sanitize_for_logging(str(balance_after)),
         )
+
+        # Invalidate cache to ensure fresh credit balance on next get_user call
+        invalidate_user_cache_by_id(user_id)
 
     except Exception as e:
         logger.error("Failed to add credits: %s", sanitize_for_logging(str(e)))
@@ -597,7 +618,7 @@ def deduct_credits(
             result = (
                 client.table("users")
                 .update(
-                    {"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()}
+                    {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
                 )
                 .eq("id", user_id)
                 .execute()
@@ -697,7 +718,7 @@ def record_usage(
         client = get_supabase_client()
 
         # Ensure timestamp is timezone-aware
-        timestamp = datetime.now(UTC).replace(tzinfo=UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat()
 
         # Only include columns that exist in the schema
         usage_data = {
@@ -895,7 +916,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
         len([user for user in users if user.get("credits", 0) > 0])
 
         # Calculate time-based statistics
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
@@ -1092,7 +1113,7 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         if not update_data:
             raise ValueError("No valid profile fields to update")
 
-        update_data["updated_at"] = datetime.now(UTC).isoformat()
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         # Update user profile
         result = client.table("users").update(update_data).eq("api_key", api_key).execute()
@@ -1160,7 +1181,7 @@ def mark_welcome_email_sent(user_id: int) -> bool:
         result = (
             client.table("users")
             .update(
-                {"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()}
+                {"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()}
             )
             .eq("id", user_id)
             .execute()
