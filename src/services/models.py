@@ -19,6 +19,8 @@ from src.cache import (
     _anannas_models_cache,
     _cerebras_models_cache,
     _chutes_models_cache,
+    _clarifai_models_cache,
+    _cloudflare_workers_ai_models_cache,
     _deepinfra_models_cache,
     _fal_models_cache,
     _featherless_models_cache,
@@ -37,13 +39,12 @@ from src.cache import (
     _together_models_cache,
     _vercel_ai_gateway_models_cache,
     _xai_models_cache,
-    _cloudflare_workers_ai_models_cache,
-    is_cache_fresh,
-    should_revalidate_in_background,
-    set_gateway_error,
-    is_gateway_in_error_state,
     clear_gateway_error,
     get_gateway_error_message,
+    is_cache_fresh,
+    is_gateway_in_error_state,
+    set_gateway_error,
+    should_revalidate_in_background,
 )
 from src.config import Config
 from src.services.google_models_config import register_google_models_in_canonical_registry
@@ -54,12 +55,13 @@ from src.services.multi_provider_registry import (
     get_registry,
 )
 from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.clarifai_client import fetch_models_from_clarifai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.xai_client import fetch_models_from_xai
-from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
 
@@ -459,6 +461,9 @@ def get_all_models_parallel():
             "aihubmix",
             "alibaba",
             "onerouter",
+            "google-vertex",
+            "cloudflare-workers-ai",
+            "clarifai",
         ]
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -536,6 +541,10 @@ def get_all_models_sequential():
     anannas_models = get_cached_models("anannas") or []
     aihubmix_models = get_cached_models("aihubmix") or []
     alibaba_models = get_cached_models("alibaba") or []
+    onerouter_models = get_cached_models("onerouter") or []
+    google_vertex_models = get_cached_models("google-vertex") or []
+    cloudflare_workers_ai_models = get_cached_models("cloudflare-workers-ai") or []
+    clarifai_models = get_cached_models("clarifai") or []
     return (
         openrouter_models
         + featherless_models
@@ -556,6 +565,10 @@ def get_all_models_sequential():
         + anannas_models
         + aihubmix_models
         + alibaba_models
+        + onerouter_models
+        + google_vertex_models
+        + cloudflare_workers_ai_models
+        + clarifai_models
     )
 
 
@@ -829,6 +842,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_cloudflare_workers_ai()
             _register_canonical_records("cloudflare-workers-ai", result)
+            return result if result is not None else []
+
+        if gateway == "clarifai":
+            cached = _get_fresh_or_stale_cached_models(_clarifai_models_cache, "clarifai")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_clarifai()
+            _register_canonical_records("clarifai", result)
             return result if result is not None else []
 
         if gateway == "all":
