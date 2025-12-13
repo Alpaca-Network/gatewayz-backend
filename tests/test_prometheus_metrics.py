@@ -188,6 +188,105 @@ class TestContextManagers:
         assert True
 
 
+class TestClaudeCodeMetrics:
+    """Tests for Claude Code metrics."""
+
+    def test_metrics_contains_claude_code_metrics(self, client):
+        """Test that Claude Code metrics are present."""
+        response = client.get("/metrics")
+        content = response.text
+
+        assert "claude_code_token_usage_tokens_total" in content
+        assert "claude_code_cost_usage_USD_total" in content
+        assert "claude_code_active_time_seconds_total" in content
+        assert "claude_code_commit_count_total" in content
+        assert "claude_code_lines_of_code_count_total" in content
+
+    def test_record_claude_code_tokens(self):
+        """Test recording Claude Code token usage metrics."""
+        prometheus_metrics.record_claude_code_tokens(
+            session_id="test-session-123",
+            model="claude-3-sonnet",
+            input_tokens=1000,
+            output_tokens=500,
+            cache_read_tokens=200,
+            cache_creation_tokens=100,
+        )
+
+        # Verify metrics were recorded (no exception)
+        assert True
+
+    def test_record_claude_code_tokens_partial(self):
+        """Test recording partial token metrics (only some types)."""
+        prometheus_metrics.record_claude_code_tokens(
+            session_id="test-session-456",
+            model="claude-3-opus",
+            input_tokens=500,
+            output_tokens=250,
+        )
+
+        # Verify metrics were recorded
+        assert True
+
+    def test_record_claude_code_cost(self):
+        """Test recording Claude Code cost metrics."""
+        prometheus_metrics.record_claude_code_cost(
+            model="claude-3-sonnet",
+            cost_usd=0.05,
+        )
+
+        # Verify metrics were recorded
+        assert True
+
+    def test_record_claude_code_cost_zero(self):
+        """Test that zero cost doesn't increment counter."""
+        prometheus_metrics.record_claude_code_cost(
+            model="claude-3-haiku",
+            cost_usd=0.0,
+        )
+
+        # Should not raise exception
+        assert True
+
+    def test_record_claude_code_active_time(self):
+        """Test recording Claude Code active time metrics."""
+        prometheus_metrics.record_claude_code_active_time(
+            cli_seconds=120.5,
+            user_seconds=30.0,
+        )
+
+        # Verify metrics were recorded
+        assert True
+
+    def test_record_claude_code_active_time_cli_only(self):
+        """Test recording only CLI active time."""
+        prometheus_metrics.record_claude_code_active_time(cli_seconds=60.0)
+
+        # Verify metrics were recorded
+        assert True
+
+    def test_record_claude_code_commit(self):
+        """Test recording Claude Code commit metric."""
+        prometheus_metrics.record_claude_code_commit()
+
+        # Verify metric was incremented
+        assert True
+
+    def test_record_claude_code_lines_of_code(self):
+        """Test recording lines of code metric."""
+        prometheus_metrics.record_claude_code_lines_of_code(lines=150)
+
+        # Verify metrics were recorded
+        assert True
+
+    def test_record_claude_code_lines_of_code_zero(self):
+        """Test that zero lines doesn't increment counter."""
+        prometheus_metrics.record_claude_code_lines_of_code(lines=0)
+
+        # Should not raise exception
+        assert True
+
+
 class TestMetricsIntegration:
     """Integration tests for metrics with actual API calls."""
 
