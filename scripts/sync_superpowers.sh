@@ -9,11 +9,14 @@ echo "Superpowers .claude Folder Sync"
 echo "=================================================="
 echo ""
 
+# Save original directory to ensure we can return to it
+ORIGINAL_DIR="$(pwd)"
+
 # Configuration
 REPO_URL="https://github.com/obra/superpowers"
-TMP_DIR="./tmp"
+TMP_DIR="${ORIGINAL_DIR}/tmp"
 REPO_DIR="${TMP_DIR}/superpowers"
-TARGET_CLAUDE_DIR="./.claude"
+TARGET_CLAUDE_DIR="${ORIGINAL_DIR}/.claude"
 
 # Superpowers folders to sync (these become .claude subdirectories)
 SYNC_FOLDERS=("commands" "hooks" "skills" "agents" "lib")
@@ -32,24 +35,18 @@ echo ""
 echo "Step 2: Cloning/updating superpowers repository..."
 if [ -d "$REPO_DIR" ]; then
     echo "  ✓ Repository already exists, updating with git pull..."
-    cd "$REPO_DIR"
 
     # Check if it's a valid git repository
-    if [ -d ".git" ]; then
-        # Fetch and pull latest changes
-        git fetch origin --quiet || {
-            echo "  ✗ ERROR: Failed to fetch from remote repository"
-            exit 1
-        }
-        git pull origin main --quiet || {
-            echo "  ✗ ERROR: Failed to pull latest changes"
+    if [ -d "$REPO_DIR/.git" ]; then
+        # Fetch and pull latest changes (from original directory)
+        (cd "$REPO_DIR" && git fetch origin --quiet && git pull origin main --quiet) || {
+            echo "  ✗ ERROR: Failed to update repository"
             exit 1
         }
         echo "  ✓ Repository updated successfully"
     else
         echo "  ✗ ERROR: Directory exists but is not a git repository"
         echo "  Removing corrupted directory and re-cloning..."
-        cd ../..
         rm -rf "$REPO_DIR"
         git clone --quiet "$REPO_URL" "$REPO_DIR" || {
             echo "  ✗ ERROR: Failed to clone repository"
@@ -57,9 +54,6 @@ if [ -d "$REPO_DIR" ]; then
         }
         echo "  ✓ Repository cloned successfully"
     fi
-
-    # Return to original directory
-    cd - > /dev/null
 else
     echo "  ✓ Cloning repository: $REPO_URL"
     git clone --quiet "$REPO_URL" "$REPO_DIR" || {
