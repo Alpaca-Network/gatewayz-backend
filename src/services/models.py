@@ -3418,6 +3418,46 @@ def normalize_anannas_model(model) -> dict | None:
         return None
 
 
+def _is_alibaba_quota_error_cached() -> bool:
+    """Check if we're in a quota error backoff period.
+
+    Returns True if a quota error was recently recorded and we should skip
+    making API calls to avoid log spam.
+    """
+    if not _alibaba_models_cache.get("quota_error"):
+        return False
+
+    timestamp = _alibaba_models_cache.get("quota_error_timestamp")
+    if not timestamp:
+        return False
+
+    backoff = _alibaba_models_cache.get("quota_error_backoff", 900)  # Default 15 min
+    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    return age < backoff
+
+
+def _set_alibaba_quota_error():
+    """Record a quota error with backoff timing.
+
+    Note: We intentionally do NOT set the main cache timestamp here.
+    This ensures that the cache appears "stale" so that get_cached_models()
+    will call fetch_models_from_alibaba(), where the quota error backoff
+    check (_is_alibaba_quota_error_cached) is evaluated. If we set timestamp,
+    the 1-hour cache TTL would override our 15-minute quota error backoff.
+    """
+    _alibaba_models_cache["quota_error"] = True
+    _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
+    _alibaba_models_cache["data"] = []
+    # Don't set timestamp - let the cache appear stale so fetch_models_from_alibaba
+    # is called and can check the quota_error_backoff
+
+
+def _clear_alibaba_quota_error():
+    """Clear quota error state after successful fetch."""
+    _alibaba_models_cache["quota_error"] = False
+    _alibaba_models_cache["quota_error_timestamp"] = None
+
+
 def fetch_models_from_alibaba():
     """Fetch models from Alibaba Cloud (DashScope) via OpenAI-compatible API
 
@@ -3436,7 +3476,15 @@ def fetch_models_from_alibaba():
             _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
             return []
 
-        from src.services.alibaba_cloud_client import list_alibaba_models
+        # Check if we're in quota error backoff period
+        if _is_alibaba_quota_error_cached():
+            logger.debug(
+                "Alibaba Cloud quota error in backoff period - skipping API call. "
+                "Will retry after backoff expires."
+            )
+            return _alibaba_models_cache.get("data", [])
+
+        from src.services.alibaba_cloud_client import list_alibaba_models, QuotaExceededError
 
         response = list_alibaba_models()
 
@@ -3451,9 +3499,20 @@ def fetch_models_from_alibaba():
 
         _alibaba_models_cache["data"] = normalized_models
         _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Clear any previous quota error state on success
+        _clear_alibaba_quota_error()
 
         logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
         return _alibaba_models_cache["data"]
+    except QuotaExceededError:
+        # Quota exceeded - cache the failure state to prevent repeated API calls
+        _set_alibaba_quota_error()
+        logger.warning(
+            "Alibaba Cloud quota exceeded. Caching empty result for %d seconds. "
+            "Please check your plan and billing details.",
+            _alibaba_models_cache.get("quota_error_backoff", 900),
+        )
+        return []
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         # Check if it's a 401 authentication error

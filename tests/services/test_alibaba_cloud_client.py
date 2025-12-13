@@ -1,6 +1,8 @@
 import types
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.config import Config
 from src.services import alibaba_cloud_client as acc
 
@@ -150,3 +152,238 @@ def test_failover_with_misconfigured_region_key(monkeypatch):
     assert response.data[0]["id"] == "qwen-max"
     assert call_order == ["international", "china"], "should failover from international to china"
     assert acc._inferred_region == "china"
+
+
+def test_is_quota_error_detects_quota_exceeded():
+    """Test that _is_quota_error detects various quota error messages."""
+    quota_errors = [
+        Exception("Error code: 429 - insufficient_quota"),
+        Exception("You exceeded your current quota, please check your plan"),
+        Exception("quota exceeded"),
+        Exception("rate_limit_exceeded"),
+        Exception("Error code: 429"),
+        Exception("status code: 429"),
+    ]
+
+    for err in quota_errors:
+        assert acc._is_quota_error(err) is True, f"Should detect quota error: {err}"
+
+
+def test_is_quota_error_does_not_match_auth_errors():
+    """Test that _is_quota_error doesn't match auth errors."""
+    auth_errors = [
+        Exception("Error code: 401 - invalid_api_key"),
+        Exception("Incorrect API key provided"),
+        Exception("unauthorized"),
+    ]
+
+    for err in auth_errors:
+        assert acc._is_quota_error(err) is False, f"Should not match auth error: {err}"
+
+
+def test_quota_error_raises_quota_exceeded_error(monkeypatch):
+    """Test that quota errors are converted to QuotaExceededError."""
+    _reset_region_state(monkeypatch)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+    def fake_get_client(region_override=None):
+        client = MagicMock()
+        client.models.list.side_effect = Exception(
+            "Error code: 429 - {'error': {'message': 'You exceeded your current quota', "
+            "'type': 'insufficient_quota', 'code': 'insufficient_quota'}}"
+        )
+        return client
+
+    monkeypatch.setattr(acc, "get_alibaba_cloud_client", fake_get_client)
+
+    with pytest.raises(acc.QuotaExceededError):
+        acc.list_alibaba_models()
+
+
+def test_quota_error_does_not_retry_other_regions(monkeypatch):
+    """Test that quota errors don't trigger region failover."""
+    _reset_region_state(monkeypatch)
+    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+    call_order: list[str] = []
+
+    def fake_get_client(region_override=None):
+        region = region_override or "international"
+        call_order.append(region)
+        client = MagicMock()
+        client.models.list.side_effect = Exception(
+            "Error code: 429 - insufficient_quota"
+        )
+        return client
+
+    monkeypatch.setattr(acc, "get_alibaba_cloud_client", fake_get_client)
+
+    with pytest.raises(acc.QuotaExceededError):
+        acc.list_alibaba_models()
+
+    # Should only try once since quota errors don't benefit from region failover
+    assert call_order == ["international"], "should not retry with other regions for quota errors"
+
+
+class TestAlibabaQuotaErrorCaching:
+    """Tests for quota error caching in fetch_models_from_alibaba."""
+
+    def test_quota_error_caches_failure_state(self, monkeypatch):
+        """Test that QuotaExceededError triggers caching of failure state."""
+        from datetime import datetime, timezone
+        from src.cache import _alibaba_models_cache
+        from src.services import models
+
+        _reset_region_state(monkeypatch)
+        monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+        # Reset cache state
+        _alibaba_models_cache["quota_error"] = False
+        _alibaba_models_cache["quota_error_timestamp"] = None
+        _alibaba_models_cache["data"] = None
+        _alibaba_models_cache["timestamp"] = None
+
+        def fake_list_alibaba_models():
+            raise acc.QuotaExceededError("quota exceeded")
+
+        monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
+
+        result = models.fetch_models_from_alibaba()
+
+        assert result == []
+        assert _alibaba_models_cache["quota_error"] is True
+        assert _alibaba_models_cache["quota_error_timestamp"] is not None
+        assert _alibaba_models_cache["data"] == []
+        # timestamp should NOT be set - this ensures the cache appears stale
+        # so that fetch_models_from_alibaba is called to check quota_error_backoff
+        assert _alibaba_models_cache["timestamp"] is None
+
+    def test_quota_error_backoff_skips_api_calls(self, monkeypatch):
+        """Test that subsequent calls during backoff period skip API calls."""
+        from datetime import datetime, timezone
+        from src.cache import _alibaba_models_cache
+        from src.services import models
+
+        _reset_region_state(monkeypatch)
+        monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+        # Set up quota error state (recently occurred)
+        _alibaba_models_cache["quota_error"] = True
+        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
+        _alibaba_models_cache["data"] = []
+        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        call_count = 0
+
+        def fake_list_alibaba_models():
+            nonlocal call_count
+            call_count += 1
+            raise acc.QuotaExceededError("quota exceeded")
+
+        monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
+
+        result = models.fetch_models_from_alibaba()
+
+        assert result == []
+        assert call_count == 0, "should skip API call during backoff period"
+
+    def test_quota_error_backoff_expires(self, monkeypatch):
+        """Test that backoff expires after the configured duration."""
+        from datetime import datetime, timezone, timedelta
+        from src.cache import _alibaba_models_cache
+        from src.services import models
+
+        _reset_region_state(monkeypatch)
+        monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+        # Set up quota error state that has expired (more than 15 minutes ago)
+        backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
+        _alibaba_models_cache["quota_error"] = True
+        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc) - timedelta(
+            seconds=backoff_seconds + 60
+        )
+        _alibaba_models_cache["data"] = []
+        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        call_count = 0
+
+        def fake_list_alibaba_models():
+            nonlocal call_count
+            call_count += 1
+            return types.SimpleNamespace(data=[])
+
+        monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
+
+        models.fetch_models_from_alibaba()
+
+        assert call_count == 1, "should retry API call after backoff expires"
+
+    def test_successful_fetch_clears_quota_error(self, monkeypatch):
+        """Test that a successful fetch clears the quota error state."""
+        from datetime import datetime, timezone, timedelta
+        from src.cache import _alibaba_models_cache
+        from src.services import models
+
+        _reset_region_state(monkeypatch)
+        monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+        # Set up expired quota error state
+        backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
+        _alibaba_models_cache["quota_error"] = True
+        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc) - timedelta(
+            seconds=backoff_seconds + 60
+        )
+        _alibaba_models_cache["data"] = []
+        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        def fake_list_alibaba_models():
+            return types.SimpleNamespace(data=[types.SimpleNamespace(id="qwen-max")])
+
+        monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
+
+        result = models.fetch_models_from_alibaba()
+
+        assert len(result) == 1
+        assert _alibaba_models_cache["quota_error"] is False
+        assert _alibaba_models_cache["quota_error_timestamp"] is None
+
+    def test_quota_error_backoff_not_overridden_by_cache_ttl(self, monkeypatch):
+        """Test that quota error backoff (15 min) is not overridden by cache TTL (1 hour).
+
+        This tests the fix for the bug where setting timestamp during quota error
+        would cause the cache to appear "fresh" for 1 hour, bypassing the 15-minute
+        backoff period.
+        """
+        from datetime import datetime, timezone, timedelta
+        from src.cache import _alibaba_models_cache
+        from src.services import models
+
+        _reset_region_state(monkeypatch)
+        monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+        # Simulate a quota error that occurred 20 minutes ago (backoff should have expired)
+        backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
+        twenty_mins_ago = datetime.now(timezone.utc) - timedelta(seconds=1200)
+
+        _alibaba_models_cache["quota_error"] = True
+        _alibaba_models_cache["quota_error_timestamp"] = twenty_mins_ago
+        _alibaba_models_cache["data"] = []
+        # timestamp is None since we don't set it on quota error
+        _alibaba_models_cache["timestamp"] = None
+
+        call_count = 0
+
+        def fake_list_alibaba_models():
+            nonlocal call_count
+            call_count += 1
+            return types.SimpleNamespace(data=[types.SimpleNamespace(id="qwen-max")])
+
+        monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
+
+        # This should trigger a new API call because:
+        # 1. Cache has no timestamp, so appears stale to get_cached_models
+        # 2. Quota error backoff (15 min) has expired (20 min ago)
+        result = models.fetch_models_from_alibaba()
+
+        assert call_count == 1, "should call API after quota error backoff expires"
+        assert len(result) == 1
