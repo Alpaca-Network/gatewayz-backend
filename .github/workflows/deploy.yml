@@ -26,7 +26,7 @@ jobs:
   # Determine environment based on branch
   setup-environment:
     name: Setup Deployment Environment
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Only run if CI passed (for workflow_run) or manual dispatch
     if: >
       github.event_name == 'workflow_dispatch' ||
@@ -79,7 +79,7 @@ jobs:
   # Deploy to Railway
   deploy-railway:
     name: Deploy to Railway (${{ needs.setup-environment.outputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment]
     environment:
       name: ${{ needs.setup-environment.outputs.environment }}
@@ -156,7 +156,7 @@ jobs:
   # Notify deployment status
   notify-deployment:
     name: Notify Deployment Status
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment, deploy-railway]
     if: always()
 
