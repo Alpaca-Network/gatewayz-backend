@@ -170,6 +170,7 @@ def fetch_models_from_clarifai():
             logger.warning("Clarifai API key not configured, cannot fetch models")
             return _cache_and_return([])
 
+        logger.info("Fetching models from Clarifai API...")
         headers = {
             "Authorization": f"Key {Config.CLARIFAI_API_KEY}",
             "Content-Type": "application/json",
@@ -185,6 +186,7 @@ def fetch_models_from_clarifai():
 
         models_data = response.json()
         models = models_data.get("data", [])
+        logger.debug(f"Clarifai API returned {len(models)} models")
 
         # Transform to our standard format
         transformed_models = []
@@ -218,8 +220,10 @@ def fetch_models_from_clarifai():
         return _cache_and_return(transformed_models)
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching Clarifai models: {e}")
+        logger.error(
+            f"HTTP error fetching Clarifai models: {e.response.status_code} - {e.response.text[:200] if e.response.text else 'No response body'}"
+        )
         return _cache_and_return([])
     except Exception as e:
-        logger.error(f"Failed to fetch models from Clarifai: {e}")
+        logger.error(f"Failed to fetch models from Clarifai: {type(e).__name__}: {e}")
         return _cache_and_return([])

@@ -140,6 +140,7 @@ def fetch_models_from_onerouter():
             logger.warning("OneRouter API key not configured, cannot fetch models")
             return _cache_and_return([])
 
+        logger.info("Fetching models from OneRouter API...")
         headers = {
             "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
             "Content-Type": "application/json",
@@ -189,7 +190,10 @@ def fetch_models_from_onerouter():
         return _cache_and_return(transformed_models)
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching OneRouter models: {e}")
+        logger.error(
+            f"HTTP error fetching OneRouter models: {e.response.status_code} - "
+            f"{e.response.text[:200] if e.response.text else 'No response body'}"
+        )
         capture_provider_error(
             e,
             provider='onerouter',
@@ -197,7 +201,7 @@ def fetch_models_from_onerouter():
         )
         return _cache_and_return([])
     except Exception as e:
-        logger.error(f"Failed to fetch models from OneRouter: {e}")
+        logger.error(f"Failed to fetch models from OneRouter: {type(e).__name__}: {e}")
         capture_provider_error(
             e,
             provider='onerouter',

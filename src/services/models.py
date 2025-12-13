@@ -3444,8 +3444,10 @@ def fetch_models_from_alibaba():
             logger.warning("No models returned from Alibaba Cloud")
             return []
 
-        # Normalize models
-        normalized_models = [normalize_alibaba_model(model) for model in response.data if model]
+        # Normalize models (filter out None values from normalization failures)
+        normalized_models = [
+            m for m in (normalize_alibaba_model(model) for model in response.data if model) if m
+        ]
 
         _alibaba_models_cache["data"] = normalized_models
         _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
