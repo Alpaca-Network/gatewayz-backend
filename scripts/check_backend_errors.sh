@@ -34,7 +34,7 @@ else
         "${SENTRY_HOST}/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/issues/" \
         -H "Authorization: Bearer ${SENTRY_ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "query=is:unresolved&statsPeriod=24h" 2>&1 || echo "ERROR")
+        "${SENTRY_HOST}/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/issues/?query=is:unresolved&statsPeriod=24h" \
 
     if [ "$SENTRY_RESPONSE" = "ERROR" ]; then
         echo "ERROR: Failed to fetch Sentry issues"
