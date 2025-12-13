@@ -311,7 +311,7 @@ class TestAlibabaQuotaErrorCaching:
 
         monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
 
-        result = models.fetch_models_from_alibaba()
+        models.fetch_models_from_alibaba()
 
         assert call_count == 1, "should retry API call after backoff expires"
 
