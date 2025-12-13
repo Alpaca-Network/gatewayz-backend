@@ -31,10 +31,9 @@ else
 
     # Fetch unresolved issues from the last 24 hours
     SENTRY_RESPONSE=$(curl -s -X GET \
-        "${SENTRY_HOST}/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/issues/" \
-        -H "Authorization: Bearer ${SENTRY_ACCESS_TOKEN}" \
-        -H "Content-Type: application/json" \
         "${SENTRY_HOST}/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/issues/?query=is:unresolved&statsPeriod=24h" \
+        -H "Authorization: Bearer ${SENTRY_ACCESS_TOKEN}" \
+        -H "Content-Type: application/json" 2>&1 || echo "ERROR")
 
     if [ "$SENTRY_RESPONSE" = "ERROR" ]; then
         echo "ERROR: Failed to fetch Sentry issues"
