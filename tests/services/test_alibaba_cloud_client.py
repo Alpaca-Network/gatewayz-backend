@@ -254,6 +254,9 @@ class TestAlibabaQuotaErrorCaching:
         assert _alibaba_models_cache["quota_error"] is True
         assert _alibaba_models_cache["quota_error_timestamp"] is not None
         assert _alibaba_models_cache["data"] == []
+        # timestamp should NOT be set - this ensures the cache appears stale
+        # so that fetch_models_from_alibaba is called to check quota_error_backoff
+        assert _alibaba_models_cache["timestamp"] is None
 
     def test_quota_error_backoff_skips_api_calls(self, monkeypatch):
         """Test that subsequent calls during backoff period skip API calls."""
@@ -343,3 +346,44 @@ class TestAlibabaQuotaErrorCaching:
         assert len(result) == 1
         assert _alibaba_models_cache["quota_error"] is False
         assert _alibaba_models_cache["quota_error_timestamp"] is None
+
+    def test_quota_error_backoff_not_overridden_by_cache_ttl(self, monkeypatch):
+        """Test that quota error backoff (15 min) is not overridden by cache TTL (1 hour).
+
+        This tests the fix for the bug where setting timestamp during quota error
+        would cause the cache to appear "fresh" for 1 hour, bypassing the 15-minute
+        backoff period.
+        """
+        from datetime import datetime, timezone, timedelta
+        from src.cache import _alibaba_models_cache
+        from src.services import models
+
+        _reset_region_state(monkeypatch)
+        monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", "test-key")
+
+        # Simulate a quota error that occurred 20 minutes ago (backoff should have expired)
+        backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
+        twenty_mins_ago = datetime.now(timezone.utc) - timedelta(seconds=1200)
+
+        _alibaba_models_cache["quota_error"] = True
+        _alibaba_models_cache["quota_error_timestamp"] = twenty_mins_ago
+        _alibaba_models_cache["data"] = []
+        # timestamp is None since we don't set it on quota error
+        _alibaba_models_cache["timestamp"] = None
+
+        call_count = 0
+
+        def fake_list_alibaba_models():
+            nonlocal call_count
+            call_count += 1
+            return types.SimpleNamespace(data=[types.SimpleNamespace(id="qwen-max")])
+
+        monkeypatch.setattr(acc, "list_alibaba_models", fake_list_alibaba_models)
+
+        # This should trigger a new API call because:
+        # 1. Cache has no timestamp, so appears stale to get_cached_models
+        # 2. Quota error backoff (15 min) has expired (20 min ago)
+        result = models.fetch_models_from_alibaba()
+
+        assert call_count == 1, "should call API after quota error backoff expires"
+        assert len(result) == 1

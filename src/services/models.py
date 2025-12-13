@@ -3437,11 +3437,19 @@ def _is_alibaba_quota_error_cached() -> bool:
 
 
 def _set_alibaba_quota_error():
-    """Record a quota error with backoff timing."""
+    """Record a quota error with backoff timing.
+
+    Note: We intentionally do NOT set the main cache timestamp here.
+    This ensures that the cache appears "stale" so that get_cached_models()
+    will call fetch_models_from_alibaba(), where the quota error backoff
+    check (_is_alibaba_quota_error_cached) is evaluated. If we set timestamp,
+    the 1-hour cache TTL would override our 15-minute quota error backoff.
+    """
     _alibaba_models_cache["quota_error"] = True
     _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
     _alibaba_models_cache["data"] = []
-    _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+    # Don't set timestamp - let the cache appear stale so fetch_models_from_alibaba
+    # is called and can check the quota_error_backoff
 
 
 def _clear_alibaba_quota_error():
