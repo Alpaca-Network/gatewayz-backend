@@ -20,8 +20,6 @@ Model ID Format:
 import logging
 from datetime import datetime, timezone
 
-import httpx
-
 from src.cache import _clarifai_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
@@ -171,33 +169,25 @@ def fetch_models_from_clarifai():
             return _cache_and_return([])
 
         logger.info("Fetching models from Clarifai API...")
-        headers = {
-            "Authorization": f"Key {Config.CLARIFAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
 
-        # Use the OpenAI-compatible models endpoint
-        response = httpx.get(
-            "https://api.clarifai.com/v2/ext/openai/v1/models",
-            headers=headers,
-            timeout=10.0
-        )
-        response.raise_for_status()
+        # Use the pooled OpenAI client for consistency with the rest of the module
+        client = get_clarifai_pooled_client()
+        models_response = client.models.list()
 
-        models_data = response.json()
-        models = models_data.get("data", [])
+        # Convert to list format
+        models = list(models_response)
         logger.debug(f"Clarifai API returned {len(models)} models")
 
         # Transform to our standard format
         transformed_models = []
         for model in models:
-            model_id = model.get("id", "")
-            context_length = model.get("context_length") or model.get("context_window", 4096)
+            model_id = getattr(model, "id", "") or ""
+            context_length = getattr(model, "context_length", None) or getattr(model, "context_window", 4096)
             transformed_model = {
                 "id": model_id,
                 "slug": f"clarifai/{model_id}",
                 "canonical_slug": f"clarifai/{model_id}",
-                "name": model.get("id", "Unknown Model"),
+                "name": model_id or "Unknown Model",
                 "description": f"Clarifai model: {model_id}",
                 "context_length": context_length,
                 "architecture": {
@@ -219,11 +209,6 @@ def fetch_models_from_clarifai():
         logger.info(f"Successfully fetched {len(transformed_models)} models from Clarifai")
         return _cache_and_return(transformed_models)
 
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            f"HTTP error fetching Clarifai models: {e.response.status_code} - {e.response.text[:200] if e.response.text else 'No response body'}"
-        )
-        return _cache_and_return([])
     except Exception as e:
         logger.error(f"Failed to fetch models from Clarifai: {type(e).__name__}: {e}")
         return _cache_and_return([])
