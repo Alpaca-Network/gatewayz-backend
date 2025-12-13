@@ -126,7 +126,7 @@ for folder in "${SYNC_FOLDERS[@]}"; do
     # Perform sync with rsync
     # Options:
     #   -a : archive mode (preserves permissions, timestamps, etc.)
-    #   -v : verbose
+    #   -h : human-readable
     #   -h : human-readable
     #   --delete : delete files in target that don't exist in source
     #   --exclude : exclude certain patterns
