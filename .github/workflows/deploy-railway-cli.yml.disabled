@@ -26,7 +26,7 @@ jobs:
   # Determine deployment environment
   setup:
     name: Setup Deployment
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     outputs:
       environment: ${{ steps.determine-env.outputs.environment }}
@@ -62,7 +62,7 @@ jobs:
   # Checkout and setup
   checkout-and-setup:
     name: Checkout & Setup
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: setup
     if: needs.setup.outputs.should_deploy == 'true'
 
@@ -91,7 +91,7 @@ jobs:
   # Install dependencies
   install-dependencies:
     name: Install Dependencies
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: checkout-and-setup
 
     steps:
@@ -120,7 +120,7 @@ jobs:
   # Run tests
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: install-dependencies
 
     steps:
@@ -172,7 +172,7 @@ jobs:
   # Build verification
   build:
     name: Build Verification
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test
 
     steps:
@@ -234,7 +234,7 @@ jobs:
   # Deploy to Railway using CLI
   deploy:
     name: Deploy to Railway
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup, build]
     if: needs.setup.outputs.should_deploy == 'true'
     environment:
@@ -313,7 +313,7 @@ jobs:
   # Post-deployment health check
   health-check:
     name: Health Check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup, deploy]
     if: always() && needs.setup.outputs.should_deploy == 'true'
 
@@ -374,7 +374,7 @@ jobs:
   # Deployment summary
   summary:
     name: Deployment Summary
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup, health-check]
     if: always() && needs.setup.outputs.should_deploy == 'true'
 
