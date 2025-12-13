@@ -101,7 +101,7 @@ else
                 echo "Fetching logs for service: $SERVICE_ID"
 
                 # Fetch deployment logs (Railway GraphQL API)
-                LOGS_QUERY='{"query": "query deploymentLogs($serviceId: String!, $limit: Int) { deploymentLogs(serviceId: $serviceId, limit: $limit) { timestamp message severity } }", "variables": {"serviceId": "'$SERVICE_ID'", "limit": 100}}'
+                LOGS_QUERY=$(jq -n --arg serviceId "$SERVICE_ID" '{"query": "query deploymentLogs($serviceId: String!, $limit: Int) { deploymentLogs(serviceId: $serviceId, limit: $limit) { timestamp message severity } }", "variables": {"serviceId": $serviceId, "limit": 100}}')
 
                 LOGS_RESPONSE=$(curl -s -X POST \
                     "https://backboard.railway.app/graphql/v2" \
