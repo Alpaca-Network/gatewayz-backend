@@ -18,7 +18,12 @@ Model ID Format:
 """
 
 import logging
+from datetime import datetime, timezone
 
+import httpx
+
+from src.cache import _clarifai_models_cache
+from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_clarifai_pooled_client
 
@@ -143,3 +148,78 @@ def process_clarifai_response(response):
     except Exception as e:
         logger.error(f"Failed to process Clarifai response: {e}")
         raise
+
+
+def fetch_models_from_clarifai():
+    """Fetch models from Clarifai API
+
+    Clarifai provides access to multiple AI models through their OpenAI-compatible API.
+    This function fetches the list of available models from their endpoint.
+
+    Models are cached with a 1-hour TTL to reduce API calls and improve performance.
+    """
+
+    def _cache_and_return(models: list[dict]) -> list[dict]:
+        """Cache models and return them"""
+        _clarifai_models_cache["data"] = models
+        _clarifai_models_cache["timestamp"] = datetime.now(timezone.utc)
+        return models
+
+    try:
+        if not Config.CLARIFAI_API_KEY:
+            logger.warning("Clarifai API key not configured, cannot fetch models")
+            return _cache_and_return([])
+
+        headers = {
+            "Authorization": f"Key {Config.CLARIFAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        # Use the OpenAI-compatible models endpoint
+        response = httpx.get(
+            "https://api.clarifai.com/v2/ext/openai/v1/models",
+            headers=headers,
+            timeout=10.0
+        )
+        response.raise_for_status()
+
+        models_data = response.json()
+        models = models_data.get("data", [])
+
+        # Transform to our standard format
+        transformed_models = []
+        for model in models:
+            model_id = model.get("id", "")
+            context_length = model.get("context_length") or model.get("context_window", 4096)
+            transformed_model = {
+                "id": model_id,
+                "slug": f"clarifai/{model_id}",
+                "canonical_slug": f"clarifai/{model_id}",
+                "name": model.get("id", "Unknown Model"),
+                "description": f"Clarifai model: {model_id}",
+                "context_length": context_length,
+                "architecture": {
+                    "modality": "text->text",
+                    "input_modalities": ["text"],
+                    "output_modalities": ["text"],
+                },
+                "pricing": {
+                    "prompt": "0",
+                    "completion": "0",
+                    "request": "0",
+                    "image": "0",
+                },
+                "provider_slug": "clarifai",
+                "source_gateway": "clarifai",
+            }
+            transformed_models.append(transformed_model)
+
+        logger.info(f"Successfully fetched {len(transformed_models)} models from Clarifai")
+        return _cache_and_return(transformed_models)
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error fetching Clarifai models: {e}")
+        return _cache_and_return([])
+    except Exception as e:
+        logger.error(f"Failed to fetch models from Clarifai: {e}")
+        return _cache_and_return([])
