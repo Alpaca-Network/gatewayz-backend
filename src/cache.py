@@ -174,6 +174,9 @@ _alibaba_models_cache = {
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Alibaba Cloud catalog
     "stale_ttl": 7200,
+    "quota_error": False,  # Track if quota error occurred
+    "quota_error_timestamp": None,  # When the quota error was recorded
+    "quota_error_backoff": 900,  # 15 minutes backoff for quota errors
 }
 
 _onerouter_models_cache = {
