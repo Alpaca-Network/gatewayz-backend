@@ -15,7 +15,7 @@ import pytest
 from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Import the chat_history module which contains feedback endpoints
 MODULE_PATH = "src.routes.chat_history"
