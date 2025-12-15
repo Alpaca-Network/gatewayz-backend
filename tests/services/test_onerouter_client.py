@@ -262,6 +262,15 @@ class TestParseTokenLimit:
 
         assert _parse_token_limit(None) == 4096
 
+    def test_parse_token_limit_invalid_string(self):
+        """Test parsing invalid string values returns default"""
+        from src.services.onerouter_client import _parse_token_limit
+
+        assert _parse_token_limit("") == 4096
+        assert _parse_token_limit("unlimited") == 4096
+        assert _parse_token_limit("N/A") == 4096
+        assert _parse_token_limit("abc") == 4096
+
 
 class TestParsePricing:
     """Test _parse_pricing helper function"""
@@ -419,6 +428,68 @@ class TestFetchModelsFromOneRouter:
             # Should use retail pricing when sale is $0
             assert models[0]["pricing"]["prompt"] == "2.50"
             assert models[0]["pricing"]["completion"] == "10.00"
+
+    def test_fetch_models_pricing_fallback_decimal_zero(self):
+        """Test that retail pricing is used when sale pricing is $0.00 or 0.0"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+
+        mock_models_response = {
+            "data": [
+                {
+                    "name": "test-model",
+                    "invoke_name": "test-model",
+                    "sale_input_cost": "$0.00",
+                    "sale_output_cost": "0.0",
+                    "retail_input_cost": "$1.50",
+                    "retail_output_cost": "$5.00",
+                    "input_token_limit": "100000",
+                    "output_token_limit": "8192",
+                    "input_modalities": "Text",
+                    "output_modalities": "Text"
+                }
+            ]
+        }
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            mock_response = Mock()
+            mock_response.json.return_value = mock_models_response
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            models = fetch_models_from_onerouter()
+
+            # Should use retail pricing when sale is $0.00 or 0.0
+            assert models[0]["pricing"]["prompt"] == "1.50"
+            assert models[0]["pricing"]["completion"] == "5.00"
+
+    def test_fetch_models_handles_null_modalities(self):
+        """Test that null modalities from API are handled gracefully"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+
+        mock_models_response = {
+            "data": [
+                {
+                    "name": "test-model",
+                    "invoke_name": "test-model",
+                    "input_token_limit": "4096",
+                    "output_token_limit": "4096",
+                    "input_modalities": None,
+                    "output_modalities": None
+                }
+            ]
+        }
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            mock_response = Mock()
+            mock_response.json.return_value = mock_models_response
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            models = fetch_models_from_onerouter()
+
+            # Should default to text modality
+            assert models[0]["architecture"]["modality"] == "text->text"
+            assert "text" in models[0]["architecture"]["input_modalities"]
 
     def test_fetch_models_skip_empty_model_id(self):
         """Test that models without invoke_name or name are skipped"""

@@ -127,8 +127,11 @@ def _parse_token_limit(value) -> int:
     if isinstance(value, int):
         return value
     if isinstance(value, str):
-        # Remove commas and convert to int
-        return int(value.replace(",", ""))
+        try:
+            # Remove commas and convert to int
+            return int(value.replace(",", ""))
+        except ValueError:
+            return 4096
     return 4096
 
 
@@ -189,9 +192,9 @@ def fetch_models_from_onerouter():
             input_token_limit = _parse_token_limit(model.get("input_token_limit"))
             output_token_limit = _parse_token_limit(model.get("output_token_limit"))
 
-            # Parse input/output modalities
-            input_modalities_str = model.get("input_modalities", "Text")
-            output_modalities_str = model.get("output_modalities", "Text")
+            # Parse input/output modalities (handle null values from API)
+            input_modalities_str = model.get("input_modalities") or "Text"
+            output_modalities_str = model.get("output_modalities") or "Text"
             input_modalities = [m.strip().lower() for m in input_modalities_str.split(",")]
             output_modalities = [m.strip().lower() for m in output_modalities_str.split(",")]
 
@@ -203,11 +206,17 @@ def fetch_models_from_onerouter():
             prompt_price = _parse_pricing(model.get("sale_input_cost"))
             completion_price = _parse_pricing(model.get("sale_output_cost"))
 
-            # If sale price is 0, use retail price
-            if prompt_price == "0":
-                prompt_price = _parse_pricing(model.get("retail_input_cost"))
-            if completion_price == "0":
-                completion_price = _parse_pricing(model.get("retail_output_cost"))
+            # If sale price is 0 (handles "0", "0.0", "0.00", etc.), use retail price
+            try:
+                if float(prompt_price) == 0:
+                    prompt_price = _parse_pricing(model.get("retail_input_cost"))
+            except ValueError:
+                pass
+            try:
+                if float(completion_price) == 0:
+                    completion_price = _parse_pricing(model.get("retail_output_cost"))
+            except ValueError:
+                pass
 
             transformed_model = {
                 "id": model_id,
