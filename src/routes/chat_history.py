@@ -13,6 +13,14 @@ from src.db.chat_history import (
     search_chat_sessions,
     update_chat_session,
 )
+from src.db.feedback import (
+    delete_feedback,
+    get_feedback_by_session,
+    get_feedback_stats,
+    get_user_feedback,
+    save_message_feedback,
+    update_feedback,
+)
 from src.services.user_lookup_cache import get_user
 from src.services.background_tasks import log_activity_background
 from src.schemas.chat import (
@@ -20,7 +28,11 @@ from src.schemas.chat import (
     ChatSessionsListResponse,
     ChatSessionStatsResponse,
     CreateChatSessionRequest,
+    FeedbackStatsResponse,
+    MessageFeedbackListResponse,
+    MessageFeedbackResponse,
     SaveChatMessageRequest,
+    SaveMessageFeedbackRequest,
     SearchChatSessionsRequest,
     UpdateChatSessionRequest,
 )
@@ -381,4 +393,335 @@ async def save_messages_batch(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to batch save messages: {str(e)}"
+        ) from e
+
+
+# =====================================================
+# Message Feedback Endpoints
+# =====================================================
+
+
+@router.post("/feedback", response_model=MessageFeedbackResponse)
+async def submit_feedback(
+    request: SaveMessageFeedbackRequest,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Submit feedback for a chat message (thumbs up, thumbs down, etc.)
+
+    This endpoint allows users to provide feedback on assistant responses.
+    Feedback can be associated with a specific session and/or message,
+    or submitted standalone for general feedback.
+
+    Feedback types:
+    - thumbs_up: User found the response helpful
+    - thumbs_down: User found the response unhelpful
+    - regenerate: User requested a new response
+
+    Optional fields:
+    - rating: 1-5 star rating
+    - comment: Text feedback
+    - model: The model that generated the response
+    - metadata: Additional context (response content, prompt, etc.)
+    """
+    start_time = time.time()
+    try:
+        # Get user (cached)
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Validate feedback type
+        valid_types = {"thumbs_up", "thumbs_down", "regenerate"}
+        if request.feedback_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid feedback_type. Must be one of: {', '.join(valid_types)}",
+            )
+
+        # Validate rating if provided
+        if request.rating is not None and (request.rating < 1 or request.rating > 5):
+            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+
+        # If session_id provided, verify it belongs to user
+        if request.session_id is not None:
+            session = get_chat_session(request.session_id, user["id"])
+            if not session:
+                raise HTTPException(status_code=404, detail="Chat session not found")
+
+        # Save feedback
+        feedback = save_message_feedback(
+            user_id=user["id"],
+            feedback_type=request.feedback_type,
+            session_id=request.session_id,
+            message_id=request.message_id,
+            rating=request.rating,
+            comment=request.comment,
+            model=request.model,
+            metadata=request.metadata,
+        )
+
+        # Log feedback activity in background
+        try:
+            log_activity_background(
+                user_id=user["id"],
+                model=request.model or "feedback",
+                provider="Chat Feedback",
+                tokens=0,
+                cost=0.0,
+                speed=0.0,
+                finish_reason="feedback_submitted",
+                app="Chat",
+                metadata={
+                    "action": "submit_feedback",
+                    "feedback_id": feedback["id"],
+                    "feedback_type": request.feedback_type,
+                    "session_id": request.session_id,
+                    "message_id": request.message_id,
+                    "has_comment": request.comment is not None,
+                    "has_rating": request.rating is not None,
+                },
+            )
+        except Exception as e:
+            logger.error(f"Failed to log feedback activity: {e}")
+            # Don't fail the request if logging fails
+
+        total_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"Feedback {feedback['id']} ({request.feedback_type}) saved for user {user['id']} "
+            f"in {total_ms:.1f}ms"
+        )
+
+        return MessageFeedbackResponse(
+            success=True,
+            data=feedback,
+            message=f"Feedback ({request.feedback_type}) submitted successfully",
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Failed to submit feedback: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to submit feedback: {str(e)}"
+        ) from e
+
+
+@router.get("/feedback", response_model=MessageFeedbackListResponse)
+async def get_my_feedback(
+    api_key: str = Depends(get_api_key),
+    feedback_type: str | None = Query(None, description="Filter by feedback type"),
+    session_id: int | None = Query(None, description="Filter by session ID"),
+    model: str | None = Query(None, description="Filter by model name"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Get the authenticated user's feedback history.
+
+    Supports filtering by:
+    - feedback_type: 'thumbs_up', 'thumbs_down', 'regenerate'
+    - session_id: specific chat session
+    - model: specific model name
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        feedback_list = get_user_feedback(
+            user_id=user["id"],
+            feedback_type=feedback_type,
+            session_id=session_id,
+            model=model,
+            limit=limit,
+            offset=offset,
+        )
+
+        logger.info(f"Retrieved {len(feedback_list)} feedback records for user {user['id']}")
+
+        return MessageFeedbackListResponse(
+            success=True,
+            data=feedback_list,
+            count=len(feedback_list),
+            message=f"Retrieved {len(feedback_list)} feedback records",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get feedback: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get feedback: {str(e)}"
+        ) from e
+
+
+@router.get("/feedback/stats", response_model=FeedbackStatsResponse)
+async def get_my_feedback_stats(
+    api_key: str = Depends(get_api_key),
+    model: str | None = Query(None, description="Filter by model name"),
+    days: int = Query(30, ge=1, le=365, description="Number of days to aggregate"),
+):
+    """
+    Get aggregated feedback statistics for the authenticated user.
+
+    Returns:
+    - Total feedback count
+    - Thumbs up/down counts and rates
+    - Average rating (if ratings provided)
+    - Breakdown by model
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        stats = get_feedback_stats(user_id=user["id"], model=model, days=days)
+
+        logger.info(f"Retrieved feedback stats for user {user['id']}")
+
+        return FeedbackStatsResponse(
+            success=True,
+            stats=stats,
+            message="Feedback statistics retrieved successfully",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get feedback stats: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get feedback stats: {str(e)}"
+        ) from e
+
+
+@router.get("/sessions/{session_id}/feedback", response_model=MessageFeedbackListResponse)
+async def get_session_feedback(
+    session_id: int,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Get all feedback for a specific chat session.
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Verify session belongs to user
+        session = get_chat_session(session_id, user["id"])
+        if not session:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+
+        feedback_list = get_feedback_by_session(session_id, user["id"])
+
+        logger.info(
+            f"Retrieved {len(feedback_list)} feedback records for session {session_id}"
+        )
+
+        return MessageFeedbackListResponse(
+            success=True,
+            data=feedback_list,
+            count=len(feedback_list),
+            message=f"Retrieved {len(feedback_list)} feedback records for session",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get session feedback: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get session feedback: {str(e)}"
+        ) from e
+
+
+@router.put("/feedback/{feedback_id}", response_model=MessageFeedbackResponse)
+async def update_my_feedback(
+    feedback_id: int,
+    request: SaveMessageFeedbackRequest,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Update an existing feedback record.
+
+    Only the feedback_type, rating, and comment can be updated.
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Validate feedback type if provided
+        if request.feedback_type:
+            valid_types = {"thumbs_up", "thumbs_down", "regenerate"}
+            if request.feedback_type not in valid_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid feedback_type. Must be one of: {', '.join(valid_types)}",
+                )
+
+        # Validate rating if provided
+        if request.rating is not None and (request.rating < 1 or request.rating > 5):
+            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+
+        feedback = update_feedback(
+            feedback_id=feedback_id,
+            user_id=user["id"],
+            feedback_type=request.feedback_type,
+            rating=request.rating,
+            comment=request.comment,
+        )
+
+        if not feedback:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+
+        logger.info(f"Updated feedback {feedback_id} for user {user['id']}")
+
+        return MessageFeedbackResponse(
+            success=True,
+            data=feedback,
+            message="Feedback updated successfully",
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Failed to update feedback: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update feedback: {str(e)}"
+        ) from e
+
+
+@router.delete("/feedback/{feedback_id}")
+async def delete_my_feedback(
+    feedback_id: int,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Delete a feedback record.
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        success = delete_feedback(feedback_id, user["id"])
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+
+        logger.info(f"Deleted feedback {feedback_id} for user {user['id']}")
+
+        return {"success": True, "message": "Feedback deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete feedback: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete feedback: {str(e)}"
         ) from e
