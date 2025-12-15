@@ -75,7 +75,10 @@ def parse_token_limit(value):
     if isinstance(value, int):
         return value
     if isinstance(value, str):
-        return int(value.replace(",", ""))
+        try:
+            return int(value.replace(",", ""))
+        except ValueError:
+            return 4096
     return 4096
 
 
