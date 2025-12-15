@@ -431,17 +431,9 @@ async def submit_feedback(
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
-        # Validate feedback type
-        valid_types = {"thumbs_up", "thumbs_down", "regenerate"}
-        if request.feedback_type not in valid_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid feedback_type. Must be one of: {', '.join(valid_types)}",
-            )
-
-        # Validate rating if provided
-        if request.rating is not None and (request.rating < 1 or request.rating > 5):
-            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+        # Note: feedback_type and rating are validated by Pydantic schema
+        # feedback_type uses Literal["thumbs_up", "thumbs_down", "regenerate"]
+        # rating uses Field(ge=1, le=5)
 
         # If session_id provided, verify it belongs to user
         if request.session_id is not None:
@@ -653,18 +645,7 @@ async def update_my_feedback(
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
-        # Validate feedback type if provided
-        if request.feedback_type:
-            valid_types = {"thumbs_up", "thumbs_down", "regenerate"}
-            if request.feedback_type not in valid_types:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid feedback_type. Must be one of: {', '.join(valid_types)}",
-                )
-
-        # Validate rating if provided
-        if request.rating is not None and (request.rating < 1 or request.rating > 5):
-            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+        # Note: feedback_type and rating are validated by Pydantic schema
 
         feedback = update_feedback(
             feedback_id=feedback_id,

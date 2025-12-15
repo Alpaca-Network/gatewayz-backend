@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # Chat History Models
@@ -69,13 +69,16 @@ class SaveChatMessageRequest(BaseModel):
 
 
 # Message Feedback Models
+FeedbackType = Literal["thumbs_up", "thumbs_down", "regenerate"]
+
+
 class MessageFeedback(BaseModel):
     id: int | None = None
     session_id: int | None = None
     message_id: int | None = None
     user_id: int
-    feedback_type: str  # 'thumbs_up', 'thumbs_down', 'regenerate'
-    rating: int | None = None  # 1-5 star rating (optional)
+    feedback_type: FeedbackType
+    rating: int | None = Field(default=None, ge=1, le=5)
     comment: str | None = None
     model: str | None = None
     metadata: dict[str, Any] | None = None
@@ -86,11 +89,11 @@ class MessageFeedback(BaseModel):
 class SaveMessageFeedbackRequest(BaseModel):
     session_id: int | None = None
     message_id: int | None = None
-    feedback_type: str  # 'thumbs_up', 'thumbs_down', 'regenerate'
-    rating: int | None = None  # 1-5 star rating (optional)
+    feedback_type: FeedbackType
+    rating: int | None = Field(default=None, ge=1, le=5)
     comment: str | None = None
     model: str | None = None
-    metadata: dict[str, Any] | None = None  # Additional context (response content, etc.)
+    metadata: dict[str, Any] | None = None
 
 
 class MessageFeedbackResponse(BaseModel):

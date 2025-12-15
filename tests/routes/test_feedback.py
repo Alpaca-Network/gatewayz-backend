@@ -168,34 +168,28 @@ def test_submit_regenerate_feedback(
     assert data["data"]["feedback_type"] == "regenerate"
 
 
-@patch("src.routes.chat_history.get_user")
-def test_submit_feedback_invalid_type(mock_get_user, client, auth_headers, mock_user):
-    """Test submitting feedback with invalid type returns 400"""
-    mock_get_user.return_value = mock_user
-
+def test_submit_feedback_invalid_type(client, auth_headers):
+    """Test submitting feedback with invalid type returns 422 (Pydantic validation)"""
     response = client.post(
         "/v1/chat/feedback",
         json={"feedback_type": "invalid_type"},
         headers=auth_headers,
     )
 
-    assert response.status_code == 400
-    assert "Invalid feedback_type" in response.json()["detail"]
+    # Pydantic returns 422 for validation errors
+    assert response.status_code == 422
 
 
-@patch("src.routes.chat_history.get_user")
-def test_submit_feedback_invalid_rating(mock_get_user, client, auth_headers, mock_user):
-    """Test submitting feedback with invalid rating returns 400"""
-    mock_get_user.return_value = mock_user
-
+def test_submit_feedback_invalid_rating(client, auth_headers):
+    """Test submitting feedback with invalid rating returns 422 (Pydantic validation)"""
     response = client.post(
         "/v1/chat/feedback",
         json={"feedback_type": "thumbs_up", "rating": 6},
         headers=auth_headers,
     )
 
-    assert response.status_code == 400
-    assert "Rating must be between 1 and 5" in response.json()["detail"]
+    # Pydantic returns 422 for validation errors
+    assert response.status_code == 422
 
 
 @patch("src.routes.chat_history.get_chat_session")
@@ -462,19 +456,16 @@ def test_update_feedback_not_found(
     assert "Feedback not found" in response.json()["detail"]
 
 
-@patch("src.routes.chat_history.get_user")
-def test_update_feedback_invalid_type(mock_get_user, client, auth_headers, mock_user):
-    """Test updating feedback with invalid type returns 400"""
-    mock_get_user.return_value = mock_user
-
+def test_update_feedback_invalid_type(client, auth_headers):
+    """Test updating feedback with invalid type returns 422 (Pydantic validation)"""
     response = client.put(
         "/v1/chat/feedback/1",
         json={"feedback_type": "invalid"},
         headers=auth_headers,
     )
 
-    assert response.status_code == 400
-    assert "Invalid feedback_type" in response.json()["detail"]
+    # Pydantic returns 422 for validation errors
+    assert response.status_code == 422
 
 
 # =========================

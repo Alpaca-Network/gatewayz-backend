@@ -470,7 +470,7 @@ def get_feedback_stats(
             m = f.get("model") or "unknown"
             if m not in by_model:
                 by_model[m] = {"thumbs_up": 0, "thumbs_down": 0, "regenerate": 0, "total": 0}
-            by_model[m][f["feedback_type"]] = by_model[m].get(f["feedback_type"], 0) + 1
+            by_model[m][f["feedback_type"]] += 1
             by_model[m]["total"] += 1
 
         stats = {
