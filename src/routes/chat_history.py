@@ -35,6 +35,7 @@ from src.schemas.chat import (
     SaveMessageFeedbackRequest,
     SearchChatSessionsRequest,
     UpdateChatSessionRequest,
+    UpdateMessageFeedbackRequest,
 )
 from pydantic import BaseModel
 from src.security.deps import get_api_key
@@ -632,13 +633,13 @@ async def get_session_feedback(
 @router.put("/feedback/{feedback_id}", response_model=MessageFeedbackResponse)
 async def update_my_feedback(
     feedback_id: int,
-    request: SaveMessageFeedbackRequest,
+    request: UpdateMessageFeedbackRequest,
     api_key: str = Depends(get_api_key),
 ):
     """
     Update an existing feedback record.
 
-    Only the feedback_type, rating, and comment can be updated.
+    All fields are optional - only provided fields will be updated.
     """
     try:
         user = get_user(api_key)

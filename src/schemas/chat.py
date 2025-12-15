@@ -96,6 +96,14 @@ class SaveMessageFeedbackRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class UpdateMessageFeedbackRequest(BaseModel):
+    """Request schema for updating feedback - all fields are optional."""
+
+    feedback_type: FeedbackType | None = None
+    rating: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = None
+
+
 class MessageFeedbackResponse(BaseModel):
     success: bool
     data: MessageFeedback | None = None
