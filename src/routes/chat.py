@@ -2419,6 +2419,13 @@ async def unified_responses(
                                 transformed_content.append(
                                     {"type": "text", "text": item.get("text", "")}
                                 )
+                            elif item.get("type") == "output_text":
+                                # Transform Responses API output_text to standard text format
+                                # This handles cases where clients send assistant messages with
+                                # output_text content type from previous response conversations
+                                transformed_content.append(
+                                    {"type": "text", "text": item.get("text", "")}
+                                )
                             elif item.get("type") == "input_image_url":
                                 transformed_content.append(
                                     {"type": "image_url", "image_url": item.get("image_url", {})}
@@ -2427,8 +2434,9 @@ async def unified_responses(
                                 # Already in correct format
                                 transformed_content.append(item)
                             else:
-                                logger.warning(f"Unknown content type: {item.get('type')}")
-                                transformed_content.append(item)
+                                logger.warning(f"Unknown content type: {item.get('type')}, skipping")
+                                # Skip unknown types instead of passing them through to avoid
+                                # provider API errors like "Unexpected content chunk type"
                         else:
                             logger.warning(f"Invalid content item (not a dict): {type(item)}")
 
