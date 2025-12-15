@@ -364,6 +364,23 @@ def test_get_feedback_by_session(sb):
     assert all(f["session_id"] == 100 for f in feedback_list)
 
 
+def test_get_feedback_by_message(sb):
+    import src.db.feedback as fb
+
+    fb.save_message_feedback(user_id=1, feedback_type="thumbs_up", message_id=500)
+    fb.save_message_feedback(user_id=1, feedback_type="thumbs_down", message_id=500)
+    fb.save_message_feedback(user_id=2, feedback_type="thumbs_up", message_id=500)
+
+    # Get all feedback for message 500
+    feedback_list = fb.get_feedback_by_message(message_id=500)
+    assert len(feedback_list) == 3
+
+    # Get only user 1's feedback for message 500
+    feedback_list = fb.get_feedback_by_message(message_id=500, user_id=1)
+    assert len(feedback_list) == 2
+    assert all(f["user_id"] == 1 for f in feedback_list)
+
+
 # =========================
 # Tests: Update Feedback
 # =========================
