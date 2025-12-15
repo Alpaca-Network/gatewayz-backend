@@ -386,7 +386,9 @@ class TestFetchModelsFromOneRouter:
 
             # Verify models were returned
             assert len(models) == 2
-            assert models[0]["id"] == "gemini-2.0-flash"
+            # Model IDs should have onerouter/ prefix for proper UI grouping
+            assert models[0]["id"] == "onerouter/gemini-2.0-flash"
+            assert models[0]["slug"] == "gemini-2.0-flash"  # slug remains without prefix
             assert models[0]["context_length"] == 1048576
             assert models[0]["max_completion_tokens"] == 8192
             assert models[0]["pricing"]["prompt"] == "0.10"
@@ -394,7 +396,8 @@ class TestFetchModelsFromOneRouter:
             assert "images" in models[0]["architecture"]["input_modalities"]
             assert models[0]["architecture"]["modality"] == "text+image->text"
 
-            assert models[1]["id"] == "deepseek-v3-250324"
+            assert models[1]["id"] == "onerouter/deepseek-v3-250324"
+            assert models[1]["slug"] == "deepseek-v3-250324"  # slug remains without prefix
             assert models[1]["context_length"] == 16384
             assert models[1]["max_completion_tokens"] == 65536
             assert models[1]["pricing"]["prompt"] == "1.14"
@@ -571,7 +574,8 @@ class TestFetchModelsFromOneRouter:
 
             # Only valid model should be included
             assert len(models) == 1
-            assert models[0]["id"] == "valid-model"
+            assert models[0]["id"] == "onerouter/valid-model"
+            assert models[0]["slug"] == "valid-model"
 
     def test_fetch_models_http_error_with_caching(self):
         """Test HTTP error handling and verify cache is still updated"""

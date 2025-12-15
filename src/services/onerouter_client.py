@@ -221,8 +221,12 @@ def fetch_models_from_onerouter():
             # Get model name with proper fallback (handle None values)
             model_name = model.get("name") or model_id
 
+            # Build the full model ID with onerouter prefix for consistent display
+            # This ensures models are grouped under "OneRouter" in the UI
+            full_model_id = f"onerouter/{model_id}"
+
             transformed_model = {
-                "id": model_id,
+                "id": full_model_id,
                 "slug": model_id,
                 "canonical_slug": model_id,
                 "name": model_name,
