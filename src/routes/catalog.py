@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
@@ -62,7 +62,7 @@ DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
 DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
 
 
-def normalize_developer_segment(value: Optional[str]) -> Optional[str]:
+def normalize_developer_segment(value: str | None) -> str | None:
     """Align developer/provider identifiers with Hugging Face style slugs."""
     if value is None:
         return None
@@ -76,7 +76,7 @@ def normalize_developer_segment(value: Optional[str]) -> Optional[str]:
     return normalized
 
 
-def normalize_model_segment(value: Optional[str]) -> Optional[str]:
+def normalize_model_segment(value: str | None) -> str | None:
     """Normalize model identifiers without altering intentional casing."""
     if value is None:
         return None
@@ -86,7 +86,7 @@ def normalize_model_segment(value: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
-def annotate_provider_sources(providers: List[dict], source: str) -> List[dict]:
+def annotate_provider_sources(providers: list[dict], source: str) -> list[dict]:
     annotated = []
     for provider in providers or []:
         entry = provider.copy()
@@ -98,12 +98,12 @@ def annotate_provider_sources(providers: List[dict], source: str) -> List[dict]:
     return annotated
 
 
-def derive_providers_from_models(models: List[dict], gateway_name: str) -> List[dict]:
+def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[dict]:
     """
     Generic function to derive provider list from model list for any gateway.
     Used for gateways that don't have a dedicated provider endpoint.
     """
-    providers: Dict[str, dict] = {}
+    providers: dict[str, dict] = {}
     for model in models or []:
         # Try different fields to get provider name
         provider_slug = None
@@ -142,8 +142,8 @@ def derive_providers_from_models(models: List[dict], gateway_name: str) -> List[
     return list(providers.values())
 
 
-def merge_provider_lists(*provider_lists: List[List[dict]]) -> List[dict]:
-    merged: Dict[str, dict] = {}
+def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
+    merged: dict[str, dict] = {}
     for providers in provider_lists:
         for provider in providers or []:
             slug = provider.get("slug")
@@ -170,7 +170,7 @@ def merge_provider_lists(*provider_lists: List[List[dict]]) -> List[dict]:
     return list(merged.values())
 
 
-def merge_models_by_slug(*model_lists: List[dict]) -> List[dict]:
+def merge_models_by_slug(*model_lists: list[dict]) -> list[dict]:
     """Merge multiple model lists by slug, avoiding duplicates"""
     merged = []
     seen = set()
@@ -185,12 +185,12 @@ def merge_models_by_slug(*model_lists: List[dict]) -> List[dict]:
 
 
 # Provider and Models Information Endpoints
-@router.get("/v1/provider", tags=["providers"])
+@router.get("/provider", tags=["providers"])
 async def get_providers(
     moderated_only: bool = Query(False, description="Filter for moderated providers only"),
-    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
-    gateway: Optional[str] = Query(
+    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    gateway: str | None = Query(
         "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -203,7 +203,7 @@ async def get_providers(
             gateway_value = "hug"
 
         openrouter_models = []
-        provider_groups: List[List[dict]] = []
+        provider_groups: list[list[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             raw_providers = get_cached_providers()
@@ -259,7 +259,7 @@ async def get_providers(
 
         combined_providers = merge_provider_lists(*provider_groups)
 
-        models_for_counts: List[dict] = []
+        models_for_counts: list[dict] = []
         if gateway_value in ("openrouter", "all"):
             models_for_counts.extend(openrouter_models)
         # Add models from other gateways for counting
@@ -308,17 +308,17 @@ async def get_providers(
 
 
 async def get_models(
-    provider: Optional[str] = Query(None, description="Filter models by provider"),
-    is_private: Optional[bool] = Query(
+    provider: str | None = Query(None, description="Filter models by provider"),
+    is_private: bool | None = Query(
         None,
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
-    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -336,27 +336,27 @@ async def get_models(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
 
-        openrouter_models: List[dict] = []
-        featherless_models: List[dict] = []
-        deepinfra_models: List[dict] = []
-        chutes_models: List[dict] = []
-        groq_models: List[dict] = []
-        fireworks_models: List[dict] = []
-        together_models: List[dict] = []
-        google_models: List[dict] = []
-        cerebras_models: List[dict] = []
-        nebius_models: List[dict] = []
-        xai_models: List[dict] = []
-        novita_models: List[dict] = []
-        hug_models: List[dict] = []
-        aimo_models: List[dict] = []
-        near_models: List[dict] = []
-        fal_models: List[dict] = []
-        helicone_models: List[dict] = []
-        anannas_models: List[dict] = []
-        aihubmix_models: List[dict] = []
-        vercel_ai_gateway_models: List[dict] = []
-        alibaba_models: List[dict] = []
+        openrouter_models: list[dict] = []
+        featherless_models: list[dict] = []
+        deepinfra_models: list[dict] = []
+        chutes_models: list[dict] = []
+        groq_models: list[dict] = []
+        fireworks_models: list[dict] = []
+        together_models: list[dict] = []
+        google_models: list[dict] = []
+        cerebras_models: list[dict] = []
+        nebius_models: list[dict] = []
+        xai_models: list[dict] = []
+        novita_models: list[dict] = []
+        hug_models: list[dict] = []
+        aimo_models: list[dict] = []
+        near_models: list[dict] = []
+        fal_models: list[dict] = []
+        helicone_models: list[dict] = []
+        anannas_models: list[dict] = []
+        aihubmix_models: list[dict] = []
+        vercel_ai_gateway_models: list[dict] = []
+        alibaba_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -549,7 +549,7 @@ async def get_models(
                 # Instead of raising 503, return an empty but valid response
                 # This prevents the entire API from failing when a single provider is unavailable
 
-        provider_groups: List[List[dict]] = []
+        provider_groups: list[list[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
             providers = get_cached_providers()
@@ -802,7 +802,7 @@ async def get_specific_model(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -850,7 +850,7 @@ async def get_specific_model(
         detected_gateway = model_data.get("source_gateway", gateway or "all")
 
         # Get enhanced providers data for all gateways
-        provider_groups: List[List[dict]] = []
+        provider_groups: list[list[dict]] = []
 
         # Always try to get OpenRouter providers for cross-reference
         openrouter_providers = get_cached_providers()
@@ -931,10 +931,10 @@ async def get_specific_model(
 
 async def get_developer_models(
     developer_name: str,
-    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
-    gateway: Optional[str] = Query("all", description="Gateway: 'openrouter' or 'all'"),
+    gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
 ):
     """
     Get all models from a specific developer/provider (e.g., anthropic, openai, meta)
@@ -1040,10 +1040,10 @@ async def get_developer_models(
 # ==================== NEW: Gateway & Provider Statistics Endpoints ====================
 
 
-@router.get("/v1/provider/{provider_name}/stats", tags=["statistics"])
+@router.get("/provider/{provider_name}/stats", tags=["statistics"])
 async def get_provider_statistics(
     provider_name: str,
-    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL),
 ):
     """
@@ -1097,7 +1097,7 @@ async def get_provider_statistics(
         raise HTTPException(status_code=500, detail=f"Failed to get provider statistics: {str(e)}")
 
 
-@router.get("/v1/gateway/{gateway}/stats", tags=["statistics"])
+@router.get("/gateway/{gateway}/stats", tags=["statistics"])
 async def get_gateway_statistics(
     gateway: str, time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL)
 ):
@@ -1165,7 +1165,7 @@ async def get_gateway_statistics(
 
 
 async def get_trending_models_endpoint(
-    gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
+    gateway: str | None = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
     limit: int = Query(10, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=100),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
@@ -1225,7 +1225,7 @@ async def get_trending_models_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get trending models: {str(e)}")
 
 
-@router.get("/v1/gateways/summary", tags=["statistics"])
+@router.get("/gateways/summary", tags=["statistics"])
 async def get_all_gateways_summary_endpoint(
     time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL)
 ):
@@ -1267,7 +1267,7 @@ async def get_all_gateways_summary_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get gateways summary: {str(e)}")
 
 
-@router.get("/v1/provider/{provider_name}/top-models", tags=["statistics"])
+@router.get("/provider/{provider_name}/top-models", tags=["statistics"])
 async def get_provider_top_models_endpoint(
     provider_name: str,
     limit: int = Query(5, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=20),
@@ -1323,7 +1323,7 @@ async def get_provider_top_models_endpoint(
 async def compare_model_across_gateways(
     provider_name: str,
     model_name: str,
-    gateways: Optional[str] = Query("all", description="Comma-separated gateways or 'all'"),
+    gateways: str | None = Query("all", description="Comma-separated gateways or 'all'"),
 ):
     """
     Compare the same model across different gateways
@@ -1457,7 +1457,7 @@ async def compare_model_across_gateways(
 
 
 async def batch_compare_models(
-    model_ids: List[str] = Query(
+    model_ids: list[str] = Query(
         ..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"
     ),
     criteria: str = Query(
@@ -1574,22 +1574,21 @@ async def batch_compare_models(
 
 
 @router.get("/models", tags=["models"])
-@router.get("/v1/models", tags=["models"])
 async def get_all_models(
-    provider: Optional[str] = Query(None, description="Filter models by provider"),
-    is_private: Optional[bool] = Query(
+    provider: str | None = Query(None, description="Filter models by provider"),
+    is_private: bool | None = Query(
         None,
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
-    limit: Optional[int] = Query(
+    limit: int | None = Query(
         50, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 50 for fast load)"
     ),
-    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
         False,
         description="Include Hugging Face metrics for models that have hugging_face_id (slower, default: false)",
     ),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
@@ -1604,9 +1603,9 @@ async def get_all_models(
     )
 
 
-@router.get("/v1/models/trending", tags=["statistics"])
+@router.get("/models/trending", tags=["statistics"])
 async def get_trending_models_api(
-    gateway: Optional[str] = Query("all", description="Gateway filter or 'all'"),
+    gateway: str | None = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
     limit: int = Query(10, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=100),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
@@ -1619,9 +1618,80 @@ async def get_trending_models_api(
     )
 
 
+@router.get("/models/low-latency", tags=["models"])
+async def get_low_latency_models_api(
+    include_ultra_only: bool = Query(
+        False,
+        description="Only include ultra-low-latency models (<100ms response time)",
+    ),
+    include_alternatives: bool = Query(
+        True,
+        description="Include suggested fast alternatives for common model families",
+    ),
+):
+    """
+    Get models optimized for low latency.
+
+    Returns models with sub-500ms average response times based on production metrics.
+    Useful for real-time applications, chatbots, and latency-sensitive use cases.
+
+    **Ultra-low-latency models** (<100ms):
+    - groq/moonshotai/kimi-k2-instruct-0905 (29ms)
+    - groq/openai/gpt-oss-120b (74ms)
+
+    **Low-latency models** (<500ms):
+    - Groq models (fastest provider)
+    - Select OpenRouter models (gemini-flash, gemma, etc.)
+    - Fireworks optimized models
+    """
+    from src.services.request_prioritization import (
+        get_low_latency_models,
+        get_ultra_low_latency_models,
+        get_fastest_providers,
+        PROVIDER_LATENCY_TIERS,
+        suggest_low_latency_alternative,
+    )
+
+    if include_ultra_only:
+        models = get_ultra_low_latency_models()
+    else:
+        models = get_low_latency_models()
+
+    result = {
+        "models": models,
+        "count": len(models),
+        "providers_by_speed": get_fastest_providers(),
+        "provider_tiers": {
+            provider: {
+                "tier": tier,
+                "description": {
+                    1: "Ultra-fast (<100ms typical)",
+                    2: "Fast (100-500ms typical)",
+                    3: "Standard (500ms-2s typical)",
+                    4: "Variable (depends on model/load)",
+                }.get(tier, "Unknown"),
+            }
+            for provider, tier in PROVIDER_LATENCY_TIERS.items()
+        },
+    }
+
+    if include_alternatives:
+        result["alternatives"] = {
+            "claude": suggest_low_latency_alternative("claude"),
+            "gpt-4": suggest_low_latency_alternative("gpt-4"),
+            "gpt-3.5": suggest_low_latency_alternative("gpt-3.5"),
+            "llama": suggest_low_latency_alternative("llama"),
+            "mistral": suggest_low_latency_alternative("mistral"),
+            "gemini": suggest_low_latency_alternative("gemini"),
+            "deepseek-r1": suggest_low_latency_alternative("deepseek-r1"),
+        }
+
+    return result
+
+
 @router.post("/models/batch-compare", tags=["comparison"])
 async def batch_compare_models_api(
-    model_ids: List[str] = Query(
+    model_ids: list[str] = Query(
         ..., description="List of model IDs (e.g., ['openai/gpt-4', 'anthropic/claude-3'])"
     ),
     criteria: str = Query(
@@ -1631,11 +1701,11 @@ async def batch_compare_models_api(
     return await batch_compare_models(model_ids=model_ids, criteria=criteria)
 
 
-@router.get("/v1/models/{provider_name}/{model_name:path}/compare", tags=["comparison"])
+@router.get("/models/{provider_name}/{model_name:path}/compare", tags=["comparison"])
 async def compare_model_gateways_api(
     provider_name: str,
     model_name: str,
-    gateways: Optional[str] = Query("all", description="Comma-separated gateways or 'all'"),
+    gateways: str | None = Query("all", description="Comma-separated gateways or 'all'"),
 ):
     return await compare_model_across_gateways(
         provider_name=provider_name,
@@ -1644,12 +1714,12 @@ async def compare_model_gateways_api(
     )
 
 
-@router.get("/v1/models/{provider_name}/{model_name:path}", tags=["models"])
+@router.get("/models/{provider_name}/{model_name:path}", tags=["models"])
 async def get_specific_model_api(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1667,7 +1737,7 @@ async def get_specific_model_api_legacy(
     provider_name: str,
     model_name: str,
     include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
-    gateway: Optional[str] = Query(
+    gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
     ),
@@ -1681,13 +1751,13 @@ async def get_specific_model_api_legacy(
     )
 
 
-@router.get("/v1/models/{developer_name}", tags=["models"])
+@router.get("/models/{developer_name}", tags=["models"])
 async def get_developer_models_api(
     developer_name: str,
-    limit: Optional[int] = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: Optional[int] = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
-    gateway: Optional[str] = Query("all", description="Gateway: 'openrouter' or 'all'"),
+    gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
 ):
     return await get_developer_models(
         developer_name=developer_name,
@@ -1698,23 +1768,23 @@ async def get_developer_models_api(
     )
 
 
-@router.get("/v1/models/search", tags=["models"])
+@router.get("/models/search", tags=["models"])
 async def search_models(
-    q: Optional[str] = Query(
+    q: str | None = Query(
         None, description="Search query (searches in model name, provider, description)"
     ),
-    modality: Optional[str] = Query(
+    modality: str | None = Query(
         None, description="Filter by modality: text, image, audio, video, multimodal"
     ),
-    is_private: Optional[bool] = Query(
+    is_private: bool | None = Query(
         None,
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
-    min_context: Optional[int] = Query(None, description="Minimum context window size (tokens)"),
-    max_context: Optional[int] = Query(None, description="Maximum context window size (tokens)"),
-    min_price: Optional[float] = Query(None, description="Minimum price per token (USD)"),
-    max_price: Optional[float] = Query(None, description="Maximum price per token (USD)"),
-    gateway: Optional[str] = Query(
+    min_context: int | None = Query(None, description="Minimum context window size (tokens)"),
+    max_context: int | None = Query(None, description="Maximum context window size (tokens)"),
+    min_price: float | None = Query(None, description="Minimum price per token (USD)"),
+    max_price: float | None = Query(None, description="Maximum price per token (USD)"),
+    gateway: str | None = Query(
         "all",
         description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, helicone, aihubmix, vercel-ai-gateway, or all",
     ),
@@ -1921,7 +1991,7 @@ async def search_models(
 # Helper functions for model comparison
 
 
-def _calculate_recommendation(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _calculate_recommendation(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     """Calculate which gateway is recommended based on pricing"""
     available = [c for c in comparisons if c.get("available")]
 
@@ -1962,7 +2032,7 @@ def _calculate_recommendation(comparisons: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-def _calculate_savings(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _calculate_savings(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     """Calculate potential savings"""
     available = [c for c in comparisons if c.get("available") and c.get("pricing")]
 
@@ -2005,7 +2075,7 @@ def _calculate_savings(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _extract_price_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_price_comparison(models_data: list[dict[str, Any]]) -> dict[str, Any]:
     """Extract price comparison data"""
     prices = {}
     for item in models_data:
@@ -2016,7 +2086,7 @@ def _extract_price_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, An
     return prices
 
 
-def _extract_context_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_context_comparison(models_data: list[dict[str, Any]]) -> dict[str, Any]:
     """Extract context length comparison data"""
     contexts = {}
     for item in models_data:
@@ -2027,8 +2097,8 @@ def _extract_context_comparison(models_data: List[Dict[str, Any]]) -> Dict[str, 
 
 
 def _extract_availability_comparison(
-    models_data: List[Dict[str, Any]], all_gateways: List[str]
-) -> Dict[str, bool]:
+    models_data: list[dict[str, Any]], all_gateways: list[str]
+) -> dict[str, bool]:
     """Extract availability comparison data"""
     availability = dict.fromkeys(all_gateways, False)
     for item in models_data:
@@ -2043,7 +2113,7 @@ def _extract_availability_comparison(
 
 @router.get("/modelz/models")
 async def get_modelz_models(
-    is_graduated: Optional[bool] = Query(
+    is_graduated: bool | None = Query(
         None,
         description="Filter for graduated (singularity) models: true=graduated only, false=non-graduated only, null=all models",
     )
@@ -2123,7 +2193,7 @@ async def get_modelz_models(
 
 @router.get("/modelz/ids")
 async def get_modelz_model_ids_endpoint(
-    is_graduated: Optional[bool] = Query(
+    is_graduated: bool | None = Query(
         None,
         description="Filter for graduated models: true=graduated only, false=non-graduated only, null=all models",
     )
@@ -2175,7 +2245,7 @@ async def get_modelz_model_ids_endpoint(
 @router.get("/modelz/check/{model_id}")
 async def check_model_on_modelz(
     model_id: str,
-    is_graduated: Optional[bool] = Query(
+    is_graduated: bool | None = Query(
         None, description="Filter for graduated models when checking"
     ),
 ):
@@ -2234,9 +2304,9 @@ async def check_model_on_modelz(
 
 
 # HuggingFace Hub SDK Discovery Endpoints
-@router.get("/v1/huggingface/discovery", tags=["huggingface-discovery"])
+@router.get("/huggingface/discovery", tags=["huggingface-discovery"])
 async def discover_huggingface_models(
-    task: Optional[str] = Query(
+    task: str | None = Query(
         "text-generation",
         description="Filter by task type (e.g., 'text-generation', 'text2text-generation', 'conversational')",
     ),
@@ -2289,10 +2359,10 @@ async def discover_huggingface_models(
         )
 
 
-@router.get("/v1/huggingface/search", tags=["huggingface-discovery"])
+@router.get("/huggingface/search", tags=["huggingface-discovery"])
 async def search_huggingface_models_endpoint(
     q: str = Query(..., description="Search query (model name, description, etc.)", min_length=1),
-    task: Optional[str] = Query(None, description="Optional task filter"),
+    task: str | None = Query(None, description="Optional task filter"),
     limit: int = Query(20, description="Number of results to return", ge=1, le=100),
 ):
     """
@@ -2327,7 +2397,7 @@ async def search_huggingface_models_endpoint(
         )
 
 
-@router.get("/v1/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
+@router.get("/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
 async def get_huggingface_model_details_endpoint(
     model_id: str,
 ):
@@ -2365,7 +2435,7 @@ async def get_huggingface_model_details_endpoint(
         )
 
 
-@router.get("/v1/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
+@router.get("/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
 async def get_huggingface_model_card_endpoint(
     model_id: str,
 ):
@@ -2404,7 +2474,7 @@ async def get_huggingface_model_card_endpoint(
         )
 
 
-@router.get("/v1/huggingface/author/{author}/models", tags=["huggingface-discovery"])
+@router.get("/huggingface/author/{author}/models", tags=["huggingface-discovery"])
 async def list_author_models_endpoint(
     author: str,
     limit: int = Query(50, description="Number of models to return", ge=1, le=500),
@@ -2436,7 +2506,7 @@ async def list_author_models_endpoint(
         )
 
 
-@router.get("/v1/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
+@router.get("/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
 async def get_model_files_endpoint(
     model_id: str,
 ):

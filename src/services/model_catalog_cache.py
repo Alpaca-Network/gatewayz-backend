@@ -12,8 +12,7 @@ This module significantly improves catalog endpoint performance by:
 
 import json
 import logging
-import time
-from typing import Any, List, Optional
+from typing import Any
 
 from src.config.redis_config import get_redis_client, is_redis_available
 
@@ -53,7 +52,7 @@ class ModelCatalogCache:
 
     # Full Catalog Caching
 
-    def get_full_catalog(self) -> Optional[List[dict[str, Any]]]:
+    def get_full_catalog(self) -> list[dict[str, Any]] | None:
         """Get cached full model catalog.
 
         Returns:
@@ -82,8 +81,8 @@ class ModelCatalogCache:
 
     def set_full_catalog(
         self,
-        catalog: List[dict[str, Any]],
-        ttl: Optional[int] = None,
+        catalog: list[dict[str, Any]],
+        ttl: int | None = None,
     ) -> bool:
         """Cache the full aggregated model catalog.
 
@@ -141,7 +140,7 @@ class ModelCatalogCache:
 
     # Provider Catalog Caching
 
-    def get_provider_catalog(self, provider_name: str) -> Optional[List[dict[str, Any]]]:
+    def get_provider_catalog(self, provider_name: str) -> list[dict[str, Any]] | None:
         """Get cached model catalog for a specific provider.
 
         Args:
@@ -174,8 +173,8 @@ class ModelCatalogCache:
     def set_provider_catalog(
         self,
         provider_name: str,
-        catalog: List[dict[str, Any]],
-        ttl: Optional[int] = None,
+        catalog: list[dict[str, Any]],
+        ttl: int | None = None,
     ) -> bool:
         """Cache model catalog for a specific provider.
 
@@ -237,7 +236,7 @@ class ModelCatalogCache:
 
     # Individual Model Caching
 
-    def get_model(self, model_id: str) -> Optional[dict[str, Any]]:
+    def get_model(self, model_id: str) -> dict[str, Any] | None:
         """Get cached metadata for a specific model.
 
         Args:
@@ -271,7 +270,7 @@ class ModelCatalogCache:
         self,
         model_id: str,
         model_data: dict[str, Any],
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> bool:
         """Cache metadata for a specific model.
 
@@ -328,7 +327,7 @@ class ModelCatalogCache:
 
     # Pricing Cache
 
-    def get_model_pricing(self, model_id: str) -> Optional[dict[str, Any]]:
+    def get_model_pricing(self, model_id: str) -> dict[str, Any] | None:
         """Get cached pricing data for a model.
 
         Args:
@@ -362,7 +361,7 @@ class ModelCatalogCache:
         self,
         model_id: str,
         pricing_data: dict[str, Any],
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> bool:
         """Cache pricing data for a model.
 
@@ -473,7 +472,7 @@ class ModelCatalogCache:
 
 
 # Global cache instance
-_model_catalog_cache: Optional[ModelCatalogCache] = None
+_model_catalog_cache: ModelCatalogCache | None = None
 
 
 def get_model_catalog_cache() -> ModelCatalogCache:
@@ -487,13 +486,13 @@ def get_model_catalog_cache() -> ModelCatalogCache:
 # Convenience functions for common operations
 
 
-def cache_full_catalog(catalog: List[dict[str, Any]], ttl: Optional[int] = None) -> bool:
+def cache_full_catalog(catalog: list[dict[str, Any]], ttl: int | None = None) -> bool:
     """Cache the full aggregated model catalog"""
     cache = get_model_catalog_cache()
     return cache.set_full_catalog(catalog, ttl=ttl)
 
 
-def get_cached_full_catalog() -> Optional[List[dict[str, Any]]]:
+def get_cached_full_catalog() -> list[dict[str, Any]] | None:
     """Get cached full model catalog"""
     cache = get_model_catalog_cache()
     return cache.get_full_catalog()
@@ -507,15 +506,15 @@ def invalidate_full_catalog() -> bool:
 
 def cache_provider_catalog(
     provider_name: str,
-    catalog: List[dict[str, Any]],
-    ttl: Optional[int] = None
+    catalog: list[dict[str, Any]],
+    ttl: int | None = None
 ) -> bool:
     """Cache model catalog for a specific provider"""
     cache = get_model_catalog_cache()
     return cache.set_provider_catalog(provider_name, catalog, ttl=ttl)
 
 
-def get_cached_provider_catalog(provider_name: str) -> Optional[List[dict[str, Any]]]:
+def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | None:
     """Get cached provider catalog"""
     cache = get_model_catalog_cache()
     return cache.get_provider_catalog(provider_name)

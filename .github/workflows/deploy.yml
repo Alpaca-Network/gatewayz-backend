@@ -1,6 +1,7 @@
 name: Deploy to Railway Test Environment
 
 on:
+<<<<<<< HEAD
   push:
     branches:
       - main
@@ -11,6 +12,24 @@ on:
       - "railway.json"
       - "start.sh"
       - ".github/workflows/deploy.yml"
+=======
+  # Trigger after CI Pipeline completes successfully
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main, staging]
+  # Manual trigger for explicit deployments
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - production
+          - staging
+>>>>>>> refs/remotes/origin/main
 
 env:
   RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
@@ -20,7 +39,11 @@ jobs:
   # Setup: Always deploy to staging on main push
   setup-environment:
     name: Setup Deployment Environment
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Only run if CI passed (for workflow_run) or manual dispatch
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     outputs:
       environment: staging
       railway_environment: staging
@@ -28,101 +51,60 @@ jobs:
     steps:
       - name: Deployment Info
         run: |
+<<<<<<< HEAD
           echo "🚀 Deploying to STAGING environment"
           echo "Branch: ${{ github.ref_name }}"
           echo "Commit: ${{ github.sha }}"
+=======
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+            case "$ENV" in
+              production)
+                RAILWAY_ENV="production"
+                echo "environment=production" >> $GITHUB_OUTPUT
+                echo "railway_environment=production" >> $GITHUB_OUTPUT
+                ;;
+              staging)
+                RAILWAY_ENV="staging"
+                echo "environment=staging" >> $GITHUB_OUTPUT
+                echo "railway_environment=staging" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          else
+            # Auto-detect from workflow_run branch
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            if [ "$BRANCH" == "main" ]; then
+              echo "environment=production" >> $GITHUB_OUTPUT
+              echo "railway_environment=production" >> $GITHUB_OUTPUT
+            elif [ "$BRANCH" == "staging" ]; then
+              echo "environment=staging" >> $GITHUB_OUTPUT
+              echo "railway_environment=staging" >> $GITHUB_OUTPUT
+            else
+              echo "environment=staging" >> $GITHUB_OUTPUT
+              echo "railway_environment=staging" >> $GITHUB_OUTPUT
+            fi
+          fi
+>>>>>>> refs/remotes/origin/main
 
-  # Pull all CI checks before deploying
-  check-ci-status:
-    name: Verify CI Passed
-    runs-on: ubuntu-latest
-    needs: setup-environment
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Wait for CI workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const sha = context.sha;
-
-            console.log(`Checking CI status for commit ${sha}...`);
-
-            // Poll for CI workflow completion (max 5 minutes)
-            let attempts = 0;
-            const maxAttempts = 30;
-
-            while (attempts < maxAttempts) {
-              const checkRuns = await github.rest.checks.listForRef({
-                owner,
-                repo,
-                ref: sha,
-              });
-
-              console.log(`Attempt ${attempts + 1}: Found ${checkRuns.data.check_runs.length} check runs`);
-
-              // Get the CI workflow
-              const ciWorkflows = checkRuns.data.check_runs.filter(run =>
-                run.name === 'Code Quality Checks' ||
-                run.name === 'Security Scan' ||
-                run.name === 'Run Tests (Shard 1)' ||
-                run.name === 'Run Tests (Shard 2)' ||
-                run.name === 'Run Tests (Shard 3)' ||
-                run.name === 'Run Tests (Shard 4)' ||
-                run.name === 'Coverage Report' ||
-                run.name === 'Build Verification' ||
-                run.name === 'Deployment Ready'
-              );
-
-              if (ciWorkflows.length === 0) {
-                console.log('Waiting for CI checks to start...');
-                attempts++;
-                await new Promise(resolve => setTimeout(resolve, 10000));
-                continue;
-              }
-
-              const allCompleted = ciWorkflows.every(run =>
-                run.status === 'completed'
-              );
-
-              if (!allCompleted) {
-                console.log('Waiting for CI checks to complete...');
-                attempts++;
-                await new Promise(resolve => setTimeout(resolve, 10000));
-                continue;
-              }
-
-              const allPassed = ciWorkflows.every(run =>
-                run.conclusion === 'success'
-              );
-
-              if (!allPassed) {
-                const failedChecks = ciWorkflows
-                  .filter(run => run.conclusion !== 'success')
-                  .map(run => `${run.name} (${run.conclusion})`)
-                  .join(', ');
-                core.setFailed(`CI checks failed: ${failedChecks}`);
-                process.exit(1);
-              }
-
-              console.log('✅ All CI checks passed!');
-              break;
-            }
-
-            if (attempts >= maxAttempts) {
-              core.setFailed('CI checks did not complete within 5 minutes');
-              process.exit(1);
-            }
+      - name: Log CI completion
+        if: github.event_name == 'workflow_run'
+        run: |
+          echo "✅ CI Pipeline completed successfully"
+          echo "Branch: ${{ github.event.workflow_run.head_branch }}"
+          echo "Commit: ${{ github.event.workflow_run.head_sha }}"
+          echo "Proceeding with deployment..."
 
   # Deploy to Railway Staging
   deploy-railway:
+<<<<<<< HEAD
     name: Deploy to Railway Staging (Test Environment)
     runs-on: ubuntu-latest
     needs: [setup-environment, check-ci-status]
+=======
+    name: Deploy to Railway (${{ needs.setup-environment.outputs.environment }})
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [setup-environment]
+>>>>>>> refs/remotes/origin/main
     environment:
       name: staging
       url: https://${{ secrets.RAILWAY_STAGING_DOMAIN }}
@@ -131,6 +113,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          # Use the SHA from the workflow_run event, or current SHA for manual dispatch
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Install Railway CLI
@@ -197,7 +181,7 @@ jobs:
   # Notify deployment status
   notify-deployment:
     name: Notify Deployment Status
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment, deploy-railway]
     if: always()
 

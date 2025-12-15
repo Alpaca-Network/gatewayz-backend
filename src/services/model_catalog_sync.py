@@ -4,17 +4,15 @@ Fetches models from all provider APIs and syncs to database
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Any
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.db.providers_db import (
-    get_all_providers,
     get_provider_by_slug,
     create_provider,
-    update_provider,
 )
-from src.db.models_catalog_db import bulk_upsert_models, get_models_stats
+from src.db.models_catalog_db import bulk_upsert_models
 from src.services.models import (
     fetch_models_from_openrouter,
     fetch_models_from_deepinfra,
@@ -68,7 +66,7 @@ PROVIDER_FETCH_FUNCTIONS = {
 }
 
 
-def safe_decimal(value: Any) -> Optional[Decimal]:
+def safe_decimal(value: Any) -> Decimal | None:
     """Safely convert a value to Decimal"""
     if value is None:
         return None
@@ -85,7 +83,7 @@ def safe_decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
-def extract_modality(model: Dict[str, Any]) -> str:
+def extract_modality(model: dict[str, Any]) -> str:
     """Extract modality from normalized model structure"""
     # Check architecture field first
     architecture = model.get("architecture")
@@ -102,7 +100,7 @@ def extract_modality(model: Dict[str, Any]) -> str:
     return "text->text"
 
 
-def extract_pricing(model: Dict[str, Any]) -> Dict[str, Optional[Decimal]]:
+def extract_pricing(model: dict[str, Any]) -> dict[str, Decimal | None]:
     """Extract pricing from normalized model structure"""
     pricing = model.get("pricing", {})
 
@@ -122,7 +120,7 @@ def extract_pricing(model: Dict[str, Any]) -> Dict[str, Optional[Decimal]]:
     }
 
 
-def extract_capabilities(model: Dict[str, Any]) -> Dict[str, bool]:
+def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
     """Extract capability flags from normalized model"""
     architecture = model.get("architecture", {})
 
@@ -145,10 +143,10 @@ def extract_capabilities(model: Dict[str, Any]) -> Dict[str, bool]:
 
 
 def transform_normalized_model_to_db_schema(
-    normalized_model: Dict[str, Any],
+    normalized_model: dict[str, Any],
     provider_id: int,
     provider_slug: str
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Transform a normalized model (from fetch functions) to database schema
 
@@ -263,7 +261,7 @@ def transform_normalized_model_to_db_schema(
         return None
 
 
-def ensure_provider_exists(provider_slug: str) -> Optional[Dict[str, Any]]:
+def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
     """
     Ensure provider exists in database, create if not
 
@@ -328,7 +326,7 @@ def ensure_provider_exists(provider_slug: str) -> Optional[Dict[str, Any]]:
             "huggingface": {
                 "name": "HuggingFace",
                 "description": "HuggingFace inference API",
-                "base_url": "https://api-inference.huggingface.co",
+                "base_url": "https://router.huggingface.co",
                 "api_key_env_var": "HUGGINGFACE_API_KEY",
                 "site_url": "https://huggingface.co",
                 "supports_streaming": True,
@@ -394,7 +392,7 @@ def ensure_provider_exists(provider_slug: str) -> Optional[Dict[str, Any]]:
 def sync_provider_models(
     provider_slug: str,
     dry_run: bool = False
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Sync models for a specific provider
 
@@ -516,9 +514,9 @@ def sync_provider_models(
 
 
 def sync_all_providers(
-    provider_slugs: Optional[List[str]] = None,
+    provider_slugs: list[str] | None = None,
     dry_run: bool = False
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Sync models from all providers (or specified list)
 

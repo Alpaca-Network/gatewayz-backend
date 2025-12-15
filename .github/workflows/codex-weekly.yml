@@ -1,0 +1,346 @@
+name: Codex Weekly Analysis
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC (consolidated from 3 separate schedules)
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      analysis_type:
+        description: "Type of analysis to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - security
+          - coverage
+          - performance
+  pull_request:
+    types: [labeled]
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+  checks: write
+  issues: write
+
+jobs:
+  # Determine which analyses to run
+  setup:
+    name: Setup Analysis
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      run_security: ${{ steps.determine.outputs.run_security }}
+      run_coverage: ${{ steps.determine.outputs.run_coverage }}
+      run_performance: ${{ steps.determine.outputs.run_performance }}
+
+    steps:
+      - name: Determine analyses to run
+        id: determine
+        run: |
+          # Default: run all on schedule or dispatch with 'all'
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            echo "run_security=true" >> $GITHUB_OUTPUT
+            echo "run_coverage=true" >> $GITHUB_OUTPUT
+            echo "run_performance=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TYPE="${{ github.event.inputs.analysis_type }}"
+            case "$TYPE" in
+              all)
+                echo "run_security=true" >> $GITHUB_OUTPUT
+                echo "run_coverage=true" >> $GITHUB_OUTPUT
+                echo "run_performance=true" >> $GITHUB_OUTPUT
+                ;;
+              security)
+                echo "run_security=true" >> $GITHUB_OUTPUT
+                echo "run_coverage=false" >> $GITHUB_OUTPUT
+                echo "run_performance=false" >> $GITHUB_OUTPUT
+                ;;
+              coverage)
+                echo "run_security=false" >> $GITHUB_OUTPUT
+                echo "run_coverage=true" >> $GITHUB_OUTPUT
+                echo "run_performance=false" >> $GITHUB_OUTPUT
+                ;;
+              performance)
+                echo "run_security=false" >> $GITHUB_OUTPUT
+                echo "run_coverage=false" >> $GITHUB_OUTPUT
+                echo "run_performance=true" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            # Check for specific labels
+            LABELS="${{ join(github.event.pull_request.labels.*.name, ',') }}"
+            if [[ "$LABELS" == *"codex-analyze"* ]]; then
+              echo "run_security=true" >> $GITHUB_OUTPUT
+            else
+              echo "run_security=false" >> $GITHUB_OUTPUT
+            fi
+            if [[ "$LABELS" == *"coverage-boost"* ]]; then
+              echo "run_coverage=true" >> $GITHUB_OUTPUT
+            else
+              echo "run_coverage=false" >> $GITHUB_OUTPUT
+            fi
+            if [[ "$LABELS" == *"perf-review"* ]]; then
+              echo "run_performance=true" >> $GITHUB_OUTPUT
+            else
+              echo "run_performance=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  # Security Analysis
+  security-analysis:
+    name: Security Analysis
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: setup
+    if: needs.setup.outputs.run_security == 'true'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install analysis tools
+        run: pip install -q ruff bandit
+
+      - name: Run static analysis
+        run: |
+          mkdir -p analysis-reports
+          echo "# Security Analysis Report" > analysis-reports/security.md
+          echo "" >> analysis-reports/security.md
+          echo "## Ruff Security Checks" >> analysis-reports/security.md
+          ruff check src/ --select=E,W,F --output-format=github >> analysis-reports/security.md 2>&1 || true
+          echo "" >> analysis-reports/security.md
+          echo "## Bandit Security Issues" >> analysis-reports/security.md
+          bandit -r src/ -f txt >> analysis-reports/security.md 2>&1 || true
+
+      - name: Run Codex Security Analysis
+        timeout-minutes: 60
+        uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_commit_signing: false
+          claude_args: "--max-turns 8"
+          prompt: |
+            Analyze this FastAPI codebase for security issues. Focus on:
+            1. Unencrypted sensitive data (API keys, tokens)
+            2. SQL injection or query injection risks
+            3. Missing input validation
+            4. Insecure API key handling in src/security/
+            5. Credential exposure in logs
+            6. CORS misconfigurations
+
+            Key files: src/security/security.py, src/db/api_keys.py, src/routes/auth.py, src/routes/payments.py
+
+            Output a brief summary of critical findings only.
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-analysis
+          path: analysis-reports/
+          if-no-files-found: ignore
+
+  # Coverage Analysis
+  coverage-analysis:
+    name: Coverage Analysis
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: setup
+    if: needs.setup.outputs.run_coverage == 'true'
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-xdist pytest-asyncio
+
+      - name: Generate coverage report
+        run: |
+          export SUPABASE_URL="${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}"
+          export SUPABASE_KEY="${{ secrets.SUPABASE_KEY || 'test-key' }}"
+          export OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY || 'test-key' }}"
+          export ENCRYPTION_KEY="${{ secrets.ENCRYPTION_KEY || 'test-encryption-key-32-bytes!' }}"
+
+          pytest tests/ --cov=src --cov-report=json --cov-report=term -m "not smoke" -x --tb=short || true
+
+          # Generate coverage analysis
+          python << 'EOF'
+          import json, os
+          if not os.path.exists('coverage.json'):
+              print("No coverage data")
+              exit(0)
+          with open('coverage.json') as f:
+              data = json.load(f)
+          files = data.get('files', {})
+          low_coverage = []
+          for fp, fd in files.items():
+              if 'src/' not in fp: continue
+              pct = fd.get('summary', {}).get('percent_covered', 0)
+              if pct < 75:
+                  low_coverage.append({'path': fp, 'percent': pct})
+          low_coverage.sort(key=lambda x: x['percent'])
+          with open('coverage_analysis.md', 'w') as f:
+              f.write('# Coverage Analysis\n\n## Files Below 75%\n\n')
+              for item in low_coverage[:15]:
+                  f.write(f"- **{item['path']}**: {item['percent']:.1f}%\n")
+          print(f"Found {len(low_coverage)} files below 75%")
+          EOF
+
+      - name: Run Codex Coverage Boost
+        timeout-minutes: 60
+        uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_commit_signing: false
+          claude_args: "--max-turns 10"
+          prompt: |
+            Read coverage_analysis.md and generate pytest tests for the lowest-coverage files.
+            Focus on: src/db/, src/services/, src/routes/
+            Use existing patterns from tests/conftest.py and tests/factories.py.
+            Mock external dependencies (Supabase, Redis, provider APIs).
+            Target: Increase coverage from 25% baseline toward 40%.
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-analysis
+          path: coverage_analysis.md
+          if-no-files-found: ignore
+
+  # Performance Analysis
+  performance-analysis:
+    name: Performance Analysis
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: setup
+    if: needs.setup.outputs.run_performance == 'true'
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Codex Performance Analysis
+        timeout-minutes: 60
+        uses: anthropics/claude-code-action@8a1c4371755898f67cd97006ba7c97702d5fc4bf
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_commit_signing: false
+          claude_args: "--max-turns 8"
+          prompt: |
+            Analyze this FastAPI gateway for performance issues:
+            1. N+1 queries in src/db/
+            2. Cache effectiveness in src/services/
+            3. Async blocking operations
+            4. Rate limiting efficiency
+            5. Connection pool utilization
+
+            Key files: src/services/connection_pool.py, src/services/rate_limiting.py, src/routes/chat.py
+
+            Output a prioritized list of performance improvements.
+
+      - name: Generate performance report
+        if: always()
+        run: |
+          cat > perf-report.md << EOF
+          # Performance Analysis Report
+
+          **Date:** $(date -u +"%Y-%m-%d %H:%M UTC")
+
+          ## Areas Reviewed
+          - Database queries (src/db/)
+          - Caching (src/services/)
+          - Rate limiting (src/services/rate_limiting.py)
+          - Hot paths (src/routes/chat.py, src/routes/messages.py)
+
+          See workflow logs for detailed recommendations.
+          EOF
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-analysis
+          path: perf-report.md
+          if-no-files-found: ignore
+
+  # Summary job
+  summary:
+    name: Analysis Summary
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [setup, security-analysis, coverage-analysis, performance-analysis]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 🔬 Codex Weekly Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Analysis | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Security | ${{ needs.security-analysis.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Coverage | ${{ needs.coverage-analysis.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance | ${{ needs.performance-analysis.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check artifacts for detailed reports." >> $GITHUB_STEP_SUMMARY
+
+      - name: Create summary issue (weekly only)
+        if: github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const date = new Date().toISOString().split('T')[0];
+            try {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔬 Weekly Codex Analysis - ${date}`,
+                body: `## Weekly Analysis Complete\n\n` +
+                  `| Analysis | Status |\n|----------|--------|\n` +
+                  `| Security | ${{ needs.security-analysis.result || 'skipped' }} |\n` +
+                  `| Coverage | ${{ needs.coverage-analysis.result || 'skipped' }} |\n` +
+                  `| Performance | ${{ needs.performance-analysis.result || 'skipped' }} |\n\n` +
+                  `**Run:** [${context.runId}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n\n` +
+                  `Check the workflow artifacts for detailed reports.`,
+                labels: ['codex-analyze', 'automated']
+              });
+            } catch (e) {
+              console.log('Could not create issue:', e.message);
+            }

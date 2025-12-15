@@ -4,7 +4,7 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 from datetime import datetime, timezone
 
 from src.config.supabase_config import get_supabase_client
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def get_all_providers(
     is_active_only: bool = True,
     include_inactive: bool = False
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get all providers from database
 
@@ -42,7 +42,7 @@ def get_all_providers(
         return []
 
 
-def get_provider_by_id(provider_id: int) -> Optional[Dict[str, Any]]:
+def get_provider_by_id(provider_id: int) -> dict[str, Any] | None:
     """
     Get a provider by its ID
 
@@ -61,7 +61,7 @@ def get_provider_by_id(provider_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_provider_by_slug(slug: str) -> Optional[Dict[str, Any]]:
+def get_provider_by_slug(slug: str) -> dict[str, Any] | None:
     """
     Get a provider by its slug
 
@@ -80,7 +80,7 @@ def get_provider_by_slug(slug: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def create_provider(provider_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def create_provider(provider_data: dict[str, Any]) -> dict[str, Any] | None:
     """
     Create a new provider
 
@@ -103,7 +103,7 @@ def create_provider(provider_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def update_provider(provider_id: int, provider_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_provider(provider_id: int, provider_data: dict[str, Any]) -> dict[str, Any] | None:
     """
     Update a provider
 
@@ -155,7 +155,7 @@ def delete_provider(provider_id: int) -> bool:
         return False
 
 
-def deactivate_provider(provider_id: int) -> Optional[Dict[str, Any]]:
+def deactivate_provider(provider_id: int) -> dict[str, Any] | None:
     """
     Deactivate a provider (soft delete)
 
@@ -168,7 +168,7 @@ def deactivate_provider(provider_id: int) -> Optional[Dict[str, Any]]:
     return update_provider(provider_id, {"is_active": False})
 
 
-def activate_provider(provider_id: int) -> Optional[Dict[str, Any]]:
+def activate_provider(provider_id: int) -> dict[str, Any] | None:
     """
     Activate a provider
 
@@ -184,8 +184,8 @@ def activate_provider(provider_id: int) -> Optional[Dict[str, Any]]:
 def update_provider_health(
     provider_id: int,
     health_status: str,
-    average_response_time_ms: Optional[int] = None
-) -> Optional[Dict[str, Any]]:
+    average_response_time_ms: int | None = None
+) -> dict[str, Any] | None:
     """
     Update provider health status
 
@@ -212,7 +212,7 @@ def update_provider_health(
         return None
 
 
-def get_providers_by_health_status(health_status: str) -> List[Dict[str, Any]]:
+def get_providers_by_health_status(health_status: str) -> list[dict[str, Any]]:
     """
     Get providers by health status
 
@@ -238,7 +238,7 @@ def get_providers_by_health_status(health_status: str) -> List[Dict[str, Any]]:
         return []
 
 
-def get_providers_stats() -> Dict[str, Any]:
+def get_providers_stats() -> dict[str, Any]:
     """
     Get overall statistics about providers
 
@@ -277,7 +277,7 @@ def get_providers_stats() -> Dict[str, Any]:
         }
 
 
-def search_providers(query: str) -> List[Dict[str, Any]]:
+def search_providers(query: str) -> list[dict[str, Any]]:
     """
     Search providers by name, slug, or description
 

@@ -31,7 +31,7 @@ def test_near_qwen_api():
     model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
     print(f"\nTesting model: {model}")
-    print(f"Timeout: 120 seconds")
+    print("Timeout: 120 seconds")
     print("-" * 50)
 
     try:

@@ -15,8 +15,8 @@ All data is stored in Redis with appropriate TTLs to prevent unbounded growth.
 import json
 import logging
 import time
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -152,8 +152,8 @@ class RedisMetrics:
             # 7. Update health score
             await self._update_health_score_pipe(pipe, provider, success)
 
-            # Execute all operations atomically
-            await pipe.execute()
+            # Execute all operations atomically (sync operation, no await needed)
+            pipe.execute()
 
             logger.debug(
                 f"Recorded metrics: {provider}/{model} - "

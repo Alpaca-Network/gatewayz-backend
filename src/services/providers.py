@@ -297,3 +297,10 @@ def fetch_models_from_onerouter():
     from src.services.onerouter_client import fetch_models_from_onerouter as _fetch
 
     return _fetch()
+
+
+def fetch_models_from_morpheus():
+    """Fetch models from Morpheus AI Gateway client"""
+    from src.services.morpheus_client import fetch_models_from_morpheus as _fetch
+
+    return _fetch()

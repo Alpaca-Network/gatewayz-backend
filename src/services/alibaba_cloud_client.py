@@ -1,7 +1,8 @@
 import logging
 import os
 from threading import Lock
-from typing import Callable, TypeVar
+from typing import TypeVar
+from collections.abc import Callable
 
 from openai import OpenAI
 
@@ -41,10 +42,32 @@ def _region_specific_api_key(region: str | None) -> str | None:
 
 
 def _get_region_api_key(region: str | None) -> str | None:
+    """Get the API key for a specific region.
+
+    Priority order:
+    1. Region-specific key (e.g., ALIBABA_CLOUD_API_KEY_CHINA)
+    2. Generic key (ALIBABA_CLOUD_API_KEY) as fallback
+    3. Any other region's key as last resort (enables failover when user
+       misconfigured which key goes with which region)
+
+    Returns the key for the region, or None if no key is configured.
+    """
     region_specific = _region_specific_api_key(region)
     if region_specific:
         return region_specific
-    return getattr(Config, "ALIBABA_CLOUD_API_KEY", None)
+
+    generic_key = getattr(Config, "ALIBABA_CLOUD_API_KEY", None)
+    if generic_key:
+        return generic_key
+
+    # Last resort: use any available key to enable failover
+    # This handles the case where user set the wrong region-specific key
+    for other_region in _VALID_REGIONS:
+        other_key = _region_specific_api_key(other_region)
+        if other_key:
+            return other_key
+
+    return None
 
 
 def _any_api_key_configured() -> bool:
@@ -113,6 +136,36 @@ def _is_auth_error(error: Exception) -> bool:
     return any(indicator in message for indicator in indicators)
 
 
+def _is_quota_error(error: Exception) -> bool:
+    """Check if an error is a quota/rate limit error (429).
+
+    Quota errors indicate the account has exceeded its quota and should
+    not be retried immediately. These are different from transient rate
+    limits and require user action (billing/plan upgrade).
+    """
+    message = str(error).lower()
+    indicators = [
+        "insufficient_quota",
+        "exceeded your current quota",
+        "error code: 429",
+        "status code: 429",
+        "quota exceeded",
+        "rate_limit_exceeded",
+    ]
+    return any(indicator in message for indicator in indicators)
+
+
+class QuotaExceededError(Exception):
+    """Raised when Alibaba Cloud returns a quota exceeded error (429).
+
+    This error indicates the account has exceeded its quota and requires
+    user action (billing/plan upgrade). It should be cached to prevent
+    repeated API calls that will fail.
+    """
+
+    pass
+
+
 def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:
     attempts = _region_attempt_order()
     if not attempts:
@@ -120,6 +173,15 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
             "Alibaba Cloud API key not configured for any region. "
             "Set ALIBABA_CLOUD_API_KEY or a region-specific key."
         )
+
+    if len(attempts) > 1:
+        logger.debug(
+            "Alibaba Cloud %s will attempt %d regions in order: %s",
+            operation_name,
+            len(attempts),
+            ", ".join(_describe_region(r) for r in attempts),
+        )
+
     last_error: Exception | None = None
 
     for idx, region in enumerate(attempts):
@@ -136,7 +198,21 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
             return result
         except Exception as exc:  # noqa: PERF203 - clarity over premature micro-opt
             last_error = exc
-            should_retry = _is_auth_error(exc) and idx < len(attempts) - 1
+            is_auth = _is_auth_error(exc)
+            is_quota = _is_quota_error(exc)
+            has_more_regions = idx < len(attempts) - 1
+            should_retry = is_auth and has_more_regions
+
+            # Handle quota errors specially - don't retry, wrap in QuotaExceededError
+            if is_quota:
+                logger.warning(
+                    "Alibaba Cloud %s quota exceeded for %s. "
+                    "Please check your plan and billing details at "
+                    "https://www.alibabacloud.com/help/en/model-studio/error-code#token-limit",
+                    operation_name,
+                    _describe_region(region),
+                )
+                raise QuotaExceededError(str(exc)) from exc
 
             if should_retry:
                 next_region = attempts[idx + 1]
@@ -150,12 +226,28 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
                 )
                 continue
 
-            logger.error(
-                "Alibaba Cloud %s failed for %s (error: %s)",
-                operation_name,
-                _describe_region(region),
-                exc,
-            )
+            # Log why we're not retrying for debugging
+            # Note: should_retry is False here, meaning either:
+            # - is_auth=True but has_more_regions=False (exhausted all regions)
+            # - is_auth=False (non-auth error, don't retry)
+            if is_auth:
+                logger.error(
+                    "Alibaba Cloud %s failed for %s (error: %s). "
+                    "No more regions to try (attempted %d of %d regions).",
+                    operation_name,
+                    _describe_region(region),
+                    exc,
+                    idx + 1,
+                    len(attempts),
+                )
+            else:
+                logger.error(
+                    "Alibaba Cloud %s failed for %s (error: %s). "
+                    "Error is not an auth error, not retrying with other regions.",
+                    operation_name,
+                    _describe_region(region),
+                    exc,
+                )
             raise
 
     if last_error:

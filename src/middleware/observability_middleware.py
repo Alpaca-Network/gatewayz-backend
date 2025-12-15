@@ -100,12 +100,20 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 if response_content_length:
                     response_size = int(response_content_length)
                 else:
-                    # For responses with a body_iterator (streaming responses),
-                    # we can only estimate size as 0 since we can't measure it
-                    if hasattr(response, "body_iterator"):
+                    # For streaming responses (SSE, chunked), we can't measure size
+                    # Check for body_iterator (StreamingResponse) or streaming content types
+                    content_type = response.headers.get("content-type", "").lower()
+                    is_streaming = (
+                        hasattr(response, "body_iterator")
+                        or "text/event-stream" in content_type
+                        or response.headers.get("x-accel-buffering", "").lower() == "no"
+                    )
+                    if is_streaming:
                         response_size = 0
                     else:
                         # Fallback: try to get body size if directly accessible
+                        # Note: We avoid accessing response.body for streaming responses
+                        # as it would consume the iterator
                         response_size = len(response.body) if hasattr(response, "body") else 0
 
                 fastapi_response_size_bytes.labels(

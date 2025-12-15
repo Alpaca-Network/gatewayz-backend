@@ -457,5 +457,80 @@ class TestGoogleVertexModelIntegration:
         assert "gemini-2.0-flash" in result1
 
 
+class TestFetchModelsFromGoogleVertex:
+    """Tests for fetch_models_from_google_vertex static model catalog"""
+
+    def test_fetch_models_returns_list(self):
+        """Test that fetch_models_from_google_vertex returns a list of models"""
+        from src.services.google_vertex_client import fetch_models_from_google_vertex
+
+        models = fetch_models_from_google_vertex()
+
+        assert models is not None
+        assert isinstance(models, list)
+        assert len(models) > 0
+
+    def test_fetch_models_includes_gemini_models(self):
+        """Test that returned models include known Gemini models"""
+        from src.services.google_vertex_client import fetch_models_from_google_vertex
+
+        models = fetch_models_from_google_vertex()
+        model_ids = [m["id"] for m in models]
+
+        # Check for expected Gemini models
+        expected_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+        ]
+
+        for expected in expected_models:
+            assert expected in model_ids, f"Expected model {expected} not found in catalog"
+
+    def test_fetch_models_normalized_format(self):
+        """Test that returned models have the expected normalized format"""
+        from src.services.google_vertex_client import fetch_models_from_google_vertex
+
+        models = fetch_models_from_google_vertex()
+
+        # Check first model has expected fields
+        model = models[0]
+        required_fields = [
+            "id",
+            "slug",
+            "canonical_slug",
+            "name",
+            "description",
+            "context_length",
+            "architecture",
+            "pricing",
+            "source_gateway",
+            "provider_slug",
+        ]
+
+        for field in required_fields:
+            assert field in model, f"Missing required field: {field}"
+
+        # Check source_gateway is set correctly
+        assert model["source_gateway"] == "google-vertex"
+
+    def test_fetch_models_updates_cache(self):
+        """Test that fetch_models_from_google_vertex updates the cache"""
+        from src.cache import _google_vertex_models_cache
+        from src.services.google_vertex_client import fetch_models_from_google_vertex
+
+        # Clear cache first
+        _google_vertex_models_cache["data"] = None
+        _google_vertex_models_cache["timestamp"] = None
+
+        models = fetch_models_from_google_vertex()
+
+        assert _google_vertex_models_cache["data"] is not None
+        assert _google_vertex_models_cache["timestamp"] is not None
+        assert len(_google_vertex_models_cache["data"]) == len(models)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

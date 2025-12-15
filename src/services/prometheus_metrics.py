@@ -280,6 +280,15 @@ streaming_duration_seconds = get_or_create_metric(Histogram,
     buckets=(0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 5.0, 10.0),
 )
 
+# TTFC (Time to First Chunk) - Critical metric for perceived streaming latency
+# Measures time from stream_generator() entry to first SSE chunk yielded
+time_to_first_chunk_seconds = get_or_create_metric(Histogram,
+    "time_to_first_chunk_seconds",
+    "Time from stream start to first SSE chunk sent to client (TTFC)",
+    ["provider", "model"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 10.0, 15.0),
+)
+
 frontend_processing_seconds = get_or_create_metric(Histogram,
     "frontend_processing_seconds",
     "Frontend processing time (request parsing, auth, preparation) in seconds",
@@ -373,25 +382,148 @@ def record_credits_used(
 
 
 @contextmanager
-def track_database_query(table: str, operation: str):
-    """Context manager to track database query metrics."""
-    start_time = time.time()
+def track_database_query(table: str, operation: str, query_description: str | None = None):
+    """
+    Context manager to track database query metrics with both Prometheus and Sentry.
+
+    This creates:
+    - Prometheus metrics for database query count and duration
+    - Sentry spans for Queries Insights (https://docs.sentry.io/product/insights/backend/queries/)
+
+    Args:
+        table: Database table name
+        operation: Operation type (select, insert, update, delete)
+        query_description: Optional parameterized query string for Sentry Insights
+    """
+    # Import Sentry insights utilities (isolated try/except to avoid double yield)
+    trace_supabase_query = None
     try:
-        yield
-    finally:
-        duration = time.time() - start_time
-        database_query_count.labels(table=table, operation=operation).inc()
-        database_query_duration.labels(table=table).observe(duration)
+        from src.utils.sentry_insights import trace_supabase_query as _trace_supabase_query
+        trace_supabase_query = _trace_supabase_query
+    except ImportError:
+        pass  # Sentry insights not available
+
+    start_time = time.time()
+
+    if trace_supabase_query:
+        # Build query description if not provided
+        query_desc = query_description or f"{operation.upper()} FROM {table}"
+
+        with trace_supabase_query(table, operation, query_description=query_desc):
+            try:
+                yield
+            finally:
+                duration = time.time() - start_time
+                database_query_count.labels(table=table, operation=operation).inc()
+                database_query_duration.labels(table=table).observe(duration)
+    else:
+        # Sentry insights not available, fall back to Prometheus only
+        try:
+            yield
+        finally:
+            duration = time.time() - start_time
+            database_query_count.labels(table=table, operation=operation).inc()
+            database_query_duration.labels(table=table).observe(duration)
 
 
-def record_cache_hit(cache_name: str):
-    """Record cache hit metric."""
+def record_cache_hit(cache_name: str, key: str | None = None, item_size: int | None = None):
+    """
+    Record cache hit metric with Sentry Cache Insights.
+
+    Args:
+        cache_name: Name of the cache (e.g., "response_cache", "model_catalog")
+        key: Optional cache key for Sentry Insights
+        item_size: Optional size of the cached item in bytes
+    """
     cache_hits.labels(cache_name=cache_name).inc()
 
+    # Record in Sentry Cache Insights
+    if key:
+        try:
+            from src.utils.sentry_insights import trace_cache_operation
 
-def record_cache_miss(cache_name: str):
-    """Record cache miss metric."""
+            with trace_cache_operation(
+                "cache.get",
+                key,
+                cache_hit=True,
+                item_size=item_size,
+                cache_system="redis" if "redis" in cache_name.lower() else "memory",
+            ):
+                pass  # Span is just for recording the hit
+        except ImportError:
+            pass  # Sentry insights not available
+
+
+def record_cache_miss(cache_name: str, key: str | None = None):
+    """
+    Record cache miss metric with Sentry Cache Insights.
+
+    Args:
+        cache_name: Name of the cache (e.g., "response_cache", "model_catalog")
+        key: Optional cache key for Sentry Insights
+    """
     cache_misses.labels(cache_name=cache_name).inc()
+
+    # Record in Sentry Cache Insights
+    if key:
+        try:
+            from src.utils.sentry_insights import trace_cache_operation
+
+            with trace_cache_operation(
+                "cache.get",
+                key,
+                cache_hit=False,
+                cache_system="redis" if "redis" in cache_name.lower() else "memory",
+            ):
+                pass  # Span is just for recording the miss
+        except ImportError:
+            pass  # Sentry insights not available
+
+
+def record_cache_set(cache_name: str, key: str, item_size: int | None = None, ttl: int | None = None):
+    """
+    Record cache set operation with Sentry Cache Insights.
+
+    Args:
+        cache_name: Name of the cache
+        key: Cache key being set
+        item_size: Size of the cached item in bytes
+        ttl: Time-to-live in seconds
+    """
+    try:
+        from src.utils.sentry_insights import trace_cache_operation
+
+        with trace_cache_operation(
+            "cache.put",
+            key,
+            item_size=item_size,
+            ttl=ttl,
+            cache_system="redis" if "redis" in cache_name.lower() else "memory",
+        ):
+            pass  # Span is just for recording the set
+    except ImportError:
+        pass  # Sentry insights not available
+
+
+def record_cache_remove(cache_name: str, key: str):
+    """
+    Record cache remove operation with Sentry Cache Insights.
+
+    Args:
+        cache_name: Name of the cache
+        key: Cache key being removed
+    """
+    try:
+        from src.utils.sentry_insights import trace_cache_operation
+
+        with trace_cache_operation(
+            "cache.remove",
+            key,
+            cache_system="redis" if "redis" in cache_name.lower() else "memory",
+        ):
+            pass  # Span is just for recording the remove
+    except ImportError:
+        pass  # Sentry insights not available
 
 
 def set_cache_size(cache_name: str, size_bytes: int):
@@ -462,6 +594,124 @@ def set_queue_size(queue_name: str, size: int):
     queue_size.labels(queue_name=queue_name).set(size)
 
 
+# ==================== Queue Monitoring Functions ====================
+# These functions integrate with Sentry Queue Monitoring
+# (https://docs.sentry.io/product/insights/backend/queue-monitoring/)
+
+
+@contextmanager
+def track_queue_publish(
+    destination: str,
+    message_id: str | None = None,
+    message_body_size: int | None = None,
+    messaging_system: str = "custom",
+):
+    """
+    Context manager to track queue publish operations with Sentry Queue Monitoring.
+
+    This creates Sentry spans for producer operations and returns trace headers
+    that should be included in the message for distributed tracing.
+
+    Args:
+        destination: Queue or topic name
+        message_id: Unique message identifier
+        message_body_size: Size of the message body in bytes
+        messaging_system: Messaging system name (kafka, redis, aws_sqs, etc.)
+
+    Yields:
+        dict: Trace headers to include in the message for distributed tracing
+
+    Example:
+        with track_queue_publish("notifications", message_id="123") as headers:
+            await queue.publish({
+                "data": payload,
+                "headers": headers  # Include for trace continuity
+            })
+    """
+    # Import Sentry insights utilities (isolated try/except to avoid double yield)
+    _trace_queue_publish = None
+    try:
+        from src.utils.sentry_insights import trace_queue_publish as _tqp
+        _trace_queue_publish = _tqp
+    except ImportError:
+        pass  # Sentry insights not available
+
+    if _trace_queue_publish:
+        with _trace_queue_publish(
+            destination,
+            message_id=message_id,
+            message_body_size=message_body_size,
+            messaging_system=messaging_system,
+        ) as (span, headers):
+            yield headers
+    else:
+        # Sentry insights not available
+        yield {}
+
+
+@contextmanager
+def track_queue_process(
+    destination: str,
+    message_id: str | None = None,
+    message_body_size: int | None = None,
+    retry_count: int | None = None,
+    receive_latency_ms: float | None = None,
+    messaging_system: str = "custom",
+    trace_headers: dict[str, str] | None = None,
+):
+    """
+    Context manager to track queue process (consume) operations with Sentry Queue Monitoring.
+
+    This creates Sentry spans for consumer operations. If trace headers are provided
+    from the producer, it will create a linked span for distributed tracing.
+
+    Args:
+        destination: Queue or topic name
+        message_id: Unique message identifier
+        message_body_size: Size of the message body in bytes
+        retry_count: Number of processing attempts
+        receive_latency_ms: Milliseconds between publishing and consumer receipt
+        messaging_system: Messaging system name (kafka, redis, aws_sqs, etc.)
+        trace_headers: Dict with sentry-trace and baggage headers from producer
+
+    Yields:
+        Sentry span object (or None if Sentry not available)
+
+    Example:
+        # Extract headers from message
+        headers = message.get("headers", {})
+
+        with track_queue_process(
+            "notifications",
+            message_id=message.get("id"),
+            trace_headers=headers
+        ) as span:
+            await process_notification(message)
+    """
+    # Import Sentry insights utilities (isolated try/except to avoid double yield)
+    _trace_queue_process = None
+    try:
+        from src.utils.sentry_insights import trace_queue_process as _tqp
+        _trace_queue_process = _tqp
+    except ImportError:
+        pass  # Sentry insights not available
+
+    if _trace_queue_process:
+        with _trace_queue_process(
+            destination,
+            message_id=message_id,
+            message_body_size=message_body_size,
+            retry_count=retry_count,
+            receive_latency_ms=receive_latency_ms,
+            messaging_system=messaging_system,
+            trace_headers=trace_headers,
+        ) as span:
+            yield span
+    else:
+        # Sentry insights not available
+        yield None
+
+
 # ==================== Performance Stage Tracking Functions ====================
 
 def track_backend_ttfb(provider: str, model: str, endpoint: str, duration: float):
@@ -476,6 +726,21 @@ def track_streaming_duration(provider: str, model: str, endpoint: str, duration:
     streaming_duration_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(
         duration
     )
+
+
+def track_time_to_first_chunk(provider: str, model: str, ttfc: float):
+    """Track Time to First Chunk (TTFC) - critical for perceived streaming latency.
+
+    This metric measures the time from when stream_generator() starts iterating
+    to when the first SSE chunk is yielded to the client. High TTFC values
+    indicate the AI provider is slow to start generating tokens.
+
+    Args:
+        provider: The AI provider name (e.g., "openrouter", "fireworks")
+        model: The model identifier
+        ttfc: Time to first chunk in seconds
+    """
+    time_to_first_chunk_seconds.labels(provider=provider, model=model).observe(ttfc)
 
 
 def track_frontend_processing(endpoint: str, duration: float):

@@ -10,12 +10,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
 
 from src.config.supabase_config import supabase
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/v1/status", tags=["status-page"])
+router = APIRouter(prefix="/status", tags=["status-page"])
 
 
 @router.get("/", response_model=dict[str, Any])
