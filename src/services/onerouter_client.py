@@ -211,7 +211,7 @@ def fetch_models_from_onerouter():
                 if float(prompt_price) == 0:
                     prompt_price = _parse_pricing(model.get("retail_input_cost"))
             except ValueError:
-                pass
+                logger.warning(f"Could not parse prompt_price '{prompt_price}' as float for model '{model_id}'; skipping sale-to-retail fallback")
             try:
                 if float(completion_price) == 0:
                     completion_price = _parse_pricing(model.get("retail_output_cost"))
