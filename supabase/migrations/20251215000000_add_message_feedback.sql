@@ -109,3 +109,7 @@ BEGIN
     RAISE EXCEPTION 'Failed to create message_feedback table';
   END IF;
 END $$;
+
+-- Notify PostgREST to reload schema cache
+-- This is critical for the new table/endpoints to work immediately after migration
+NOTIFY pgrst, 'reload schema';
