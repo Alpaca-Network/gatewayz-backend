@@ -15,24 +15,19 @@ from src.config import Config
 
 
 def fetch_onerouter_models():
-    """Fetch all models from OneRouter API"""
-    if not Config.ONEROUTER_API_KEY:
-        print("❌ ONEROUTER_API_KEY not set in environment")
-        print("Please set: export ONEROUTER_API_KEY=your_api_key")
-        return None
-
+    """Fetch all models from OneRouter API using the public display_models endpoint"""
     headers = {
-        "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
         "Content-Type": "application/json",
     }
 
     try:
-        # Try the OpenAI-compatible models endpoint
+        # Use the public display_models endpoint (no auth required)
         print("📡 Fetching models from OneRouter API...")
         response = httpx.get(
-            "https://llm.onerouter.pro/v1/models",
+            "https://app.onerouter.pro/api/display_models/",
             headers=headers,
-            timeout=15.0
+            timeout=15.0,
+            follow_redirects=True
         )
         response.raise_for_status()
 
@@ -48,34 +43,6 @@ def fetch_onerouter_models():
         return None
     except Exception as e:
         print(f"❌ Error fetching models: {e}")
-        return None
-
-
-def try_display_models_endpoint():
-    """Try the alternative display_models endpoint"""
-    if not Config.ONEROUTER_API_KEY:
-        return None
-
-    headers = {
-        "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        print("\n📡 Trying alternative endpoint: /api/display_models...")
-        response = httpx.get(
-            "https://app.onerouter.pro/api/display_models",
-            headers=headers,
-            timeout=15.0
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        print(f"✅ Fetched data from display_models endpoint")
-        return data
-
-    except Exception as e:
-        print(f"ℹ️  Alternative endpoint failed: {e}")
         return None
 
 
@@ -101,23 +68,36 @@ def format_pricing_entry(model):
     return model_id, entry
 
 
+def parse_token_limit(value):
+    """Parse token limit from various formats"""
+    if value is None:
+        return 4096
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value.replace(",", ""))
+    return 4096
+
+
+def parse_pricing(value):
+    """Parse pricing value from various formats"""
+    if value is None:
+        return "0"
+    if isinstance(value, str):
+        return value.replace("$", "").strip()
+    return str(value)
+
+
 def main():
     print("=" * 80)
     print("OneRouter Models Fetcher")
     print("=" * 80)
 
-    # Try main endpoint
+    # Fetch models from public display_models endpoint
     models = fetch_onerouter_models()
 
     if not models:
-        # Try alternative endpoint
-        alt_data = try_display_models_endpoint()
-        if alt_data:
-            models = alt_data.get("models", []) or alt_data.get("data", [])
-
-    if not models:
         print("\n❌ Could not fetch models from OneRouter API")
-        print("Please check your API key and try again.")
         return
 
     print("\n" + "=" * 80)
@@ -127,9 +107,10 @@ def main():
     # Group models by provider/type
     model_groups = {}
     for model in models:
-        model_id = model.get("id", "")
+        # Use invoke_name as the model identifier
+        model_id = model.get("invoke_name") or model.get("name", "")
 
-        # Determine provider from model ID
+        # Determine provider from model name
         if "gpt" in model_id.lower():
             provider = "OpenAI"
         elif "claude" in model_id.lower():
@@ -144,6 +125,8 @@ def main():
             provider = "DeepSeek"
         elif "qwen" in model_id.lower():
             provider = "Alibaba"
+        elif "skylark" in model_id.lower():
+            provider = "ByteDance"
         else:
             provider = "Other"
 
@@ -155,13 +138,18 @@ def main():
     for provider in sorted(model_groups.keys()):
         print(f"\n{provider}:")
         print("-" * 80)
-        for model in sorted(model_groups[provider], key=lambda x: x.get("id", "")):
-            model_id = model.get("id", "")
-            context = model.get("context_length") or model.get("context_window", "N/A")
-            owned_by = model.get("owned_by", "N/A")
+        for model in sorted(model_groups[provider], key=lambda x: x.get("invoke_name") or x.get("name", "")):
+            model_id = model.get("invoke_name") or model.get("name", "")
+            input_tokens = model.get("input_token_limit", "N/A")
+            output_tokens = model.get("output_token_limit", "N/A")
+            input_modalities = model.get("input_modalities", "Text")
+            retail_input = model.get("retail_input_cost", "N/A")
+            retail_output = model.get("retail_output_cost", "N/A")
 
             print(f"  • {model_id}")
-            print(f"    Context: {context}, Owner: {owned_by}")
+            print(f"    Input: {input_tokens} tokens, Output: {output_tokens} tokens")
+            print(f"    Modalities: {input_modalities}")
+            print(f"    Pricing: Input {retail_input}/M, Output {retail_output}/M")
 
     print("\n" + "=" * 80)
     print("Pricing JSON Format")
@@ -170,17 +158,25 @@ def main():
     print("\n{")
 
     # Generate pricing JSON (sorted alphabetically)
-    for model in sorted(models, key=lambda x: x.get("id", "")):
-        model_id = model.get("id", "")
-        context = model.get("context_length") or model.get("context_window", 4096)
+    for model in sorted(models, key=lambda x: x.get("invoke_name") or x.get("name", "")):
+        model_id = model.get("invoke_name") or model.get("name", "")
+        if not model_id:
+            continue
 
-        # Use placeholder pricing - needs to be filled with actual values
+        input_tokens = parse_token_limit(model.get("input_token_limit"))
+        output_tokens = parse_token_limit(model.get("output_token_limit"))
+
+        # Use retail pricing (sale pricing is often $0 for free tier)
+        prompt_price = parse_pricing(model.get("retail_input_cost"))
+        completion_price = parse_pricing(model.get("retail_output_cost"))
+
         print(f'  "{model_id}": {{')
-        print(f'    "prompt": "0.00",')
-        print(f'    "completion": "0.00",')
+        print(f'    "prompt": "{prompt_price}",')
+        print(f'    "completion": "{completion_price}",')
         print(f'    "request": "0",')
         print(f'    "image": "0",')
-        print(f'    "context_length": {context}')
+        print(f'    "context_length": {input_tokens},')
+        print(f'    "max_completion_tokens": {output_tokens}')
         print('  },')
 
     print("}")
@@ -188,8 +184,6 @@ def main():
     print("\n" + "=" * 80)
     print(f"Total Models: {len(models)}")
     print("=" * 80)
-    print("\n⚠️  Note: Pricing values need to be manually updated from")
-    print("   https://app.onerouter.pro/models (requires login)")
     print("\n✅ Done!")
 
 
