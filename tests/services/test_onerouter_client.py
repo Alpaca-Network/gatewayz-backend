@@ -271,6 +271,13 @@ class TestParseTokenLimit:
         assert _parse_token_limit("N/A") == 4096
         assert _parse_token_limit("abc") == 4096
 
+    def test_parse_token_limit_float(self):
+        """Test parsing float values"""
+        from src.services.onerouter_client import _parse_token_limit
+
+        assert _parse_token_limit(128000.0) == 128000
+        assert _parse_token_limit(4096.5) == 4096
+
 
 class TestParsePricing:
     """Test _parse_pricing helper function"""
@@ -301,6 +308,13 @@ class TestParsePricing:
         from src.services.onerouter_client import _parse_pricing
 
         assert _parse_pricing(None) == "0"
+
+    def test_parse_pricing_with_commas(self):
+        """Test parsing pricing with commas"""
+        from src.services.onerouter_client import _parse_pricing
+
+        assert _parse_pricing("$1,000.50") == "1000.50"
+        assert _parse_pricing("1,234.56") == "1234.56"
 
 
 class TestFetchModelsFromOneRouter:

@@ -121,11 +121,11 @@ def process_onerouter_response(response):
 
 
 def _parse_token_limit(value) -> int:
-    """Parse token limit from various formats (string with commas, int, etc.)"""
+    """Parse token limit from various formats (string with commas, int, float, etc.)"""
     if value is None:
         return 4096
-    if isinstance(value, int):
-        return value
+    if isinstance(value, (int, float)):
+        return int(value)
     if isinstance(value, str):
         try:
             # Remove commas and convert to int
@@ -140,8 +140,8 @@ def _parse_pricing(value) -> str:
     if value is None:
         return "0"
     if isinstance(value, str):
-        # Remove $ sign and return as string
-        return value.replace("$", "").strip()
+        # Remove $ sign and commas, then return as string
+        return value.replace("$", "").replace(",", "").strip()
     return str(value)
 
 

@@ -72,8 +72,8 @@ def parse_token_limit(value):
     """Parse token limit from various formats"""
     if value is None:
         return 4096
-    if isinstance(value, int):
-        return value
+    if isinstance(value, (int, float)):
+        return int(value)
     if isinstance(value, str):
         try:
             return int(value.replace(",", ""))
@@ -87,7 +87,7 @@ def parse_pricing(value):
     if value is None:
         return "0"
     if isinstance(value, str):
-        return value.replace("$", "").strip()
+        return value.replace("$", "").replace(",", "").strip()
     return str(value)
 
 
