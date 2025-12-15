@@ -218,12 +218,15 @@ def fetch_models_from_onerouter():
             except ValueError:
                 pass
 
+            # Get model name with proper fallback (handle None values)
+            model_name = model.get("name") or model_id
+
             transformed_model = {
                 "id": model_id,
                 "slug": model_id,
                 "canonical_slug": model_id,
-                "name": model.get("name", model_id),
-                "description": f"OneRouter model: {model.get('name', model_id)}",
+                "name": model_name,
+                "description": f"OneRouter model: {model_name}",
                 "context_length": input_token_limit,
                 "max_completion_tokens": output_token_limit,
                 "architecture": {

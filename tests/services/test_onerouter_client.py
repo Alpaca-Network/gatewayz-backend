@@ -505,6 +505,35 @@ class TestFetchModelsFromOneRouter:
             assert models[0]["architecture"]["modality"] == "text->text"
             assert "text" in models[0]["architecture"]["input_modalities"]
 
+    def test_fetch_models_handles_null_name(self):
+        """Test that null name from API falls back to invoke_name"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+
+        mock_models_response = {
+            "data": [
+                {
+                    "name": None,
+                    "invoke_name": "valid-model-id",
+                    "input_token_limit": "4096",
+                    "output_token_limit": "4096",
+                    "input_modalities": "Text",
+                    "output_modalities": "Text"
+                }
+            ]
+        }
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            mock_response = Mock()
+            mock_response.json.return_value = mock_models_response
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            models = fetch_models_from_onerouter()
+
+            # Should use invoke_name as fallback for name and description
+            assert models[0]["name"] == "valid-model-id"
+            assert models[0]["description"] == "OneRouter model: valid-model-id"
+
     def test_fetch_models_skip_empty_model_id(self):
         """Test that models without invoke_name or name are skipped"""
         from src.services.onerouter_client import fetch_models_from_onerouter
