@@ -236,10 +236,14 @@ def fetch_models_from_onerouter():
         # Fetch pricing data from display_models to enrich the model list
         pricing_map = _fetch_display_models_pricing()
 
+        if pricing_map:
+            logger.debug(f"Loaded pricing data for {len(pricing_map)} models from display_models")
+
         # Transform to our standard format
         # The /v1/models endpoint returns OpenAI-compatible format with fields:
         # id, object, created, owned_by
         transformed_models = []
+        enriched_count = 0
         for model in models:
             # Use the model id directly (this is what's used for API calls)
             model_id = model.get("id", "")
@@ -247,7 +251,10 @@ def fetch_models_from_onerouter():
                 continue
 
             # Get pricing/context info from display_models if available
+            # Note: We assume the 'id' from /v1/models matches 'invoke_name' from display_models
             pricing_info = pricing_map.get(model_id, {})
+            if pricing_info:
+                enriched_count += 1
             context_length = pricing_info.get("context_length", 128000)
             max_completion_tokens = pricing_info.get("max_completion_tokens", 4096)
             prompt_price = pricing_info.get("prompt", "0")
@@ -284,7 +291,10 @@ def fetch_models_from_onerouter():
             }
             transformed_models.append(transformed_model)
 
-        logger.info(f"Successfully fetched {len(transformed_models)} models from OneRouter")
+        logger.info(
+            f"Successfully fetched {len(transformed_models)} models from OneRouter "
+            f"({enriched_count} enriched with pricing data)"
+        )
         return _cache_and_return(transformed_models)
 
     except httpx.HTTPStatusError as e:
