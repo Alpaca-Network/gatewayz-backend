@@ -250,8 +250,11 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION clean_old_health_history IS 'Clean health history data older than retention period';
 
+-- Drop existing view first to allow column name changes
+DROP VIEW IF EXISTS model_status_current;
+
 -- Create view for current model status (for status page)
-CREATE OR REPLACE VIEW model_status_current AS
+CREATE VIEW model_status_current AS
 SELECT
     mht.provider,
     mht.model,
@@ -301,6 +304,10 @@ GRANT SELECT ON model_status_current TO anon;
 -- Enable RLS on model_health_tracking
 ALTER TABLE model_health_tracking ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Authenticated users can read model health" ON model_health_tracking;
+DROP POLICY IF EXISTS "Service role can do anything on model health" ON model_health_tracking;
+
 -- Create policies
 CREATE POLICY "Authenticated users can read model health"
     ON model_health_tracking
@@ -318,6 +325,10 @@ CREATE POLICY "Service role can do anything on model health"
 -- Enable RLS on model_health_incidents
 ALTER TABLE model_health_incidents ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Authenticated users can read incidents" ON model_health_incidents;
+DROP POLICY IF EXISTS "Service role can do anything on incidents" ON model_health_incidents;
+
 CREATE POLICY "Authenticated users can read incidents"
     ON model_health_incidents
     FOR SELECT
@@ -333,6 +344,10 @@ CREATE POLICY "Service role can do anything on incidents"
 
 -- Enable RLS on model_health_history
 ALTER TABLE model_health_history ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Authenticated users can read health history" ON model_health_history;
+DROP POLICY IF EXISTS "Service role can do anything on health history" ON model_health_history;
 
 CREATE POLICY "Authenticated users can read health history"
     ON model_health_history

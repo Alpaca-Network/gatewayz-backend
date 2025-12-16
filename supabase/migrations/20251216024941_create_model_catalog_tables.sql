@@ -102,10 +102,11 @@ CREATE INDEX IF NOT EXISTS "idx_models_modality" ON "public"."models" ("modality
 CREATE INDEX IF NOT EXISTS "idx_models_provider_active" ON "public"."models" ("provider_id", "is_active");
 
 -- ============================================================================
--- MODEL HEALTH HISTORY TABLE
+-- MODEL CATALOG HEALTH HISTORY TABLE
 -- ============================================================================
--- Stores historical health check data for models
-CREATE TABLE IF NOT EXISTS "public"."model_health_history" (
+-- Stores historical health check data for catalog models
+-- Note: This is separate from the runtime model_health_history table used for monitoring
+CREATE TABLE IF NOT EXISTS "public"."model_catalog_health_history" (
     "id" SERIAL PRIMARY KEY,
     "model_id" INTEGER NOT NULL REFERENCES "public"."models"("id") ON DELETE CASCADE,
     "health_status" TEXT NOT NULL CHECK (health_status IN ('healthy', 'degraded', 'down', 'unknown')),
@@ -114,12 +115,12 @@ CREATE TABLE IF NOT EXISTS "public"."model_health_history" (
     "checked_at" TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- Add comment to model_health_history table
-COMMENT ON TABLE "public"."model_health_history" IS 'Historical health check data for models';
+-- Add comment to model_catalog_health_history table
+COMMENT ON TABLE "public"."model_catalog_health_history" IS 'Historical health check data for catalog models';
 
--- Create indexes for model_health_history
-CREATE INDEX IF NOT EXISTS "idx_model_health_history_model_id" ON "public"."model_health_history" ("model_id");
-CREATE INDEX IF NOT EXISTS "idx_model_health_history_checked_at" ON "public"."model_health_history" ("checked_at");
+-- Create indexes for model_catalog_health_history
+CREATE INDEX IF NOT EXISTS "idx_model_catalog_health_history_model_id" ON "public"."model_catalog_health_history" ("model_id");
+CREATE INDEX IF NOT EXISTS "idx_model_catalog_health_history_checked_at" ON "public"."model_catalog_health_history" ("checked_at");
 
 -- ============================================================================
 -- FUNCTIONS
@@ -154,7 +155,7 @@ CREATE TRIGGER update_models_updated_at
 -- Enable RLS on all tables
 ALTER TABLE "public"."providers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."models" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."model_health_history" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."model_catalog_health_history" ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies if they exist (for idempotency)
 DROP POLICY IF EXISTS "Allow public read access to providers" ON "public"."providers";
@@ -163,8 +164,8 @@ DROP POLICY IF EXISTS "Allow service role full access to providers" ON "public".
 DROP POLICY IF EXISTS "Allow public read access to active models" ON "public"."models";
 DROP POLICY IF EXISTS "Allow authenticated read access to models" ON "public"."models";
 DROP POLICY IF EXISTS "Allow service role full access to models" ON "public"."models";
-DROP POLICY IF EXISTS "Allow authenticated read access to health history" ON "public"."model_health_history";
-DROP POLICY IF EXISTS "Allow service role full access to health history" ON "public"."model_health_history";
+DROP POLICY IF EXISTS "Allow authenticated read access to catalog health history" ON "public"."model_catalog_health_history";
+DROP POLICY IF EXISTS "Allow service role full access to catalog health history" ON "public"."model_catalog_health_history";
 
 -- Policies for providers table
 -- Allow public read access to providers
@@ -210,17 +211,17 @@ CREATE POLICY "Allow service role full access to models"
     USING (true)
     WITH CHECK (true);
 
--- Policies for model_health_history table
--- Allow authenticated users to read health history
-CREATE POLICY "Allow authenticated read access to health history"
-    ON "public"."model_health_history"
+-- Policies for model_catalog_health_history table
+-- Allow authenticated users to read catalog health history
+CREATE POLICY "Allow authenticated read access to catalog health history"
+    ON "public"."model_catalog_health_history"
     FOR SELECT
     TO authenticated
     USING (true);
 
--- Allow service role full access to health history
-CREATE POLICY "Allow service role full access to health history"
-    ON "public"."model_health_history"
+-- Allow service role full access to catalog health history
+CREATE POLICY "Allow service role full access to catalog health history"
+    ON "public"."model_catalog_health_history"
     FOR ALL
     TO service_role
     USING (true)
@@ -237,12 +238,12 @@ GRANT SELECT ON "public"."models" TO anon;
 -- Grant permissions to authenticated users
 GRANT SELECT ON "public"."providers" TO authenticated;
 GRANT SELECT ON "public"."models" TO authenticated;
-GRANT SELECT ON "public"."model_health_history" TO authenticated;
+GRANT SELECT ON "public"."model_catalog_health_history" TO authenticated;
 
 -- Grant all permissions to service role
 GRANT ALL ON "public"."providers" TO service_role;
 GRANT ALL ON "public"."models" TO service_role;
-GRANT ALL ON "public"."model_health_history" TO service_role;
+GRANT ALL ON "public"."model_catalog_health_history" TO service_role;
 
 -- Grant sequence usage
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon;
