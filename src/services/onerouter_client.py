@@ -172,11 +172,13 @@ def _fetch_display_models_pricing() -> dict:
                 if float(prompt_price) == 0:
                     prompt_price = _parse_pricing(model.get("retail_input_cost"))
             except ValueError:
+                # Keep original price if parsing fails (e.g., malformed value)
                 pass
             try:
                 if float(completion_price) == 0:
                     completion_price = _parse_pricing(model.get("retail_output_cost"))
             except ValueError:
+                # Keep original price if parsing fails (e.g., malformed value)
                 pass
 
             pricing_map[model_id] = {
