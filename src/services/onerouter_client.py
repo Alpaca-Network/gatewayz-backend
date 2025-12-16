@@ -149,8 +149,8 @@ def fetch_models_from_onerouter():
     """Fetch models from OneRouter API
 
     OneRouter provides access to multiple AI models through their API.
-    This function fetches the list of available models from the public
-    display_models endpoint which does not require authentication.
+    This function fetches the list of available models from the authenticated
+    /v1/models endpoint which returns the complete model list.
 
     Models are cached with a 1-hour TTL to reduce API calls and improve performance.
     """
@@ -163,14 +163,19 @@ def fetch_models_from_onerouter():
 
     try:
         logger.info("Fetching models from OneRouter API...")
+
+        if not Config.ONEROUTER_API_KEY:
+            logger.warning("OneRouter API key not configured, skipping model fetch")
+            return _cache_and_return([])
+
         headers = {
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
         }
 
-        # Use the public display_models endpoint (no auth required)
-        # This endpoint returns comprehensive model information including pricing
+        # Use the authenticated /v1/models endpoint for complete model list
         response = httpx.get(
-            "https://app.onerouter.pro/api/display_models/",
+            "https://api.onerouter.pro/v1/models",
             headers=headers,
             timeout=15.0,
             follow_redirects=True
@@ -181,45 +186,22 @@ def fetch_models_from_onerouter():
         models = models_data.get("data", [])
 
         # Transform to our standard format
+        # The /v1/models endpoint returns OpenAI-compatible format with fields:
+        # id, object, created, owned_by
         transformed_models = []
         for model in models:
-            # Use invoke_name as the model ID (this is what's used for API calls)
-            model_id = model.get("invoke_name") or model.get("name", "")
+            # Use the model id directly (this is what's used for API calls)
+            model_id = model.get("id", "")
             if not model_id:
                 continue
 
-            # Parse context lengths from string format (e.g., "131,072")
-            input_token_limit = _parse_token_limit(model.get("input_token_limit"))
-            output_token_limit = _parse_token_limit(model.get("output_token_limit"))
+            # OpenAI format doesn't include detailed context/pricing info
+            # Use sensible defaults
+            context_length = model.get("context_length", 128000)
+            max_completion_tokens = model.get("max_completion_tokens", 4096)
 
-            # Parse input/output modalities (handle null values from API)
-            input_modalities_str = model.get("input_modalities") or "Text"
-            output_modalities_str = model.get("output_modalities") or "Text"
-            input_modalities = [m.strip().lower() for m in input_modalities_str.split(",")]
-            output_modalities = [m.strip().lower() for m in output_modalities_str.split(",")]
-
-            # Determine modality type
-            has_image_input = any(m in ["images", "image"] for m in input_modalities)
-            modality = "text+image->text" if has_image_input else "text->text"
-
-            # Parse pricing (sale price if available, otherwise retail)
-            prompt_price = _parse_pricing(model.get("sale_input_cost"))
-            completion_price = _parse_pricing(model.get("sale_output_cost"))
-
-            # If sale price is 0 (handles "0", "0.0", "0.00", etc.), use retail price
-            try:
-                if float(prompt_price) == 0:
-                    prompt_price = _parse_pricing(model.get("retail_input_cost"))
-            except ValueError:
-                logger.warning(f"Could not parse prompt_price '{prompt_price}' as float for model '{model_id}'; skipping sale-to-retail fallback")
-            try:
-                if float(completion_price) == 0:
-                    completion_price = _parse_pricing(model.get("retail_output_cost"))
-            except ValueError:
-                pass
-
-            # Get model name with proper fallback (handle None values)
-            model_name = model.get("name") or model_id
+            # Build a readable name from the model ID
+            model_name = model_id.replace("-", " ").replace("_", " ").title()
 
             # Build the full model ID with onerouter prefix for consistent display
             # This ensures models are grouped under "OneRouter" in the UI
@@ -231,16 +213,16 @@ def fetch_models_from_onerouter():
                 "canonical_slug": model_id,
                 "name": model_name,
                 "description": f"OneRouter model: {model_name}",
-                "context_length": input_token_limit,
-                "max_completion_tokens": output_token_limit,
+                "context_length": context_length,
+                "max_completion_tokens": max_completion_tokens,
                 "architecture": {
-                    "modality": modality,
-                    "input_modalities": input_modalities,
-                    "output_modalities": output_modalities,
+                    "modality": "text->text",
+                    "input_modalities": ["text"],
+                    "output_modalities": ["text"],
                 },
                 "pricing": {
-                    "prompt": prompt_price,
-                    "completion": completion_price,
+                    "prompt": "0",
+                    "completion": "0",
                     "request": "0",
                     "image": "0",
                 },
@@ -260,7 +242,7 @@ def fetch_models_from_onerouter():
         capture_provider_error(
             e,
             provider='onerouter',
-            endpoint='/api/display_models'
+            endpoint='/v1/models'
         )
         return _cache_and_return([])
     except Exception as e:
@@ -268,6 +250,6 @@ def fetch_models_from_onerouter():
         capture_provider_error(
             e,
             provider='onerouter',
-            endpoint='/api/display_models'
+            endpoint='/v1/models'
         )
         return _cache_and_return([])
