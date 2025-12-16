@@ -6,7 +6,7 @@ response times, success rates, and error tracking.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -17,14 +17,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/v1/model-health", tags=["monitoring"])
+@router.get("/model-health", tags=["monitoring"])
 async def get_all_model_health(
-    provider: Optional[str] = Query(None, description="Filter by provider"),
-    status: Optional[str] = Query(None, description="Filter by last status (success, error, timeout, etc.)"),
+    provider: str | None = Query(None, description="Filter by provider"),
+    status: str | None = Query(None, description="Filter by last status (success, error, timeout, etc.)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     _: dict[str, Any] | None = Depends(get_optional_user),
-) -> Dict:
+) -> dict:
     """
     Get health metrics for all monitored models.
 
@@ -63,12 +63,12 @@ async def get_all_model_health(
         raise HTTPException(status_code=500, detail="Failed to fetch model health data")
 
 
-@router.get("/v1/model-health/{provider}/{model}", tags=["monitoring"])
+@router.get("/model-health/{provider}/{model}", tags=["monitoring"])
 async def get_model_health(
     provider: str,
     model: str,
     _: dict[str, Any] | None = Depends(get_optional_user),
-) -> Dict:
+) -> dict:
     """
     Get health metrics for a specific provider-model combination.
 
@@ -96,12 +96,12 @@ async def get_model_health(
         raise HTTPException(status_code=500, detail="Failed to fetch model health data")
 
 
-@router.get("/v1/model-health/unhealthy", tags=["monitoring"])
+@router.get("/model-health/unhealthy", tags=["monitoring"])
 async def get_unhealthy_models(
     error_threshold: float = Query(0.2, ge=0.0, le=1.0, description="Minimum error rate (0.0-1.0)"),
     min_calls: int = Query(10, ge=1, description="Minimum number of calls to evaluate"),
     _: dict[str, Any] | None = Depends(get_optional_user),
-) -> Dict:
+) -> dict:
     """
     Get models with high error rates (unhealthy models).
 
@@ -129,10 +129,10 @@ async def get_unhealthy_models(
         raise HTTPException(status_code=500, detail="Failed to fetch unhealthy models")
 
 
-@router.get("/v1/model-health/stats", tags=["monitoring"])
+@router.get("/model-health/stats", tags=["monitoring"])
 async def get_model_health_stats(
     _: dict[str, Any] | None = Depends(get_optional_user),
-) -> Dict:
+) -> dict:
     """
     Get aggregate statistics for model health tracking.
 
@@ -153,11 +153,11 @@ async def get_model_health_stats(
         raise HTTPException(status_code=500, detail="Failed to fetch model health stats")
 
 
-@router.get("/v1/model-health/provider/{provider}/summary", tags=["monitoring"])
+@router.get("/model-health/provider/{provider}/summary", tags=["monitoring"])
 async def get_provider_health_summary(
     provider: str,
     _: dict[str, Any] | None = Depends(get_optional_user),
-) -> Dict:
+) -> dict:
     """
     Get health summary for all models from a specific provider.
 
@@ -184,10 +184,10 @@ async def get_provider_health_summary(
         raise HTTPException(status_code=500, detail="Failed to fetch provider health summary")
 
 
-@router.get("/v1/model-health/providers", tags=["monitoring"])
+@router.get("/model-health/providers", tags=["monitoring"])
 async def get_all_providers(
     _: dict[str, Any] | None = Depends(get_optional_user),
-) -> Dict:
+) -> dict:
     """
     Get list of all providers with health data.
 

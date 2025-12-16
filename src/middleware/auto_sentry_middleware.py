@@ -14,7 +14,7 @@ Features:
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -101,7 +101,8 @@ class AutoSentryMiddleware(BaseHTTPMiddleware):
                 from fastapi import HTTPException
 
                 # Don't capture HTTPException to Sentry - these are intentional user-facing errors
-                # (401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Validation Error, etc.)
+                # Route handlers should capture the underlying exception before wrapping in HTTPException
+                # (401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Validation Error, 500 Internal Error, etc.)
                 if isinstance(exc, HTTPException):
                     # Log for debugging but don't send to Sentry
                     logger.debug(

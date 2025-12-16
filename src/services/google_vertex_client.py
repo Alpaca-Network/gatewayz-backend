@@ -329,7 +329,15 @@ def _make_google_vertex_request_sdk(
         try:
             generation_config = {}
             if max_tokens is not None:
-                generation_config["max_output_tokens"] = max_tokens
+                # Google Vertex AI requires max_output_tokens to be at least 16
+                # Validate and adjust if necessary to prevent 400 errors
+                adjusted_max_tokens = max(16, max_tokens)
+                if adjusted_max_tokens != max_tokens:
+                    logger.warning(
+                        f"max_tokens={max_tokens} is below minimum (16). "
+                        f"Adjusting to {adjusted_max_tokens} for Google Vertex AI compatibility."
+                    )
+                generation_config["max_output_tokens"] = adjusted_max_tokens
             if temperature is not None:
                 generation_config["temperature"] = temperature
             if top_p is not None:
@@ -437,7 +445,15 @@ def _make_google_vertex_request_rest(
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
-            generation_config["maxOutputTokens"] = max_tokens
+            # Google Vertex AI requires maxOutputTokens to be at least 16
+            # Validate and adjust if necessary to prevent 400 errors
+            adjusted_max_tokens = max(16, max_tokens)
+            if adjusted_max_tokens != max_tokens:
+                logger.warning(
+                    f"max_tokens={max_tokens} is below minimum (16). "
+                    f"Adjusting to {adjusted_max_tokens} for Google Vertex AI compatibility."
+                )
+            generation_config["maxOutputTokens"] = adjusted_max_tokens
         if temperature is not None:
             generation_config["temperature"] = temperature
         if top_p is not None:
@@ -1088,7 +1104,90 @@ def fetch_models_from_google_vertex():
     """Fetch models from Google Vertex AI API
 
     Google Vertex AI does not provide a public API to list available models.
-    Returns None to indicate no dynamic model listing is available.
+    Returns a static list of known Google/Gemini models from the config.
     """
-    logger.info("Google Vertex AI does not provide a public model listing API")
-    return None
+    from datetime import timezone, datetime
+
+    from src.cache import _google_vertex_models_cache
+    from src.services.google_models_config import get_google_models
+
+    logger.info("Loading static Google Vertex AI model catalog")
+
+    try:
+        multi_provider_models = get_google_models()
+        normalized_models = []
+
+        for model in multi_provider_models:
+            # Find the google-vertex provider config for pricing info
+            vertex_provider = next(
+                (p for p in model.providers if p.name == "google-vertex"), None
+            )
+
+            pricing = {}
+            features = []
+            if vertex_provider:
+                pricing = {
+                    "prompt": str(vertex_provider.cost_per_1k_input),
+                    "completion": str(vertex_provider.cost_per_1k_output),
+                    "request": None,
+                    "image": None,
+                    "web_search": None,
+                    "internal_reasoning": None,
+                }
+                features = vertex_provider.features
+
+            # Build architecture based on modalities
+            input_modalities = model.modalities if model.modalities else ["text"]
+            output_modalities = ["text"]  # Google models output text
+
+            normalized = {
+                "id": model.id,
+                "slug": model.id,
+                "canonical_slug": model.id,
+                "hugging_face_id": None,
+                "name": model.name,
+                "created": None,
+                "description": model.description,
+                "context_length": model.context_length,
+                "architecture": {
+                    "modality": "text->text",
+                    "input_modalities": input_modalities,
+                    "output_modalities": output_modalities,
+                    "tokenizer": None,
+                    "instruct_type": "chat",
+                },
+                "pricing": pricing,
+                "top_provider": None,
+                "per_request_limits": None,
+                "supported_parameters": [
+                    "max_tokens",
+                    "temperature",
+                    "top_p",
+                    "top_k",
+                    "stream",
+                ],
+                "default_parameters": {},
+                "provider_slug": "google",
+                "provider_site_url": "https://cloud.google.com/vertex-ai",
+                "model_logo_url": None,
+                "source_gateway": "google-vertex",
+                "tags": features,
+                "raw_google_vertex": {
+                    "id": model.id,
+                    "name": model.name,
+                    "modalities": model.modalities,
+                    "context_length": model.context_length,
+                },
+            }
+            normalized_models.append(normalized)
+
+        # Update cache
+        _google_vertex_models_cache["data"] = normalized_models
+        _google_vertex_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        logger.info(f"Loaded {len(normalized_models)} Google Vertex AI models from static catalog")
+        return normalized_models
+
+    except Exception as e:
+        logger.error(f"Failed to load Google Vertex AI models: {e}")
+        return []

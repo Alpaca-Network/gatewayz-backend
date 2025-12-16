@@ -10,6 +10,7 @@ This module provides REST API endpoints for accessing:
 - Anomaly detection
 
 Endpoints:
+- POST /monitoring - Sentry tunnel for frontend error tracking (bypasses ad blockers)
 - GET /api/monitoring/health - All provider health scores
 - GET /api/monitoring/health/{provider} - Specific provider health
 - GET /api/monitoring/errors/{provider} - Recent errors for a provider
@@ -22,15 +23,21 @@ Endpoints:
 - GET /api/monitoring/anomalies - Detected anomalies
 - GET /api/monitoring/trial-analytics - Trial funnel metrics
 - GET /api/monitoring/cost-analysis - Cost breakdown by provider
+
+Note: These endpoints support optional authentication. If an API key is provided,
+it will be validated. If not provided, public access is allowed with rate limiting.
 """
 
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from src.security.deps import get_optional_api_key
 from src.services.analytics import get_analytics_service
 from src.services.model_availability import availability_service
 from src.services.redis_metrics import get_redis_metrics
@@ -38,6 +45,149 @@ from src.services.redis_metrics import get_redis_metrics
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
+
+# Separate router for Sentry tunnel at root /monitoring path
+sentry_tunnel_router = APIRouter(tags=["sentry-tunnel"])
+
+# Allowed Sentry hosts for security
+ALLOWED_SENTRY_HOSTS = {
+    "sentry.io",
+    "o4510344966111232.ingest.us.sentry.io",  # From the error URL
+    "ingest.sentry.io",
+    "ingest.us.sentry.io",
+}
+
+
+def _is_valid_sentry_host(hostname: str | None) -> bool:
+    """
+    Validate that a hostname is a legitimate Sentry host.
+
+    Uses exact matching or proper subdomain checking to prevent SSRF attacks
+    via malicious domains like evil-sentry.io or malicioussentry.io.
+
+    Args:
+        hostname: The hostname to validate
+
+    Returns:
+        True if hostname is a valid Sentry host, False otherwise
+    """
+    if not hostname:
+        return False
+
+    for allowed in ALLOWED_SENTRY_HOSTS:
+        # Exact match
+        if hostname == allowed:
+            return True
+        # Valid subdomain (must have dot before the allowed domain)
+        if hostname.endswith("." + allowed):
+            return True
+
+    return False
+
+
+@sentry_tunnel_router.post("/monitoring")
+async def sentry_tunnel(request: Request) -> Response:
+    """
+    Sentry tunnel endpoint for frontend error tracking.
+
+    This endpoint acts as a proxy to forward Sentry events from the frontend
+    to Sentry's ingestion endpoint. This helps bypass ad blockers that might
+    block direct requests to sentry.io.
+
+    The frontend Sentry SDK should be configured with:
+    ```javascript
+    Sentry.init({
+      dsn: "your-dsn",
+      tunnel: "/monitoring",
+    });
+    ```
+
+    No authentication required - this is intentionally public to allow
+    frontend error tracking without exposing API keys.
+    """
+    try:
+        # Read the raw request body (Sentry envelope format)
+        body = await request.body()
+
+        if not body:
+            logger.warning("Sentry tunnel: Empty request body")
+            return Response(status_code=400, content="Empty request body")
+
+        # Parse the envelope to extract the DSN
+        # Sentry envelopes have a JSON header on the first line
+        try:
+            envelope_lines = body.split(b"\n")
+            if not envelope_lines:
+                return Response(status_code=400, content="Invalid envelope format")
+
+            # First line contains the envelope header with DSN
+            import json
+
+            header = json.loads(envelope_lines[0])
+
+            # Ensure header is a dict (not a list, string, number, etc.)
+            if not isinstance(header, dict):
+                logger.warning("Sentry tunnel: Envelope header is not a JSON object")
+                return Response(status_code=400, content="Invalid envelope header")
+
+            dsn = header.get("dsn")
+
+            if not dsn:
+                logger.warning("Sentry tunnel: No DSN in envelope header")
+                return Response(status_code=400, content="No DSN in envelope")
+
+            # Parse the DSN to get the project ID and host
+            parsed_dsn = urlparse(dsn)
+            sentry_host = parsed_dsn.hostname
+
+            # Security check: Only allow forwarding to known Sentry hosts
+            # Uses exact matching or proper subdomain checking to prevent SSRF
+            if not _is_valid_sentry_host(sentry_host):
+                logger.warning(f"Sentry tunnel: Blocked request to non-Sentry host: {sentry_host}")
+                return Response(status_code=403, content="Invalid Sentry host")
+
+            # Extract project ID from DSN path
+            project_id = parsed_dsn.path.strip("/")
+
+            # Construct the Sentry ingestion URL
+            sentry_url = f"https://{sentry_host}/api/{project_id}/envelope/"
+
+            logger.debug(f"Sentry tunnel: Forwarding to {sentry_url}")
+
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            logger.warning(f"Sentry tunnel: Failed to parse envelope header: {e}")
+            return Response(status_code=400, content="Invalid envelope header")
+
+        # Forward the envelope to Sentry
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                sentry_response = await client.post(
+                    sentry_url,
+                    content=body,
+                    headers={
+                        "Content-Type": "application/x-sentry-envelope",
+                        "X-Forwarded-For": request.client.host if request.client else "",
+                    },
+                )
+
+                # Return Sentry's response
+                return Response(
+                    status_code=sentry_response.status_code,
+                    content=sentry_response.content,
+                    headers={"Content-Type": "application/json"},
+                )
+
+            except httpx.TimeoutException:
+                logger.error("Sentry tunnel: Timeout forwarding to Sentry")
+                return Response(status_code=504, content="Sentry request timeout")
+
+            except httpx.HTTPError as e:
+                logger.error(f"Sentry tunnel: HTTP error forwarding to Sentry: {e}")
+                return Response(status_code=502, content="Failed to forward to Sentry")
+
+    except Exception as e:
+        logger.error(f"Sentry tunnel: Unexpected error: {e}", exc_info=True)
+        return Response(status_code=500, content="Internal server error")
 
 
 # Response Models
@@ -89,11 +239,13 @@ class LatencyPercentilesResponse(BaseModel):
 
 # Endpoints
 @router.get("/health", response_model=list[HealthResponse])
-async def get_all_provider_health():
+async def get_all_provider_health(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get health scores for all providers.
 
     Returns a list of provider health scores (0-100) with status classification.
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -123,12 +275,14 @@ async def get_all_provider_health():
 
 
 @router.get("/health/{provider}", response_model=HealthResponse)
-async def get_provider_health(provider: str):
+async def get_provider_health(provider: str, api_key: str | None = Depends(get_optional_api_key)):
     """
     Get health score for a specific provider.
 
     Args:
         provider: Provider name (e.g., "openrouter", "portkey")
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -156,7 +310,8 @@ async def get_provider_health(provider: str):
 @router.get("/errors/{provider}", response_model=list[ErrorResponse])
 async def get_provider_errors(
     provider: str,
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of errors to return")
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of errors to return"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get recent errors for a specific provider.
@@ -164,6 +319,8 @@ async def get_provider_errors(
     Args:
         provider: Provider name
         limit: Maximum number of errors (default: 100, max: 1000)
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -177,13 +334,16 @@ async def get_provider_errors(
 
 @router.get("/stats/realtime", response_model=RealtimeStatsResponse)
 async def get_realtime_stats(
-    hours: int = Query(1, ge=1, le=24, description="Number of hours to look back")
+    hours: int = Query(1, ge=1, le=24, description="Number of hours to look back"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get real-time statistics from Redis for all providers.
 
     Args:
         hours: Number of hours to look back (default: 1, max: 24)
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -235,7 +395,8 @@ async def get_realtime_stats(
 @router.get("/stats/hourly/{provider}")
 async def get_hourly_stats(
     provider: str,
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to look back")
+    hours: int = Query(24, ge=1, le=168, description="Number of hours to look back"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get hourly statistics for a specific provider.
@@ -243,6 +404,8 @@ async def get_hourly_stats(
     Args:
         provider: Provider name
         hours: Number of hours to look back (default: 24, max: 168 = 1 week)
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         redis_metrics = get_redis_metrics()
@@ -259,11 +422,13 @@ async def get_hourly_stats(
 
 
 @router.get("/circuit-breakers", response_model=list[CircuitBreakerResponse])
-async def get_all_circuit_breakers():
+async def get_all_circuit_breakers(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get circuit breaker states for all provider/model combinations.
 
     Returns the current circuit breaker state, availability, and failure counts.
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         # Get all models that have been tracked
@@ -292,12 +457,14 @@ async def get_all_circuit_breakers():
 
 
 @router.get("/circuit-breakers/{provider}", response_model=list[CircuitBreakerResponse])
-async def get_provider_circuit_breakers(provider: str):
+async def get_provider_circuit_breakers(provider: str, api_key: str | None = Depends(get_optional_api_key)):
     """
     Get circuit breaker states for a specific provider's models.
 
     Args:
         provider: Provider name
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         circuit_states = []
@@ -329,7 +496,7 @@ async def get_provider_circuit_breakers(provider: str):
 
 
 @router.get("/providers/comparison")
-async def get_provider_comparison():
+async def get_provider_comparison(api_key: str | None = Depends(get_optional_api_key)):
     """
     Compare all providers across key metrics.
 
@@ -339,6 +506,8 @@ async def get_provider_comparison():
     - Total cost
     - Error rates
     - Health scores
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -358,7 +527,8 @@ async def get_provider_comparison():
 async def get_latency_percentiles(
     provider: str,
     model: str,
-    percentiles: str = Query("50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)")
+    percentiles: str = Query("50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get latency percentiles for a specific provider/model combination.
@@ -367,6 +537,8 @@ async def get_latency_percentiles(
         provider: Provider name
         model: Model ID
         percentiles: Comma-separated percentiles (e.g., "50,95,99")
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         # Parse percentiles
@@ -398,7 +570,7 @@ async def get_latency_percentiles(
 
 
 @router.get("/anomalies")
-async def get_anomalies():
+async def get_anomalies(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get detected anomalies in metrics.
 
@@ -408,6 +580,8 @@ async def get_anomalies():
     - High error rates (>10%)
 
     Returns list of anomalies with severity classification.
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -426,7 +600,7 @@ async def get_anomalies():
 
 
 @router.get("/trial-analytics")
-async def get_trial_analytics():
+async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key)):
     """
     Get trial funnel analytics.
 
@@ -436,6 +610,8 @@ async def get_trial_analytics():
     - Conversions to paid
     - Conversion rates
     - Average time to conversion
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -452,7 +628,8 @@ async def get_trial_analytics():
 
 @router.get("/cost-analysis")
 async def get_cost_analysis(
-    days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
+    days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get cost breakdown by provider.
@@ -465,6 +642,8 @@ async def get_cost_analysis(
     - Cost per request
     - Total requests
     - Cost trends
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         from datetime import timedelta
@@ -488,7 +667,8 @@ async def get_cost_analysis(
 @router.get("/latency-trends/{provider}")
 async def get_latency_trends(
     provider: str,
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze")
+    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get latency trends for a provider over time.
@@ -501,6 +681,8 @@ async def get_latency_trends(
     - Hourly average latency
     - P95 and P99 percentiles
     - Latency trends over time
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -517,7 +699,8 @@ async def get_latency_trends(
 
 @router.get("/error-rates")
 async def get_error_rates(
-    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze")
+    hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
+    api_key: str | None = Depends(get_optional_api_key)
 ):
     """
     Get error rates broken down by model.
@@ -529,6 +712,8 @@ async def get_error_rates(
     - Error rate per model
     - Total requests and failures
     - Provider information
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()
@@ -544,7 +729,7 @@ async def get_error_rates(
 
 
 @router.get("/token-efficiency/{provider}/{model}")
-async def get_token_efficiency(provider: str, model: str):
+async def get_token_efficiency(provider: str, model: str, api_key: str | None = Depends(get_optional_api_key)):
     """
     Get token efficiency metrics for a provider/model.
 
@@ -557,6 +742,8 @@ async def get_token_efficiency(provider: str, model: str):
     - Tokens per request
     - Cost per request
     - Average input/output tokens
+
+    Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         analytics = get_analytics_service()

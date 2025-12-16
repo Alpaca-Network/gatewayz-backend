@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from postgrest import APIError
 
@@ -17,7 +17,7 @@ ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
 
 
 # near the top of the module
-def _pct(used: int, limit: Optional[int]) -> Optional[float]:
+def _pct(used: int, limit: int | None) -> float | None:
     if not limit:
         return None
     return round(min(100.0, (used / float(limit)) * 100.0), 6)
@@ -48,7 +48,7 @@ def refresh_postgrest_schema_cache(client) -> bool:
 
 
 def _insert_api_key_row(
-    client, api_key_payload: Dict[str, Any], include_encrypted_fields: bool = True
+    client, api_key_payload: dict[str, Any], include_encrypted_fields: bool = True
 ):
     """Insert API key data, optionally dropping encrypted columns for legacy schemas."""
     payload = dict(api_key_payload)
@@ -65,7 +65,7 @@ def _is_optional_column_error(error: Exception) -> bool:
 
 
 def _handle_schema_cache_insert_error(
-    client, api_key_payload: Dict[str, Any], original_error: APIError
+    client, api_key_payload: dict[str, Any], original_error: APIError
 ):
     """Retry API key insert after schema refresh or by omitting encrypted columns."""
     if not _is_schema_cache_error(original_error):
@@ -96,7 +96,7 @@ def _handle_schema_cache_insert_error(
 
 
 def check_key_name_uniqueness(
-    user_id: int, key_name: str, exclude_key_id: Optional[int] = None
+    user_id: int, key_name: str, exclude_key_id: int | None = None
 ) -> bool:
     """Check if a key name is unique within the user's scope"""
     try:
@@ -129,11 +129,11 @@ def create_api_key(
     user_id: int,
     key_name: str,
     environment_tag: str = "live",
-    scope_permissions: Optional[Dict[str, Any]] = None,
-    expiration_days: Optional[int] = None,
-    max_requests: Optional[int] = None,
-    ip_allowlist: Optional[List[str]] = None,
-    domain_referrers: Optional[List[str]] = None,
+    scope_permissions: dict[str, Any] | None = None,
+    expiration_days: int | None = None,
+    max_requests: int | None = None,
+    ip_allowlist: list[str] | None = None,
+    domain_referrers: list[str] | None = None,
     is_primary: bool = False,
 ) -> tuple[str, int]:
     """Create a new API key for a user"""
@@ -346,7 +346,7 @@ def create_api_key(
         raise RuntimeError(f"Failed to create API key: {e}") from e
 
 
-def get_user_api_keys(user_id: int) -> List[Dict[str, Any]]:
+def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
     """Get all API keys for a user"""
     try:
         client = get_supabase_client()
@@ -495,7 +495,7 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
         return False
 
 
-def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
+def validate_api_key(api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return user info if valid"""
     # Lazy import to avoid circular dependency
     from src.db.users import get_user
@@ -601,7 +601,6 @@ def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
 def increment_api_key_usage(api_key: str) -> None:
     """Increment the request count for an API key"""
     # Lazy import to avoid circular dependency
-    from src.db.users import get_user
 
     try:
         client = get_supabase_client()
@@ -632,7 +631,7 @@ def increment_api_key_usage(api_key: str) -> None:
         logger.error("Failed to increment API key usage: %s", sanitize_for_logging(str(e)))
 
 
-def get_api_key_usage_stats(api_key: str) -> Dict[str, Any]:
+def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
     """Get usage statistics for a specific API key"""
     try:
         client = get_supabase_client()
@@ -701,7 +700,7 @@ def get_api_key_usage_stats(api_key: str) -> Dict[str, Any]:
         }
 
 
-def update_api_key(api_key: str, user_id: int, updates: Dict[str, Any]) -> bool:
+def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
     """Update an API key's details"""
     try:
         client = get_supabase_client()
@@ -917,7 +916,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         return False
 
 
-def get_api_key_by_id(key_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
     """Get API key details by ID, ensuring user ownership"""
     try:
         client = get_supabase_client()
@@ -997,7 +996,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_all_api_keys_usage(user_id: int) -> Dict[str, Any]:
+def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
     """Get usage statistics for all API keys of a user"""
     try:
         client = get_supabase_client()

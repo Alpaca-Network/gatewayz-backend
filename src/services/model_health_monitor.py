@@ -116,6 +116,7 @@ class ModelHealthMonitor:
         self.batch_size = max(1, batch_size)
         self.batch_interval = max(0.0, batch_interval)
         self.fetch_chunk_size = max(1, fetch_chunk_size)
+        self._monitoring_task: asyncio.Task | None = None
 
         # Test payload for health checks
         self.test_payload = {
@@ -124,8 +125,15 @@ class ModelHealthMonitor:
             "temperature": 0.1,
         }
 
-    async def start_monitoring(self):
-        """Start the health monitoring service"""
+    async def start_monitoring(self, run_initial_check: bool = True):
+        """Start the health monitoring service
+
+        Args:
+            run_initial_check: If True, performs an initial health check synchronously
+                               before starting the background loop. This ensures system_data
+                               is populated immediately rather than waiting for the first
+                               check_interval (default 5 minutes).
+        """
         if self.monitoring_active:
             logger.warning("Health monitoring is already active")
             return
@@ -133,13 +141,108 @@ class ModelHealthMonitor:
         self.monitoring_active = True
         logger.info("Starting model health monitoring service")
 
-        # Start monitoring loop
-        asyncio.create_task(self._monitoring_loop())
+        # Perform initial health check synchronously to populate system_data immediately
+        # This prevents the race condition where /health/dashboard returns UNKNOWN status
+        # because no health checks have completed yet
+        if run_initial_check:
+            try:
+                logger.info("Running initial health check to populate system metrics...")
+                await self._perform_initial_health_check()
+                logger.info("Initial health check completed - system metrics available")
+            except Exception as e:
+                logger.warning(f"Initial health check failed, will retry in background: {e}")
+                # Initialize with empty but valid system_data to avoid UNKNOWN status
+                await self._initialize_empty_system_data()
+
+        # Start monitoring loop for periodic checks and store task reference for cleanup
+        self._monitoring_task = asyncio.create_task(self._monitoring_loop())
 
     async def stop_monitoring(self):
-        """Stop the health monitoring service"""
+        """Stop the health monitoring service and wait for background task to complete"""
         self.monitoring_active = False
-        logger.info("Stopped model health monitoring service")
+        logger.info("Stopping model health monitoring service...")
+
+        # Cancel and await the monitoring task to ensure clean shutdown
+        if self._monitoring_task is not None:
+            self._monitoring_task.cancel()
+            try:
+                await self._monitoring_task
+            except asyncio.CancelledError:
+                pass  # Expected when task is cancelled
+            self._monitoring_task = None
+
+        logger.info("Model health monitoring service stopped")
+
+    async def _perform_initial_health_check(self):
+        """Perform a lightweight initial health check to populate system_data.
+
+        This is a faster version of _perform_health_checks() that:
+        1. Only checks a small sample of models (first few from each gateway)
+        2. Has a shorter timeout
+        3. Prioritizes populating system_data over comprehensive coverage
+
+        The full health check will run in the background loop afterward.
+        """
+        logger.info("Performing initial health check (lightweight)")
+
+        # Get models but limit to a small sample for fast startup
+        models_to_check = await self._get_models_to_check()
+
+        if not models_to_check:
+            logger.warning("No models available for initial health check")
+            # Still initialize system_data with zeros rather than leaving it None
+            await self._initialize_empty_system_data()
+            return
+
+        # Take a sample of models (max 10) for quick initial check
+        sample_size = min(10, len(models_to_check))
+        sample_models = models_to_check[:sample_size]
+
+        logger.info(f"Initial check: sampling {sample_size} of {len(models_to_check)} models")
+
+        # Check the sample models with shorter timeout
+        results = await asyncio.gather(
+            *(self._check_model_health(model) for model in sample_models),
+            return_exceptions=True,
+        )
+
+        for model, result in zip(sample_models, results, strict=False):
+            if isinstance(result, Exception):
+                logger.debug(f"Initial health check failed for {model.get('id')}: {result}")
+                continue
+            if result:
+                self._update_health_data(result)
+
+        # Update provider and system metrics even with partial data
+        await self._update_provider_metrics()
+        await self._update_system_metrics()
+
+        logger.info(
+            f"Initial health check complete: {len(self.health_data)} models, "
+            f"{len(self.provider_data)} providers tracked"
+        )
+
+    async def _initialize_empty_system_data(self):
+        """Initialize system_data with empty/zero values.
+
+        This is called when no models are available or initial check fails,
+        to ensure system_data is not None and endpoints return valid responses
+        instead of UNKNOWN status.
+        """
+        self.system_data = SystemHealthMetrics(
+            overall_status=HealthStatus.UNKNOWN,  # No checks performed yet
+            total_providers=0,
+            healthy_providers=0,
+            degraded_providers=0,
+            unhealthy_providers=0,
+            total_models=0,
+            healthy_models=0,
+            degraded_models=0,
+            unhealthy_models=0,
+            system_uptime=0.0,  # No data yet
+            last_updated=datetime.now(timezone.utc),
+        )
+        logger.info("Initialized empty system health data (no models checked yet)")
 
     async def _monitoring_loop(self):
         """Main monitoring loop"""
@@ -222,7 +325,9 @@ class ModelHealthMonitor:
 
             for gateway in gateways:
                 try:
+                    logger.debug(f"Fetching models from {gateway}...")
                     gateway_models = get_cached_models(gateway)
+                    logger.debug(f"Got {len(gateway_models) if gateway_models else 0} models from {gateway}")
                     if gateway_models:
                         for chunk in self._chunk_list(gateway_models, self.fetch_chunk_size):
                             for model in chunk:
@@ -240,7 +345,9 @@ class ModelHealthMonitor:
         except Exception as e:
             logger.error(f"Failed to get models for health checking: {e}")
 
+        logger.info(f"Total models collected for health checking: {len(models)}")
         return models
+
 
     @staticmethod
     def _chunk_list(items: list[dict[str, Any]], size: int):
@@ -334,6 +441,8 @@ class ModelHealthMonitor:
         - Data policy restrictions (404 with policy message)
         - Invalid parameters for specific models (400 with known issues)
         - Temporary service unavailability (503)
+        - Non-serverless model access errors (400)
+        - Model access permission errors (404 with specific patterns)
         """
         if not status_code:
             return True  # Capture unknown errors
@@ -342,9 +451,17 @@ class ModelHealthMonitor:
         if status_code == 429:
             return False
 
-        # Don't capture data policy restrictions - user configuration issue
-        if status_code == 404 and error_message and "data policy" in error_message.lower():
-            return False
+        # Don't capture data policy restrictions or specific model access permission errors
+        if status_code == 404 and error_message:
+            lower_msg = error_message.lower()
+            # Data policy restrictions - user configuration issue
+            if "data policy" in lower_msg:
+                return False
+            # Model access permission errors - only filter specific access/permission patterns
+            # Don't filter generic "not found" errors which could be genuine issues
+            if ("does not exist" in lower_msg and ("team" in lower_msg or "access" in lower_msg)) or \
+               ("no access" in lower_msg and "model" in lower_msg):
+                return False
 
         # Don't capture temporary service unavailability
         if status_code == 503 and error_message and "unavailable" in error_message.lower():
@@ -352,18 +469,22 @@ class ModelHealthMonitor:
 
         # Don't capture known parameter validation issues for specific providers
         if status_code == 400 and error_message:
-            # Google Vertex AI max_output_tokens validation
-            if "max_output_tokens" in error_message.lower() and "minimum value" in error_message.lower():
+            lower_msg = error_message.lower()
+            # Google Vertex AI max_output_tokens validation (already fixed in code)
+            if "max_output_tokens" in lower_msg and "minimum value" in lower_msg:
                 return False
             # Audio-only model requirements
-            if "audio" in error_message.lower() and "modality" in error_message.lower():
+            if "audio" in lower_msg and "modality" in lower_msg:
+                return False
+            # Non-serverless model access errors - plan/configuration issue
+            if "non-serverless" in lower_msg or "unable to access" in lower_msg:
                 return False
 
         # Don't capture authentication issues - configuration problem
         if status_code == 403 and error_message and "key" in error_message.lower():
             return False
 
-        # Capture all other errors
+        # Capture all other errors (including generic 500 errors and most 404s)
         return True
 
     def _get_api_key_for_gateway(self, gateway: str) -> str | None:
@@ -411,7 +532,7 @@ class ModelHealthMonitor:
                 "openrouter": "https://openrouter.ai/api/v1/chat/completions",
                 "featherless": "https://api.featherless.ai/v1/chat/completions",
                 "deepinfra": "https://api.deepinfra.com/v1/openai/chat/completions",
-                "huggingface": "https://api-inference.huggingface.co/models/" + model_id,
+                "huggingface": "https://router.huggingface.co/v1/chat/completions",
                 "groq": "https://api.groq.com/openai/v1/chat/completions",
                 "fireworks": "https://api.fireworks.ai/inference/v1/chat/completions",
                 "together": "https://api.together.xyz/v1/chat/completions",
@@ -443,12 +564,8 @@ class ModelHealthMonitor:
                 "Authorization": f"Bearer {api_key}",
             }
 
-            # For HuggingFace, use a different payload format
-            if gateway == "huggingface":
-                test_payload = {
-                    "inputs": "Hello",
-                    "parameters": {"max_new_tokens": 10, "temperature": 0.1},
-                }
+            # HuggingFace now uses OpenAI-compatible format via router.huggingface.co
+            # No special payload format needed - the default OpenAI format works
 
             # Perform the actual HTTP request
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -663,6 +780,43 @@ class ModelHealthMonitor:
             last_updated=datetime.now(timezone.utc),
         )
 
+        # Publish health data to Redis cache for consumption by main API
+        await self._publish_health_to_cache()
+
+    async def _publish_health_to_cache(self):
+        """Publish health data to Redis cache for consumption by main API"""
+        try:
+            from src.services.simple_health_cache import simple_health_cache
+            from src.config.redis_config import get_redis_config
+
+            # Debug log to check Redis connection
+            redis_config = get_redis_config()
+            redis_host = redis_config.redis_host
+            logger.info(f"Attempting to publish health data to Redis from simple monitor (host: {redis_host})")
+
+            # Cache system health
+            if self.system_data:
+                simple_health_cache.cache_system_health(asdict(self.system_data))
+                logger.debug("Published system health to Redis cache")
+
+            # Cache providers health
+            providers_data = [asdict(p) for p in self.provider_data.values()]
+            if providers_data:
+                simple_health_cache.cache_providers_health(providers_data)
+                logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
+
+            # Cache models health
+            models_data = [asdict(m) for m in self.health_data.values()]
+            if models_data:
+                simple_health_cache.cache_models_health(models_data)
+                logger.debug(f"Published {len(models_data)} models health to Redis cache")
+
+            logger.info("Health data published to Redis cache successfully")
+
+        except Exception as e:
+            logger.warning(f"Failed to publish health data to Redis cache: {e}")
+            # Don't fail the health check if cache publish fails
+
     def get_model_health(self, model_id: str, gateway: str = None) -> ModelHealthMetrics | None:
         """Get health metrics for a specific model"""
         if gateway:
@@ -718,5 +872,15 @@ class ModelHealthMonitor:
         }
 
 
-# Global health monitor instance
-health_monitor = ModelHealthMonitor()
+# Global health monitor instance with rate-limited configuration
+# This prevents hitting provider rate limits by:
+# - Checking models in small batches (20 at a time)
+# - Adding 15-second delay between batches (4 batches/min max)
+# - Running checks every 5 minutes by default
+# This is especially important for OpenRouter's 4 model switches/minute limit
+health_monitor = ModelHealthMonitor(
+    check_interval=300,  # Check every 5 minutes
+    batch_size=20,  # Process 20 models per batch
+    batch_interval=15.0,  # 15 second delay between batches (4 batches/min)
+    fetch_chunk_size=100,  # Fetch models in chunks of 100
+)

@@ -4,6 +4,8 @@ Dependency injection functions for authentication and authorization
 """
 
 import logging
+import os
+import secrets
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request
@@ -11,15 +13,63 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.services.user_lookup_cache import get_user
 from src.security.security import audit_logger, validate_api_key_security
+from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 logger = logging.getLogger(__name__)
 
 # HTTP Bearer security scheme with auto_error=False to allow custom error handling
 security = HTTPBearer(auto_error=False)
 
+# Admin API key security scheme
+admin_security = HTTPBearer()
+
+
+async def get_admin_key(credentials: HTTPAuthorizationCredentials = Depends(admin_security)) -> str:
+    """
+    Validate admin API key from ADMIN_API_KEY environment variable
+
+    This is separate from user API keys and requires the ADMIN_API_KEY env var.
+    Use this for administrative endpoints that should only be accessed by admins.
+
+    Args:
+        credentials: HTTP Authorization credentials
+
+    Returns:
+        Validated admin key string
+
+    Raises:
+        HTTPException: 401 if invalid admin key
+    """
+    admin_key = credentials.credentials
+
+    # Input validation
+    try:
+        ensure_non_empty_string(admin_key, "admin API key")
+        ensure_api_key_like(admin_key, field_name="admin API key", min_length=10)
+    except ValueError:
+        # Do not leak details
+        raise HTTPException(status_code=401, detail="Invalid admin API key") from None
+
+    # Get expected key from environment
+    expected_key = os.environ.get("ADMIN_API_KEY")
+
+    # Ensure admin key is configured
+    if not expected_key:
+        logger.error("ADMIN_API_KEY environment variable not set")
+        raise HTTPException(status_code=401, detail="Invalid admin API key")
+
+    # Use constant-time comparison to prevent timing attacks
+    if not secrets.compare_digest(admin_key, expected_key):
+        raise HTTPException(status_code=401, detail="Invalid admin API key")
+
+    return admin_key
+
 
 async def get_api_key(
-    credentials: HTTPAuthorizationCredentials = Depends(security), request: Request = None
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None,
+    *,
+    log_security_violations: bool = True,
 ) -> str:
     """
     Validate API key from Authorization header
@@ -35,6 +85,9 @@ async def get_api_key(
     Args:
         credentials: HTTP Authorization credentials
         request: FastAPI request object
+        log_security_violations: Whether to log security violations for invalid keys.
+            Set to False for optional auth endpoints where invalid credentials
+            should silently fall back to anonymous access.
 
     Returns:
         Validated API key string
@@ -97,8 +150,8 @@ async def get_api_key(
                 status_code = code
                 break
 
-        # Log security violation
-        if client_ip:
+        # Log security violation (only for required auth endpoints)
+        if log_security_violations and client_ip:
             audit_logger.log_security_violation(
                 violation_type="INVALID_API_KEY", details=error_message, ip_address=client_ip
             )
@@ -169,6 +222,10 @@ async def get_optional_api_key(
     Use for endpoints that work for both auth and non-auth users
     but need the raw API key string (not the user object).
 
+    Note: Invalid credentials are silently ignored (returning None) without
+    logging security violations, since authentication is optional for these
+    endpoints and invalid credentials should fall back to anonymous access.
+
     Args:
         credentials: Optional credentials
         request: Request object
@@ -180,7 +237,9 @@ async def get_optional_api_key(
         return None
 
     try:
-        return await get_api_key(credentials, request)
+        # Don't log security violations for optional auth - invalid credentials
+        # should silently fall back to anonymous access
+        return await get_api_key(credentials, request, log_security_violations=False)
     except HTTPException:
         return None
 
@@ -194,6 +253,10 @@ async def get_optional_user(
 
     Use for endpoints that work for both auth and non-auth users.
 
+    Note: Invalid credentials are silently ignored (returning None) without
+    logging security violations, since authentication is optional for these
+    endpoints and invalid credentials should fall back to anonymous access.
+
     Args:
         credentials: Optional credentials
         request: Request object
@@ -205,7 +268,9 @@ async def get_optional_user(
         return None
 
     try:
-        api_key = await get_api_key(credentials, request)
+        # Don't log security violations for optional auth - invalid credentials
+        # should silently fall back to anonymous access
+        api_key = await get_api_key(credentials, request, log_security_violations=False)
         return get_user(api_key)
     except HTTPException:
         return None

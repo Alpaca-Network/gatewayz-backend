@@ -377,15 +377,22 @@ class TestPaymentIntents:
 class TestWebhooks:
     """Test webhook processing"""
 
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
     @patch('stripe.Webhook.construct_event')
     @patch.object(StripeService, '_handle_checkout_completed')
     def test_handle_checkout_completed_webhook(
         self,
         mock_handle_checkout,
         mock_construct_event,
+        mock_is_processed,
+        mock_record_event,
         stripe_service
     ):
         """Test checkout.session.completed webhook"""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
 
         mock_event = {
             'id': 'evt_test_123',
@@ -419,6 +426,8 @@ class TestWebhooks:
         with pytest.raises(ValueError, match="Invalid signature"):
             stripe_service.handle_webhook(b'payload', 'bad_signature')
 
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.add_credits_to_user')
     @patch('src.services.payments.update_payment_status')
@@ -427,9 +436,14 @@ class TestWebhooks:
         mock_update_payment,
         mock_add_credits,
         mock_construct_event,
+        mock_is_processed,
+        mock_record_event,
         stripe_service
     ):
         """Test checkout completed webhook adds credits to user"""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
 
         # Create a Mock object instead of dict to support attribute access
         mock_session = Mock()
@@ -731,6 +745,8 @@ class TestWebhooks:
             stripe_session_id='cs_lookup_only',
         )
 
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.update_payment_status')
@@ -741,9 +757,14 @@ class TestWebhooks:
         mock_update_payment,
         mock_get_payment,
         mock_construct_event,
+        mock_is_processed,
+        mock_record_event,
         stripe_service
     ):
         """Test payment_intent.succeeded webhook"""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
 
         mock_get_payment.return_value = {
             'id': 1,
@@ -774,6 +795,8 @@ class TestWebhooks:
         )
         mock_add_credits.assert_called_once()
 
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
     @patch('stripe.Webhook.construct_event')
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.update_payment_status')
@@ -782,9 +805,14 @@ class TestWebhooks:
         mock_update_payment,
         mock_get_payment,
         mock_construct_event,
+        mock_is_processed,
+        mock_record_event,
         stripe_service
     ):
         """Test payment_intent.payment_failed webhook"""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
 
         mock_get_payment.return_value = {
             'id': 1,
@@ -936,6 +964,8 @@ class TestSessionRetrieval:
 class TestPaymentIntegration:
     """Integration tests for complete payment flows"""
 
+    @patch('src.services.payments.record_processed_event')
+    @patch('src.services.payments.is_event_processed')
     @patch('src.services.payments.get_user_by_id')
     @patch('src.services.payments.create_payment')
     @patch('stripe.checkout.Session.create')
@@ -950,11 +980,16 @@ class TestPaymentIntegration:
         mock_stripe_create,
         mock_create_payment,
         mock_get_user,
+        mock_is_processed,
+        mock_record_event,
         stripe_service,
         mock_user,
         mock_payment
     ):
         """Test complete payment flow: create session → webhook → credits added"""
+
+        mock_is_processed.return_value = False
+        mock_record_event.return_value = True
 
         # Step 1: Create checkout session
         mock_get_user.return_value = mock_user
@@ -1018,15 +1053,20 @@ class TestPaymentIntegration:
             'stripe_session_id': 'cs_test_123'
         }
 
+    @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.add_credits_to_user')
     @patch('src.services.payments.update_payment_status')
     def test_checkout_completed_missing_credits_uses_amount_total(
         self,
         mock_update_payment,
         mock_add_credits,
+        mock_get_payment,
         stripe_service
     ):
         """Ensure handler falls back to session amount when credits metadata is missing"""
+
+        # Return None from payment lookup so we use amount_total fallback
+        mock_get_payment.return_value = None
 
         session = Mock()
         session.metadata = {

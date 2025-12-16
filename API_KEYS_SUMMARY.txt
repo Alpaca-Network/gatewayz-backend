@@ -1,0 +1,172 @@
+================================================================================
+                    API KEYS NEEDED FOR TESTING
+================================================================================
+
+SHORT ANSWER:
+=============
+You need 2 things to run 98.7% of all tests:
+
+1. Supabase Test Database (FREE) → Enables 562 tests
+2. Cerebras API Key (FREE)       → Enables 7 tests
+
+All other provider API keys are OPTIONAL and NOT needed for tests.
+
+================================================================================
+
+DETAILED BREAKDOWN:
+===================
+
+🔴 CRITICAL - Supabase Database
+--------------------------------
+What: Test database instance
+Where: https://supabase.com (free tier available)
+Tests Enabled: 562 (93.7% of skipped tests)
+Cost: FREE (500MB database included)
+
+What to get:
+  - SUPABASE_URL=https://your-project.supabase.co
+  - SUPABASE_KEY=your-service-role-key
+
+Why needed:
+  - 518 database integration tests
+  - 44 referral system tests (after adding schema)
+  - User management, payments, chat history, etc.
+
+Setup time: ~10 minutes
+
+
+🟡 OPTIONAL - Cerebras API Key  
+-------------------------------
+What: AI inference API key
+Where: https://cloud.cerebras.ai/ (free tier available)
+Tests Enabled: 7
+Cost: FREE (generous free tier)
+
+What to get:
+  - CEREBRAS_API_KEY=your-api-key
+
+Why needed:
+  - Cerebras Qwen model tests
+  - Streaming tests
+  - Error handling tests
+
+Setup time: ~5 minutes
+
+
+✅ NOT NEEDED - Other Provider Keys
+------------------------------------
+The following are already configured or not needed for tests:
+
+  ❌ OPENROUTER_API_KEY     - Tests are mocked
+  ❌ FEATHERLESS_API_KEY    - Tests are mocked
+  ❌ CHUTES_API_KEY         - Tests are mocked
+  ❌ FIREWORKS_API_KEY      - Tests are mocked
+  ❌ TOGETHER_API_KEY       - Tests are mocked
+  ❌ DEEPINFRA_API_KEY      - Tests are mocked
+  ❌ HUGGINGFACE_API_KEY    - Tests are mocked
+  ❌ XAI_API_KEY            - Tests are mocked
+  ❌ GROQ_API_KEY           - Tests are mocked
+  ❌ FAL_API_KEY            - Tests are mocked
+  ❌ Other providers        - Tests are mocked
+
+These are only needed for LIVE integration testing (not unit/integration tests).
+
+================================================================================
+
+IMPACT ANALYSIS:
+================
+
+Current State (No additional keys):
+  • 1,861 tests runnable (75.6%)
+  • 1,854 tests passing (99.6% pass rate)
+  • 600 tests skipped
+
+With Supabase:
+  • 2,423 tests runnable (98.5%)
+  • Expected pass rate: 99%+
+  • 38 tests skipped
+
+With Supabase + Cerebras:
+  • 2,430 tests runnable (98.7%)
+  • Expected pass rate: 99%+
+  • 31 tests skipped (features not implemented)
+
+================================================================================
+
+QUICK START:
+============
+
+Step 1: Set up Supabase (10 minutes)
+-------------------------------------
+1. Visit https://supabase.com/dashboard
+2. Create new project (free)
+3. Go to Settings → API
+4. Copy URL and service_role key
+5. Add to .env file:
+
+   SUPABASE_URL=https://xxxxx.supabase.co
+   SUPABASE_KEY=your-service-role-key
+
+6. Run migrations (see SETUP_TEST_KEYS.md)
+7. Add referral schema:
+   
+   ALTER TABLE users ADD COLUMN referral_code VARCHAR(50);
+   ALTER TABLE users ADD COLUMN referred_by UUID;
+
+
+Step 2: Set up Cerebras (5 minutes) - OPTIONAL
+-----------------------------------------------
+1. Visit https://cloud.cerebras.ai/
+2. Sign up (free)
+3. Get API key
+4. Add to .env file:
+
+   CEREBRAS_API_KEY=your-key
+
+
+Step 3: Run Tests
+-----------------
+pytest tests/ -v --cov=src
+
+================================================================================
+
+COST BREAKDOWN:
+===============
+
+Supabase:     $0/month (free tier: 500MB DB, 2GB bandwidth)
+Cerebras:     $0/month (free tier for testing)
+Other:        $0 (not needed)
+
+TOTAL: $0 🎉
+
+================================================================================
+
+FILES CREATED:
+==============
+
+1. SETUP_TEST_KEYS.md      - Detailed step-by-step guide
+2. api_keys_needed.md      - Complete API keys documentation
+3. test_pipeline_report.md - Full test execution report
+4. API_KEYS_SUMMARY.txt    - This file (quick reference)
+
+================================================================================
+
+QUESTIONS?
+==========
+
+Q: Do I need ALL the provider API keys listed in .env.example?
+A: NO. Only Supabase and optionally Cerebras.
+
+Q: Why are 600 tests skipped?
+A: 93.7% need database, 7.3% need other infrastructure. All intentional.
+
+Q: Can I run tests without any API keys?
+A: YES! 1,854 tests already pass without any keys.
+
+Q: What's the bare minimum to run 99% of tests?
+A: Just Supabase. That's it.
+
+Q: Is this expensive?
+A: No, completely free with free tiers.
+
+================================================================================

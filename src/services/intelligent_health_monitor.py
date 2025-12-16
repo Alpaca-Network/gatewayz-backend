@@ -20,7 +20,7 @@ Features:
 import asyncio
 import logging
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
@@ -116,6 +116,7 @@ class IntelligentHealthMonitor:
         self.monitoring_active = False
         self._worker_id = None
         self._semaphore = asyncio.Semaphore(max_concurrent_checks)
+        self._monitoring_tasks: list[asyncio.Task] = []
 
         # Configuration for each tier
         self.tier_config = {
@@ -152,16 +153,29 @@ class IntelligentHealthMonitor:
 
         logger.info(f"Starting intelligent health monitoring service (worker: {self._worker_id})")
 
-        # Start background tasks
-        asyncio.create_task(self._monitoring_loop())
-        asyncio.create_task(self._tier_update_loop())
-        asyncio.create_task(self._aggregate_metrics_loop())
-        asyncio.create_task(self._incident_resolution_loop())
+        # Start background tasks and store references for cleanup
+        self._monitoring_tasks = [
+            asyncio.create_task(self._monitoring_loop()),
+            asyncio.create_task(self._tier_update_loop()),
+            asyncio.create_task(self._aggregate_metrics_loop()),
+            asyncio.create_task(self._incident_resolution_loop()),
+        ]
 
     async def stop_monitoring(self):
-        """Stop the health monitoring service"""
+        """Stop the health monitoring service and wait for all background tasks to complete"""
         self.monitoring_active = False
-        logger.info(f"Stopped intelligent health monitoring service (worker: {self._worker_id})")
+        logger.info(f"Stopping intelligent health monitoring service (worker: {self._worker_id})...")
+
+        # Cancel and await all monitoring tasks to ensure clean shutdown
+        for task in self._monitoring_tasks:
+            task.cancel()
+
+        # Wait for all tasks to complete cancellation
+        if self._monitoring_tasks:
+            await asyncio.gather(*self._monitoring_tasks, return_exceptions=True)
+            self._monitoring_tasks = []
+
+        logger.info(f"Intelligent health monitoring service stopped (worker: {self._worker_id})")
 
     async def _monitoring_loop(self):
         """Main monitoring loop with intelligent scheduling"""
@@ -172,6 +186,8 @@ class IntelligentHealthMonitor:
 
                 if not models_to_check:
                     logger.debug("No models need checking at this time")
+                    # Still publish cached health data to keep cache fresh
+                    await self._publish_health_to_cache()
                     await asyncio.sleep(60)
                     continue
 
@@ -202,6 +218,9 @@ class IntelligentHealthMonitor:
 
                     # Small delay between batches to avoid overwhelming the system
                     await asyncio.sleep(1)
+
+                # Publish health data to Redis cache for main API consumption
+                await self._publish_health_to_cache()
 
                 # Sleep before next iteration
                 await asyncio.sleep(30)
@@ -270,7 +289,10 @@ class IntelligentHealthMonitor:
                 lock_key = f"health_check_lock:{model['provider']}:{model['model']}:{model['gateway']}"
 
                 # Try to acquire lock (60 second expiry)
-                acquired = await redis_client.set(lock_key, self._worker_id, ex=60, nx=True)
+                # Note: redis_client is synchronous, so we use asyncio.to_thread
+                acquired = await asyncio.to_thread(
+                    redis_client.set, lock_key, self._worker_id, ex=60, nx=True
+                )
 
                 if acquired:
                     filtered_models.append(model)
@@ -661,6 +683,176 @@ class IntelligentHealthMonitor:
         }
         return mapping.get(status, "unknown")
 
+    async def _publish_health_to_cache(self):
+        """Publish aggregated health data to Redis cache for main API consumption"""
+        try:
+            from src.config.supabase_config import supabase
+            from src.services.simple_health_cache import simple_health_cache
+            from src.config.redis_config import get_redis_config
+
+            # Debug log to check Redis connection
+            redis_config = get_redis_config()
+            redis_host = redis_config.redis_host
+            logger.info(f"Attempting to publish health data to Redis (host: {redis_host})")
+
+            # Query aggregated health data from database
+            # Get model health data
+            models_response = (
+                supabase.table("model_health_tracking")
+                .select("provider, model, gateway, last_status, last_response_time_ms, uptime_percentage_24h, error_count, call_count, last_called_at")
+                .eq("is_enabled", True)
+                .order("last_called_at", desc=True)
+                .limit(500)  # Limit for cache size
+                .execute()
+            )
+
+            models_data = []
+            for m in models_response.data or []:
+                # The 'provider' column in model_health_tracking actually stores the gateway name
+                # (e.g., openrouter, featherless, fireworks) due to how record_model_call works.
+                # Use 'provider' as fallback for 'gateway' when gateway is not set.
+                stored_provider = m.get("provider") or "unknown"
+                stored_gateway = m.get("gateway")
+                # If gateway is not set, use provider as gateway since that's what's stored
+                effective_gateway = stored_gateway if stored_gateway else stored_provider
+                models_data.append({
+                    "model_id": m.get("model") or "unknown",
+                    "provider": stored_provider,
+                    "gateway": effective_gateway,
+                    "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
+                    "response_time_ms": m.get("last_response_time_ms"),
+                    "avg_response_time_ms": m.get("last_response_time_ms"),
+                    "uptime_percentage": m.get("uptime_percentage_24h", 0.0),
+                    "error_count": m.get("error_count", 0),
+                    "total_requests": m.get("call_count", 0),
+                    "last_checked": m.get("last_called_at"),
+                })
+
+            if models_data:
+                simple_health_cache.cache_models_health(models_data)
+                logger.debug(f"Published {len(models_data)} models health to Redis cache")
+
+            # Aggregate provider data
+            providers_map = {}
+            for m in models_data:
+                provider = m.get("provider", "unknown")
+                gateway = m.get("gateway", "unknown")
+                key = f"{gateway}:{provider}"
+                if key not in providers_map:
+                    providers_map[key] = {
+                        "provider": provider,
+                        "gateway": gateway,
+                        "status": "online",
+                        "total_models": 0,
+                        "healthy_models": 0,
+                        "degraded_models": 0,
+                        "unhealthy_models": 0,
+                        "avg_response_time_ms": 0,
+                        "overall_uptime": 0,
+                        "response_times": [],
+                    }
+                p = providers_map[key]
+                p["total_models"] += 1
+                if m.get("status") == "healthy":
+                    p["healthy_models"] += 1
+                else:
+                    p["unhealthy_models"] += 1
+                if m.get("response_time_ms"):
+                    p["response_times"].append(m["response_time_ms"])
+
+            # Calculate averages and status
+            providers_data = []
+            for p in providers_map.values():
+                if p["response_times"]:
+                    p["avg_response_time_ms"] = sum(p["response_times"]) / len(p["response_times"])
+                if p["total_models"] > 0:
+                    p["overall_uptime"] = (p["healthy_models"] / p["total_models"]) * 100
+                if p["unhealthy_models"] > p["total_models"] * 0.5:
+                    p["status"] = "offline"
+                elif p["unhealthy_models"] > 0:
+                    p["status"] = "degraded"
+                del p["response_times"]  # Remove temp data
+                providers_data.append(p)
+
+            if providers_data:
+                simple_health_cache.cache_providers_health(providers_data)
+                logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
+
+            # Calculate system health from tracked models
+            tracked_models = len(models_data)
+            healthy_models = sum(1 for m in models_data if m.get("status") == "healthy")
+            unhealthy_models = tracked_models - healthy_models
+            tracked_providers = len(providers_data)
+            healthy_providers = sum(1 for p in providers_data if p.get("status") == "online")
+            degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
+            unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
+
+            # Get total counts from openrouter_models table (not just tracked)
+            try:
+                catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
+                total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                logger.info(f"Got {total_models} total models from openrouter_models table")
+            except Exception as e:
+                logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
+                try:
+                    catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
+                    total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                    logger.info(f"Got {total_models} total models from models table")
+                except Exception as e2:
+                    logger.warning(f"Failed to get models catalog count: {e2}, using tracked count: {tracked_models}")
+                    total_models = tracked_models
+                
+            try:
+                # Get all providers from providers table
+                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+                total_providers = providers_response.count if providers_response.count is not None else tracked_providers
+                logger.info(f"Got {total_providers} total providers from providers table")
+            except Exception as e:
+                logger.warning(f"Failed to get providers catalog count: {e}, using tracked count: {tracked_providers}")
+                total_providers = tracked_providers
+                
+            # Get gateway count from GATEWAY_CONFIG (not a database table)
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                total_gateways = len(GATEWAY_CONFIG)
+            except Exception:
+                total_gateways = 0
+
+            if unhealthy_providers == 0 and degraded_providers == 0:
+                overall_status = "healthy"
+            elif tracked_providers > 0 and unhealthy_providers >= tracked_providers * 0.5:
+                overall_status = "unhealthy"
+            elif unhealthy_providers > 0 or degraded_providers > 0:
+                overall_status = "degraded"
+            else:
+                overall_status = "healthy"
+
+            system_uptime = (healthy_models / tracked_models * 100) if tracked_models > 0 else 100.0
+
+            system_data = {
+                "overall_status": overall_status,
+                "total_providers": total_providers,
+                "healthy_providers": healthy_providers,
+                "degraded_providers": degraded_providers,
+                "unhealthy_providers": unhealthy_providers,
+                "total_models": total_models,
+                "healthy_models": healthy_models,
+                "degraded_models": 0,  # Would need more complex calculation
+                "unhealthy_models": unhealthy_models,
+                "total_gateways": total_gateways,
+                "tracked_models": tracked_models,
+                "tracked_providers": tracked_providers,
+                "system_uptime": system_uptime,
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            }
+
+            simple_health_cache.cache_system_health(system_data)
+            logger.info(f"Published health data to Redis cache: {total_models} models, {total_providers} providers, {total_gateways} gateways (tracked: {tracked_models} models)")
+
+        except Exception as e:
+            logger.warning(f"Failed to publish health data to Redis cache: {e}")
+            # Don't fail the monitoring if cache publish fails
+
     async def _tier_update_loop(self):
         """Periodically update model tiers based on usage patterns"""
         while self.monitoring_active:
@@ -670,9 +862,23 @@ class IntelligentHealthMonitor:
                 from src.config.supabase_config import supabase
 
                 # Call the database function to update tiers
-                supabase.rpc("update_model_tier").execute()
-
-                logger.info("Updated model monitoring tiers based on usage")
+                try:
+                    supabase.rpc("update_model_tier").execute()
+                    logger.info("Updated model monitoring tiers based on usage")
+                except Exception as rpc_error:
+                    # Handle database function not found or schema cache issues
+                    error_msg = str(rpc_error)
+                    if "PGRST202" in error_msg or "Could not find the function" in error_msg:
+                        logger.warning(
+                            f"Database function 'update_model_tier' not found in schema cache. "
+                            f"This may indicate the migration hasn't been applied or PostgREST needs a schema reload. "
+                            f"Error: {error_msg}"
+                        )
+                        # Skip this iteration and try again next hour
+                        continue
+                    else:
+                        # Re-raise other errors for proper logging
+                        raise
 
             except Exception as e:
                 logger.error(f"Error in tier update loop: {e}", exc_info=True)

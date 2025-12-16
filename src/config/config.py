@@ -57,7 +57,16 @@ _default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query
 
 _project_root = Path(__file__).resolve().parents[2]
 _src_root = Path(__file__).resolve().parents[1]
-_default_data_dir = _src_root / "data"
+
+# Use /tmp for serverless environments (read-only file system), otherwise use src/data
+def _get_data_dir() -> Path:
+    """Get data directory, using /tmp in serverless environments."""
+    # Check if we're in a serverless environment (read-only /var/task)
+    if os.path.exists("/var/task") and not os.access("/var/task", os.W_OK):
+        return Path("/tmp/gatewayz_data")
+    return _src_root / "data"
+
+_default_data_dir = _get_data_dir()
 
 
 def _resolve_path_env(var_name: str, default: Path) -> Path:
@@ -70,7 +79,16 @@ def _resolve_path_env(var_name: str, default: Path) -> Path:
 
 def _ensure_directory(path: Path) -> Path:
     """Ensure a directory exists and return the path."""
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        # If we can't create the directory, use /tmp as fallback
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to create directory {path}: {e}. Using /tmp fallback.")
+        fallback = Path("/tmp") / path.name
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
     return path
 
 
@@ -191,6 +209,16 @@ class Config:
     CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
     CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
 
+    # Akash ML Configuration
+    AKASH_API_KEY = os.environ.get("AKASH_API_KEY")
+
+    # Morpheus AI Gateway Configuration
+    MORPHEUS_API_KEY = os.environ.get("MORPHEUS_API_KEY")
+
+    # Cloudflare Workers AI Configuration
+    CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
+    CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+
     # Google Vertex AI Configuration (for image generation & generative APIs)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
     GOOGLE_VERTEX_LOCATION = os.environ.get("GOOGLE_VERTEX_LOCATION", "us-central1")
@@ -285,6 +313,16 @@ class Config:
     GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
     GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")
 
+    # Arize AI Observability Configuration
+    ARIZE_ENABLED = os.environ.get("ARIZE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    ARIZE_SPACE_ID = os.environ.get("ARIZE_SPACE_ID")
+    ARIZE_API_KEY = os.environ.get("ARIZE_API_KEY")
+    ARIZE_PROJECT_NAME = os.environ.get("ARIZE_PROJECT_NAME", "GATEWAYZ")
+
     # Redis Configuration (for real-time metrics and rate limiting)
     REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {
         "1",
@@ -337,7 +375,7 @@ class Config:
         if is_vercel:
             if invalid_vars:
                 raise RuntimeError(
-                    f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+                    "Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
                 )
             return True
 
@@ -361,7 +399,7 @@ class Config:
             )
         if invalid_vars:
             error_messages.append(
-                f"Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
+                "Invalid environment variables:\n" + "\n".join(f"  - {v}" for v in invalid_vars)
             )
 
         if error_messages:

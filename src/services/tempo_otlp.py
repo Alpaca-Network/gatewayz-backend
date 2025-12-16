@@ -23,7 +23,7 @@ from src.config.opentelemetry_config import instrument_fastapi_application
 logger = logging.getLogger(__name__)
 
 
-def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 1.0) -> bool:
     """
     Check if the Tempo OTLP endpoint is reachable.
 
@@ -68,7 +68,7 @@ def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
             sock = socket.create_connection((host, port), timeout=timeout)
             logger.debug(f"Successfully connected to Tempo endpoint {host}:{port}")
             return True
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+        except (TimeoutError, ConnectionRefusedError, OSError) as e:
             logger.warning(
                 f"Tempo endpoint {host}:{port} is not accepting connections: {e}. "
                 f"Tracing will be disabled."

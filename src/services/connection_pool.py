@@ -350,7 +350,7 @@ def get_huggingface_pooled_client() -> OpenAI:
 
     return get_pooled_client(
         provider="huggingface",
-        base_url="https://api-inference.huggingface.co/v1",
+        base_url="https://router.huggingface.co/v1",
         api_key=Config.HUGGINGFACE_API_KEY,
         timeout=HUGGINGFACE_TIMEOUT,
     )
@@ -393,15 +393,18 @@ def get_chutes_pooled_client() -> OpenAI:
 
 
 def get_clarifai_pooled_client() -> OpenAI:
-    """Get pooled client for Clarifai."""
+    """Get pooled client for Clarifai.
+
+    Uses Clarifai's OpenAI-compatible API endpoint.
+    See: https://docs.clarifai.com/compute/inference/open-ai/
+    """
     if not Config.CLARIFAI_API_KEY:
         raise ValueError("Clarifai API key not configured")
 
     return get_pooled_client(
         provider="clarifai",
-        base_url="https://api.clarifai.com/v1",
+        base_url="https://api.clarifai.com/v2/ext/openai/v1",
         api_key=Config.CLARIFAI_API_KEY,
-        default_headers={"X-Clarifai-PAT": Config.CLARIFAI_API_KEY},
     )
 
 
@@ -415,3 +418,129 @@ def get_onerouter_pooled_client() -> OpenAI:
         base_url="https://llm.onerouter.pro/v1",
         api_key=Config.ONEROUTER_API_KEY,
     )
+
+
+def get_groq_pooled_client() -> OpenAI:
+    """Get pooled client for Groq."""
+    if not Config.GROQ_API_KEY:
+        raise ValueError("Groq API key not configured")
+
+    return get_pooled_client(
+        provider="groq",
+        base_url="https://api.groq.com/openai/v1",
+        api_key=Config.GROQ_API_KEY,
+    )
+
+
+def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
+    """Get pooled client for Cloudflare Workers AI.
+
+    Cloudflare Workers AI provides an OpenAI-compatible API endpoint.
+    See: https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/
+    """
+    if not Config.CLOUDFLARE_API_TOKEN:
+        raise ValueError("Cloudflare API token not configured")
+    if not Config.CLOUDFLARE_ACCOUNT_ID:
+        raise ValueError("Cloudflare Account ID not configured")
+
+    # Cloudflare's OpenAI-compatible base URL includes the account ID
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{Config.CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+
+    return get_pooled_client(
+        provider="cloudflare-workers-ai",
+        base_url=base_url,
+        api_key=Config.CLOUDFLARE_API_TOKEN,
+    )
+
+
+def get_akash_pooled_client() -> OpenAI:
+    """Get pooled client for Akash ML.
+
+    Akash ML provides an OpenAI-compatible API endpoint.
+    See: https://api.akashml.com/v1
+    """
+    if not Config.AKASH_API_KEY:
+        raise ValueError("Akash API key not configured")
+
+    return get_pooled_client(
+        provider="akash",
+        base_url="https://api.akashml.com/v1",
+        api_key=Config.AKASH_API_KEY,
+    )
+
+
+def get_morpheus_pooled_client() -> OpenAI:
+    """Get pooled client for Morpheus AI Gateway.
+
+    Morpheus provides an OpenAI-compatible API endpoint for decentralized AI.
+    See: https://api.mor.org/api/v1
+    """
+    if not Config.MORPHEUS_API_KEY:
+        raise ValueError("Morpheus API key not configured")
+
+    return get_pooled_client(
+        provider="morpheus",
+        base_url="https://api.mor.org/api/v1",
+        api_key=Config.MORPHEUS_API_KEY,
+    )
+
+
+# =============================================================================
+# CONNECTION PRE-WARMING
+# =============================================================================
+# PERF: Pre-warm connections to frequently used providers on app startup.
+# This eliminates the cold-start penalty (~100-200ms) for TLS handshake,
+# HTTP/2 connection setup, and provider authentication on first requests.
+
+
+def warmup_provider_connections() -> dict[str, str]:
+    """
+    Pre-warm connections to frequently used providers.
+
+    This function creates pooled clients for high-traffic providers,
+    establishing TCP connections, completing TLS handshakes, and
+    setting up HTTP/2 multiplexing before any user requests arrive.
+
+    Returns:
+        Dict mapping provider names to their warmup status ("ok" or error message)
+    """
+    # Providers to pre-warm, ordered by typical traffic volume
+    providers_to_warm = [
+        ("openrouter", get_openrouter_pooled_client),
+        ("fireworks", get_fireworks_pooled_client),
+        ("together", get_together_pooled_client),
+        ("groq", get_groq_pooled_client),
+        ("featherless", get_featherless_pooled_client),
+        ("xai", get_xai_pooled_client),
+    ]
+
+    results = {}
+
+    for provider_name, get_client_fn in providers_to_warm:
+        try:
+            # Creating the client establishes the connection
+            client = get_client_fn()
+            # The client is now in the pool with an active connection
+            results[provider_name] = "ok"
+            logger.info(f"✅ Warmed up connection to {provider_name}")
+        except ValueError as e:
+            # API key not configured - expected for some providers
+            results[provider_name] = f"skipped: {e}"
+            logger.debug(f"⏭️  Skipping {provider_name} warmup: {e}")
+        except Exception as e:
+            # Connection error - log but don't fail startup
+            results[provider_name] = f"error: {e}"
+            logger.warning(f"⚠️  Failed to warm up {provider_name}: {e}")
+
+    return results
+
+
+async def warmup_provider_connections_async() -> dict[str, str]:
+    """
+    Async wrapper for pre-warming connections.
+
+    Runs the synchronous warmup in a thread pool to avoid blocking
+    the event loop during startup.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, warmup_provider_connections)

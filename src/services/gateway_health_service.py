@@ -468,7 +468,7 @@ async def run_comprehensive_check(
         gateway_results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True), timeout=60.0
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Gateway health check timed out after 60 seconds")
         # Return partial results
         gateway_results = [{"final_status": "timeout", "name": "Timeout"} for _ in gateway_names]

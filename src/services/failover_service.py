@@ -7,9 +7,8 @@ Uses database to track model availability across providers and provider health.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
 
-from src.db.failover_db import get_providers_for_model, get_provider_model_id
+from src.db.failover_db import get_providers_for_model
 from src.db.model_health import record_model_call
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ class ProviderFailoverError(Exception):
 async def route_with_failover(
     model: str,
     request_data: dict,
-    user_preferences: Optional[dict] = None,
+    user_preferences: dict | None = None,
     max_attempts: int = 3
 ) -> dict:
     """

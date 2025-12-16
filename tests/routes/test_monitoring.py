@@ -479,3 +479,144 @@ class TestBusinessMetricsEndpoints:
         assert data["model"] == "gpt-4"
         assert data["cost_per_token"] == 0.0001
         assert data["tokens_per_request"] == 100.0
+
+
+class TestSentryTunnelEndpoint:
+    """Test Sentry tunnel endpoint for frontend error tracking"""
+
+    def test_sentry_tunnel_empty_body(self, client: TestClient):
+        """Test that empty body returns 400"""
+        response = client.post("/monitoring", content=b"")
+        assert response.status_code == 400
+        assert "Empty request body" in response.text
+
+    def test_sentry_tunnel_invalid_envelope(self, client: TestClient):
+        """Test that invalid envelope format returns 400"""
+        response = client.post("/monitoring", content=b"not a valid json\n")
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_no_dsn(self, client: TestClient):
+        """Test that envelope without DSN returns 400"""
+        import json
+        envelope = json.dumps({"event_id": "12345"}).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "No DSN in envelope" in response.text
+
+    def test_sentry_tunnel_blocked_host(self, client: TestClient):
+        """Test that non-Sentry hosts are blocked"""
+        import json
+        envelope = json.dumps({
+            "dsn": "https://key@evil.example.com/12345",
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_ssrf_prevention_suffix_attack(self, client: TestClient):
+        """Test that SSRF attacks via suffix matching are blocked (e.g., evil-sentry.io)"""
+        import json
+        # This domain ends with sentry.io but is not a valid Sentry domain
+        envelope = json.dumps({
+            "dsn": "https://key@evil-sentry.io/12345",
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_ssrf_prevention_malicious_subdomain(self, client: TestClient):
+        """Test that SSRF attacks via malicious subdomains are blocked"""
+        import json
+        # This looks like a subdomain but isn't properly formed
+        envelope = json.dumps({
+            "dsn": "https://key@malicioussentry.io/12345",
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_null_hostname(self, client: TestClient):
+        """Test that malformed DSN with null hostname is rejected"""
+        import json
+        # DSN without valid hostname
+        envelope = json.dumps({
+            "dsn": "://key@/12345",  # Malformed URL with no hostname
+            "event_id": "12345"
+        }).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 403
+        assert "Invalid Sentry host" in response.text
+
+    def test_sentry_tunnel_non_dict_json(self, client: TestClient):
+        """Test that non-dict JSON envelope returns 400"""
+        import json
+        # Array instead of object
+        envelope = json.dumps([1, 2, 3]).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_string_json(self, client: TestClient):
+        """Test that string JSON envelope returns 400"""
+        import json
+        # String instead of object
+        envelope = json.dumps("just a string").encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_number_json(self, client: TestClient):
+        """Test that number JSON envelope returns 400"""
+        import json
+        # Number instead of object
+        envelope = json.dumps(12345).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    def test_sentry_tunnel_null_json(self, client: TestClient):
+        """Test that null JSON envelope returns 400"""
+        import json
+        # Null instead of object
+        envelope = json.dumps(None).encode() + b"\n"
+        response = client.post("/monitoring", content=envelope)
+        assert response.status_code == 400
+        assert "Invalid envelope header" in response.text
+
+    @pytest.mark.asyncio
+    def test_sentry_tunnel_valid_envelope(self, client: TestClient):
+        """Test that valid Sentry envelope is forwarded"""
+        import json
+        # Create a valid Sentry envelope with allowed host
+        envelope_header = json.dumps({
+            "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
+            "event_id": "12345"
+        }).encode()
+        envelope_item_header = json.dumps({
+            "type": "event",
+            "length": 2
+        }).encode()
+        envelope_item_payload = b"{}"
+        envelope = envelope_header + b"\n" + envelope_item_header + b"\n" + envelope_item_payload
+
+        # Mock httpx.AsyncClient to avoid actual network call
+        with patch("src.routes.monitoring.httpx.AsyncClient") as mock_client:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.content = b'{"id": "12345"}'
+
+            mock_client_instance = Mock()
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client_instance.post = AsyncMock(return_value=mock_response)
+
+            mock_client.return_value = mock_client_instance
+
+            response = client.post("/monitoring", content=envelope)
+
+            # Endpoint should forward to Sentry and return success
+            assert response.status_code == 200

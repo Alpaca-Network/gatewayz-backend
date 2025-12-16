@@ -8,7 +8,8 @@ to errors captured by Sentry across the application.
 import functools
 import logging
 from contextvars import ContextVar
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
+from collections.abc import Callable
 
 try:
     import sentry_sdk
@@ -193,6 +194,7 @@ def capture_provider_error(
     model: str | None = None,
     request_id: str | None = None,
     endpoint: str | None = None,
+    extra_context: dict[str, Any] | None = None,
 ) -> str | None:
     """
     Capture a provider-related error with standard context.
@@ -203,6 +205,7 @@ def capture_provider_error(
         model: Model ID if applicable
         request_id: Request ID for tracing
         endpoint: API endpoint called
+        extra_context: Additional context information to include
 
     Returns:
         Event ID if captured, None if Sentry is disabled
@@ -214,6 +217,8 @@ def capture_provider_error(
         context_data['request_id'] = request_id
     if endpoint:
         context_data['endpoint'] = endpoint
+    if extra_context:
+        context_data.update(extra_context)
 
     return capture_error(
         exception,

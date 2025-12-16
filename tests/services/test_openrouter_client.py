@@ -77,18 +77,20 @@ def test_get_openrouter_client_missing_key_raises(monkeypatch, mod):
     monkeypatch.setattr(mod.Config, "OPENROUTER_SITE_URL", "https://x")
     monkeypatch.setattr(mod.Config, "OPENROUTER_SITE_NAME", "X")
 
-    called = {"n": 0}
+    pool_called = {"n": 0}
 
-    def _should_not_be_called(**kwargs):
-        called["n"] += 1
-        return FakeOpenAI(**kwargs)
+    def _pool_should_not_be_called():
+        pool_called["n"] += 1
+        return FakeOpenAI()
 
-    monkeypatch.setattr(mod, "OpenAI", _should_not_be_called)
+    # Patch the connection pool function since that's what the code uses
+    monkeypatch.setattr(mod, "get_openrouter_pooled_client", _pool_should_not_be_called)
 
     # Act + Assert
     with pytest.raises(ValueError):
         mod.get_openrouter_client()
-    assert called["n"] == 0  # OpenAI() never called
+    # Pool function should never be called when API key is missing
+    assert pool_called["n"] == 0
 
 
 def test_make_openrouter_request_openai_forwards_args(monkeypatch, mod):

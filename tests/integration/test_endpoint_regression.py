@@ -222,7 +222,7 @@ class TestChatCompletionsEndpoints:
         mock_rl_result.remaining_requests = 1000
         mock_rl_result.remaining_tokens = 1000000
         mock_rl_result.retry_after = None
-        
+
         mock_rl_manager = Mock()
         mock_rl_manager.check_rate_limit = AsyncMock(return_value=mock_rl_result)
         mock_rl_manager.release_concurrency = AsyncMock()
@@ -285,7 +285,7 @@ class TestChatCompletionsEndpoints:
         mock_rl_result.remaining_requests = 1000
         mock_rl_result.remaining_tokens = 1000000
         mock_rl_result.retry_after = None
-        
+
         mock_rl_manager = Mock()
         mock_rl_manager.check_rate_limit = AsyncMock(return_value=mock_rl_result)
         mock_rl_manager.release_concurrency = AsyncMock()
@@ -363,7 +363,7 @@ class TestUnifiedResponsesEndpoint:
         mock_rl_result.remaining_requests = 1000
         mock_rl_result.remaining_tokens = 1000000
         mock_rl_result.retry_after = None
-        
+
         mock_rl_manager = Mock()
         mock_rl_manager.check_rate_limit = AsyncMock(return_value=mock_rl_result)
         mock_rl_manager.release_concurrency = AsyncMock()
@@ -441,7 +441,7 @@ class TestUnifiedResponsesEndpoint:
         mock_rl_result.remaining_requests = 1000
         mock_rl_result.remaining_tokens = 1000000
         mock_rl_result.retry_after = None
-        
+
         mock_rl_manager = Mock()
         mock_rl_manager.check_rate_limit = AsyncMock(return_value=mock_rl_result)
         mock_rl_manager.release_concurrency = AsyncMock()

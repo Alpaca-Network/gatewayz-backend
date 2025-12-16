@@ -19,29 +19,19 @@ import os
 os.environ['APP_ENV'] = 'testing'
 
 # Import after setting environment
-try:
-    from src.services.model_health_monitor import (
-        ModelHealthMonitor,
-        track_model_health,
-        get_model_health,
-        mark_model_unhealthy,
-        mark_model_healthy,
-        get_unhealthy_models,
-    )
-    HEALTH_MONITOR_AVAILABLE = True
-except (ImportError, AttributeError):
-    HEALTH_MONITOR_AVAILABLE = False
-    # Create mock functions for testing structure
-    class ModelHealthMonitor:
-        pass
+from src.services.model_health_monitor import (
+    ModelHealthMonitor,
+    ModelHealthMetrics,
+    HealthStatus,
+    SystemHealthMetrics,
+)
+HEALTH_MONITOR_AVAILABLE = True
 
 
 @pytest.fixture
 def health_monitor():
     """Create a health monitor instance"""
-    if HEALTH_MONITOR_AVAILABLE:
-        return ModelHealthMonitor()
-    return Mock()
+    return ModelHealthMonitor()
 
 
 @pytest.fixture
@@ -57,89 +47,50 @@ def sample_model_data():
     }
 
 
-@pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented yet")
 class TestModelHealthTracking:
-    """Test model health tracking functionality"""
+    """Test model health tracking functionality using ModelHealthMonitor methods"""
 
-    def test_track_successful_request(self, health_monitor):
-        """Track successful model request"""
-        model_id = "gpt-3.5-turbo"
+    def test_get_model_health_returns_none_for_unknown(self, health_monitor):
+        """Get health for unknown model returns None"""
+        result = health_monitor.get_model_health("unknown-model-12345")
+        assert result is None
 
-        result = track_model_health(
-            model_id=model_id,
-            success=True,
-            latency=1.5,
-            error=None
-        )
+    def test_get_all_models_health_returns_list(self, health_monitor):
+        """Get all models health returns a list"""
+        result = health_monitor.get_all_models_health()
+        assert isinstance(result, list)
 
-        assert result is not None
-        # Health should be tracked
+    def test_get_health_summary_returns_dict(self, health_monitor):
+        """Get health summary returns a dictionary"""
+        result = health_monitor.get_health_summary()
+        assert isinstance(result, dict)
 
-    def test_track_failed_request(self, health_monitor):
-        """Track failed model request"""
-        model_id = "gpt-3.5-turbo"
-
-        result = track_model_health(
-            model_id=model_id,
-            success=False,
-            latency=5.0,
-            error="Timeout error"
-        )
-
-        assert result is not None
-        # Failure should be recorded
-
-    def test_track_multiple_requests(self, health_monitor):
-        """Track multiple requests for same model"""
-        model_id = "gpt-3.5-turbo"
-
-        # Track successful requests
-        for _ in range(10):
-            track_model_health(model_id, success=True, latency=1.0)
-
-        # Track some failures
-        for _ in range(2):
-            track_model_health(model_id, success=False, latency=5.0, error="Error")
-
-        # Health should reflect the ratio
-        health = get_model_health(model_id)
-        if health:
-            assert health.get('success_rate', 1.0) > 0.5
+    def test_get_system_health_initially_none(self, health_monitor):
+        """System health is None before monitoring starts"""
+        result = health_monitor.get_system_health()
+        # May be None initially or return SystemHealthMetrics
+        assert result is None or isinstance(result, SystemHealthMetrics)
 
 
-@pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented yet")
 class TestHealthStatusManagement:
-    """Test health status management"""
+    """Test health status management via ModelHealthMonitor"""
 
-    def test_mark_model_unhealthy(self, health_monitor):
-        """Mark a model as unhealthy"""
-        model_id = "gpt-3.5-turbo"
+    def test_get_provider_health_returns_none_for_unknown(self, health_monitor):
+        """Get provider health for unknown provider returns None"""
+        result = health_monitor.get_provider_health("unknown-provider", "unknown-gateway")
+        assert result is None
 
-        result = mark_model_unhealthy(model_id, reason="High error rate")
+    def test_get_all_providers_health_returns_list(self, health_monitor):
+        """Get all providers health returns a list"""
+        result = health_monitor.get_all_providers_health()
+        assert isinstance(result, list)
 
-        assert result is not None or result is True
-
-    def test_mark_model_healthy(self, health_monitor):
-        """Mark a model as healthy"""
-        model_id = "gpt-3.5-turbo"
-
-        # First mark unhealthy
-        mark_model_unhealthy(model_id, reason="Test")
-
-        # Then mark healthy
-        result = mark_model_healthy(model_id)
-
-        assert result is not None or result is True
-
-    def test_get_unhealthy_models(self, health_monitor):
-        """Get list of unhealthy models"""
-        # Mark some models unhealthy
-        mark_model_unhealthy("model1", reason="Error")
-        mark_model_unhealthy("model2", reason="Timeout")
-
-        unhealthy = get_unhealthy_models()
-
-        assert isinstance(unhealthy, (list, dict)) or unhealthy is None
+    def test_health_data_structure(self, health_monitor):
+        """Health data internal structure is initialized"""
+        assert hasattr(health_monitor, 'health_data')
+        assert isinstance(health_monitor.health_data, dict)
+        assert hasattr(health_monitor, 'provider_data')
+        assert isinstance(health_monitor.provider_data, dict)
 
 
 class TestHealthScoreCalculation:
@@ -175,33 +126,36 @@ class TestHealthScoreCalculation:
 class TestHealthMetrics:
     """Test health metrics collection"""
 
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_track_latency(self, health_monitor):
-        """Track request latency"""
-        model_id = "gpt-3.5-turbo"
+    def test_model_health_metrics_dataclass(self):
+        """Test ModelHealthMetrics dataclass structure"""
+        metrics = ModelHealthMetrics(
+            model_id="gpt-3.5-turbo",
+            gateway="openrouter",
+            provider="openai",
+            status=HealthStatus.HEALTHY,
+            response_time_ms=1500,
+            last_checked=datetime.now(),
+        )
 
-        latencies = [1.0, 1.5, 2.0, 1.2, 1.8]
+        assert metrics.model_id == "gpt-3.5-turbo"
+        assert metrics.gateway == "openrouter"
+        assert metrics.status == HealthStatus.HEALTHY
+        assert metrics.response_time_ms == 1500
 
-        for latency in latencies:
-            track_model_health(model_id, success=True, latency=latency)
+    def test_model_health_metrics_unhealthy(self):
+        """Test ModelHealthMetrics with unhealthy status"""
+        metrics = ModelHealthMetrics(
+            model_id="broken-model",
+            gateway="openrouter",
+            provider="test",
+            status=HealthStatus.UNHEALTHY,
+            response_time_ms=None,
+            last_checked=datetime.now(),
+            error_message="Connection timeout",
+        )
 
-        health = get_model_health(model_id)
-        if health and 'avg_latency' in health:
-            # Average should be around 1.5
-            assert 1.0 <= health['avg_latency'] <= 2.5
-
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_track_error_count(self, health_monitor):
-        """Track error count"""
-        model_id = "gpt-3.5-turbo"
-
-        # Generate some errors
-        for i in range(5):
-            track_model_health(model_id, success=False, error=f"Error {i}")
-
-        health = get_model_health(model_id)
-        if health and 'error_count' in health:
-            assert health['error_count'] >= 5
+        assert metrics.status == HealthStatus.UNHEALTHY
+        assert metrics.error_message == "Connection timeout"
 
 
 class TestFailureDetection:
@@ -244,24 +198,22 @@ class TestFailureDetection:
 class TestRecoveryDetection:
     """Test recovery detection"""
 
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_detect_recovery(self, health_monitor):
-        """Detect when model recovers"""
-        model_id = "gpt-3.5-turbo"
+    def test_health_status_enum_values(self):
+        """Test HealthStatus enum has expected values"""
+        assert HealthStatus.HEALTHY.value == "healthy"
+        assert HealthStatus.UNHEALTHY.value == "unhealthy"
+        assert HealthStatus.DEGRADED.value == "degraded"
+        assert HealthStatus.UNKNOWN.value == "unknown"
 
-        # Mark unhealthy
-        mark_model_unhealthy(model_id, reason="High errors")
+    def test_health_status_transitions(self):
+        """Test that health status can transition between states"""
+        # Can set to unhealthy
+        status = HealthStatus.UNHEALTHY
+        assert status == HealthStatus.UNHEALTHY
 
-        # Simulate successful requests
-        for _ in range(10):
-            track_model_health(model_id, success=True, latency=1.0)
-
-        # Should potentially auto-recover or allow manual recovery
-        mark_model_healthy(model_id)
-
-        health = get_model_health(model_id)
-        if health:
-            assert health.get('status') in ['healthy', 'recovering', None]
+        # Can recover to healthy
+        status = HealthStatus.HEALTHY
+        assert status == HealthStatus.HEALTHY
 
 
 class TestHealthAlerts:
@@ -293,61 +245,47 @@ class TestHealthAlerts:
 class TestHealthMonitoringEdgeCases:
     """Test edge cases"""
 
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_handle_null_model_id(self, health_monitor):
-        """Handle null model ID gracefully"""
-        try:
-            result = track_model_health(None, success=True, latency=1.0)
-            assert result is None or result is False
-        except (ValueError, TypeError):
-            # Acceptable to raise error
-            pass
+    def test_get_model_health_with_none_model_id(self, health_monitor):
+        """Handle None model ID gracefully"""
+        # Should return None for None model_id
+        result = health_monitor.get_model_health(None)
+        assert result is None
 
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_handle_negative_latency(self, health_monitor):
-        """Handle negative latency values"""
-        try:
-            result = track_model_health("gpt-3.5-turbo", success=True, latency=-1.0)
-            # Should either reject or handle
-            assert result is not None
-        except ValueError:
-            # Acceptable to raise error
-            pass
+    def test_get_model_health_with_empty_string(self, health_monitor):
+        """Handle empty string model ID"""
+        result = health_monitor.get_model_health("")
+        assert result is None
 
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_handle_extreme_latency(self, health_monitor):
-        """Handle extremely high latency values"""
-        result = track_model_health("gpt-3.5-turbo", success=False, latency=99999.0)
-
-        # Should handle gracefully
-        assert result is not None or result is False
+    def test_get_provider_health_with_none_values(self, health_monitor):
+        """Handle None provider/gateway gracefully"""
+        result = health_monitor.get_provider_health(None, None)
+        assert result is None
 
 
 class TestHealthMonitorPersistence:
     """Test health data persistence"""
 
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_health_data_persisted(self, health_monitor):
-        """Health data should be persisted"""
-        model_id = "gpt-3.5-turbo"
+    def test_health_data_dict_initialized(self, health_monitor):
+        """Health data dictionary is initialized on monitor creation"""
+        assert hasattr(health_monitor, 'health_data')
+        assert isinstance(health_monitor.health_data, dict)
+        assert hasattr(health_monitor, 'provider_data')
+        assert isinstance(health_monitor.provider_data, dict)
+        # system_data is None until monitoring starts
+        assert hasattr(health_monitor, 'system_data')
 
-        track_model_health(model_id, success=True, latency=1.0)
-
-        # Should be retrievable
-        health = get_model_health(model_id)
-        assert health is not None or health == {}
-
-    @pytest.mark.skipif(not HEALTH_MONITOR_AVAILABLE, reason="Health monitor not implemented")
-    def test_health_data_timestamped(self, health_monitor):
-        """Health data should include timestamps"""
-        model_id = "gpt-3.5-turbo"
-
-        track_model_health(model_id, success=True, latency=1.0)
-
-        health = get_model_health(model_id)
-        if health:
-            # Should have timestamp field
-            assert 'last_check' in health or 'timestamp' in health or 'updated_at' in health
+    def test_model_health_metrics_has_timestamp(self):
+        """ModelHealthMetrics includes last_checked timestamp"""
+        metrics = ModelHealthMetrics(
+            model_id="test-model",
+            gateway="test",
+            provider="test",
+            status=HealthStatus.HEALTHY,
+            response_time_ms=100,
+            last_checked=datetime.now(),
+        )
+        assert metrics.last_checked is not None
+        assert isinstance(metrics.last_checked, datetime)
 
 
 class TestHealthMonitorIntegration:

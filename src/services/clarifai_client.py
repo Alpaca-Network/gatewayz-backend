@@ -1,16 +1,27 @@
 """
 Clarifai client for LLM inference integration.
 
-This client uses the official Clarifai Python SDK to interact with language models
-available on the Clarifai platform. It supports both standard LLM models and
-specialized models for reasoning and multimodal tasks.
+This client uses Clarifai's OpenAI-compatible API endpoint to interact with
+language models available on the Clarifai platform. It supports both standard
+LLM models and specialized models for reasoning and multimodal tasks.
 
 Clarifai provides access to models like Claude, GPT-4, Llama, Mistral, and others
-through a unified API.
+through a unified OpenAI-compatible API.
+
+API Documentation: https://docs.clarifai.com/compute/inference/open-ai/
+
+Model ID Format:
+    Models should be specified using Clarifai's URL format:
+    - Full URL: https://clarifai.com/{user_id}/{app_id}/models/{model_id}
+    - Abbreviated: {user_id}/{app_id}/models/{model_id}
+    Example: "openai/chat-completion/models/gpt-4o"
 """
 
 import logging
+from datetime import datetime, timezone
 
+from src.cache import _clarifai_models_cache
+from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_clarifai_pooled_client
 
@@ -37,7 +48,7 @@ def make_clarifai_request_openai(messages, model, **kwargs):
 
     Args:
         messages: List of message objects in OpenAI format
-        model: Model ID (e.g., "claude-3.5-sonnet" or with user/app prefix)
+        model: Model ID in Clarifai format (e.g., "openai/chat-completion/models/gpt-4o")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
 
     Returns:
@@ -66,7 +77,7 @@ def make_clarifai_request_openai_stream(messages, model, **kwargs):
 
     Args:
         messages: List of message objects in OpenAI format
-        model: Model ID (e.g., "claude-3.5-sonnet" or with user/app prefix)
+        model: Model ID in Clarifai format (e.g., "openai/chat-completion/models/gpt-4o")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
 
     Returns:
@@ -135,3 +146,69 @@ def process_clarifai_response(response):
     except Exception as e:
         logger.error(f"Failed to process Clarifai response: {e}")
         raise
+
+
+def fetch_models_from_clarifai():
+    """Fetch models from Clarifai API
+
+    Clarifai provides access to multiple AI models through their OpenAI-compatible API.
+    This function fetches the list of available models from their endpoint.
+
+    Models are cached with a 1-hour TTL to reduce API calls and improve performance.
+    """
+
+    def _cache_and_return(models: list[dict]) -> list[dict]:
+        """Cache models and return them"""
+        _clarifai_models_cache["data"] = models
+        _clarifai_models_cache["timestamp"] = datetime.now(timezone.utc)
+        return models
+
+    try:
+        if not Config.CLARIFAI_API_KEY:
+            logger.warning("Clarifai API key not configured, cannot fetch models")
+            return _cache_and_return([])
+
+        logger.info("Fetching models from Clarifai API...")
+
+        # Use the pooled OpenAI client for consistency with the rest of the module
+        client = get_clarifai_pooled_client()
+        models_response = client.models.list()
+
+        # Convert to list format
+        models = list(models_response)
+        logger.debug(f"Clarifai API returned {len(models)} models")
+
+        # Transform to our standard format
+        transformed_models = []
+        for model in models:
+            model_id = getattr(model, "id", "") or ""
+            context_length = getattr(model, "context_length", None) or getattr(model, "context_window", 4096)
+            transformed_model = {
+                "id": model_id,
+                "slug": f"clarifai/{model_id}",
+                "canonical_slug": f"clarifai/{model_id}",
+                "name": model_id or "Unknown Model",
+                "description": f"Clarifai model: {model_id}",
+                "context_length": context_length,
+                "architecture": {
+                    "modality": "text->text",
+                    "input_modalities": ["text"],
+                    "output_modalities": ["text"],
+                },
+                "pricing": {
+                    "prompt": "0",
+                    "completion": "0",
+                    "request": "0",
+                    "image": "0",
+                },
+                "provider_slug": "clarifai",
+                "source_gateway": "clarifai",
+            }
+            transformed_models.append(transformed_model)
+
+        logger.info(f"Successfully fetched {len(transformed_models)} models from Clarifai")
+        return _cache_and_return(transformed_models)
+
+    except Exception as e:
+        logger.error(f"Failed to fetch models from Clarifai: {type(e).__name__}: {e}")
+        return _cache_and_return([])

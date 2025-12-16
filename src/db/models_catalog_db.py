@@ -4,7 +4,7 @@ Handles CRUD operations for AI models with provider relationships
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -13,7 +13,7 @@ from src.config.supabase_config import get_supabase_client
 logger = logging.getLogger(__name__)
 
 
-def _serialize_model_data(data: Dict[str, Any]) -> Dict[str, Any]:
+def _serialize_model_data(data: dict[str, Any]) -> dict[str, Any]:
     """Convert Decimal and other non-JSON-serializable types to JSON-compatible types"""
     serialized = {}
     for key, value in data.items():
@@ -29,11 +29,11 @@ def _serialize_model_data(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_all_models(
-    provider_id: Optional[int] = None,
+    provider_id: int | None = None,
     is_active_only: bool = True,
     limit: int = 100,
     offset: int = 0
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get all models from database
 
@@ -70,7 +70,7 @@ def get_all_models(
         return []
 
 
-def get_model_by_id(model_id: int) -> Optional[Dict[str, Any]]:
+def get_model_by_id(model_id: int) -> dict[str, Any] | None:
     """
     Get a model by its ID
 
@@ -98,7 +98,7 @@ def get_model_by_id(model_id: int) -> Optional[Dict[str, Any]]:
 def get_models_by_provider_slug(
     provider_slug: str,
     is_active_only: bool = True
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get all models for a specific provider by slug
 
@@ -133,7 +133,7 @@ def get_models_by_provider_slug(
 def get_model_by_provider_and_model_id(
     provider_id: int,
     provider_model_id: str
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Get a model by provider ID and provider-specific model ID
 
@@ -160,7 +160,7 @@ def get_model_by_provider_and_model_id(
         return None
 
 
-def create_model(model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def create_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
     """
     Create a new model
 
@@ -184,7 +184,7 @@ def create_model(model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def bulk_create_models(models_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def bulk_create_models(models_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Create multiple models at once
 
@@ -207,7 +207,7 @@ def bulk_create_models(models_data: List[Dict[str, Any]]) -> List[Dict[str, Any]
         return []
 
 
-def update_model(model_id: int, model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_model(model_id: int, model_data: dict[str, Any]) -> dict[str, Any] | None:
     """
     Update a model
 
@@ -259,7 +259,7 @@ def delete_model(model_id: int) -> bool:
         return False
 
 
-def deactivate_model(model_id: int) -> Optional[Dict[str, Any]]:
+def deactivate_model(model_id: int) -> dict[str, Any] | None:
     """
     Deactivate a model (soft delete)
 
@@ -272,7 +272,7 @@ def deactivate_model(model_id: int) -> Optional[Dict[str, Any]]:
     return update_model(model_id, {"is_active": False})
 
 
-def activate_model(model_id: int) -> Optional[Dict[str, Any]]:
+def activate_model(model_id: int) -> dict[str, Any] | None:
     """
     Activate a model
 
@@ -288,9 +288,9 @@ def activate_model(model_id: int) -> Optional[Dict[str, Any]]:
 def update_model_health(
     model_id: int,
     health_status: str,
-    response_time_ms: Optional[int] = None,
-    error_message: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
+    response_time_ms: int | None = None,
+    error_message: str | None = None
+) -> dict[str, Any] | None:
     """
     Update model health status and log to history
 
@@ -336,7 +336,7 @@ def update_model_health(
 def get_model_health_history(
     model_id: int,
     limit: int = 100
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get health check history for a model
 
@@ -364,7 +364,7 @@ def get_model_health_history(
         return []
 
 
-def get_models_by_health_status(health_status: str) -> List[Dict[str, Any]]:
+def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
     """
     Get models by health status
 
@@ -390,7 +390,7 @@ def get_models_by_health_status(health_status: str) -> List[Dict[str, Any]]:
         return []
 
 
-def search_models(query: str, provider_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def search_models(query: str, provider_id: int | None = None) -> list[dict[str, Any]]:
     """
     Search models by name, model_id, or description
 
@@ -421,7 +421,7 @@ def search_models(query: str, provider_id: Optional[int] = None) -> List[Dict[st
         return []
 
 
-def get_models_stats(provider_id: Optional[int] = None) -> Dict[str, Any]:
+def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
     """
     Get overall statistics about models
 
@@ -476,7 +476,7 @@ def get_models_stats(provider_id: Optional[int] = None) -> Dict[str, Any]:
         }
 
 
-def upsert_model(model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def upsert_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
     """
     Upsert a model (insert or update if exists)
     Uses provider_id and provider_model_id as unique constraint
@@ -508,7 +508,7 @@ def upsert_model(model_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def bulk_upsert_models(models_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def bulk_upsert_models(models_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Upsert multiple models at once
 

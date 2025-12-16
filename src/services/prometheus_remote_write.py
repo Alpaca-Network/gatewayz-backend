@@ -8,6 +8,9 @@ The Railway Grafana stack template comes with Prometheus pre-configured
 to receive metrics via:
 - HTTP remote_write endpoint: /api/v1/write
 - Internal URL: http://prometheus:9090
+
+This implementation uses protobuf format with Snappy compression as required
+by the Prometheus remote write protocol.
 """
 
 import asyncio
@@ -17,11 +20,85 @@ import time
 from typing import Any
 
 import httpx
-from prometheus_client import REGISTRY, generate_latest
+import snappy
+from prometheus_client import REGISTRY
 
 from src.config import Config
+from src.services.prometheus_pb2 import Label, Sample, TimeSeries, WriteRequest
 
 logger = logging.getLogger(__name__)
+
+# Protobuf is now always available via our custom implementation
+PROTOBUF_AVAILABLE = True
+
+
+def _get_instance_labels() -> dict[str, str]:
+    """Get instance-identifying labels for all metrics."""
+    hostname = socket.gethostname()
+    return {
+        "instance": hostname,
+        "job": "gatewayz",
+    }
+
+
+def _serialize_metrics_to_protobuf(registry=REGISTRY) -> bytes:
+    """
+    Serialize metrics from registry to Prometheus remote write protobuf format.
+
+    The remote write protocol requires:
+    1. Metrics in protobuf format (WriteRequest message)
+    2. Snappy compression of the protobuf data
+
+    Args:
+        registry: Prometheus metrics registry (default: REGISTRY)
+
+    Returns:
+        Snappy-compressed protobuf bytes ready for remote write
+    """
+    write_request = WriteRequest()
+    instance_labels = _get_instance_labels()
+    current_timestamp_ms = int(time.time() * 1000)
+
+    # Iterate over all metrics in the registry
+    for metric in registry.collect():
+        for sample in metric.samples:
+            # Create a new TimeSeries for each sample
+            ts = TimeSeries()
+
+            # Collect all labels for this sample
+            all_labels: dict[str, str] = {}
+
+            # Add the metric name as __name__ label
+            all_labels["__name__"] = sample.name
+
+            # Add instance labels
+            for label_name, label_value in instance_labels.items():
+                all_labels[label_name] = str(label_value)
+
+            # Add sample-specific labels
+            for label_name, label_value in sample.labels.items():
+                all_labels[label_name] = str(label_value)
+
+            # Sort labels lexicographically by name as required by Prometheus
+            for label_name in sorted(all_labels.keys()):
+                ts.labels.append(Label(name=label_name, value=all_labels[label_name]))
+
+            # Add the sample value with current timestamp
+            sample_obj = Sample(
+                value=float(sample.value),
+                timestamp=current_timestamp_ms,
+            )
+            ts.samples.append(sample_obj)
+
+            write_request.timeseries.append(ts)
+
+    # Serialize to protobuf bytes
+    protobuf_data = write_request.SerializeToString()
+
+    # Compress with Snappy (block format, not framed)
+    compressed_data = snappy.compress(protobuf_data)
+
+    return compressed_data
 
 
 class PrometheusRemoteWriter:
@@ -30,9 +107,16 @@ class PrometheusRemoteWriter:
 
     This follows the Prometheus remote write protocol:
     - Metrics are collected from the local registry
-    - Serialized to Prometheus text format
+    - Serialized to protobuf format (WriteRequest message)
+    - Compressed with Snappy compression
     - Sent to the remote Prometheus instance via HTTP POST
+
+    Includes circuit breaker pattern to reduce noise when Prometheus is unavailable.
     """
+
+    # Circuit breaker settings
+    CIRCUIT_BREAKER_THRESHOLD = 5  # Number of consecutive failures to open circuit
+    CIRCUIT_BREAKER_RESET_TIMEOUT = 300  # Seconds to wait before retrying (5 minutes)
 
     def __init__(
         self,
@@ -51,17 +135,29 @@ class PrometheusRemoteWriter:
         """
         self.remote_write_url = remote_write_url or Config.PROMETHEUS_REMOTE_WRITE_URL
         self.push_interval = push_interval
-        self.enabled = enabled
+        self.enabled = enabled and PROTOBUF_AVAILABLE
         self.client = None
         self._push_task = None
         self._last_push_time = 0
         self._push_count = 0
         self._push_errors = 0
 
+        # Circuit breaker state
+        self._consecutive_failures = 0
+        self._circuit_open_time = 0
+        self._circuit_open = False
+
+        if enabled and not PROTOBUF_AVAILABLE:
+            logger.warning(
+                "Prometheus remote write requested but protobuf support not available. "
+                "Install with: pip install python-snappy"
+            )
+
         logger.info("Prometheus Remote Writer initialized")
         logger.info(f"  URL: {self.remote_write_url}")
         logger.info(f"  Push interval: {self.push_interval}s")
         logger.info(f"  Enabled: {self.enabled}")
+        logger.info(f"  Protobuf support: {PROTOBUF_AVAILABLE}")
 
     async def start(self):
         """Start the background push task."""
@@ -102,9 +198,63 @@ class PrometheusRemoteWriter:
                 logger.error(f"Error in prometheus push loop: {e}")
                 self._push_errors += 1
 
+    def _check_circuit_breaker(self) -> bool:
+        """
+        Check if the circuit breaker allows a request.
+
+        Returns:
+            True if request is allowed, False if circuit is open
+        """
+        if not self._circuit_open:
+            return True
+
+        # Check if we should try to reset the circuit
+        time_since_open = time.time() - self._circuit_open_time
+        if time_since_open >= self.CIRCUIT_BREAKER_RESET_TIMEOUT:
+            logger.info(
+                f"Prometheus remote write circuit breaker reset after "
+                f"{time_since_open:.0f}s, attempting to reconnect"
+            )
+            self._circuit_open = False
+            return True
+
+        return False
+
+    def _record_success(self):
+        """Record a successful push and reset circuit breaker."""
+        self._push_count += 1
+        self._last_push_time = time.time()
+        self._consecutive_failures = 0
+        if self._circuit_open:
+            logger.info("Prometheus remote write circuit breaker closed after successful push")
+            self._circuit_open = False
+
+    def _record_failure(self):
+        """Record a failed push and potentially open circuit breaker."""
+        self._push_errors += 1
+        self._consecutive_failures += 1
+
+        if (
+            not self._circuit_open
+            and self._consecutive_failures >= self.CIRCUIT_BREAKER_THRESHOLD
+        ):
+            self._circuit_open = True
+            self._circuit_open_time = time.time()
+            logger.warning(
+                f"Prometheus remote write circuit breaker opened after "
+                f"{self._consecutive_failures} consecutive failures. "
+                f"Will retry in {self.CIRCUIT_BREAKER_RESET_TIMEOUT}s"
+            )
+
     async def push_metrics(self) -> bool:
         """
         Push current metrics to Prometheus remote_write endpoint.
+
+        Serializes metrics to protobuf format with Snappy compression
+        and sends them via HTTP POST to the remote write endpoint.
+
+        Includes circuit breaker pattern to avoid excessive retries when
+        the Prometheus endpoint is unavailable.
 
         Returns:
             True if push was successful, False otherwise
@@ -112,47 +262,69 @@ class PrometheusRemoteWriter:
         if not self.enabled or not self.client:
             return False
 
-        try:
-            # Collect metrics from Prometheus client library
-            metrics_data = generate_latest(REGISTRY)
+        # Check circuit breaker
+        if not self._check_circuit_breaker():
+            # Circuit is open, skip this push silently
+            return False
 
-            # Send to remote Prometheus
+        try:
+            # Serialize and compress metrics
+            compressed_data = _serialize_metrics_to_protobuf(REGISTRY)
+
+            # Send to remote write endpoint
             response = await self.client.post(
                 self.remote_write_url,
-                content=metrics_data,
-                headers={"Content-Type": "text/plain; charset=utf-8"},
+                content=compressed_data,
+                headers={
+                    "Content-Encoding": "snappy",
+                    "Content-Type": "application/x-protobuf",
+                    "X-Prometheus-Remote-Write-Version": "0.1.0",
+                },
             )
 
-            self._last_push_time = time.time()
-            self._push_count += 1
+            response.raise_for_status()
 
-            if response.status_code in (200, 201, 204):
-                logger.debug(
-                    f"Successfully pushed metrics to Prometheus "
-                    f"({len(metrics_data)} bytes, status {response.status_code})"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"Prometheus remote write returned status {response.status_code}: "
-                    f"{response.text[:200]}"
-                )
-                self._push_errors += 1
-                return False
+            self._record_success()
 
-        except httpx.TimeoutException:
-            logger.debug("Timeout pushing metrics to Prometheus")
-            self._push_errors += 1
+            logger.debug(
+                f"Successfully pushed metrics to {self.remote_write_url} "
+                f"(status: {response.status_code})"
+            )
+            return True
+
+        except httpx.HTTPStatusError as e:
+            self._record_failure()
+            logger.error(
+                f"HTTP error pushing metrics to {self.remote_write_url}: "
+                f"{e.response.status_code} - {e.response.text}"
+            )
             return False
-        except (socket.gaierror, OSError) as e:
-            # DNS resolution or connection error - log at debug level since Prometheus
-            # may not be available in all environments (e.g., production without Grafana stack)
-            logger.debug(f"Cannot connect to Prometheus at {self.remote_write_url}: {e}")
-            self._push_errors += 1
+        except httpx.ConnectError as e:
+            self._record_failure()
+            # Only log if circuit is not yet open (avoid spam)
+            if not self._circuit_open:
+                logger.warning(
+                    f"Connection error pushing metrics to {self.remote_write_url}: "
+                    f"{type(e).__name__}: {e}"
+                )
+            return False
+        except httpx.TimeoutException as e:
+            self._record_failure()
+            # Only log if circuit is not yet open (avoid spam)
+            if not self._circuit_open:
+                logger.warning(
+                    f"Timeout pushing metrics to {self.remote_write_url}: "
+                    f"{type(e).__name__}: {e}"
+                )
             return False
         except Exception as e:
-            logger.debug(f"Error pushing metrics to Prometheus: {e}")
-            self._push_errors += 1
+            self._record_failure()
+            # Only log if circuit is not yet open (avoid spam)
+            if not self._circuit_open:
+                logger.error(
+                    f"Error pushing metrics to {self.remote_write_url}: "
+                    f"{type(e).__name__}: {e}"
+                )
             return False
 
     def get_stats(self) -> dict[str, Any]:
@@ -169,6 +341,12 @@ class PrometheusRemoteWriter:
                 if self._push_count > 0
                 else 0
             ),
+            "circuit_breaker": {
+                "open": self._circuit_open,
+                "consecutive_failures": self._consecutive_failures,
+                "threshold": self.CIRCUIT_BREAKER_THRESHOLD,
+                "reset_timeout": self.CIRCUIT_BREAKER_RESET_TIMEOUT,
+            },
         }
 
 
@@ -184,14 +362,25 @@ async def init_prometheus_remote_write():
         logger.info("Prometheus monitoring is disabled")
         return
 
+    # Enable remote write if protobuf dependencies are available
+    # Falls back to scraping via /metrics endpoint if protobuf is not available
     prometheus_writer = PrometheusRemoteWriter(
         remote_write_url=Config.PROMETHEUS_REMOTE_WRITE_URL,
         push_interval=30,  # Push every 30 seconds
-        enabled=True,
+        enabled=True,  # Enabled with protobuf support
     )
 
-    await prometheus_writer.start()
-    logger.info("Prometheus remote write initialized")
+    if prometheus_writer.enabled:
+        await prometheus_writer.start()
+        logger.info(
+            "Prometheus remote write enabled with protobuf support. "
+            "Metrics will be pushed to remote write endpoint."
+        )
+    else:
+        logger.info(
+            "Prometheus remote write disabled (protobuf dependencies not available). "
+            "Metrics available via /metrics scrape endpoint."
+        )
 
 
 async def shutdown_prometheus_remote_write():

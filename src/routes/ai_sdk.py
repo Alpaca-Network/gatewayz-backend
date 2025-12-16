@@ -20,13 +20,27 @@ from pydantic import BaseModel, Field
 
 from src.services.ai_sdk_client import (
     make_ai_sdk_request_openai,
-    make_ai_sdk_request_openai_stream,
+    make_ai_sdk_request_openai_stream_async,
     process_ai_sdk_response,
     validate_ai_sdk_api_key,
+)
+from src.services.openrouter_client import (
+    get_openrouter_client,
+    make_openrouter_request_openai,
+    make_openrouter_request_openai_stream_async,
+    process_openrouter_response,
 )
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Try to import sentry_sdk for error tracking
+try:
+    import sentry_sdk
+
+    SENTRY_AVAILABLE = True
+except ImportError:
+    SENTRY_AVAILABLE = False
 
 # Create router
 router = APIRouter()
@@ -95,6 +109,29 @@ def _build_request_kwargs(request: AISDKChatRequest) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+def _is_openrouter_model(model: str) -> bool:
+    """Check if the model should be routed through OpenRouter.
+
+    Models with the 'openrouter/' prefix are OpenRouter-specific and should be
+    routed directly through OpenRouter instead of the Vercel AI Gateway.
+
+    Examples:
+        - openrouter/auto -> True (OpenRouter's automatic model selection)
+        - openrouter/quasar-alpha -> True
+        - openai/gpt-4o -> False (use Vercel AI Gateway)
+        - anthropic/claude-3 -> False (use Vercel AI Gateway)
+
+    Args:
+        model: The requested model ID
+
+    Returns:
+        bool: True if the model should be routed through OpenRouter
+    """
+    if not model:
+        return False
+    return model.lower().startswith("openrouter/")
+
+
 @router.post("/api/chat/ai-sdk-completions", tags=["ai-sdk"], response_model=AISDKChatResponse)
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
 async def ai_sdk_chat_completion(request: AISDKChatRequest):
@@ -157,18 +194,36 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         AISDKChatResponse: Chat completion response with choices and usage
     """
     try:
-        # Validate API key is configured
-        validate_ai_sdk_api_key()
-
-        # Handle streaming requests
-        if request.stream:
-            return await _handle_ai_sdk_stream(request)
-
         # Build kwargs for API request
         kwargs = _build_request_kwargs(request)
 
         # Convert messages to dict format
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+        # Check if this is an openrouter/* model - route directly through OpenRouter
+        if _is_openrouter_model(request.model):
+            logger.info(f"Routing '{request.model}' directly through OpenRouter")
+
+            # Handle streaming requests via OpenRouter
+            if request.stream:
+                return await _handle_openrouter_stream(request, messages, kwargs)
+
+            # Make request directly to OpenRouter
+            response = await asyncio.to_thread(
+                make_openrouter_request_openai, messages, request.model, **kwargs
+            )
+
+            # Process and return response
+            processed = await asyncio.to_thread(process_openrouter_response, response)
+            return processed
+
+        # Default path: Use Vercel AI Gateway
+        # Validate API key is configured
+        validate_ai_sdk_api_key()
+
+        # Handle streaming requests via AI SDK
+        if request.stream:
+            return await _handle_ai_sdk_stream(request, request.model)
 
         # Make request to AI SDK endpoint
         response = await asyncio.to_thread(
@@ -179,39 +234,72 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
         processed = await asyncio.to_thread(process_ai_sdk_response, response)
         return processed
 
+    except HTTPException:
+        # Re-raise HTTPExceptions without modification (e.g., from _handle_openrouter_stream)
+        raise
     except ValueError as e:
-        logger.error(f"AI SDK configuration error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_message = str(e).lower()
+        # Determine if this is an OpenRouter or AI SDK configuration error
+        if "openrouter" in error_message:
+            logger.error(f"OpenRouter configuration error: {e}", exc_info=True)
+            detail = "OpenRouter service is not configured. Please contact support."
+        else:
+            logger.error(f"AI SDK configuration error: {e}", exc_info=True)
+            detail = "AI SDK service is not configured. Please contact support."
+        # Capture configuration errors to Sentry (503 errors)
+        if SENTRY_AVAILABLE:
+            sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=503, detail=detail)
     except Exception as e:
-        logger.error(f"AI SDK chat completion error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process AI SDK request")
+        logger.error(f"AI SDK chat completion error: {e}", exc_info=True)
+        # Capture all other errors to Sentry (500 errors)
+        if SENTRY_AVAILABLE:
+            sentry_sdk.capture_exception(e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process AI SDK request: {str(e)}"
+        )
 
 
-async def _handle_ai_sdk_stream(request: AISDKChatRequest):
-    """Handle streaming responses for AI SDK endpoint.
+async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, kwargs: dict):
+    """Handle streaming responses routed directly through OpenRouter.
 
     Args:
         request: AISDKChatRequest with stream=True
+        messages: Pre-converted messages list
+        kwargs: Pre-built kwargs dictionary
 
     Returns:
         StreamingResponse with server-sent events
+
+    Raises:
+        HTTPException: If OpenRouter API key is not configured (503)
     """
+    # Validate OpenRouter API key before starting the stream
+    # This ensures we return HTTP 503 instead of streaming an error
+    try:
+        get_openrouter_client()
+    except ValueError as e:
+        logger.error(f"OpenRouter configuration error: {e}", exc_info=True)
+        if SENTRY_AVAILABLE:
+            sentry_sdk.capture_exception(e)
+        raise HTTPException(
+            status_code=503,
+            detail="OpenRouter service is not configured. Please contact support.",
+        )
 
     async def stream_response():
         try:
-            # Build kwargs for API request
-            kwargs = _build_request_kwargs(request)
-
-            # Convert messages to dict format
-            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-
-            # Make streaming request
-            stream = await asyncio.to_thread(
-                make_ai_sdk_request_openai_stream, messages, request.model, **kwargs
+            # Make async streaming request directly to OpenRouter
+            # PERF: Using async client prevents blocking the event loop while waiting
+            # for chunks, ensuring proper real-time streaming to the client
+            stream = await make_openrouter_request_openai_stream_async(
+                messages, request.model, **kwargs
             )
 
-            # Stream response chunks
-            for chunk in stream:
+            # Stream response chunks using async iteration
+            # PERF: async for yields control to the event loop between chunks,
+            # allowing FastAPI to flush each chunk immediately instead of buffering
+            async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = getattr(chunk.choices[0], "delta", None)
                     if delta and hasattr(delta, "content") and delta.content:
@@ -226,9 +314,104 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest):
             yield f"data: {json.dumps(completion_data)}\n\n"
             yield "data: [DONE]\n\n"
 
+        except ValueError as e:
+            error_message = str(e).lower()
+            # Determine if this is an OpenRouter configuration error
+            if "openrouter" in error_message:
+                logger.error(f"OpenRouter configuration error: {e}", exc_info=True)
+                detail = "OpenRouter service is not configured. Please contact support."
+            else:
+                logger.error(f"OpenRouter streaming error: {e}", exc_info=True)
+                detail = f"Failed to process streaming request: {str(e)}"
+            # Capture errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": detail}
+            yield f"data: {json.dumps(error_data)}\n\n"
         except Exception as e:
-            logger.error(f"AI SDK streaming error: {e}")
-            error_data = {"error": str(e)}
+            logger.error(f"OpenRouter streaming error: {e}", exc_info=True)
+            # Capture streaming errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": f"Failed to process streaming request: {str(e)}"}
             yield f"data: {json.dumps(error_data)}\n\n"
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream")
+    # SSE streaming headers to prevent buffering by proxies/nginx
+    stream_headers = {
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+    }
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
+
+
+async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
+    """Handle streaming responses for AI SDK endpoint.
+
+    Args:
+        request: AISDKChatRequest with stream=True
+        model: The transformed model ID to use
+
+    Returns:
+        StreamingResponse with server-sent events
+    """
+
+    async def stream_response():
+        try:
+            # Validate API key is configured
+            validate_ai_sdk_api_key()
+
+            # Build kwargs for API request
+            kwargs = _build_request_kwargs(request)
+
+            # Convert messages to dict format
+            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+            # Make async streaming request
+            # PERF: Using async client prevents blocking the event loop while waiting
+            # for chunks, ensuring proper real-time streaming to the client
+            stream = await make_ai_sdk_request_openai_stream_async(messages, model, **kwargs)
+
+            # Stream response chunks using async iteration
+            # PERF: async for yields control to the event loop between chunks,
+            # allowing FastAPI to flush each chunk immediately instead of buffering
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = getattr(chunk.choices[0], "delta", None)
+                    if delta and hasattr(delta, "content") and delta.content:
+                        # Format as SSE (Server-Sent Events)
+                        data = {
+                            "choices": [{"delta": {"role": "assistant", "content": delta.content}}]
+                        }
+                        yield f"data: {json.dumps(data)}\n\n"
+
+            # Send completion signal
+            completion_data = {"choices": [{"finish_reason": "stop"}]}
+            yield f"data: {json.dumps(completion_data)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        except ValueError as e:
+            # This handler only processes AI SDK models (non-OpenRouter)
+            logger.error(f"AI SDK configuration error: {e}", exc_info=True)
+            # Capture configuration errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": "AI SDK service is not configured. Please contact support."}
+            yield f"data: {json.dumps(error_data)}\n\n"
+        except Exception as e:
+            logger.error(f"AI SDK streaming error: {e}", exc_info=True)
+            # Capture streaming errors to Sentry
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
+            error_data = {"error": f"Failed to process streaming request: {str(e)}"}
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    # SSE streaming headers to prevent buffering by proxies/nginx
+    stream_headers = {
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+    }
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
