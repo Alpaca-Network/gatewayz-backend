@@ -145,12 +145,58 @@ def _parse_pricing(value) -> str:
     return str(value)
 
 
+def _fetch_display_models_pricing() -> dict:
+    """Fetch pricing info from display_models endpoint and return as a lookup dict."""
+    try:
+        response = httpx.get(
+            "https://app.onerouter.pro/api/display_models/",
+            headers={"Content-Type": "application/json"},
+            timeout=10.0,
+            follow_redirects=True
+        )
+        response.raise_for_status()
+        models = response.json().get("data", [])
+
+        pricing_map = {}
+        for model in models:
+            model_id = model.get("invoke_name") or model.get("name", "")
+            if not model_id:
+                continue
+
+            # Parse pricing (sale price if available, otherwise retail)
+            prompt_price = _parse_pricing(model.get("sale_input_cost"))
+            completion_price = _parse_pricing(model.get("sale_output_cost"))
+
+            # If sale price is 0, use retail price
+            try:
+                if float(prompt_price) == 0:
+                    prompt_price = _parse_pricing(model.get("retail_input_cost"))
+            except ValueError:
+                pass
+            try:
+                if float(completion_price) == 0:
+                    completion_price = _parse_pricing(model.get("retail_output_cost"))
+            except ValueError:
+                pass
+
+            pricing_map[model_id] = {
+                "prompt": prompt_price,
+                "completion": completion_price,
+                "context_length": _parse_token_limit(model.get("input_token_limit")),
+                "max_completion_tokens": _parse_token_limit(model.get("output_token_limit")),
+            }
+        return pricing_map
+    except Exception as e:
+        logger.warning(f"Failed to fetch display_models pricing: {e}")
+        return {}
+
+
 def fetch_models_from_onerouter():
     """Fetch models from OneRouter API
 
     OneRouter provides access to multiple AI models through their API.
-    This function fetches the list of available models from the authenticated
-    /v1/models endpoint which returns the complete model list.
+    This function fetches the complete model list from the authenticated /v1/models
+    endpoint and enriches it with pricing data from the display_models endpoint.
 
     Models are cached with a 1-hour TTL to reduce API calls and improve performance.
     """
@@ -185,6 +231,9 @@ def fetch_models_from_onerouter():
         models_data = response.json()
         models = models_data.get("data", [])
 
+        # Fetch pricing data from display_models to enrich the model list
+        pricing_map = _fetch_display_models_pricing()
+
         # Transform to our standard format
         # The /v1/models endpoint returns OpenAI-compatible format with fields:
         # id, object, created, owned_by
@@ -195,10 +244,12 @@ def fetch_models_from_onerouter():
             if not model_id:
                 continue
 
-            # OpenAI format doesn't include detailed context/pricing info
-            # Use sensible defaults
-            context_length = model.get("context_length", 128000)
-            max_completion_tokens = model.get("max_completion_tokens", 4096)
+            # Get pricing/context info from display_models if available
+            pricing_info = pricing_map.get(model_id, {})
+            context_length = pricing_info.get("context_length", 128000)
+            max_completion_tokens = pricing_info.get("max_completion_tokens", 4096)
+            prompt_price = pricing_info.get("prompt", "0")
+            completion_price = pricing_info.get("completion", "0")
 
             # Build a readable name from the model ID
             model_name = model_id.replace("-", " ").replace("_", " ").title()
@@ -221,8 +272,8 @@ def fetch_models_from_onerouter():
                     "output_modalities": ["text"],
                 },
                 "pricing": {
-                    "prompt": "0",
-                    "completion": "0",
+                    "prompt": prompt_price,
+                    "completion": completion_price,
                     "request": "0",
                     "image": "0",
                 },
