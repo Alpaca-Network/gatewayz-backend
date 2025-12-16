@@ -181,11 +181,29 @@ def _fetch_display_models_pricing() -> dict:
                 # Keep original price if parsing fails (e.g., malformed value)
                 pass
 
+            # Parse modalities (handle null values from API)
+            input_modalities_str = model.get("input_modalities") or "Text"
+            output_modalities_str = model.get("output_modalities") or "Text"
+            input_modalities = [m.strip().lower() for m in input_modalities_str.split(",")]
+            output_modalities = [m.strip().lower() for m in output_modalities_str.split(",")]
+
+            # Determine modality type
+            has_image_input = any(m in ["images", "image"] for m in input_modalities)
+            modality = "text+image->text" if has_image_input else "text->text"
+
+            # Use 128000 as default for context_length to match fallback defaults
+            context_length = _parse_token_limit(model.get("input_token_limit"))
+            if context_length == 4096:  # _parse_token_limit default means null/invalid input
+                context_length = 128000
+
             pricing_map[model_id] = {
                 "prompt": prompt_price,
                 "completion": completion_price,
-                "context_length": _parse_token_limit(model.get("input_token_limit")),
+                "context_length": context_length,
                 "max_completion_tokens": _parse_token_limit(model.get("output_token_limit")),
+                "input_modalities": input_modalities,
+                "output_modalities": output_modalities,
+                "modality": modality,
             }
         return pricing_map
     except Exception as e:
@@ -259,6 +277,9 @@ def fetch_models_from_onerouter():
             max_completion_tokens = pricing_info.get("max_completion_tokens", 4096)
             prompt_price = pricing_info.get("prompt", "0")
             completion_price = pricing_info.get("completion", "0")
+            modality = pricing_info.get("modality", "text->text")
+            input_modalities = pricing_info.get("input_modalities", ["text"])
+            output_modalities = pricing_info.get("output_modalities", ["text"])
 
             # Build a readable name from the model ID
             model_name = model_id.replace("-", " ").replace("_", " ").title()
@@ -276,9 +297,9 @@ def fetch_models_from_onerouter():
                 "context_length": context_length,
                 "max_completion_tokens": max_completion_tokens,
                 "architecture": {
-                    "modality": "text->text",
-                    "input_modalities": ["text"],
-                    "output_modalities": ["text"],
+                    "modality": modality,
+                    "input_modalities": input_modalities,
+                    "output_modalities": output_modalities,
                 },
                 "pricing": {
                     "prompt": prompt_price,

@@ -358,6 +358,8 @@ class TestFetchModelsFromOneRouter:
                     "retail_output_cost": "$0.40",
                     "input_token_limit": "1048576",
                     "output_token_limit": "8192",
+                    "input_modalities": "Text, Code, Images",
+                    "output_modalities": "Text, Code",
                 },
                 {
                     "invoke_name": "deepseek-v3-250324",
@@ -368,6 +370,8 @@ class TestFetchModelsFromOneRouter:
                     "retail_output_cost": "$4.56",
                     "input_token_limit": "16,384",
                     "output_token_limit": "65,536",
+                    "input_modalities": "Text",
+                    "output_modalities": "Text",
                 }
             ]
         }
@@ -394,23 +398,27 @@ class TestFetchModelsFromOneRouter:
             # Verify all 3 models were returned
             assert len(models) == 3
 
-            # First model - has pricing from display_models
+            # First model - has pricing and multimodal info from display_models
             assert models[0]["id"] == "onerouter/gemini-2.0-flash"
             assert models[0]["slug"] == "gemini-2.0-flash"
             assert models[0]["context_length"] == 1048576
             assert models[0]["max_completion_tokens"] == 8192
             assert models[0]["pricing"]["prompt"] == "0.10"
             assert models[0]["pricing"]["completion"] == "0.40"
+            assert models[0]["architecture"]["modality"] == "text+image->text"
+            assert "images" in models[0]["architecture"]["input_modalities"]
 
-            # Second model - has pricing from display_models
+            # Second model - has pricing from display_models (text only)
             assert models[1]["id"] == "onerouter/deepseek-v3-250324"
             assert models[1]["pricing"]["prompt"] == "1.14"
             assert models[1]["pricing"]["completion"] == "4.56"
+            assert models[1]["architecture"]["modality"] == "text->text"
 
             # Third model - no pricing data, uses defaults
             assert models[2]["id"] == "onerouter/model-without-pricing"
             assert models[2]["context_length"] == 128000  # default
             assert models[2]["pricing"]["prompt"] == "0"  # default
+            assert models[2]["architecture"]["modality"] == "text->text"  # default
 
             # Verify cache was populated
             assert _onerouter_models_cache["data"] == models
