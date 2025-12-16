@@ -745,6 +745,7 @@ async def get_models(
 
         note = {
             "openrouter": "OpenRouter catalog",
+            "onerouter": "OneRouter catalog",
             "featherless": "Featherless catalog",
             "deepinfra": "DeepInfra catalog",
             "chutes": "Chutes.ai catalog",
@@ -762,7 +763,7 @@ async def get_models(
             "anannas": "Anannas catalog",
             "aihubmix": "AiHubMix catalog",
             "vercel-ai-gateway": "Vercel AI Gateway catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, and Vercel AI Gateway catalogs",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, OneRouter, and Vercel AI Gateway catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         result = {
