@@ -331,89 +331,114 @@ class TestFetchModelsFromOneRouter:
         _onerouter_models_cache["data"] = None
         _onerouter_models_cache["timestamp"] = None
 
-    def test_fetch_models_success_with_caching(self, mock_onerouter_api_key):
-        """Test successful model fetch and verify cache is populated"""
+    def test_fetch_models_success_with_caching_and_pricing(self, mock_onerouter_api_key):
+        """Test successful model fetch with pricing enrichment from display_models"""
         from src.services.onerouter_client import fetch_models_from_onerouter
         from src.cache import _onerouter_models_cache
         from datetime import datetime, timezone
 
-        # Mock response matching the OpenAI /v1/models API format
-        mock_models_response = {
+        # Mock /v1/models response (complete list)
+        mock_v1_models_response = {
+            "data": [
+                {"id": "gemini-2.0-flash", "object": "model", "created": 1234567890, "owned_by": "google"},
+                {"id": "deepseek-v3-250324", "object": "model", "created": 1234567890, "owned_by": "deepseek"},
+                {"id": "model-without-pricing", "object": "model", "created": 1234567890, "owned_by": "test"}
+            ]
+        }
+
+        # Mock display_models response (pricing data for some models)
+        mock_display_models_response = {
             "data": [
                 {
-                    "id": "gemini-2.0-flash",
-                    "object": "model",
-                    "created": 1234567890,
-                    "owned_by": "google"
+                    "invoke_name": "gemini-2.0-flash",
+                    "name": "gemini-2.0-flash",
+                    "sale_input_cost": "$0",
+                    "sale_output_cost": "$0",
+                    "retail_input_cost": "$0.10",
+                    "retail_output_cost": "$0.40",
+                    "input_token_limit": "1048576",
+                    "output_token_limit": "8192",
                 },
                 {
-                    "id": "deepseek-v3-250324",
-                    "object": "model",
-                    "created": 1234567890,
-                    "owned_by": "deepseek"
+                    "invoke_name": "deepseek-v3-250324",
+                    "name": "deepseek-v3-250324",
+                    "sale_input_cost": "$1.14",
+                    "sale_output_cost": "$4.56",
+                    "retail_input_cost": "$1.14",
+                    "retail_output_cost": "$4.56",
+                    "input_token_limit": "16,384",
+                    "output_token_limit": "65,536",
                 }
             ]
         }
 
         with patch('src.services.onerouter_client.httpx.get') as mock_get:
-            mock_response = Mock()
-            mock_response.json.return_value = mock_models_response
-            mock_response.raise_for_status = Mock()
-            mock_get.return_value = mock_response
+            # Return different responses based on URL
+            def side_effect(url, **kwargs):
+                mock_response = Mock()
+                mock_response.raise_for_status = Mock()
+                if "v1/models" in url:
+                    mock_response.json.return_value = mock_v1_models_response
+                else:
+                    mock_response.json.return_value = mock_display_models_response
+                return mock_response
+
+            mock_get.side_effect = side_effect
 
             # Verify cache is empty before fetch
             assert _onerouter_models_cache["data"] is None
-            assert _onerouter_models_cache["timestamp"] is None
 
             # Fetch models
             models = fetch_models_from_onerouter()
 
-            # Verify models were returned
-            assert len(models) == 2
-            # Model IDs should have onerouter/ prefix for proper UI grouping
-            assert models[0]["id"] == "onerouter/gemini-2.0-flash"
-            assert models[0]["slug"] == "gemini-2.0-flash"  # slug remains without prefix
-            assert models[0]["context_length"] == 128000  # default value
-            assert models[0]["max_completion_tokens"] == 4096  # default value
+            # Verify all 3 models were returned
+            assert len(models) == 3
 
+            # First model - has pricing from display_models
+            assert models[0]["id"] == "onerouter/gemini-2.0-flash"
+            assert models[0]["slug"] == "gemini-2.0-flash"
+            assert models[0]["context_length"] == 1048576
+            assert models[0]["max_completion_tokens"] == 8192
+            assert models[0]["pricing"]["prompt"] == "0.10"
+            assert models[0]["pricing"]["completion"] == "0.40"
+
+            # Second model - has pricing from display_models
             assert models[1]["id"] == "onerouter/deepseek-v3-250324"
-            assert models[1]["slug"] == "deepseek-v3-250324"  # slug remains without prefix
+            assert models[1]["pricing"]["prompt"] == "1.14"
+            assert models[1]["pricing"]["completion"] == "4.56"
+
+            # Third model - no pricing data, uses defaults
+            assert models[2]["id"] == "onerouter/model-without-pricing"
+            assert models[2]["context_length"] == 128000  # default
+            assert models[2]["pricing"]["prompt"] == "0"  # default
 
             # Verify cache was populated
             assert _onerouter_models_cache["data"] == models
             assert _onerouter_models_cache["timestamp"] is not None
             assert isinstance(_onerouter_models_cache["timestamp"], datetime)
 
-            # Verify timestamp is recent (within last 5 seconds)
-            cache_age = (datetime.now(timezone.utc) - _onerouter_models_cache["timestamp"]).total_seconds()
-            assert cache_age < 5
-
     def test_fetch_models_skip_empty_model_id(self, mock_onerouter_api_key):
         """Test that models without id are skipped"""
         from src.services.onerouter_client import fetch_models_from_onerouter
 
-        mock_models_response = {
+        mock_v1_models_response = {
             "data": [
-                {
-                    "id": "",
-                    "object": "model",
-                    "created": 1234567890,
-                    "owned_by": "test"
-                },
-                {
-                    "id": "valid-model",
-                    "object": "model",
-                    "created": 1234567890,
-                    "owned_by": "test"
-                }
+                {"id": "", "object": "model", "created": 1234567890, "owned_by": "test"},
+                {"id": "valid-model", "object": "model", "created": 1234567890, "owned_by": "test"}
             ]
         }
 
         with patch('src.services.onerouter_client.httpx.get') as mock_get:
-            mock_response = Mock()
-            mock_response.json.return_value = mock_models_response
-            mock_response.raise_for_status = Mock()
-            mock_get.return_value = mock_response
+            def side_effect(url, **kwargs):
+                mock_response = Mock()
+                mock_response.raise_for_status = Mock()
+                if "v1/models" in url:
+                    mock_response.json.return_value = mock_v1_models_response
+                else:
+                    mock_response.json.return_value = {"data": []}
+                return mock_response
+
+            mock_get.side_effect = side_effect
 
             models = fetch_models_from_onerouter()
 
@@ -468,28 +493,33 @@ class TestFetchModelsFromOneRouter:
             assert _onerouter_models_cache["data"] == []
             assert _onerouter_models_cache["timestamp"] is not None
 
-    def test_fetch_models_uses_correct_endpoint(self, mock_onerouter_api_key):
-        """Test that fetch_models_from_onerouter uses the authenticated /v1/models endpoint"""
+    def test_fetch_models_uses_correct_endpoints(self, mock_onerouter_api_key):
+        """Test that fetch_models_from_onerouter calls both /v1/models and display_models"""
         from src.services.onerouter_client import fetch_models_from_onerouter
 
-        mock_models_response = {"data": []}
-
         with patch('src.services.onerouter_client.httpx.get') as mock_get:
-            mock_response = Mock()
-            mock_response.json.return_value = mock_models_response
-            mock_response.raise_for_status = Mock()
-            mock_get.return_value = mock_response
+            def side_effect(url, **kwargs):
+                mock_response = Mock()
+                mock_response.raise_for_status = Mock()
+                mock_response.json.return_value = {"data": []}
+                return mock_response
+
+            mock_get.side_effect = side_effect
 
             fetch_models_from_onerouter()
 
-            # Verify the correct endpoint was called
-            mock_get.assert_called_once()
-            call_args = mock_get.call_args
-            assert call_args[0][0] == "https://api.onerouter.pro/v1/models"
-            assert call_args[1]["follow_redirects"] is True
-            # Verify authorization header is set
-            assert "Authorization" in call_args[1]["headers"]
-            assert call_args[1]["headers"]["Authorization"] == "Bearer test_onerouter_key_123"
+            # Verify both endpoints were called
+            assert mock_get.call_count == 2
+
+            # Check the /v1/models call (first call)
+            v1_call = mock_get.call_args_list[0]
+            assert v1_call[0][0] == "https://api.onerouter.pro/v1/models"
+            assert "Authorization" in v1_call[1]["headers"]
+            assert v1_call[1]["headers"]["Authorization"] == "Bearer test_onerouter_key_123"
+
+            # Check the display_models call (second call - from pricing enrichment)
+            display_call = mock_get.call_args_list[1]
+            assert display_call[0][0] == "https://app.onerouter.pro/api/display_models/"
 
     def test_fetch_models_missing_api_key(self):
         """Test that fetch returns empty list when API key is not configured"""
