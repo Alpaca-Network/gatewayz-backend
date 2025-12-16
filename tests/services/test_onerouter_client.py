@@ -271,6 +271,13 @@ class TestParseTokenLimit:
         assert _parse_token_limit("N/A") == 4096
         assert _parse_token_limit("abc") == 4096
 
+    def test_parse_token_limit_float(self):
+        """Test parsing float values"""
+        from src.services.onerouter_client import _parse_token_limit
+
+        assert _parse_token_limit(128000.0) == 128000
+        assert _parse_token_limit(4096.5) == 4096
+
 
 class TestParsePricing:
     """Test _parse_pricing helper function"""
@@ -301,6 +308,13 @@ class TestParsePricing:
         from src.services.onerouter_client import _parse_pricing
 
         assert _parse_pricing(None) == "0"
+
+    def test_parse_pricing_with_commas(self):
+        """Test parsing pricing with commas"""
+        from src.services.onerouter_client import _parse_pricing
+
+        assert _parse_pricing("$1,000.50") == "1000.50"
+        assert _parse_pricing("1,234.56") == "1234.56"
 
 
 class TestFetchModelsFromOneRouter:
@@ -490,6 +504,35 @@ class TestFetchModelsFromOneRouter:
             # Should default to text modality
             assert models[0]["architecture"]["modality"] == "text->text"
             assert "text" in models[0]["architecture"]["input_modalities"]
+
+    def test_fetch_models_handles_null_name(self):
+        """Test that null name from API falls back to invoke_name"""
+        from src.services.onerouter_client import fetch_models_from_onerouter
+
+        mock_models_response = {
+            "data": [
+                {
+                    "name": None,
+                    "invoke_name": "valid-model-id",
+                    "input_token_limit": "4096",
+                    "output_token_limit": "4096",
+                    "input_modalities": "Text",
+                    "output_modalities": "Text"
+                }
+            ]
+        }
+
+        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+            mock_response = Mock()
+            mock_response.json.return_value = mock_models_response
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            models = fetch_models_from_onerouter()
+
+            # Should use invoke_name as fallback for name and description
+            assert models[0]["name"] == "valid-model-id"
+            assert models[0]["description"] == "OneRouter model: valid-model-id"
 
     def test_fetch_models_skip_empty_model_id(self):
         """Test that models without invoke_name or name are skipped"""
