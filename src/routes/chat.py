@@ -935,6 +935,7 @@ async def stream_generator(
     tracker=None,
     is_anonymous=False,
     is_async_stream=False,  # PERF: Flag to indicate if stream is async
+    request_received_at=None,  # Wall-clock timestamp when request was received
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -952,6 +953,7 @@ async def stream_generator(
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
+    ttfc_seconds = None  # Store TTFC for response timing data
 
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
@@ -1009,6 +1011,7 @@ async def stream_generator(
             # TTFC: Track time to first chunk for performance monitoring
             if not first_chunk_sent:
                 ttfc = time.monotonic() - ttfc_start
+                ttfc_seconds = ttfc  # Save for timing data response
                 first_chunk_sent = True
                 # Record TTFC metric
                 track_time_to_first_chunk(provider=provider, model=model, ttfc=ttfc)
@@ -1091,6 +1094,35 @@ async def stream_generator(
                 )
                 yield create_done_sse()
                 return
+
+        # Calculate timing metrics for client
+        streaming_duration = None
+        tokens_per_second = None
+
+        if ttfc_seconds is not None:
+            streaming_duration = elapsed - ttfc_seconds
+            if completion_tokens > 0 and streaming_duration > 0:
+                tokens_per_second = completion_tokens / streaming_duration
+
+        # Calculate server timestamps for client latency measurement
+        server_responded_at = time.time()
+
+        # Send timing data before [DONE] for client visibility
+        timing_data = {
+            "type": "timing",
+            "timing": {
+                "ttfc_ms": round(ttfc_seconds * 1000, 1) if ttfc_seconds else None,
+                "total_ms": round(elapsed * 1000, 1),
+                "streaming_ms": round(streaming_duration * 1000, 1) if streaming_duration else None,
+                "tokens_per_second": round(tokens_per_second, 1) if tokens_per_second else None,
+                "input_tokens": prompt_tokens,
+                "output_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "server_received_at": request_received_at,
+                "server_responded_at": server_responded_at,
+            }
+        }
+        yield f"data: {json.dumps(timing_data)}\n\n"
 
         # OPTIMIZATION: Send [DONE] immediately, process credits/logging in background!
         # This makes the stream complete 100-200ms faster for the client
@@ -1180,6 +1212,9 @@ async def chat_completions(
     request: Request = None,
 ):
     # === 0) Setup / sanity ===
+    # Capture request arrival timestamp for client latency calculation
+    request_received_at = time.time()
+
     # Generate request correlation ID for distributed tracing
     request_id = str(uuid.uuid4())
     request_id_var.set(request_id)
@@ -1684,6 +1719,7 @@ async def chat_completions(
                             tracker,
                             is_anonymous,
                             is_async_stream=is_async_stream,
+                            request_received_at=request_received_at,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -2221,6 +2257,10 @@ async def chat_completions(
         processed["gateway_usage"].update(
             {
                 "tokens_charged": total_tokens,
+                "backend_processing_ms": int(elapsed * 1000),
+                "backend_received_at": int(request_received_at * 1000),  # Unix timestamp in ms
+                "backend_responded_at": int((request_received_at + elapsed) * 1000),  # Unix timestamp in ms
+                # Legacy field for backwards compatibility
                 "request_ms": int(elapsed * 1000),
             }
         )
@@ -2280,6 +2320,18 @@ async def chat_completions(
         if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
 
+        # Add timing headers for non-streaming responses
+        server_responded_at = time.time()
+        headers["X-Total-Time-Ms"] = str(round(elapsed * 1000, 1))
+        if completion_tokens > 0 and elapsed > 0:
+            tokens_per_second = completion_tokens / elapsed
+            headers["X-Tokens-Per-Second"] = str(round(tokens_per_second, 1))
+        headers["X-Input-Tokens"] = str(prompt_tokens)
+        headers["X-Output-Tokens"] = str(completion_tokens)
+        headers["X-Total-Tokens"] = str(total_tokens)
+        headers["X-Server-Received-At"] = str(request_received_at)
+        headers["X-Server-Responded-At"] = str(server_responded_at)
+
         return JSONResponse(content=processed, headers=headers)
 
     except HTTPException:
@@ -2314,6 +2366,9 @@ async def unified_responses(
     - Supports response_format for structured JSON output
     - Future-ready for multimodal input/output
     """
+    # Capture request arrival timestamp for client latency calculation
+    request_received_at = time.time()
+
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
@@ -2702,6 +2757,7 @@ async def unified_responses(
                             rate_limit_mgr,
                             provider=attempt_provider,
                             tracker=None,
+                            request_received_at=request_received_at,
                         ):
                             if chunk_data.startswith("data: "):
                                 data_str = chunk_data[6:].strip()
@@ -3313,6 +3369,10 @@ async def unified_responses(
         # Add gateway usage metadata
         response["gateway_usage"] = {
             "tokens_charged": total_tokens,
+            "backend_processing_ms": int(elapsed * 1000),
+            "backend_received_at": int(request_received_at * 1000),  # Unix timestamp in ms
+            "backend_responded_at": int((request_received_at + elapsed) * 1000),  # Unix timestamp in ms
+            # Legacy field for backwards compatibility
             "request_ms": int(elapsed * 1000),
         }
         if not trial.get("is_trial", False):

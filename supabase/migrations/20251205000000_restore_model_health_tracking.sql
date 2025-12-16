@@ -98,9 +98,6 @@ COMMENT ON COLUMN model_health_tracking.next_check_at IS 'Scheduled time for nex
 COMMENT ON COLUMN model_health_tracking.check_interval_seconds IS 'Interval between health checks in seconds';
 COMMENT ON COLUMN model_health_tracking.is_enabled IS 'Whether monitoring is enabled for this model';
 COMMENT ON COLUMN model_health_tracking.metadata IS 'Additional metadata (JSON): pricing_tier, capabilities, etc.';
-COMMENT ON COLUMN model_health_tracking.input_tokens IS 'Number of input tokens in the last call';
-COMMENT ON COLUMN model_health_tracking.output_tokens IS 'Number of output tokens in the last call';
-COMMENT ON COLUMN model_health_tracking.total_tokens IS 'Total tokens (input + output) in the last call';
 
 -- Create trigger for updated_at
 CREATE OR REPLACE FUNCTION update_model_health_tracking_updated_at()
