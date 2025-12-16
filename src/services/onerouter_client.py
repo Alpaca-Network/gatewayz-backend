@@ -191,16 +191,17 @@ def _fetch_display_models_pricing() -> dict:
             has_image_input = any(m in ["images", "image"] for m in input_modalities)
             modality = "text+image->text" if has_image_input else "text->text"
 
-            # Use 128000 as default for context_length to match fallback defaults
-            context_length = _parse_token_limit(model.get("input_token_limit"))
-            if context_length == 4096:  # _parse_token_limit default means null/invalid input
-                context_length = 128000
+            # Parse context lengths, using 128000 as default if not provided
+            input_token_limit = model.get("input_token_limit")
+            output_token_limit = model.get("output_token_limit")
+            context_length = _parse_token_limit(input_token_limit) if input_token_limit else 128000
+            max_completion_tokens = _parse_token_limit(output_token_limit) if output_token_limit else 4096
 
             pricing_map[model_id] = {
                 "prompt": prompt_price,
                 "completion": completion_price,
                 "context_length": context_length,
-                "max_completion_tokens": _parse_token_limit(model.get("output_token_limit")),
+                "max_completion_tokens": max_completion_tokens,
                 "input_modalities": input_modalities,
                 "output_modalities": output_modalities,
                 "modality": modality,
