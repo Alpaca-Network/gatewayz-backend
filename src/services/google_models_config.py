@@ -40,8 +40,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-3-flash-preview",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.50,  # $0.50/1M tokens = $0.0005/1K tokens
-                    cost_per_1k_output=3.00,  # $3/1M tokens = $0.003/1K tokens
+                    cost_per_1k_input=0.0005,  # $0.50/1M tokens
+                    cost_per_1k_output=0.003,  # $3.00/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal", "function_calling", "thinking"],
                 ),
@@ -50,8 +50,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="google/gemini-3-flash-preview",
                     priority=2,
                     requires_credentials=False,
-                    cost_per_1k_input=0.60,  # OpenRouter markup
-                    cost_per_1k_output=3.50,
+                    cost_per_1k_input=0.0006,  # $0.60/1M tokens (OpenRouter markup)
+                    cost_per_1k_output=0.0035,  # $3.50/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal"],
                 ),
