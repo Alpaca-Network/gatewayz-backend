@@ -70,6 +70,7 @@ def apply_model_alias(model_id: str | None) -> str | None:
     return model_id
 
 # Gemini model name constants to reduce duplication
+GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
 GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
@@ -450,6 +451,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         "google-vertex": {
             # Google Vertex AI models - simple names
             # Full resource names are constructed by the client
+            # Gemini 3 models (latest - released Dec 17, 2025)
+            "gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
             # Gemini 2.5 models (newest)
             # Flash Lite (stable GA version - use stable by default)
             "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
@@ -461,19 +469,19 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
             "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
             "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
-            # Gemini 2.5 flash models
-            "gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            # Gemini 2.5 flash models (use stable GA version by default)
+            "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
+            "google/gemini-2.5-flash": "gemini-2.5-flash",
+            "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
+            # Preview version (only if explicitly requested)
             "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
-            "google/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "@google/models/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            # Image-specific models
+            # Image-specific models (GA version only - no preview version exists)
             "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
             "gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
+            "@google/models/gemini-2.5-flash-image": "gemini-2.5-flash-image",
             # Pro (use stable GA version by default)
             "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
             "google/gemini-2.5-pro": "gemini-2.5-pro",
@@ -501,15 +509,10 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.0-pro-001": "gemini-2.0-pro-001",
             "google/gemini-2.0-pro": GEMINI_2_0_PRO,
             "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
-            # Gemini 1.5 models
-            "gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-pro-002": "gemini-1.5-pro-002",
-            "google/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "@google/models/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "gemini-1.5-flash-002": "gemini-1.5-flash-002",
-            "google/gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "@google/models/gemini-1.5-flash": GEMINI_1_5_FLASH,
+            # Gemini 1.5 models - RETIRED (April-September 2025)
+            # These models are NO LONGER AVAILABLE on Google Vertex AI
+            # Removed all google-vertex mappings to prevent 404 errors
+            # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
             # Gemini 1.0 models
             "gemini-1.0-pro": GEMINI_1_0_PRO,
             "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
@@ -517,7 +520,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
             # Aliases for convenience
             "gemini-2.0": GEMINI_2_0_FLASH,
-            "gemini-1.5": GEMINI_1_5_PRO,
+            # Note: gemini-1.5 alias removed - model is retired on Vertex AI
             # Gemma models (open source models from Google)
             "google/gemma-2-9b": "gemma-2-9b-it",
             "google/gemma-2-9b-it": "gemma-2-9b-it",
@@ -1076,18 +1079,20 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         return "google-vertex"
     if normalized_model.startswith("@google/models/") and any(
         pattern in normalized_model
-        for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+        for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
     ):
-        # Patterns like "@google/models/gemini-2.5-flash"
+        # Patterns like "@google/models/gemini-3-flash" or "@google/models/gemini-2.5-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if (
         any(
             pattern in normalized_model
-            for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+            for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
         )
         and "/" not in model_id
     ):
-        # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
+        # Simple patterns like "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
