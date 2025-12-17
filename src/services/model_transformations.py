@@ -50,7 +50,7 @@ OPENROUTER_AUTO_FALLBACKS = {
     "featherless": "meta-llama/llama-3.3-70b",
     "fireworks": "meta-llama/llama-3.3-70b",
     "together": "meta-llama/llama-3.3-70b",
-    "google-vertex": "gemini-1.5-pro",
+    "google-vertex": "gemini-2.5-flash",  # Updated from retired gemini-1.5-pro
     "vercel-ai-gateway": "openai/gpt-4o-mini",
     "aihubmix": "openai/gpt-4o-mini",
     "anannas": "openai/gpt-4o-mini",
