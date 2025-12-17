@@ -70,6 +70,7 @@ def apply_model_alias(model_id: str | None) -> str | None:
     return model_id
 
 # Gemini model name constants to reduce duplication
+GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
 GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
@@ -450,6 +451,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         "google-vertex": {
             # Google Vertex AI models - simple names
             # Full resource names are constructed by the client
+            # Gemini 3 models (latest - released Dec 17, 2025)
+            "gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
             # Gemini 2.5 models (newest)
             # Flash Lite (stable GA version - use stable by default)
             "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
@@ -1076,18 +1084,18 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         return "google-vertex"
     if normalized_model.startswith("@google/models/") and any(
         pattern in normalized_model
-        for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+        for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
     ):
-        # Patterns like "@google/models/gemini-2.5-flash"
+        # Patterns like "@google/models/gemini-3-flash" or "@google/models/gemini-2.5-flash"
         return "google-vertex"
     if (
         any(
             pattern in normalized_model
-            for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+            for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
         )
         and "/" not in model_id
     ):
-        # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
+        # Simple patterns like "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
         return "google-vertex"
     if model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"

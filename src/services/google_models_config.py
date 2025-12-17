@@ -27,6 +27,36 @@ def get_google_models() -> list[MultiProviderModel]:
     """
 
     models = [
+        # Gemini 3 Models
+        MultiProviderModel(
+            id="gemini-3-flash",
+            name="Gemini 3 Flash",
+            description="Google's latest frontier model with breakthrough speed and intelligence",
+            context_length=1000000,
+            modalities=["text", "image", "audio", "video"],
+            providers=[
+                ProviderConfig(
+                    name="google-vertex",
+                    model_id="gemini-3-flash-preview",
+                    priority=1,
+                    requires_credentials=True,
+                    cost_per_1k_input=0.50,  # $0.50/1M tokens = $0.0005/1K tokens
+                    cost_per_1k_output=3.00,  # $3/1M tokens = $0.003/1K tokens
+                    max_tokens=8192,
+                    features=["streaming", "multimodal", "function_calling", "thinking"],
+                ),
+                ProviderConfig(
+                    name="openrouter",
+                    model_id="google/gemini-3-flash-preview",
+                    priority=2,
+                    requires_credentials=False,
+                    cost_per_1k_input=0.60,  # OpenRouter markup
+                    cost_per_1k_output=3.50,
+                    max_tokens=8192,
+                    features=["streaming", "multimodal"],
+                ),
+            ],
+        ),
         # Gemini 2.5 Models
         MultiProviderModel(
             id="gemini-2.5-flash",
