@@ -510,20 +510,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "google/gemini-2.0-pro": GEMINI_2_0_PRO,
             "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
             # Gemini 1.5 models - RETIRED (April-September 2025)
-            # WARNING: These models are NO LONGER AVAILABLE on Google Vertex AI
-            # API requests will return 404 errors
-            # Recommended replacements:
-            #   - gemini-1.5-pro -> gemini-2.5-pro or gemini-2.0-flash
-            #   - gemini-1.5-flash -> gemini-2.5-flash or gemini-2.0-flash-lite
-            # Keeping mappings for OpenRouter compatibility only
-            "gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-pro-002": "gemini-1.5-pro-002",
-            "google/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "@google/models/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "gemini-1.5-flash-002": "gemini-1.5-flash-002",
-            "google/gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "@google/models/gemini-1.5-flash": GEMINI_1_5_FLASH,
+            # These models are NO LONGER AVAILABLE on Google Vertex AI
+            # Removed all google-vertex mappings to prevent 404 errors
+            # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
             # Gemini 1.0 models
             "gemini-1.0-pro": GEMINI_1_0_PRO,
             "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
@@ -531,7 +520,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
             # Aliases for convenience
             "gemini-2.0": GEMINI_2_0_FLASH,
-            "gemini-1.5": GEMINI_1_5_PRO,
+            # Note: gemini-1.5 alias removed - model is retired on Vertex AI
             # Gemma models (open source models from Google)
             "google/gemma-2-9b": "gemma-2-9b-it",
             "google/gemma-2-9b-it": "gemma-2-9b-it",
@@ -1090,18 +1079,20 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         return "google-vertex"
     if normalized_model.startswith("@google/models/") and any(
         pattern in normalized_model
-        for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+        for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
     ):
         # Patterns like "@google/models/gemini-3-flash" or "@google/models/gemini-2.5-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if (
         any(
             pattern in normalized_model
-            for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+            for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
         )
         and "/" not in model_id
     ):
-        # Simple patterns like "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
+        # Simple patterns like "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
