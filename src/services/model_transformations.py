@@ -478,11 +478,10 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
             "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            # Image-specific models
+            # Image-specific models (GA version only - no preview version exists)
             "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
             "gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
+            "@google/models/gemini-2.5-flash-image": "gemini-2.5-flash-image",
             # Pro (use stable GA version by default)
             "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
             "google/gemini-2.5-pro": "gemini-2.5-pro",
