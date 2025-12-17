@@ -204,52 +204,17 @@ def get_google_models() -> list[MultiProviderModel]:
                 ),
             ],
         ),
-        # Gemini 1.5 Models - RETIRED (Deprecated April-September 2025)
-        # These models are no longer available on Vertex AI and will return 404 errors
+        # Gemini 1.5 Models - REMOVED
+        # These models were fully retired by Google in April-September 2025
+        # They return 404 errors on Vertex AI and have been removed from this registry
+        # to prevent them from appearing in catalog listings or causing routing errors.
+        #
         # Recommended replacements:
-        #   - gemini-1.5-pro -> gemini-2.0-flash or gemini-2.5-pro
-        #   - gemini-1.5-flash -> gemini-2.0-flash-lite or gemini-2.5-flash-lite
-        # Keeping minimal config for OpenRouter fallback only (OpenRouter may still support them)
-        MultiProviderModel(
-            id="gemini-1.5-pro",
-            name="Gemini 1.5 Pro (Retired - Use Gemini 2.5 Pro)",
-            description="[RETIRED] This model is no longer available on Vertex AI. Use gemini-2.5-pro instead.",
-            context_length=1000000,
-            modalities=["text", "image", "audio", "video"],
-            providers=[
-                # Vertex AI provider removed - model is retired
-                ProviderConfig(
-                    name="openrouter",
-                    model_id="google/gemini-pro-1.5",
-                    priority=1,
-                    requires_credentials=False,
-                    cost_per_1k_input=1.50,
-                    cost_per_1k_output=6.00,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal"],
-                ),
-            ],
-        ),
-        MultiProviderModel(
-            id="gemini-1.5-flash",
-            name="Gemini 1.5 Flash (Retired - Use Gemini 2.5 Flash)",
-            description="[RETIRED] This model is no longer available on Vertex AI. Use gemini-2.5-flash instead.",
-            context_length=1000000,
-            modalities=["text", "image", "audio", "video"],
-            providers=[
-                # Vertex AI provider removed - model is retired
-                ProviderConfig(
-                    name="openrouter",
-                    model_id="google/gemini-flash-1.5",
-                    priority=1,
-                    requires_credentials=False,
-                    cost_per_1k_input=0.10,
-                    cost_per_1k_output=0.40,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal"],
-                ),
-            ],
-        ),
+        #   - gemini-1.5-pro -> gemini-2.5-pro or gemini-2.0-flash
+        #   - gemini-1.5-flash -> gemini-2.5-flash or gemini-2.0-flash-lite
+        #
+        # Note: OpenRouter may still support these models. If needed, they can be
+        # accessed directly via OpenRouter without going through this registry.
         # Gemma Models (Open source)
         MultiProviderModel(
             id="gemma-2-9b-it",
