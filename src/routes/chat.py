@@ -20,6 +20,14 @@ import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
+
+# Direct imports (replaces wrapper functions)
+from src.db.api_keys import increment_api_key_usage
+from src.db.plans import enforce_plan_limits
+from src.db.rate_limits import create_rate_limit_alert, update_rate_limit_usage
+from src.db.users import get_user, deduct_credits, log_api_usage_transaction, record_usage
+from src.db.chat_history import create_chat_session, save_chat_message, get_chat_session
+from src.db.activity import log_activity, get_provider_from_model
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
@@ -72,339 +80,57 @@ except ImportError:
 
 
 
-# Import provider clients with graceful error handling
-# This prevents a single provider's import failure from breaking the entire chat endpoint
-_provider_import_errors = {}
+# ============================================================================
+# Provider Registry System
+# ============================================================================
+# All provider imports and registrations are now handled by the provider registry.
+# This replaces 283 lines of repetitive import code with a clean, configuration-driven approach.
+#
+# To add a new provider:
+# 1. Create the provider client in src/services/{provider}_client.py
+# 2. Add configuration to src/config/providers.py
+# 3. That's it! The provider will be auto-loaded.
+#
+# See docs/PROVIDER_REGISTRY_REFACTORING.md for details.
+# ============================================================================
 
+from src.services.provider_loader import load_all_providers
+from src.services.provider_registry import get_provider_registry
+from src.config.providers import PROVIDER_CONFIGS, DEFAULT_PROVIDER, AUTO_DETECT_PROVIDERS, normalize_provider_name
 
-# Helper function to safely import provider clients
-def _safe_import_provider(provider_name, imports_list):
-    """Safely import provider functions with error logging
+# Load all providers at module initialization
+# This replaces all the _safe_import_provider calls and manual registrations
+load_all_providers()
 
-    Returns a dict with either:
-    - Real functions if import succeeds
-    - Sentinel functions that raise HTTPException if used
-    """
-    try:
-        module_path = f"src.services.{provider_name}_client"
-        module = __import__(module_path, fromlist=imports_list)
-        result = {}
-        for import_name in imports_list:
-            result[import_name] = getattr(module, import_name)
-        logging.getLogger(__name__).debug(f"✓ Loaded {provider_name} provider client")
-        return result
-    except Exception as e:
-        error_msg = (
-            f"⚠  Failed to load {provider_name} provider client: {type(e).__name__}: {str(e)}"
-        )
-        logging.getLogger(__name__).error(error_msg)
-        _provider_import_errors[provider_name] = str(e)
-
-        # Return sentinel functions that raise informative errors when called
-        def make_error_raiser(prov_name, func_name, error):
-            async def async_error(*args, **kwargs):
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}"
-                )
-
-            def sync_error(*args, **kwargs):
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}"
-                )
-
-            # Return the sync version by default (async handling is done elsewhere)
-            return sync_error
-
-        return {import_name: make_error_raiser(provider_name, import_name, e) for import_name in imports_list}
-
-# Load all provider clients
-_openrouter = _safe_import_provider(
-    "openrouter",
-    [
-        "make_openrouter_request_openai",
-        "process_openrouter_response",
-        "make_openrouter_request_openai_stream",
-        "make_openrouter_request_openai_stream_async",
-    ],
-)
-make_openrouter_request_openai = _openrouter.get("make_openrouter_request_openai")
-process_openrouter_response = _openrouter.get("process_openrouter_response")
-make_openrouter_request_openai_stream = _openrouter.get("make_openrouter_request_openai_stream")
-make_openrouter_request_openai_stream_async = _openrouter.get("make_openrouter_request_openai_stream_async")
-
-
-_featherless = _safe_import_provider(
-    "featherless",
-    [
-        "make_featherless_request_openai",
-        "process_featherless_response",
-        "make_featherless_request_openai_stream",
-    ],
-)
-make_featherless_request_openai = _featherless.get("make_featherless_request_openai")
-process_featherless_response = _featherless.get("process_featherless_response")
-make_featherless_request_openai_stream = _featherless.get("make_featherless_request_openai_stream")
-
-_fireworks = _safe_import_provider(
-    "fireworks",
-    [
-        "make_fireworks_request_openai",
-        "process_fireworks_response",
-        "make_fireworks_request_openai_stream",
-    ],
-)
-make_fireworks_request_openai = _fireworks.get("make_fireworks_request_openai")
-process_fireworks_response = _fireworks.get("process_fireworks_response")
-make_fireworks_request_openai_stream = _fireworks.get("make_fireworks_request_openai_stream")
-
-_together = _safe_import_provider(
-    "together",
-    [
-        "make_together_request_openai",
-        "process_together_response",
-        "make_together_request_openai_stream",
-    ],
-)
-make_together_request_openai = _together.get("make_together_request_openai")
-process_together_response = _together.get("process_together_response")
-make_together_request_openai_stream = _together.get("make_together_request_openai_stream")
-
-_huggingface = _safe_import_provider(
-    "huggingface",
-    [
-        "make_huggingface_request_openai",
-        "process_huggingface_response",
-        "make_huggingface_request_openai_stream",
-    ],
-)
-make_huggingface_request_openai = _huggingface.get("make_huggingface_request_openai")
-process_huggingface_response = _huggingface.get("process_huggingface_response")
-make_huggingface_request_openai_stream = _huggingface.get("make_huggingface_request_openai_stream")
-
-_aimo = _safe_import_provider(
-    "aimo",
-    [
-        "make_aimo_request_openai",
-        "process_aimo_response",
-        "make_aimo_request_openai_stream",
-    ],
-)
-make_aimo_request_openai = _aimo.get("make_aimo_request_openai")
-process_aimo_response = _aimo.get("process_aimo_response")
-make_aimo_request_openai_stream = _aimo.get("make_aimo_request_openai_stream")
-
-_xai = _safe_import_provider(
-    "xai",
-    [
-        "make_xai_request_openai",
-        "process_xai_response",
-        "make_xai_request_openai_stream",
-    ],
-)
-make_xai_request_openai = _xai.get("make_xai_request_openai")
-process_xai_response = _xai.get("process_xai_response")
-make_xai_request_openai_stream = _xai.get("make_xai_request_openai_stream")
-
-_cerebras = _safe_import_provider(
-    "cerebras",
-    [
-        "make_cerebras_request_openai",
-        "process_cerebras_response",
-        "make_cerebras_request_openai_stream",
-    ],
-)
-make_cerebras_request_openai = _cerebras.get("make_cerebras_request_openai")
-process_cerebras_response = _cerebras.get("process_cerebras_response")
-make_cerebras_request_openai_stream = _cerebras.get("make_cerebras_request_openai_stream")
-
-_chutes = _safe_import_provider(
-    "chutes",
-    [
-        "make_chutes_request_openai",
-        "process_chutes_response",
-        "make_chutes_request_openai_stream",
-    ],
-)
-make_chutes_request_openai = _chutes.get("make_chutes_request_openai")
-process_chutes_response = _chutes.get("process_chutes_response")
-make_chutes_request_openai_stream = _chutes.get("make_chutes_request_openai_stream")
-
-_google_vertex = _safe_import_provider(
-    "google_vertex",
-    [
-        "make_google_vertex_request_openai",
-        "process_google_vertex_response",
-        "make_google_vertex_request_openai_stream",
-    ],
-)
-make_google_vertex_request_openai = _google_vertex.get("make_google_vertex_request_openai")
-process_google_vertex_response = _google_vertex.get("process_google_vertex_response")
-make_google_vertex_request_openai_stream = _google_vertex.get(
-    "make_google_vertex_request_openai_stream"
+# Shared helper functions for chat endpoints (eliminates ~320 lines of duplication)
+from src.routes.chat_helpers import (
+    validate_user_and_auth,
+    validate_trial,
+    check_plan_limits,
+    ensure_capacity,
+    check_rate_limits,
+    handle_billing,
+    get_rate_limit_headers as get_rl_headers,
+    validate_session_id,
+    inject_chat_history,
+    build_optional_params,
+    transform_input_to_messages,
+    validate_and_adjust_max_tokens,
+    POSTGRES_INT_MIN,
+    POSTGRES_INT_MAX,
 )
 
-_near = _safe_import_provider(
-    "near",
-    [
-        "make_near_request_openai",
-        "process_near_response",
-        "make_near_request_openai_stream",
-    ],
+# Stream processing helpers (extracted from stream_generator to reduce complexity)
+from src.services.stream_helpers import (
+    estimate_tokens_from_content,
+    calculate_stream_timing_data,
+    map_streaming_error_message,
 )
-make_near_request_openai = _near.get("make_near_request_openai")
-process_near_response = _near.get("process_near_response")
-make_near_request_openai_stream = _near.get("make_near_request_openai_stream")
-
-_vercel_ai_gateway = _safe_import_provider(
-    "vercel_ai_gateway",
-    [
-        "make_vercel_ai_gateway_request_openai",
-        "process_vercel_ai_gateway_response",
-        "make_vercel_ai_gateway_request_openai_stream",
-    ],
-)
-make_vercel_ai_gateway_request_openai = _vercel_ai_gateway.get(
-    "make_vercel_ai_gateway_request_openai"
-)
-process_vercel_ai_gateway_response = _vercel_ai_gateway.get("process_vercel_ai_gateway_response")
-make_vercel_ai_gateway_request_openai_stream = _vercel_ai_gateway.get(
-    "make_vercel_ai_gateway_request_openai_stream"
-)
-
-_helicone = _safe_import_provider(
-    "helicone",
-    [
-        "make_helicone_request_openai",
-        "process_helicone_response",
-        "make_helicone_request_openai_stream",
-    ],
-)
-make_helicone_request_openai = _helicone.get("make_helicone_request_openai")
-process_helicone_response = _helicone.get("process_helicone_response")
-make_helicone_request_openai_stream = _helicone.get("make_helicone_request_openai_stream")
-
-_aihubmix = _safe_import_provider(
-    "aihubmix",
-    [
-        "make_aihubmix_request_openai",
-        "process_aihubmix_response",
-        "make_aihubmix_request_openai_stream",
-    ],
-)
-make_aihubmix_request_openai = _aihubmix.get("make_aihubmix_request_openai")
-process_aihubmix_response = _aihubmix.get("process_aihubmix_response")
-make_aihubmix_request_openai_stream = _aihubmix.get("make_aihubmix_request_openai_stream")
-
-_anannas = _safe_import_provider(
-    "anannas",
-    [
-        "make_anannas_request_openai",
-        "process_anannas_response",
-        "make_anannas_request_openai_stream",
-    ],
-)
-make_anannas_request_openai = _anannas.get("make_anannas_request_openai")
-process_anannas_response = _anannas.get("process_anannas_response")
-make_anannas_request_openai_stream = _anannas.get("make_anannas_request_openai_stream")
-
-_alpaca_network = _safe_import_provider(
-    "alpaca_network",
-    [
-        "make_alpaca_network_request_openai",
-        "process_alpaca_network_response",
-        "make_alpaca_network_request_openai_stream",
-    ],
-)
-make_alpaca_network_request_openai = _alpaca_network.get("make_alpaca_network_request_openai")
-process_alpaca_network_response = _alpaca_network.get("process_alpaca_network_response")
-make_alpaca_network_request_openai_stream = _alpaca_network.get(
-    "make_alpaca_network_request_openai_stream"
-)
-
-_alibaba_cloud = _safe_import_provider(
-    "alibaba_cloud",
-    [
-        "make_alibaba_cloud_request_openai",
-        "process_alibaba_cloud_response",
-        "make_alibaba_cloud_request_openai_stream",
-    ],
-)
-make_alibaba_cloud_request_openai = _alibaba_cloud.get("make_alibaba_cloud_request_openai")
-process_alibaba_cloud_response = _alibaba_cloud.get("process_alibaba_cloud_response")
-make_alibaba_cloud_request_openai_stream = _alibaba_cloud.get(
-    "make_alibaba_cloud_request_openai_stream"
-)
-
-_clarifai = _safe_import_provider(
-    "clarifai",
-    [
-        "make_clarifai_request_openai",
-        "process_clarifai_response",
-        "make_clarifai_request_openai_stream",
-    ],
-)
-make_clarifai_request_openai = _clarifai.get("make_clarifai_request_openai")
-process_clarifai_response = _clarifai.get("process_clarifai_response")
-make_clarifai_request_openai_stream = _clarifai.get("make_clarifai_request_openai_stream")
-
-_groq = _safe_import_provider(
-    "groq",
-    [
-        "make_groq_request_openai",
-        "process_groq_response",
-        "make_groq_request_openai_stream",
-    ],
-)
-make_groq_request_openai = _groq.get("make_groq_request_openai")
-process_groq_response = _groq.get("process_groq_response")
-make_groq_request_openai_stream = _groq.get("make_groq_request_openai_stream")
-
-_cloudflare_workers_ai = _safe_import_provider(
-    "cloudflare_workers_ai",
-    [
-        "make_cloudflare_workers_ai_request_openai",
-        "process_cloudflare_workers_ai_response",
-        "make_cloudflare_workers_ai_request_openai_stream",
-    ],
-)
-make_cloudflare_workers_ai_request_openai = _cloudflare_workers_ai.get(
-    "make_cloudflare_workers_ai_request_openai"
-)
-process_cloudflare_workers_ai_response = _cloudflare_workers_ai.get(
-    "process_cloudflare_workers_ai_response"
-)
-make_cloudflare_workers_ai_request_openai_stream = _cloudflare_workers_ai.get(
-    "make_cloudflare_workers_ai_request_openai_stream"
-)
-
-_morpheus = _safe_import_provider(
-    "morpheus",
-    [
-        "make_morpheus_request_openai",
-        "process_morpheus_response",
-        "make_morpheus_request_openai_stream",
-    ],
-)
-make_morpheus_request_openai = _morpheus.get("make_morpheus_request_openai")
-process_morpheus_response = _morpheus.get("process_morpheus_response")
-make_morpheus_request_openai_stream = _morpheus.get("make_morpheus_request_openai_stream")
-
-_onerouter = _safe_import_provider(
-    "onerouter",
-    [
-        "make_onerouter_request_openai",
-        "process_onerouter_response",
-        "make_onerouter_request_openai_stream",
-    ],
-)
-make_onerouter_request_openai = _onerouter.get("make_onerouter_request_openai")
-process_onerouter_response = _onerouter.get("process_onerouter_response")
-make_onerouter_request_openai_stream = _onerouter.get("make_onerouter_request_openai_stream")
 
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
+from src.services.rate_limiting import get_rate_limit_manager
+from src.services.trial_validation import validate_trial_access, track_trial_usage
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
@@ -416,99 +142,12 @@ from src.services.provider_failover import (
 )
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.token_estimator import estimate_message_tokens
+from src.utils.logging_utils import mask_key
 
 
-# Backwards compatibility wrappers for test patches
-def increment_api_key_usage(*args, **kwargs):
-    return api_keys_module.increment_api_key_usage(*args, **kwargs)
-
-
-def enforce_plan_limits(*args, **kwargs):
-    return plans_module.enforce_plan_limits(*args, **kwargs)
-
-
-def create_rate_limit_alert(*args, **kwargs):
-    return rate_limits_module.create_rate_limit_alert(*args, **kwargs)
-
-
-def update_rate_limit_usage(*args, **kwargs):
-    return rate_limits_module.update_rate_limit_usage(*args, **kwargs)
-
-
-def get_user(*args, **kwargs):
-    return users_module.get_user(*args, **kwargs)
-
-
-def deduct_credits(*args, **kwargs):
-    return users_module.deduct_credits(*args, **kwargs)
-
-
-def log_api_usage_transaction(*args, **kwargs):
-    return users_module.log_api_usage_transaction(*args, **kwargs)
-
-
-def record_usage(*args, **kwargs):
-    return users_module.record_usage(*args, **kwargs)
-
-
-def create_chat_session(*args, **kwargs):
-    return chat_history_module.create_chat_session(*args, **kwargs)
-
-
-def save_chat_message(*args, **kwargs):
-    return chat_history_module.save_chat_message(*args, **kwargs)
-
-
-def get_chat_session(*args, **kwargs):
-    return chat_history_module.get_chat_session(*args, **kwargs)
-
-
-def log_activity(*args, **kwargs):
-    return activity_module.log_activity(*args, **kwargs)
-
-
-def validate_and_adjust_max_tokens(optional: dict, model: str) -> None:
-    """
-    Validate and adjust max_tokens for models with minimum token requirements.
-
-    Google Gemini models require max_tokens >= 16. This function automatically
-    adjusts the value if it's below the minimum to prevent API errors.
-
-    Args:
-        optional: Dictionary of optional parameters (modified in-place)
-        model: The model ID being used
-    """
-    if "max_tokens" not in optional or optional["max_tokens"] is None:
-        return
-
-    model_lower = model.lower()
-
-    # Check if this is a Gemini model that requires min tokens >= 16
-    if "gemini" in model_lower or "google" in model_lower:
-        min_tokens = 16
-        if optional["max_tokens"] < min_tokens:
-            logger.warning(
-                f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
-                f"for Gemini model {model} (minimum requirement)"
-            )
-            optional["max_tokens"] = min_tokens
-
-
-def get_provider_from_model(*args, **kwargs):
-    return activity_module.get_provider_from_model(*args, **kwargs)
-
-
-def get_rate_limit_manager(*args, **kwargs):
-    return rate_limiting_service.get_rate_limit_manager(*args, **kwargs)
-
-
-def validate_trial_access(*args, **kwargs):
-    return trial_module.validate_trial_access(*args, **kwargs)
-
-
-def track_trial_usage(*args, **kwargs):
-    return trial_module.track_trial_usage(*args, **kwargs)
-
+# ============================================================================
+# Helper Functions
+# ============================================================================
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -517,15 +156,8 @@ router = APIRouter()
 logger.info("🔄 Chat module initialized - router created")
 logger.info(f"   Router type: {type(router)}")
 
-DEFAULT_PROVIDER_TIMEOUT = 30
-PROVIDER_TIMEOUTS = {
-    "huggingface": 120,
-    "near": 120,  # Large models like Qwen3-30B need extended timeout
-}
-
-
-def mask_key(k: str) -> str:
-    return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
+# Provider timeouts are now configured in src/config/providers.py
+# Access via: get_provider_registry().get_timeout(provider_name)
 
 
 async def _to_thread(func, *args, **kwargs):
@@ -847,13 +479,7 @@ async def _process_stream_completion_background(
 
         # Save chat history
         # Validate session_id before attempting to save
-        if session_id:
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None
+        session_id = validate_session_id(session_id)
 
         if session_id:
             try:
@@ -1064,22 +690,9 @@ async def stream_generator(
 
         # If no usage was provided, estimate based on content
         if total_tokens == 0:
-            # Rough estimate: 1 token ≈ 4 characters
-            completion_tokens = max(1, len(accumulated_content) // 4)
-
-            # Calculate prompt tokens, handling both string and multimodal content
-            prompt_chars = 0
-            for m in messages:
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    prompt_chars += len(content)
-                elif isinstance(content, list):
-                    # For multimodal content, extract text parts
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            prompt_chars += len(item.get("text", ""))
-            prompt_tokens = max(1, prompt_chars // 4)
-            total_tokens = prompt_tokens + completion_tokens
+            prompt_tokens, completion_tokens, total_tokens = estimate_tokens_from_content(
+                accumulated_content, messages
+            )
 
         elapsed = max(0.001, time.monotonic() - start_time)
 
@@ -1095,33 +708,10 @@ async def stream_generator(
                 yield create_done_sse()
                 return
 
-        # Calculate timing metrics for client
-        streaming_duration = None
-        tokens_per_second = None
-
-        if ttfc_seconds is not None:
-            streaming_duration = elapsed - ttfc_seconds
-            if completion_tokens > 0 and streaming_duration > 0:
-                tokens_per_second = completion_tokens / streaming_duration
-
-        # Calculate server timestamps for client latency measurement
-        server_responded_at = time.time()
-
-        # Send timing data before [DONE] for client visibility
-        timing_data = {
-            "type": "timing",
-            "timing": {
-                "ttfc_ms": round(ttfc_seconds * 1000, 1) if ttfc_seconds else None,
-                "total_ms": round(elapsed * 1000, 1),
-                "streaming_ms": round(streaming_duration * 1000, 1) if streaming_duration else None,
-                "tokens_per_second": round(tokens_per_second, 1) if tokens_per_second else None,
-                "input_tokens": prompt_tokens,
-                "output_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "server_received_at": request_received_at,
-                "server_responded_at": server_responded_at,
-            }
-        }
+        # Calculate timing metrics for client and send before [DONE]
+        timing_data = calculate_stream_timing_data(
+            ttfc_seconds, elapsed, completion_tokens, prompt_tokens, total_tokens, request_received_at
+        )
         yield f"data: {json.dumps(timing_data)}\n\n"
 
         # OPTIMIZATION: Send [DONE] immediately, process credits/logging in background!
@@ -1151,36 +741,8 @@ async def stream_generator(
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
 
-        # Extract meaningful error message for the client
-        error_str = str(e).lower()
-        error_message = "Streaming error occurred"
-        error_type = "stream_error"
-
-        # Check for rate limit errors
-        if "rate limit" in error_str or "429" in error_str or "too many" in error_str:
-            error_message = "Rate limit exceeded. Please wait a moment and try again."
-            error_type = "rate_limit_error"
-        # Check for authentication errors
-        elif "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
-            error_message = "Authentication failed. Please check your API key or sign in again."
-            error_type = "auth_error"
-        # Check for provider/upstream errors
-        elif "upstream" in error_str or "provider" in error_str or "503" in error_str or "502" in error_str:
-            error_message = f"Provider temporarily unavailable: {str(e)[:200]}"
-            error_type = "provider_error"
-        # Check for timeout errors
-        elif "timeout" in error_str or "timed out" in error_str:
-            error_message = "Request timed out. The model may be overloaded. Please try again."
-            error_type = "timeout_error"
-        # Check for model not found errors
-        elif "not found" in error_str or "404" in error_str:
-            error_message = f"Model or resource not found: {str(e)[:200]}"
-            error_type = "not_found_error"
-        # For other errors, include a sanitized version of the error message
-        else:
-            # Include the actual error message but truncate it for safety
-            sanitized_msg = str(e)[:300].replace('\n', ' ').replace('\r', ' ')
-            error_message = f"Streaming error: {sanitized_msg}"
+        # Map exception to user-friendly error message
+        error_message, error_type = map_streaming_error_message(e)
 
         yield create_error_sse_chunk(
             error_message=error_message,
@@ -1244,70 +806,25 @@ async def chat_completions(
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
 
     try:
-        # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
+        # === 1) User + plan/trial prechecks (REFACTORED: using shared helpers) ===
         with tracker.stage("auth_validation"):
+            # Validate user and determine if anonymous
+            user, is_anonymous = await validate_user_and_auth(api_key, _to_thread, request_id)
+
             if is_anonymous:
-                # Anonymous user - skip user lookup, trial validation, plan limits
-                user = None
+                # Anonymous user - skip trial validation and plan limits
                 trial = {"is_valid": True, "is_trial": False}
                 environment_tag = "live"
-                logger.info("Processing anonymous chat request (request_id=%s)", request_id)
             else:
-                # Authenticated user - perform full validation
-                # Step 1: Get user first (required for subsequent checks)
-                user = await _to_thread(get_user, api_key)
-                if not user and Config.IS_TESTING:
-                    logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
-                    user = await _to_thread(_fallback_get_user, api_key)
-                if not user:
-                    logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-
+                # Authenticated user - get environment and validate trial
                 environment_tag = user.get("environment_tag", "live")
-
-                # Step 2: Only validate trial access (plan limits checked after token usage known)
-                trial = await _to_thread(validate_trial_access, api_key)
-
-        # Validate trial access (only for authenticated users)
-        if not is_anonymous and not trial.get("is_valid", False):
-            if trial.get("is_trial") and trial.get("is_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=trial["error"],
-                    headers={
-                        "X-Trial-Expired": "true",
-                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
-                    },
-                )
-            elif trial.get("is_trial"):
-                headers = {}
-                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
-                    if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
-                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
-            else:
-                raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
-
-        # Fast-fail requests that would exceed plan limits before hitting any upstream provider
-        # (only for authenticated users)
-        if not is_anonymous:
-            await _ensure_plan_capacity(user["id"], environment_tag)
+                trial = await validate_trial(api_key, _to_thread)
 
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False) and not is_anonymous
 
-        # Pre-check plan limits before making any upstream calls (only for authenticated users)
-        if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
-                )
-
         # Allow disabling rate limiting for testing (DEV ONLY)
         import os
-
         disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
 
         # Initialize rate limit variables
@@ -1315,45 +832,17 @@ async def chat_completions(
         rl_final = None
 
         # Rate limiting (only for authenticated non-trial users)
-        if (
-            not is_anonymous
-            and not trial.get("is_trial", False)
-            and rate_limit_mgr
-            and not disable_rate_limiting
-        ):
-            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
-            if not rl_pre.allowed:
-                await _to_thread(
-                    create_rate_limit_alert,
-                    api_key,
-                    "rate_limit_exceeded",
-                    {
-                        "reason": rl_pre.reason,
-                        "retry_after": rl_pre.retry_after,
-                        "remaining_requests": rl_pre.remaining_requests,
-                        "remaining_tokens": rl_pre.remaining_tokens,
-                    },
-                )
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Rate limit exceeded: {rl_pre.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
-                    ),
-                )
+        if not is_anonymous and not disable_rate_limiting:
+            rl_pre = await check_rate_limits(
+                api_key,
+                tokens_used=0,
+                is_trial=trial.get("is_trial", False),
+                _to_thread=_to_thread
+            )
 
         # Credit check (only for authenticated non-trial users)
         if not is_anonymous and not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
-
-        # Pre-check plan limits before streaming (fail fast) - only for authenticated users
-        if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
-                )
 
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
@@ -1361,77 +850,24 @@ async def chat_completions(
 
         # === 2.1) Inject conversation history if session_id provided ===
         # Chat history is only available for authenticated users
-        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
-        if session_id and not is_anonymous:
-            # Validate session_id is within valid PostgreSQL integer range
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s: out of PostgreSQL integer range. Ignoring session history.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None  # Ignore invalid session_id
-
-        if session_id and not is_anonymous:
-            try:
-                # Fetch the session with its message history
-                session = await _to_thread(get_chat_session, session_id, user["id"])
-
-                if session and session.get("messages"):
-                    # Transform DB messages to OpenAI format and prepend to current messages
-                    history_messages = [
-                        {"role": msg["role"], "content": msg["content"]}
-                        for msg in session["messages"]
-                    ]
-
-                    # Prepend history to incoming messages
-                    messages = history_messages + messages
-
-                    logger.info(
-                        "Injected %d messages from session %s",
-                        len(history_messages),
-                        sanitize_for_logging(str(session_id)),
-                    )
-                else:
-                    logger.debug(
-                        "No history found for session %s or session doesn't exist",
-                        sanitize_for_logging(str(session_id)),
-                    )
-
-            except Exception as e:
-                # Don't fail the request if history fetch fails
-                logger.warning(
-                    "Failed to fetch chat history for session %s: %s",
-                    sanitize_for_logging(str(session_id)),
-                    sanitize_for_logging(str(e)),
-                )
+        if not is_anonymous:
+            session_id = validate_session_id(session_id)
+            messages = await inject_chat_history(session_id, user["id"], messages, _to_thread, get_chat_session)
         elif session_id and is_anonymous:
             logger.debug("Ignoring session_id for anonymous request")
 
         # === 2.2) Plan limit pre-check with estimated tokens (only for authenticated users) ===
-        estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+        # This is the ONLY pre-request plan check - replaces the previous 3 duplicate checks!
         if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise HTTPException(
-                    status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
-                )
+            estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
+            await check_plan_limits(user["id"], environment_tag, estimated_tokens, _to_thread)
 
         # Store original model for response
         original_model = req.model
 
         with tracker.stage("request_preparation"):
-            optional = {}
-            for name in (
-                "max_tokens",
-                "temperature",
-                "top_p",
-                "frequency_penalty",
-                "presence_penalty",
-                "tools",
-            ):
-                val = getattr(req, name, None)
-                if val is not None:
-                    optional[name] = val
+            param_names = ("max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "tools")
+            optional = build_optional_params(req, param_names)
 
             # Validate and adjust max_tokens for models with minimum requirements
             validate_and_adjust_max_tokens(optional, original_model)
@@ -1440,19 +876,12 @@ async def chat_completions(
             req_provider_missing = req.provider is None or (
                 isinstance(req.provider, str) and not req.provider
             )
-            provider = (req.provider or "openrouter").lower()
-
-            # Normalize provider aliases
-            if provider == "hug":
-                provider = "huggingface"
-
+            provider = normalize_provider_name((req.provider or "openrouter").lower())
             provider_locked = not req_provider_missing
 
             override_provider = detect_provider_from_model_id(original_model)
             if override_provider:
-                override_provider = override_provider.lower()
-                if override_provider == "hug":
-                    override_provider = "huggingface"
+                override_provider = normalize_provider_name(override_provider.lower())
                 if provider_locked and override_provider != provider:
                     logger.info(
                         "Skipping provider override for model %s: request locked provider to '%s'",
@@ -1473,10 +902,7 @@ async def chat_completions(
                 # Try to detect provider from model ID using the transformation module
                 detected_provider = detect_provider_from_model_id(original_model)
                 if detected_provider:
-                    provider = detected_provider
-                    # Normalize provider aliases
-                    if provider == "hug":
-                        provider = "huggingface"
+                    provider = normalize_provider_name(detected_provider)
                     logger.info(
                         "Auto-detected provider '%s' for model %s",
                         sanitize_for_logging(provider),
@@ -1486,14 +912,8 @@ async def chat_completions(
                     # Fallback to checking cached models
                     from src.services.models import get_cached_models
 
-                    # Try each provider with transformation
-                    for test_provider in [
-                        "huggingface",
-                        "featherless",
-                        "fireworks",
-                        "together",
-                        "google-vertex",
-                    ]:
+                    # Try each provider with transformation (using configured auto-detect list)
+                    for test_provider in AUTO_DETECT_PROVIDERS:
                         transformed = transform_model_id(original_model, test_provider)
                         provider_models = get_cached_models(test_provider) or []
                         if any(m.get("id") == transformed for m in provider_models):
@@ -1502,7 +922,7 @@ async def chat_completions(
                                 f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
                             )
                             break
-                    # Otherwise default to openrouter (already set)
+                    # Otherwise default to DEFAULT_PROVIDER (configured provider)
 
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(original_model, provider_chain)
@@ -1532,157 +952,46 @@ async def chat_completions(
                 request_model = attempt_model
                 is_async_stream = False  # Default to sync, only OpenRouter uses async currently
                 try:
-                    if attempt_provider == "featherless":
-                        stream = await _to_thread(
-                            make_featherless_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
+                    # ============================================================================
+                    # Provider Registry - Streaming Requests
+                    # Replaces 150 lines of if/elif chains with registry lookup
+                    # ============================================================================
+                    provider_config = get_provider_registry().get(attempt_provider)
+                    if not provider_config:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unknown provider: {attempt_provider}. Available: {', '.join(get_provider_registry().list_providers())}"
                         )
-                    elif attempt_provider == "fireworks":
-                        stream = await _to_thread(
-                            make_fireworks_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "together":
-                        stream = await _to_thread(
-                            make_together_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "huggingface":
-                        stream = await _to_thread(
-                            make_huggingface_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "aimo":
-                        stream = await _to_thread(
-                            make_aimo_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "xai":
-                        stream = await _to_thread(
-                            make_xai_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "cerebras":
-                        stream = await _to_thread(
-                            make_cerebras_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "chutes":
-                        stream = await _to_thread(
-                            make_chutes_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "near":
-                        stream = await _to_thread(
-                            make_near_request_openai_stream, messages, request_model, **optional
-                        )
-                    elif attempt_provider == "google-vertex":
-                        stream = await _to_thread(
-                            make_google_vertex_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "vercel-ai-gateway":
-                        stream = await _to_thread(
-                            make_vercel_ai_gateway_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "helicone":
-                        stream = await _to_thread(
-                            make_helicone_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "aihubmix":
-                        stream = await _to_thread(
-                            make_aihubmix_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "anannas":
-                        stream = await _to_thread(
-                            make_anannas_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "alpaca-network":
-                        stream = await _to_thread(
-                            make_alpaca_network_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "alibaba-cloud":
-                        stream = await _to_thread(
-                            make_alibaba_cloud_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "clarifai":
-                        stream = await _to_thread(
-                            make_clarifai_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "groq":
-                        stream = await _to_thread(
-                            make_groq_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "cloudflare-workers-ai":
-                        stream = await _to_thread(
-                            make_cloudflare_workers_ai_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "morpheus":
-                        stream = await _to_thread(
-                            make_morpheus_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    elif attempt_provider == "onerouter":
-                        stream = await _to_thread(
-                            make_onerouter_request_openai_stream,
-                            messages,
-                            request_model,
-                            **optional,
-                        )
-                    else:
-                        # PERF: Use async streaming for OpenRouter (default provider)
-                        # This is the most impactful optimization - prevents event loop blocking
-                        # while waiting for the AI provider to return the first chunk
+
+                    # PERF: Use async streaming when available to prevent event loop blocking
+                    # while waiting for the AI provider to return the first chunk
+                    if provider_config.supports_async_streaming and provider_config.make_request_stream_async:
                         try:
-                            stream = await make_openrouter_request_openai_stream_async(
+                            stream = await provider_config.make_request_stream_async(
                                 messages,
                                 request_model,
                                 **optional,
                             )
                             is_async_stream = True
-                            logger.debug(f"Using async streaming for OpenRouter model {request_model}")
+                            logger.debug(f"Using async streaming for {attempt_provider} model {request_model}")
                         except Exception as async_err:
                             # Fallback to sync streaming if async fails
-                            logger.warning(f"Async streaming failed, falling back to sync: {async_err}")
+                            logger.warning(f"Async streaming failed for {attempt_provider}, falling back to sync: {async_err}")
                             stream = await _to_thread(
-                                make_openrouter_request_openai_stream,
+                                provider_config.make_request_stream,
                                 messages,
                                 request_model,
                                 **optional,
                             )
                             is_async_stream = False
+                    else:
+                        # Use standard sync streaming
+                        stream = await _to_thread(
+                            provider_config.make_request_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
 
                     provider = attempt_provider
                     model = request_model
@@ -1801,214 +1110,37 @@ async def chat_completions(
                 )
 
             request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
+            # Get provider timeout from registry
+            request_timeout = get_provider_registry().get_timeout(attempt_provider)
+            if request_timeout != 30:  # 30 is the default timeout
                 logger.debug(
                     "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                 )
 
             try:
-                if attempt_provider == "featherless":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_featherless_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
+                # ============================================================================
+                # Provider Registry - Non-streaming Requests
+                # Replaces 200 lines of if/elif chains with registry lookup
+                # ============================================================================
+                provider_config = get_provider_registry().get(attempt_provider)
+                if not provider_config:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unknown provider: {attempt_provider}. Available: {', '.join(get_provider_registry().list_providers())}"
                     )
-                    processed = await _to_thread(process_featherless_response, resp_raw)
-                elif attempt_provider == "fireworks":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_fireworks_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_fireworks_response, resp_raw)
-                elif attempt_provider == "together":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_together_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_together_response, resp_raw)
-                elif attempt_provider == "huggingface":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_huggingface_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_huggingface_response, resp_raw)
-                elif attempt_provider == "aimo":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_aimo_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_aimo_response, resp_raw)
-                elif attempt_provider == "xai":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_xai_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_xai_response, resp_raw)
-                elif attempt_provider == "cerebras":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_cerebras_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_cerebras_response, resp_raw)
-                elif attempt_provider == "chutes":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_chutes_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_chutes_response, resp_raw)
-                elif attempt_provider == "near":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_near_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_near_response, resp_raw)
-                elif attempt_provider == "google-vertex":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_google_vertex_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_google_vertex_response, resp_raw)
-                elif attempt_provider == "vercel-ai-gateway":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_vercel_ai_gateway_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_vercel_ai_gateway_response, resp_raw)
-                elif attempt_provider == "helicone":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_helicone_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_helicone_response, resp_raw)
-                elif attempt_provider == "aihubmix":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_aihubmix_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_aihubmix_response, resp_raw)
-                elif attempt_provider == "anannas":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_anannas_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_anannas_response, resp_raw)
-                elif attempt_provider == "alpaca-network":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_alpaca_network_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_alpaca_network_response, resp_raw)
-                elif attempt_provider == "alibaba-cloud":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_alibaba_cloud_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_alibaba_cloud_response, resp_raw)
-                elif attempt_provider == "clarifai":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_clarifai_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_clarifai_response, resp_raw)
-                elif attempt_provider == "groq":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_groq_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_groq_response, resp_raw)
-                elif attempt_provider == "cloudflare-workers-ai":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_cloudflare_workers_ai_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_cloudflare_workers_ai_response, resp_raw)
-                elif attempt_provider == "morpheus":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_morpheus_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_morpheus_response, resp_raw)
-                elif attempt_provider == "onerouter":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_onerouter_request_openai,
-                            messages,
-                            request_model,
-                            **optional,
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_onerouter_response, resp_raw)
-                else:
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_openrouter_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_openrouter_response, resp_raw)
+
+                # Make request with provider-specific timeout
+                resp_raw = await asyncio.wait_for(
+                    _to_thread(
+                        provider_config.make_request,
+                        messages,
+                        request_model,
+                        **optional
+                    ),
+                    timeout=request_timeout,
+                )
+                # Process response
+                processed = await _to_thread(provider_config.process_response, resp_raw)
 
                 provider = attempt_provider
                 model = request_model
@@ -2096,65 +1228,24 @@ async def chat_completions(
                         ),
                     )
 
-        cost = calculate_cost(model, prompt_tokens, completion_tokens)
         is_trial = trial.get("is_trial", False)
 
         # Credit/usage tracking (only for authenticated users)
         if not is_anonymous:
-            if is_trial:
-                # Log transaction for trial users (with $0 cost)
-                try:
-                    await _to_thread(
-                        log_api_usage_transaction,
-                        api_key,
-                        0.0,
-                        f"API usage - {model} (Trial)",
-                        {
-                            "model": model,
-                            "total_tokens": total_tokens,
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "cost_usd": 0.0,
-                            "is_trial": True,
-                        },
-                        True,
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
-            else:
-                # For non-trial users, deduct credits
-                try:
-                    await _to_thread(
-                        deduct_credits,
-                        api_key,
-                        cost,
-                        f"API usage - {model}",
-                        {
-                            "model": model,
-                            "total_tokens": total_tokens,
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "cost_usd": cost,
-                        },
-                    )
-                    await _to_thread(
-                        record_usage,
-                        user["id"],
-                        api_key,
-                        model,
-                        total_tokens,
-                        cost,
-                        int(elapsed * 1000),
-                    )
-                except ValueError as e:
-                    # e.g., insufficient funds detected atomically in DB
-                    raise HTTPException(status_code=402, detail=str(e))
-                except Exception as e:
-                    logger.error("Usage recording error: %s", e)
-
-                await _to_thread(update_rate_limit_usage, api_key, total_tokens)
-
-            await _to_thread(increment_api_key_usage, api_key)
+            cost = await handle_billing(
+                api_key=api_key,
+                user_id=user["id"],
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                elapsed_ms=int(elapsed * 1000),
+                is_trial=is_trial,
+                _to_thread=_to_thread,
+            )
+        else:
+            # For anonymous users, still calculate cost for metrics
+            cost = calculate_cost(model, prompt_tokens, completion_tokens)
 
         # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
         await _record_inference_metrics_and_health(
@@ -2199,14 +1290,8 @@ async def chat_completions(
         # === 5) History (use the last user message in this request only) ===
         # Chat history is only saved for authenticated users
         # Validate session_id before attempting to save
-        if session_id and not is_anonymous:
-            # Re-validate session_id in case it was modified during request processing
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s during history save: out of PostgreSQL integer range. Skipping history save.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None
+        if not is_anonymous:
+            session_id = validate_session_id(session_id)
 
         if session_id and not is_anonymous:
             try:
@@ -2384,182 +1469,44 @@ async def unified_responses(
     stream_release_handled = False
 
     try:
-        # === 1) User + plan/trial prechecks ===
-        user = await _to_thread(get_user, api_key)
-        if not user and not Config.IS_TESTING:
-            logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
-            user = await _to_thread(_fallback_get_user, api_key)
-        if not user:
-            logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
-            raise HTTPException(status_code=401, detail="Invalid API key")
-
+        # === 1) User + plan/trial prechecks (REFACTORED: using shared helpers) ===
+        # Validate user (unified_responses requires authentication, no anonymous support)
+        user, _ = await validate_user_and_auth(api_key, _to_thread)
         environment_tag = user.get("environment_tag", "live")
 
-        trial = await _to_thread(validate_trial_access, api_key)
-        if not trial.get("is_valid", False):
-            if trial.get("is_trial") and trial.get("is_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=trial["error"],
-                    headers={
-                        "X-Trial-Expired": "true",
-                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
-                    },
-                )
-            elif trial.get("is_trial"):
-                headers = {}
-                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
-                    if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
-                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
-            else:
-                raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+        # Validate trial access
+        trial = await validate_trial(api_key, _to_thread)
 
         rate_limit_mgr = get_rate_limit_manager()
 
-        # Pre-check plan limits before making any provider calls to avoid unnecessary work
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-        if not pre_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429,
-                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
-            )
-        else:
-            logger.debug(
-                "Plan pre-check passed for user %s (env=%s): %s",
-                sanitize_for_logging(str(user.get("id"))),
-                environment_tag,
-                pre_plan,
-            )
+        # Rate limiting (only for non-trial users)
+        rl_pre = await check_rate_limits(
+            api_key,
+            tokens_used=0,
+            is_trial=trial.get("is_trial", False),
+            _to_thread=_to_thread
+        )
 
-        if not trial.get("is_trial", False):
-            rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
-            if not rl_pre.allowed:
-                await _to_thread(
-                    create_rate_limit_alert,
-                    api_key,
-                    "rate_limit_exceeded",
-                    {
-                        "reason": rl_pre.reason,
-                        "retry_after": rl_pre.retry_after,
-                        "remaining_requests": rl_pre.remaining_requests,
-                        "remaining_tokens": rl_pre.remaining_tokens,
-                    },
-                )
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Rate limit exceeded: {rl_pre.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
-                    ),
-                )
-
+        # Credit check (only for non-trial users)
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise HTTPException(status_code=402, detail="Insufficient credits")
 
         # === 2) Transform 'input' to 'messages' format for upstream ===
-        messages = []
-        try:
-            for inp_msg in req.input:
-                # Convert InputMessage to standard message format
-                if isinstance(inp_msg.content, str):
-                    messages.append({"role": inp_msg.role, "content": inp_msg.content})
-                elif isinstance(inp_msg.content, list):
-                    # Multimodal content - transform to OpenAI format
-                    transformed_content = []
-                    for item in inp_msg.content:
-                        if isinstance(item, dict):
-                            # Map input types to OpenAI chat format
-                            if item.get("type") == "input_text":
-                                transformed_content.append(
-                                    {"type": "text", "text": item.get("text", "")}
-                                )
-                            elif item.get("type") == "output_text":
-                                # Transform Responses API output_text to standard text format
-                                # This handles cases where clients send assistant messages with
-                                # output_text content type from previous response conversations
-                                transformed_content.append(
-                                    {"type": "text", "text": item.get("text", "")}
-                                )
-                            elif item.get("type") == "input_image_url":
-                                transformed_content.append(
-                                    {"type": "image_url", "image_url": item.get("image_url", {})}
-                                )
-                            elif item.get("type") in ("text", "image_url"):
-                                # Already in correct format
-                                transformed_content.append(item)
-                            else:
-                                logger.warning(f"Unknown content type: {item.get('type')}, skipping")
-                                # Skip unknown types instead of passing them through to avoid
-                                # provider API errors like "Unexpected content chunk type"
-                        else:
-                            logger.warning(f"Invalid content item (not a dict): {type(item)}")
-
-                    messages.append({"role": inp_msg.role, "content": transformed_content})
-                else:
-                    logger.error(f"Invalid content type: {type(inp_msg.content)}")
-                    raise HTTPException(
-                        status_code=400, detail=f"Invalid content type: {type(inp_msg.content)}"
-                    )
-        except Exception as e:
-            logger.error(f"Error transforming input to messages: {e}, input: {req.input}")
-            raise HTTPException(status_code=400, detail=f"Invalid input format: {str(e)}")
+        messages = transform_input_to_messages(req.input)
 
         # === 2.1) Inject conversation history if session_id provided ===
-        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
-        if session_id:
-            # Validate session_id is within valid PostgreSQL integer range
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s for /v1/responses: out of PostgreSQL integer range. Ignoring session history.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None
+        session_id = validate_session_id(session_id)
+        messages = await inject_chat_history(session_id, user["id"], messages, _to_thread, get_chat_session)
 
-        if session_id:
-            try:
-                session = await _to_thread(get_chat_session, session_id, user["id"])
-                if session and session.get("messages"):
-                    history_messages = [
-                        {"role": msg["role"], "content": msg["content"]}
-                        for msg in session["messages"]
-                    ]
-                    messages = history_messages + messages
-                    logger.info(
-                        "Injected %d messages from session %s",
-                        len(history_messages),
-                        sanitize_for_logging(str(session_id)),
-                    )
-            except Exception as e:
-                logger.warning(
-                    "Failed to fetch chat history for session %s: %s",
-                    sanitize_for_logging(str(session_id)),
-                    sanitize_for_logging(str(e)),
-                )
-
-        # Plan limit pre-check for unified responses
+        # Plan limit pre-check with estimated tokens (ONLY pre-request plan check)
         estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
-        if not pre_plan.get("allowed", False):
-            raise HTTPException(
-                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
-            )
+        await check_plan_limits(user["id"], environment_tag, estimated_tokens, _to_thread)
 
         # Store original model for response
         original_model = req.model
 
-        optional = {}
-        for name in (
-            "max_tokens",
-            "temperature",
-            "top_p",
-            "frequency_penalty",
-            "presence_penalty",
-            "tools",
-        ):
-            val = getattr(req, name, None)
-            if val is not None:
-                optional[name] = val
+        param_names = ("max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "tools")
+        optional = build_optional_params(req, param_names)
 
         # Validate and adjust max_tokens for models with minimum requirements
         validate_and_adjust_max_tokens(optional, original_model)
@@ -2578,19 +1525,12 @@ async def unified_responses(
         req_provider_missing = req.provider is None or (
             isinstance(req.provider, str) and not req.provider
         )
-        provider = (req.provider or "openrouter").lower()
-
-        # Normalize provider aliases
-        if provider == "hug":
-            provider = "huggingface"
-
+        provider = normalize_provider_name((req.provider or "openrouter").lower())
         provider_locked = not req_provider_missing
 
         override_provider = detect_provider_from_model_id(original_model)
         if override_provider:
-            override_provider = override_provider.lower()
-            if override_provider == "hug":
-                override_provider = "huggingface"
+            override_provider = normalize_provider_name(override_provider.lower())
             if provider_locked and override_provider != provider:
                 logger.info(
                     "Skipping provider override for model %s: request locked provider to '%s'",
@@ -3026,86 +1966,38 @@ async def unified_responses(
                 )
 
             request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
+            # Get provider timeout from registry
+            request_timeout = get_provider_registry().get_timeout(attempt_provider)
+            if request_timeout != 30:  # 30 is the default timeout
                 logger.debug(
                     "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                 )
 
             http_exc = None
             try:
-                if attempt_provider == "featherless":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_featherless_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
+                # ============================================================================
+                # Provider Registry - Non-streaming Requests
+                # Replaces if/elif chains with registry lookup
+                # ============================================================================
+                provider_config = get_provider_registry().get(attempt_provider)
+                if not provider_config:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unknown provider: {attempt_provider}. Available: {', '.join(get_provider_registry().list_providers())}"
                     )
-                    processed = await _to_thread(process_featherless_response, resp_raw)
-                elif attempt_provider == "fireworks":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_fireworks_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_fireworks_response, resp_raw)
-                elif attempt_provider == "together":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_together_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_together_response, resp_raw)
-                elif attempt_provider == "huggingface":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_huggingface_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_huggingface_response, resp_raw)
-                elif attempt_provider == "aimo":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_aimo_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_aimo_response, resp_raw)
-                elif attempt_provider == "xai":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_xai_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_xai_response, resp_raw)
-                elif attempt_provider == "cerebras":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_cerebras_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_cerebras_response, resp_raw)
-                elif attempt_provider == "chutes":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_chutes_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_chutes_response, resp_raw)
-                elif attempt_provider == "groq":
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(make_groq_request_openai, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_groq_response, resp_raw)
-                else:
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_openrouter_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_openrouter_response, resp_raw)
+
+                # Make request with provider-specific timeout
+                resp_raw = await asyncio.wait_for(
+                    _to_thread(
+                        provider_config.make_request,
+                        messages,
+                        request_model,
+                        **optional
+                    ),
+                    timeout=request_timeout,
+                )
+                # Process response
+                processed = await _to_thread(provider_config.process_response, resp_raw)
 
                 provider = attempt_provider
                 model = request_model
@@ -3176,62 +2068,20 @@ async def unified_responses(
                     ),
                 )
 
-        cost = calculate_cost(model, prompt_tokens, completion_tokens)
         is_trial = trial.get("is_trial", False)
 
-        if is_trial:
-            # Log transaction for trial users (with $0 cost)
-            try:
-                await _to_thread(
-                    log_api_usage_transaction,
-                    api_key,
-                    0.0,
-                    f"API usage - {model} (Trial)",
-                    {
-                        "model": model,
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "cost_usd": 0.0,
-                        "is_trial": True,
-                    },
-                    True,
-                )
-            except Exception as e:
-                logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
-        else:
-            # For non-trial users, deduct credits
-            try:
-                await _to_thread(
-                    deduct_credits,
-                    api_key,
-                    cost,
-                    f"API usage - {model}",
-                    {
-                        "model": model,
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "cost_usd": cost,
-                    },
-                )
-                await _to_thread(
-                    record_usage,
-                    user["id"],
-                    api_key,
-                    model,
-                    total_tokens,
-                    cost,
-                    int(elapsed * 1000),
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=402, detail=str(e))
-            except Exception as e:
-                logger.error("Usage recording error: %s", e)
-
-            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
-
-        await _to_thread(increment_api_key_usage, api_key)
+        # Credit/usage tracking using shared helper
+        cost = await handle_billing(
+            api_key=api_key,
+            user_id=user["id"],
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            elapsed_ms=int(elapsed * 1000),
+            is_trial=is_trial,
+            _to_thread=_to_thread,
+        )
 
         # Record Prometheus metrics and passive health monitoring
         await _record_inference_metrics_and_health(
@@ -3274,13 +2124,7 @@ async def unified_responses(
 
         # === 5) History ===
         # Validate session_id before attempting to save
-        if session_id:
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s during /v1/responses history save: out of PostgreSQL integer range. Skipping history save.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None
+        session_id = validate_session_id(session_id)
 
         if session_id:
             try:
