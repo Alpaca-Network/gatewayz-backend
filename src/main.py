@@ -383,6 +383,7 @@ def create_app() -> FastAPI:
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
+        ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
