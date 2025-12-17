@@ -67,17 +67,17 @@ def get_google_models() -> list[MultiProviderModel]:
             providers=[
                 ProviderConfig(
                     name="google-vertex",
-                    model_id="gemini-2.5-flash-preview-09-2025",
+                    model_id="gemini-2.5-flash",  # Use stable GA version for production
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.075,  # Example pricing
+                    cost_per_1k_input=0.075,
                     cost_per_1k_output=0.30,
                     max_tokens=8192,
-                    features=["streaming", "multimodal", "function_calling"],
+                    features=["streaming", "multimodal", "function_calling", "thinking"],
                 ),
                 ProviderConfig(
                     name="openrouter",
-                    model_id="google/gemini-2.5-flash-preview-09-2025",
+                    model_id="google/gemini-2.5-flash",
                     priority=2,
                     requires_credentials=False,
                     cost_per_1k_input=0.10,  # OpenRouter markup
@@ -204,28 +204,24 @@ def get_google_models() -> list[MultiProviderModel]:
                 ),
             ],
         ),
-        # Gemini 1.5 Models
+        # Gemini 1.5 Models - RETIRED (Deprecated April-September 2025)
+        # These models are no longer available on Vertex AI and will return 404 errors
+        # Recommended replacements:
+        #   - gemini-1.5-pro -> gemini-2.0-flash or gemini-2.5-pro
+        #   - gemini-1.5-flash -> gemini-2.0-flash-lite or gemini-2.5-flash-lite
+        # Keeping minimal config for OpenRouter fallback only (OpenRouter may still support them)
         MultiProviderModel(
             id="gemini-1.5-pro",
-            name="Gemini 1.5 Pro",
-            description="Mid-generation model with excellent performance",
+            name="Gemini 1.5 Pro (Retired - Use Gemini 2.5 Pro)",
+            description="[RETIRED] This model is no longer available on Vertex AI. Use gemini-2.5-pro instead.",
             context_length=1000000,
             modalities=["text", "image", "audio", "video"],
             providers=[
-                ProviderConfig(
-                    name="google-vertex",
-                    model_id="gemini-1.5-pro",
-                    priority=1,
-                    requires_credentials=True,
-                    cost_per_1k_input=1.25,
-                    cost_per_1k_output=5.00,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal", "function_calling"],
-                ),
+                # Vertex AI provider removed - model is retired
                 ProviderConfig(
                     name="openrouter",
                     model_id="google/gemini-pro-1.5",
-                    priority=2,
+                    priority=1,
                     requires_credentials=False,
                     cost_per_1k_input=1.50,
                     cost_per_1k_output=6.00,
@@ -236,25 +232,16 @@ def get_google_models() -> list[MultiProviderModel]:
         ),
         MultiProviderModel(
             id="gemini-1.5-flash",
-            name="Gemini 1.5 Flash",
-            description="Fast and efficient model for everyday tasks",
+            name="Gemini 1.5 Flash (Retired - Use Gemini 2.5 Flash)",
+            description="[RETIRED] This model is no longer available on Vertex AI. Use gemini-2.5-flash instead.",
             context_length=1000000,
             modalities=["text", "image", "audio", "video"],
             providers=[
-                ProviderConfig(
-                    name="google-vertex",
-                    model_id="gemini-1.5-flash",
-                    priority=1,
-                    requires_credentials=True,
-                    cost_per_1k_input=0.075,
-                    cost_per_1k_output=0.30,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal", "function_calling"],
-                ),
+                # Vertex AI provider removed - model is retired
                 ProviderConfig(
                     name="openrouter",
                     model_id="google/gemini-flash-1.5",
-                    priority=2,
+                    priority=1,
                     requires_credentials=False,
                     cost_per_1k_input=0.10,
                     cost_per_1k_output=0.40,

@@ -469,13 +469,14 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
             "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
             "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
-            # Gemini 2.5 flash models
-            "gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            # Gemini 2.5 flash models (use stable GA version by default)
+            "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
+            "google/gemini-2.5-flash": "gemini-2.5-flash",
+            "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
+            # Preview version (only if explicitly requested)
             "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
-            "google/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "@google/models/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             # Image-specific models
             "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
@@ -509,7 +510,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.0-pro-001": "gemini-2.0-pro-001",
             "google/gemini-2.0-pro": GEMINI_2_0_PRO,
             "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
-            # Gemini 1.5 models
+            # Gemini 1.5 models - RETIRED (April-September 2025)
+            # WARNING: These models are NO LONGER AVAILABLE on Google Vertex AI
+            # API requests will return 404 errors
+            # Recommended replacements:
+            #   - gemini-1.5-pro -> gemini-2.5-pro or gemini-2.0-flash
+            #   - gemini-1.5-flash -> gemini-2.5-flash or gemini-2.0-flash-lite
+            # Keeping mappings for OpenRouter compatibility only
             "gemini-1.5-pro": GEMINI_1_5_PRO,
             "gemini-1.5-pro-002": "gemini-1.5-pro-002",
             "google/gemini-1.5-pro": GEMINI_1_5_PRO,
