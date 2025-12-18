@@ -39,12 +39,12 @@ DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or auto-detect if not specified"
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or 'all'"
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -471,6 +471,11 @@ async def get_models(
             if not alibaba_models and gateway_value == "alibaba":
                 logger.warning("Alibaba Cloud models unavailable - continuing without them")
 
+        if gateway_value in ("google-vertex", "all"):
+            google_models = get_cached_models("google-vertex") or []
+            if not google_models and gateway_value == "google-vertex":
+                logger.warning("Google Vertex AI models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "featherless":
@@ -511,6 +516,8 @@ async def get_models(
             models = vercel_ai_gateway_models
         elif gateway_value == "alibaba":
             models = alibaba_models
+        elif gateway_value == "google-vertex":
+            models = google_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -521,6 +528,7 @@ async def get_models(
                 groq_models,
                 fireworks_models,
                 together_models,
+                google_models,
                 aimo_models,
                 near_models,
                 fal_models,
