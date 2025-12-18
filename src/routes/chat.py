@@ -391,6 +391,18 @@ make_morpheus_request_openai = _morpheus.get("make_morpheus_request_openai")
 process_morpheus_response = _morpheus.get("process_morpheus_response")
 make_morpheus_request_openai_stream = _morpheus.get("make_morpheus_request_openai_stream")
 
+_onerouter = _safe_import_provider(
+    "onerouter",
+    [
+        "make_onerouter_request_openai",
+        "process_onerouter_response",
+        "make_onerouter_request_openai_stream",
+    ],
+)
+make_onerouter_request_openai = _onerouter.get("make_onerouter_request_openai")
+process_onerouter_response = _onerouter.get("process_onerouter_response")
+make_onerouter_request_openai_stream = _onerouter.get("make_onerouter_request_openai_stream")
+
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
@@ -834,6 +846,15 @@ async def _process_stream_completion_background(
             )
 
         # Save chat history
+        # Validate session_id before attempting to save
+        if session_id:
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -1305,6 +1326,16 @@ async def chat_completions(
 
         # === 2.1) Inject conversation history if session_id provided ===
         # Chat history is only available for authenticated users
+        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
+        if session_id and not is_anonymous:
+            # Validate session_id is within valid PostgreSQL integer range
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s: out of PostgreSQL integer range. Ignoring session history.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None  # Ignore invalid session_id
+
         if session_id and not is_anonymous:
             try:
                 # Fetch the session with its message history
@@ -1588,6 +1619,13 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "onerouter":
+                        stream = await _to_thread(
+                            make_onerouter_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
                     else:
                         # PERF: Use async streaming for OpenRouter (default provider)
                         # This is the most impactful optimization - prevents event loop blocking
@@ -1625,6 +1663,11 @@ async def chat_completions(
                     stream_headers["X-Provider"] = provider
                     stream_headers["X-Model"] = model
                     stream_headers["X-Requested-Model"] = original_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers["X-Accel-Buffering"] = "no"
+                    stream_headers["Cache-Control"] = "no-cache, no-transform"
+                    stream_headers["Connection"] = "keep-alive"
 
                     return StreamingResponse(
                         stream_generator(
@@ -1911,6 +1954,17 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_morpheus_response, resp_raw)
+                elif attempt_provider == "onerouter":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_onerouter_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_onerouter_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -2108,6 +2162,16 @@ async def chat_completions(
 
         # === 5) History (use the last user message in this request only) ===
         # Chat history is only saved for authenticated users
+        # Validate session_id before attempting to save
+        if session_id and not is_anonymous:
+            # Re-validate session_id in case it was modified during request processing
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s during history save: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id and not is_anonymous:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -2355,6 +2419,13 @@ async def unified_responses(
                                 transformed_content.append(
                                     {"type": "text", "text": item.get("text", "")}
                                 )
+                            elif item.get("type") == "output_text":
+                                # Transform Responses API output_text to standard text format
+                                # This handles cases where clients send assistant messages with
+                                # output_text content type from previous response conversations
+                                transformed_content.append(
+                                    {"type": "text", "text": item.get("text", "")}
+                                )
                             elif item.get("type") == "input_image_url":
                                 transformed_content.append(
                                     {"type": "image_url", "image_url": item.get("image_url", {})}
@@ -2363,8 +2434,9 @@ async def unified_responses(
                                 # Already in correct format
                                 transformed_content.append(item)
                             else:
-                                logger.warning(f"Unknown content type: {item.get('type')}")
-                                transformed_content.append(item)
+                                logger.warning(f"Unknown content type: {item.get('type')}, skipping")
+                                # Skip unknown types instead of passing them through to avoid
+                                # provider API errors like "Unexpected content chunk type"
                         else:
                             logger.warning(f"Invalid content item (not a dict): {type(item)}")
 
@@ -2379,6 +2451,16 @@ async def unified_responses(
             raise HTTPException(status_code=400, detail=f"Invalid input format: {str(e)}")
 
         # === 2.1) Inject conversation history if session_id provided ===
+        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
+        if session_id:
+            # Validate session_id is within valid PostgreSQL integer range
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s for /v1/responses: out of PostgreSQL integer range. Ignoring session history.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -2840,9 +2922,18 @@ async def unified_responses(
                     stream_release_handled = True
                     provider = attempt_provider
                     model = request_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers = {
+                        "X-Accel-Buffering": "no",
+                        "Cache-Control": "no-cache, no-transform",
+                        "Connection": "keep-alive",
+                    }
+
                     return StreamingResponse(
                         response_stream_generator(),
                         media_type="text/event-stream",
+                        headers=stream_headers,
                     )
                 except Exception as exc:
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
@@ -3126,6 +3217,15 @@ async def unified_responses(
             )
 
         # === 5) History ===
+        # Validate session_id before attempting to save
+        if session_id:
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s during /v1/responses history save: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])

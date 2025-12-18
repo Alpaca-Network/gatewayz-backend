@@ -313,6 +313,16 @@ class Config:
     GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
     GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")
 
+    # Arize AI Observability Configuration
+    ARIZE_ENABLED = os.environ.get("ARIZE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    ARIZE_SPACE_ID = os.environ.get("ARIZE_SPACE_ID")
+    ARIZE_API_KEY = os.environ.get("ARIZE_API_KEY")
+    ARIZE_PROJECT_NAME = os.environ.get("ARIZE_PROJECT_NAME", "GATEWAYZ")
+
     # Redis Configuration (for real-time metrics and rate limiting)
     REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {
         "1",

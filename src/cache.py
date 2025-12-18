@@ -174,6 +174,9 @@ _alibaba_models_cache = {
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Alibaba Cloud catalog
     "stale_ttl": 7200,
+    "quota_error": False,  # Track if quota error occurred
+    "quota_error_timestamp": None,  # When the quota error was recorded
+    "quota_error_backoff": 900,  # 15 minutes backoff for quota errors
 }
 
 _onerouter_models_cache = {
@@ -187,6 +190,13 @@ _cloudflare_workers_ai_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Cloudflare Workers AI catalog
+    "stale_ttl": 7200,
+}
+
+_clarifai_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Clarifai catalog
     "stale_ttl": 7200,
 }
 
@@ -227,6 +237,7 @@ def get_models_cache(gateway: str):
         "alibaba": _alibaba_models_cache,
         "onerouter": _onerouter_models_cache,
         "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
+        "clarifai": _clarifai_models_cache,
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -264,6 +275,7 @@ def clear_models_cache(gateway: str):
         "alibaba": _alibaba_models_cache,
         "onerouter": _onerouter_models_cache,
         "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
+        "clarifai": _clarifai_models_cache,
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())

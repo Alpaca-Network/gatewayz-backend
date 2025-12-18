@@ -18,6 +18,7 @@ from src.services.connection_pool import (
     get_pool_stats,
     warmup_provider_connections_async,
 )
+from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.prometheus_remote_write import (
     init_prometheus_remote_write,
     shutdown_prometheus_remote_write,
@@ -37,6 +38,13 @@ def _create_background_task(coro, name: str = None) -> asyncio.Task:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return task
+
+
+def _init_google_models_sync() -> None:
+    """Synchronous helper to initialize Google models (runs in executor thread)."""
+    from src.services.google_models_config import initialize_google_models
+
+    initialize_google_models()
 
 
 @asynccontextmanager
@@ -136,6 +144,18 @@ async def lifespan(app):
 
         _create_background_task(init_tempo_exporter_background(), name="init_tempo_exporter")
 
+        # Initialize Arize OTEL for LLM observability in background
+        async def init_arize_background():
+            try:
+                if init_arize_otel():
+                    logger.info("Arize OTEL tracing initialized")
+                else:
+                    logger.debug("Arize OTEL tracing not enabled or not configured")
+            except Exception as e:
+                logger.warning(f"Arize OTEL initialization warning: {e}")
+
+        _create_background_task(init_arize_background(), name="init_arize_otel")
+
         # Initialize Prometheus remote write in background
         async def init_prometheus_background():
             try:
@@ -176,6 +196,18 @@ async def lifespan(app):
         # Initialize response cache
         get_cache()
         logger.info("Response cache initialized")
+
+        # Initialize Google Vertex AI models catalog in background
+        async def init_google_models_background():
+            try:
+                # Run synchronous initialization in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _init_google_models_sync)
+                logger.info("✓ Google Vertex AI models initialized")
+            except Exception as e:
+                logger.warning(f"Google models initialization warning: {e}", exc_info=True)
+
+        _create_background_task(init_google_models_background(), name="init_google_models")
 
         # Initialize autonomous error monitoring in background
         async def init_error_monitoring_background():
@@ -237,6 +269,13 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
+
+        # Shutdown Arize OTEL
+        try:
+            shutdown_arize_otel()
+            logger.info("Arize OTEL shutdown complete")
+        except Exception as e:
+            logger.warning(f"Arize OTEL shutdown warning: {e}")
 
         # Clear connection pools
         clear_connection_pools()

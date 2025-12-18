@@ -395,6 +395,7 @@ async def test_tier_update_loop_handles_missing_function():
                     try:
                         await task
                     except asyncio.CancelledError:
+                        # Task cancellation during test cleanup is expected; ignore
                         pass
 
                 # Verify the error was handled gracefully with a warning
@@ -446,6 +447,7 @@ async def test_tier_update_loop_handles_other_errors():
                     try:
                         await task
                     except asyncio.CancelledError:
+                        # Task cancellation during test cleanup is expected; ignore
                         pass
 
                 # Verify the error was logged properly as an ERROR (not a warning)

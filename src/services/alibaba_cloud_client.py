@@ -136,6 +136,36 @@ def _is_auth_error(error: Exception) -> bool:
     return any(indicator in message for indicator in indicators)
 
 
+def _is_quota_error(error: Exception) -> bool:
+    """Check if an error is a quota/rate limit error (429).
+
+    Quota errors indicate the account has exceeded its quota and should
+    not be retried immediately. These are different from transient rate
+    limits and require user action (billing/plan upgrade).
+    """
+    message = str(error).lower()
+    indicators = [
+        "insufficient_quota",
+        "exceeded your current quota",
+        "error code: 429",
+        "status code: 429",
+        "quota exceeded",
+        "rate_limit_exceeded",
+    ]
+    return any(indicator in message for indicator in indicators)
+
+
+class QuotaExceededError(Exception):
+    """Raised when Alibaba Cloud returns a quota exceeded error (429).
+
+    This error indicates the account has exceeded its quota and requires
+    user action (billing/plan upgrade). It should be cached to prevent
+    repeated API calls that will fail.
+    """
+
+    pass
+
+
 def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:
     attempts = _region_attempt_order()
     if not attempts:
@@ -169,8 +199,20 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
         except Exception as exc:  # noqa: PERF203 - clarity over premature micro-opt
             last_error = exc
             is_auth = _is_auth_error(exc)
+            is_quota = _is_quota_error(exc)
             has_more_regions = idx < len(attempts) - 1
             should_retry = is_auth and has_more_regions
+
+            # Handle quota errors specially - don't retry, wrap in QuotaExceededError
+            if is_quota:
+                logger.warning(
+                    "Alibaba Cloud %s quota exceeded for %s. "
+                    "Please check your plan and billing details at "
+                    "https://www.alibabacloud.com/help/en/model-studio/error-code#token-limit",
+                    operation_name,
+                    _describe_region(region),
+                )
+                raise QuotaExceededError(str(exc)) from exc
 
             if should_retry:
                 next_region = attempts[idx + 1]

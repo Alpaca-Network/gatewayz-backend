@@ -152,8 +152,8 @@ class RedisMetrics:
             # 7. Update health score
             await self._update_health_score_pipe(pipe, provider, success)
 
-            # Execute all operations atomically
-            await pipe.execute()
+            # Execute all operations atomically (sync operation, no await needed)
+            pipe.execute()
 
             logger.debug(
                 f"Recorded metrics: {provider}/{model} - "

@@ -13,6 +13,38 @@ DEFAULT_DAILY_TOKEN_LIMIT = 500_000
 DEFAULT_MONTHLY_TOKEN_LIMIT = 15_000_000
 DEFAULT_TRIAL_FEATURES = ["basic_models"]
 
+# PERF: In-memory cache for usage data to reduce database queries
+# Short TTL since usage data changes frequently and is billing-critical
+_usage_cache: dict[str, dict[str, Any]] = {}
+_usage_cache_ttl = 10  # 10 seconds TTL - short to minimize over-usage window
+
+
+def clear_usage_cache(user_id: int | None = None) -> None:
+    """Clear usage cache (for testing or explicit invalidation)"""
+    global _usage_cache
+    if user_id:
+        cache_key = f"usage:{user_id}"
+        if cache_key in _usage_cache:
+            del _usage_cache[cache_key]
+            logger.debug(f"Cleared usage cache for user {user_id}")
+    else:
+        _usage_cache.clear()
+        logger.info("Cleared entire usage cache")
+
+
+def get_usage_cache_stats() -> dict[str, Any]:
+    """Get cache statistics for monitoring"""
+    return {
+        "cached_users": len(_usage_cache),
+        "ttl_seconds": _usage_cache_ttl,
+    }
+
+
+def invalidate_usage_cache(user_id: int) -> None:
+    """Invalidate cache for a specific user (e.g., after usage recorded)"""
+    clear_usage_cache(user_id)
+    logger.debug(f"Invalidated usage cache for user {user_id}")
+
 
 def get_all_plans() -> list[dict[str, Any]]:
     """Get all available subscription plans"""
@@ -367,8 +399,8 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
         }
 
 
-def get_user_usage_within_plan_limits(user_id: int) -> dict[str, Any]:
-    """Get user's current usage against their plan limits"""
+def _get_user_usage_within_plan_limits_uncached(user_id: int) -> dict[str, Any]:
+    """Internal function: Get user usage from database (no caching)"""
     try:
         client = get_supabase_client()
         entitlements = check_plan_entitlements(user_id)
@@ -435,6 +467,35 @@ def get_user_usage_within_plan_limits(user_id: int) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting usage within plan limits for user {user_id}: {e}")
         return None
+
+
+def get_user_usage_within_plan_limits(user_id: int) -> dict[str, Any]:
+    """Get user's current usage against their plan limits with caching (saves ~50-80ms per request)"""
+    cache_key = f"usage:{user_id}"
+
+    # PERF: Check cache first to avoid database queries
+    if cache_key in _usage_cache:
+        entry = _usage_cache[cache_key]
+        cache_time = entry["timestamp"]
+        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=_usage_cache_ttl):
+            logger.debug(f"Usage cache hit for user {user_id} (age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)")
+            return entry["data"]
+        else:
+            # Cache expired, remove it
+            del _usage_cache[cache_key]
+            logger.debug(f"Usage cache expired for user {user_id}")
+
+    # Cache miss - fetch from database
+    logger.debug(f"Usage cache miss for user {user_id} - fetching from database")
+    result = _get_user_usage_within_plan_limits_uncached(user_id)
+
+    # Cache the result (even if None, to avoid repeated DB queries for invalid users)
+    _usage_cache[cache_key] = {
+        "data": result,
+        "timestamp": datetime.now(timezone.utc),
+    }
+
+    return result
 
 
 def enforce_plan_limits(

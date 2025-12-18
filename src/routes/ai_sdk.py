@@ -336,7 +336,14 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
             error_data = {"error": f"Failed to process streaming request: {str(e)}"}
             yield f"data: {json.dumps(error_data)}\n\n"
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream")
+    # SSE streaming headers to prevent buffering by proxies/nginx
+    stream_headers = {
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+    }
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
 
 
 async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
@@ -400,4 +407,11 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
             error_data = {"error": f"Failed to process streaming request: {str(e)}"}
             yield f"data: {json.dumps(error_data)}\n\n"
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream")
+    # SSE streaming headers to prevent buffering by proxies/nginx
+    stream_headers = {
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+    }
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)

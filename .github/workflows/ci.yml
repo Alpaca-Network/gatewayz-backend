@@ -24,7 +24,7 @@ jobs:
   # Job 1: Linting and Code Quality
   lint:
     name: Code Quality Checks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout code
@@ -92,7 +92,7 @@ jobs:
   # Job 2: Security Checks
   security:
     name: Security Scan
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout code
@@ -121,7 +121,7 @@ jobs:
   # Job 3: Run Tests (Parallelized with Sharding)
   test:
     name: Run Tests (Shard ${{ matrix.shard }})
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: lint
 
     strategy:
@@ -248,7 +248,7 @@ jobs:
   # Job 3B: Merge coverage reports
   coverage:
     name: Coverage Report
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test
     if: always()
     outputs:
@@ -407,7 +407,7 @@ jobs:
   # Job 4: Build Check
   build:
     name: Build Verification
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint, coverage]  # Only run if lint and tests pass
 
     steps:
@@ -455,7 +455,7 @@ jobs:
   # Job 5: Deployment Ready Check
   deployment-check:
     name: Deployment Ready
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint, security, coverage, build]
     if: github.event_name == 'push'
 
@@ -490,7 +490,7 @@ jobs:
   # (Automatically triggers via workflow_run, but can also be manually dispatched)
   trigger-cursor-auto-fix:
     name: Notify Cursor Auto-Fix
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Depends on critical jobs and runs if any failed
     needs: [lint, security, test, coverage, build]
     if: failure()
@@ -511,7 +511,7 @@ jobs:
   # Job 6: Railway Deployment Notification
   notify-deployment:
     name: Notify Deployment
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [deployment-check]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
 

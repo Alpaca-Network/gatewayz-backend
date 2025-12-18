@@ -468,20 +468,32 @@ def _process_referral_code_background(
                 # Send notification to referrer
                 if referrer.get("email"):
                     try:
-                        send_referral_signup_notification(
+                        notification_sent = send_referral_signup_notification(
                             referrer_id=referrer["id"],
                             referrer_email=referrer["email"],
                             referrer_username=referrer.get("username", "User"),
                             referee_username=username,
                         )
-                        logger.info(
-                            f"Background task: Referral notification sent to referrer "
-                            f"{referrer['id']}"
-                        )
+                        if notification_sent:
+                            logger.info(
+                                f"Background task: Referral notification sent to referrer "
+                                f"{referrer['id']} at {referrer['email']}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Background task: Referral notification failed for referrer "
+                                f"{referrer['id']} at {referrer['email']} - email service returned failure"
+                            )
                     except Exception as notify_error:
                         logger.error(
-                            f"Background task: Failed to send referral notification: {notify_error}"
+                            f"Background task: Failed to send referral notification to "
+                            f"referrer {referrer['id']} at {referrer.get('email')}: {notify_error}"
                         )
+                else:
+                    logger.warning(
+                        f"Background task: Cannot send referral notification - "
+                        f"referrer {referrer['id']} has no email address"
+                    )
             except Exception as store_error:
                 logger.error(
                     f"Background task: Failed to store referral code: {store_error}"
