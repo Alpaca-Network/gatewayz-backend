@@ -88,10 +88,11 @@ MODEL_ID_ALIASES = {
     # XAI Grok specialized models
     "grok-code-fast-1": "x-ai/grok-code-fast-1",
     # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
-    "grok-beta": "grok-3",
-    "xai/grok-beta": "xai/grok-3",
-    "grok-vision-beta": "grok-3",
-    "xai/grok-vision-beta": "xai/grok-3",
+    # Note: Map directly to canonical x-ai/ prefix since apply_model_alias doesn't chain
+    "grok-beta": "x-ai/grok-3",
+    "xai/grok-beta": "x-ai/grok-3",
+    "grok-vision-beta": "x-ai/grok-3",
+    "xai/grok-vision-beta": "x-ai/grok-3",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
