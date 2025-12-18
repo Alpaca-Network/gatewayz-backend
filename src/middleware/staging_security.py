@@ -1,18 +1,15 @@
 """
 Staging environment security middleware.
 
-This middleware protects the staging/test environment from unauthorized access.
-It can enforce:
-- Custom authentication token (X-Staging-Access-Token header)
-- IP whitelisting
-- Combined security checks
+This middleware protects the staging environment by requiring admin authentication
+for all routes except health checks and documentation.
 
 Only applies when APP_ENV=staging.
 """
 
 import logging
 import os
-from typing import Optional
+import secrets
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -28,114 +25,70 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
     """
     Security middleware for staging environment.
 
-    Provides multiple layers of protection:
-    1. IP whitelisting (if STAGING_ALLOWED_IPS is set)
-    2. Access token verification (if STAGING_ACCESS_TOKEN is set)
+    Enforces admin-only access to staging environment:
+    - All routes except health/docs require admin authentication
+    - Uses ADMIN_API_KEY for verification (same as admin endpoints)
 
-    Configuration via environment variables:
-    - STAGING_ACCESS_TOKEN: Required token in X-Staging-Access-Token header
-    - STAGING_ALLOWED_IPS: Comma-separated list of allowed IP addresses
-
-    Examples:
-        # Via Railway CLI
-        railway variables set STAGING_ACCESS_TOKEN="staging_abc123..."
-        railway variables set STAGING_ALLOWED_IPS="203.0.113.1,198.51.100.1"
-
-        # Usage
-        curl https://staging.api.com/v1/models \\
-            -H "X-Staging-Access-Token: staging_abc123..."
+    Usage:
+        curl https://staging.api.com/admin/model-sync/all \\
+            -H "Authorization: Bearer <ADMIN_API_KEY>"
     """
 
-    # Paths that bypass security checks
-    ALLOWED_PATHS = {"/health", "/", "/ping", "/docs", "/redoc", "/openapi.json"}
+    # Paths that bypass admin authentication
+    ALLOWED_PATHS = {"/health", "/", "/ping", "/docs", "/redoc", "/openapi.json", "/metrics"}
 
     def __init__(self, app):
         super().__init__(app)
-        self.staging_token = os.getenv("STAGING_ACCESS_TOKEN")
-        self.allowed_ips = self._parse_allowed_ips()
+        self.admin_api_key = os.getenv("ADMIN_API_KEY")
 
         # Log security configuration on startup
         if Config.APP_ENV == "staging":
-            security_features = []
-            if self.staging_token:
-                security_features.append("Access Token")
-            if self.allowed_ips:
-                security_features.append(f"IP Whitelist ({len(self.allowed_ips)} IPs)")
-
-            if security_features:
-                logger.info(f"Staging security enabled: {', '.join(security_features)}")
+            if self.admin_api_key:
+                logger.info("🔒 Staging security enabled: Admin-only access (all routes require ADMIN_API_KEY)")
             else:
                 logger.warning(
-                    "Staging security not configured! "
-                    "Set STAGING_ACCESS_TOKEN or STAGING_ALLOWED_IPS to protect staging."
+                    "⚠️  Staging security WARNING: ADMIN_API_KEY not set! "
+                    "Staging environment is currently open to everyone."
                 )
 
-    def _parse_allowed_ips(self) -> Optional[set[str]]:
-        """Parse allowed IPs from environment variable."""
-        ips_str = os.getenv("STAGING_ALLOWED_IPS", "").strip()
-        if not ips_str:
-            return None
-
-        # Split by comma and clean up
-        ips = {ip.strip() for ip in ips_str.split(",") if ip.strip()}
-        return ips if ips else None
-
     async def dispatch(self, request: Request, call_next):
-        """Process request and enforce staging security."""
+        """Process request and enforce admin-only staging security."""
 
         # Only apply in staging environment
         if Config.APP_ENV != "staging":
             return await call_next(request)
 
-        # Skip security for allowed paths (health checks, docs)
+        # Skip authentication for allowed paths (health checks, docs)
         if request.url.path in self.ALLOWED_PATHS:
             return await call_next(request)
 
-        # Check 1: IP Whitelist (if configured)
-        if self.allowed_ips:
-            client_ip = self._get_client_ip(request)
-            if client_ip not in self.allowed_ips:
-                logger.warning(
-                    f"Staging access denied: IP not whitelisted",
-                    extra={
-                        "client_ip": client_ip,
-                        "path": request.url.path,
-                        "user_agent": request.headers.get("user-agent", "unknown"),
-                    },
-                )
-                return self._access_denied_response(
-                    reason="IP address not whitelisted",
-                    client_ip=client_ip,
-                )
+        # Require admin authentication for all other routes in staging
+        if not self.admin_api_key:
+            # No admin key configured - allow through (but log warning)
+            logger.warning(f"Staging access without admin key check: {request.url.path}")
+            return await call_next(request)
 
-        # Check 2: Access Token (if configured)
-        if self.staging_token:
-            auth_header = request.headers.get("X-Staging-Access-Token")
+        # Extract Authorization header
+        auth_header = request.headers.get("Authorization", "")
 
-            if not auth_header:
-                logger.warning(
-                    f"Staging access denied: Missing access token",
-                    extra={
-                        "client_ip": self._get_client_ip(request),
-                        "path": request.url.path,
-                    },
-                )
-                return self._access_denied_response(
-                    reason="Missing X-Staging-Access-Token header"
-                )
+        if not auth_header.startswith("Bearer "):
+            return self._access_denied_response("Missing or invalid Authorization header")
 
-            if auth_header != self.staging_token:
-                logger.warning(
-                    f"Staging access denied: Invalid access token",
-                    extra={
-                        "client_ip": self._get_client_ip(request),
-                        "path": request.url.path,
-                        "token_prefix": auth_header[:10] + "..." if len(auth_header) > 10 else auth_header,
-                    },
-                )
-                return self._access_denied_response(reason="Invalid access token")
+        # Extract the token
+        provided_key = auth_header.replace("Bearer ", "").strip()
 
-        # All security checks passed
+        # Validate admin key using constant-time comparison
+        if not provided_key or not secrets.compare_digest(provided_key, self.admin_api_key):
+            logger.warning(
+                f"Staging access denied: Invalid admin key",
+                extra={
+                    "path": request.url.path,
+                    "ip": self._get_client_ip(request),
+                },
+            )
+            return self._access_denied_response("Invalid admin API key")
+
+        # Admin key valid - allow request
         return await call_next(request)
 
     def _get_client_ip(self, request: Request) -> str:
@@ -154,26 +107,17 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
         # Fall back to direct connection IP
         return request.client.host if request.client else "unknown"
 
-    def _access_denied_response(
-        self, reason: str, client_ip: Optional[str] = None
-    ) -> JSONResponse:
+    def _access_denied_response(self, reason: str) -> JSONResponse:
         """Return access denied response."""
-        content = {
-            "error": "Staging Access Denied",
-            "message": f"Access to this staging/test environment is restricted: {reason}",
-            "environment": "staging",
-            "hint": "This is a test environment. Contact your team administrator for access credentials.",
-        }
-
-        # Include client IP in development mode (helps with debugging)
-        if client_ip and not Config.IS_PRODUCTION:
-            content["your_ip"] = client_ip
-
         return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=content,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "error": "Authentication Required",
+                "message": f"Staging environment requires admin authentication: {reason}",
+                "hint": "Use 'Authorization: Bearer <ADMIN_API_KEY>' header to access staging.",
+            },
             headers={
+                "WWW-Authenticate": "Bearer",
                 "X-Environment": "staging",
-                "X-Access-Denied-Reason": reason,
             },
         )
