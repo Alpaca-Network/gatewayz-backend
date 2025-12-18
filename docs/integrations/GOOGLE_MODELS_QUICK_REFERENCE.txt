@@ -2,210 +2,326 @@
 GOOGLE VERTEX AI MODELS - QUICK REFERENCE
 ================================================================================
 
-11 UNIQUE MODELS AVAILABLE
-40 INPUT FORMAT VARIATIONS SUPPORTED
+8 UNIQUE MODELS AVAILABLE (Updated December 2025)
+Multiple providers supported per model (Google Vertex AI + OpenRouter)
 
 ================================================================================
-LATEST RECOMMENDED (Use these first)
+ACCESSING GOOGLE MODELS
 ================================================================================
 
-gemini-2.0-flash
-  ↳ Fast and capable, good for most use cases
-  ↳ Also: gemini-2.0, @google/models/gemini-2.0-flash, google/gemini-2.0-flash
-  ↳ Maps from: gemini-2.5-flash, gemini-2.5-flash-lite
+Via Catalog API:
+  GET /v1/models?gateway=google-vertex          # Google Vertex models only
+  GET /v1/models?gateway=all                    # All models including Google
 
-gemini-2.0-pro
-  ↳ Higher quality, better reasoning
-  ↳ Also: @google/models/gemini-2.0-pro, google/gemini-2.0-pro
-  ↳ Maps from: gemini-2.5-pro
-
-gemini-1.5-pro
-  ↳ Production-ready, proven stable
-  ↳ Also: gemini-1.5, @google/models/gemini-1.5-pro, google/gemini-1.5-pro
+Via Chat Completions:
+  POST /v1/chat/completions
+  {
+    "model": "gemini-3-flash",                  # Latest model
+    "messages": [{"role": "user", "content": "Hello"}]
+  }
 
 ================================================================================
-ALL 11 MODELS (Ordered by Version)
+LATEST MODELS (December 2025 - Use these first)
 ================================================================================
 
-GEMINI 2.0 SERIES:
-  1. gemini-2.0-flash           (17 aliases)
-  2. gemini-2.0-flash-thinking  (1 alias)
-  3. gemini-2.0-flash-001       (1 alias)
-  4. gemini-2.0-pro             (7 aliases)
-  5. gemini-2.0-pro-001         (1 alias)
+✨ GEMINI 3 FLASH (NEW - Dec 17, 2025)
+  Model: gemini-3-flash
+  ↳ Google's latest frontier model with breakthrough speed and intelligence
+  ↳ Pricing: $0.0005/1K input, $0.003/1K output tokens
+  ↳ Features: streaming, multimodal, function_calling, thinking
+  ↳ Context: 1M tokens, Max output: 8192 tokens
 
-GEMINI 1.5 SERIES:
-  6. gemini-1.5-pro             (4 aliases)
-  7. gemini-1.5-pro-002         (1 alias)
-  8. gemini-1.5-flash           (3 aliases)
-  9. gemini-1.5-flash-002       (1 alias)
+GEMINI 2.5 FLASH
+  Model: gemini-2.5-flash
+  ↳ Fastest multimodal model with breakthrough speed
+  ↳ Pricing: $0.075/1K input, $0.30/1K output tokens
+  ↳ Features: streaming, multimodal, function_calling, thinking
+  ↳ Context: 1M tokens, Max output: 8192 tokens
 
-GEMINI 1.0 SERIES:
-  10. gemini-1.0-pro            (3 aliases)
-  11. gemini-1.0-pro-vision     (1 alias)
+GEMINI 2.5 FLASH LITE
+  Model: gemini-2.5-flash-lite
+  ↳ Ultra-fast, cost-effective model for simple tasks
+  ↳ Pricing: $0.03/1K input, $0.12/1K output tokens
+  ↳ Features: streaming, multimodal
+  ↳ Context: 1M tokens, Max output: 8192 tokens
 
-================================================================================
-PREVIEW MODELS (Auto-Remapped)
-================================================================================
-
-These automatically map to stable versions - NO NEED TO CHANGE YOUR CODE!
-
-gemini-2.5-flash-lite          → gemini-2.0-flash
-gemini-2.5-flash               → gemini-2.0-flash
-gemini-2.5-flash-preview       → gemini-2.0-flash
-gemini-2.5-flash-preview-09-2025 → gemini-2.0-flash
-gemini-2.5-pro                 → gemini-2.0-pro
-gemini-2.5-pro-preview-09-2025 → gemini-2.0-pro
+GEMINI 2.5 PRO
+  Model: gemini-2.5-pro
+  ↳ Most capable Gemini model for complex reasoning
+  ↳ Pricing: $1.25/1K input, $5.00/1K output tokens
+  ↳ Features: streaming, multimodal, function_calling
+  ↳ Context: 1M tokens, Max output: 8192 tokens
 
 ================================================================================
-INPUT FORMATS
+GEMINI 2.0 MODELS
 ================================================================================
 
-Simple Name (RECOMMENDED):
-  gemini-2.0-flash
-  gemini-1.5-pro
-  gemini-1.0-pro
+GEMINI 2.0 FLASH (Experimental)
+  Model: gemini-2.0-flash-exp
+  ↳ Experimental preview of Gemini 2.0 Flash
+  ↳ Pricing: FREE during preview
+  ↳ Features: streaming, multimodal, function_calling
+  ↳ Context: 1M tokens, Max output: 8192 tokens
 
-Portkey Format:
-  @google/models/gemini-2.0-flash
-  @google/models/gemini-1.5-pro
-  @google/models/gemini-1.0-pro
-
-Google Prefix:
-  google/gemini-2.0-flash
-  google/gemini-1.5-pro
-  google/gemini-1.0-pro
-
-Aliases:
-  gemini-2.0    → gemini-2.0-flash
-  gemini-1.5    → gemini-1.5-pro
+GEMINI 2.0 FLASH
+  Model: gemini-2.0-flash
+  ↳ Fast and versatile model for diverse tasks
+  ↳ Pricing: $0.075/1K input, $0.30/1K output tokens
+  ↳ Features: streaming, multimodal, function_calling
+  ↳ Context: 1M tokens, Max output: 8192 tokens
 
 ================================================================================
-QUICK COPY-PASTE COMMANDS
+GEMMA MODELS (Open Source)
 ================================================================================
 
-Test gemini-2.0-flash:
-curl -X POST http://localhost:8000/v1/chat/completions \
+GEMMA 2 9B INSTRUCT
+  Model: gemma-2-9b-it
+  ↳ Google's open-source 9B parameter instruction-tuned model
+  ↳ Pricing: $0.03/1K input, $0.06/1K output tokens
+  ↳ Features: streaming
+  ↳ Context: 8192 tokens, Max output: 8192 tokens
+
+GEMMA 2 27B INSTRUCT
+  Model: gemma-2-27b-it
+  ↳ Google's open-source 27B parameter instruction-tuned model
+  ↳ Pricing: $0.10/1K input, $0.20/1K output tokens
+  ↳ Features: streaming
+  ↳ Context: 8192 tokens, Max output: 8192 tokens
+
+================================================================================
+RETIRED MODELS (No longer available)
+================================================================================
+
+⚠️ Gemini 1.5 models were RETIRED by Google (April-September 2025)
+   - gemini-1.5-pro
+   - gemini-1.5-flash
+   - gemini-1.5-pro-002
+   - gemini-1.5-flash-002
+
+Recommended replacements:
+  gemini-1.5-pro   → gemini-2.5-pro or gemini-2.5-flash
+  gemini-1.5-flash → gemini-2.5-flash or gemini-2.5-flash-lite
+
+================================================================================
+MULTI-PROVIDER SUPPORT
+================================================================================
+
+Each Google model can be accessed through multiple providers:
+
+1. Google Vertex AI (Direct)
+   ↳ Priority: 1 (preferred when credentials available)
+   ↳ Requires: GOOGLE_VERTEX_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS
+   ↳ Region: Configured via GOOGLE_VERTEX_LOCATION (default: us-central1)
+
+2. OpenRouter (Proxy/Fallback)
+   ↳ Priority: 2 (automatic fallback when Vertex credentials unavailable)
+   ↳ Requires: OPENROUTER_API_KEY
+   ↳ Adds small markup to pricing (~20%)
+   ↳ Model prefix: google/ (e.g., google/gemini-3-flash-preview)
+   ↳ Note: OpenRouter uses -preview suffix for Gemini 3 Flash
+
+The system automatically selects the best provider based on:
+- Credential availability
+- Provider priority settings
+- Model availability
+
+================================================================================
+CATALOG API EXAMPLES
+================================================================================
+
+List Google Vertex Models:
+curl -X GET "https://api.gatewayz.ai/v1/models?gateway=google-vertex" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+List All Models (including Google):
+curl -X GET "https://api.gatewayz.ai/v1/models?gateway=all" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+Filter by Provider:
+curl -X GET "https://api.gatewayz.ai/v1/models?gateway=google-vertex&provider=google" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+================================================================================
+CHAT COMPLETION EXAMPLES
+================================================================================
+
+Test Gemini 3 Flash (Latest):
+curl -X POST https://api.gatewayz.ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{
+    "model": "gemini-3-flash",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 100
+  }'
 
-Test gemini-2.0-pro:
-curl -X POST http://localhost:8000/v1/chat/completions \
+Test Gemini 2.5 Flash:
+curl -X POST https://api.gatewayz.ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model":"gemini-2.0-pro","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{
+    "model": "gemini-2.5-flash",
+    "messages": [{"role": "user", "content": "Explain quantum computing"}],
+    "max_tokens": 500
+  }'
 
-Test gemini-1.5-pro:
-curl -X POST http://localhost:8000/v1/chat/completions \
+Test with Multimodal (Image):
+curl -X POST https://api.gatewayz.ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model":"gemini-1.5-pro","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{
+    "model": "gemini-2.5-flash",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+      ]
+    }]
+  }'
 
 ================================================================================
-PYTHON QUICK TEST
+PYTHON CLIENT EXAMPLES
 ================================================================================
 
 from openai import OpenAI
 
-# Both URL formats work - the SDK automatically appends /v1 to the base URL
+# Initialize client
 client = OpenAI(
     api_key="YOUR_API_KEY",
-    base_url="http://localhost:8000"  # or "http://localhost:8000/v1"
+    base_url="https://api.gatewayz.ai"
 )
 
-# Test any model:
+# Use Gemini 3 Flash
 response = client.chat.completions.create(
-    model="gemini-2.0-flash",  # Change model here
-    messages=[{"role": "user", "content": "Hello!"}],
+    model="gemini-3-flash",
+    messages=[{"role": "user", "content": "Write a haiku about AI"}],
     max_tokens=100
 )
-
 print(response.choices[0].message.content)
+
+# Use Gemini 2.5 Pro for complex reasoning
+response = client.chat.completions.create(
+    model="gemini-2.5-pro",
+    messages=[{
+        "role": "user",
+        "content": "Explain the proof of Fermat's Last Theorem"
+    }],
+    max_tokens=2000
+)
+print(response.choices[0].message.content)
+
+# Stream responses
+stream = client.chat.completions.create(
+    model="gemini-2.5-flash",
+    messages=[{"role": "user", "content": "Tell me a story"}],
+    stream=True
+)
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
 
 ================================================================================
 MODEL SELECTION GUIDE
 ================================================================================
 
+For LATEST FEATURES:
+  Use: gemini-3-flash (NEW Dec 2025)
+
 For SPEED:
-  Use: gemini-2.0-flash or gemini-1.5-flash
+  Use: gemini-2.5-flash-lite or gemini-2.5-flash
 
-For QUALITY:
-  Use: gemini-2.0-pro or gemini-2.0-flash-thinking
+For QUALITY/REASONING:
+  Use: gemini-2.5-pro
 
-For PRODUCTION:
-  Use: gemini-1.5-pro (proven stable)
+For COST EFFICIENCY:
+  Use: gemini-2.5-flash-lite (cheapest at $0.03/1K input)
 
-For REASONING:
-  Use: gemini-2.0-flash-thinking or gemini-2.0-pro
+For MULTIMODAL (text/image/audio/video):
+  Use: Any Gemini 2.5 or 3.0 model (all support multimodal)
 
-For COST:
-  Use: gemini-2.0-flash or gemini-1.5-flash
+For OPEN SOURCE:
+  Use: gemma-2-9b-it or gemma-2-27b-it
 
-For VISION:
-  Use: gemini-1.0-pro-vision (only vision variant)
+For EXPERIMENTATION:
+  Use: gemini-2.0-flash-exp (FREE during preview)
 
 ================================================================================
 REQUIREMENTS
 ================================================================================
 
-Environment Variables:
-  GOOGLE_PROJECT_ID=your-project-id
-  GOOGLE_VERTEX_LOCATION=us-central1 (or your region)
-  GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-  (or GOOGLE_VERTEX_CREDENTIALS_JSON environment variable)
+For Google Vertex AI (Direct Access):
+  Environment Variables:
+    GOOGLE_PROJECT_ID=your-project-id
+    GOOGLE_VERTEX_LOCATION=us-central1 (or your preferred region)
+    GOOGLE_VERTEX_CREDENTIALS_JSON={"type":"service_account",...}
+    (or GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json)
 
-GCP Setup:
-  1. Vertex AI API enabled
-  2. Service account with "Vertex AI User" role
-  3. Project ID and region configured
+  GCP Setup:
+    1. Enable Vertex AI API in your Google Cloud project
+    2. Create service account with "Vertex AI User" role
+    3. Download service account JSON key
+    4. Set environment variable with JSON content
 
-================================================================================
-TESTING STATUS
-================================================================================
-
-✓ All 11 models configured
-✓ All 40 aliases validated
-✓ Format transformations working
-✓ Preview model remapping active
-✓ Ready for integration testing
+For OpenRouter Fallback:
+  Environment Variables:
+    OPENROUTER_API_KEY=sk-or-...
 
 ================================================================================
-FILES GENERATED
+TROUBLESHOOTING
 ================================================================================
 
-1. google_models_config.json
-   - Machine-readable configuration
-   - All 40 mappings included
+Models not appearing in catalog?
+  → Check: GET /v1/models?gateway=google-vertex
+  → Ensure gateway parameter is set correctly
+  → Default is gateway=openrouter (won't show Google models)
 
-2. GOOGLE_MODELS_VALIDATION_REPORT.md
-   - Full documentation
-   - Configuration details
+404 errors for Gemini 1.5 models?
+  → These models were retired by Google (April-September 2025)
+  → Use Gemini 2.5 or 3.0 models instead
+  → See "RETIRED MODELS" section above for replacements
 
-3. GOOGLE_MODELS_TESTING_GUIDE.md
-   - Detailed testing examples
-   - Troubleshooting guide
+Authentication errors?
+  → Verify GOOGLE_VERTEX_CREDENTIALS_JSON is set correctly
+  → Check service account has "Vertex AI User" role
+  → Ensure Vertex AI API is enabled in your project
+  → System will fallback to OpenRouter if Vertex credentials unavailable
 
-4. GOOGLE_MODELS_QUICK_REFERENCE.txt
-   - This file
-   - Quick lookups
+Pricing discrepancies?
+  → Gemini 3 Flash: $0.0005/1K tokens = $0.50/1M tokens
+  → Gemini 2.5 models: Check per-1K pricing in model listings above
+  → OpenRouter adds markup (~20%) over direct Vertex pricing
+  → All pricing normalized to per-1K tokens for consistency
 
-5. validate_google_models.py
-   - Configuration validation script
+================================================================================
+CONFIGURATION FILES
+================================================================================
 
-6. test_google_models.py
-   - Full integration test script
+Model Definitions:
+  src/services/google_models_config.py
+
+Model Transformations:
+  src/services/model_transformations.py
+
+Vertex AI Client:
+  src/services/google_vertex_client.py
+
+Catalog API:
+  src/routes/catalog.py
 
 ================================================================================
 MORE INFORMATION
 ================================================================================
 
-See: GOOGLE_MODELS_VALIDATION_REPORT.md
-     GOOGLE_MODELS_TESTING_GUIDE.md
-     google_models_config.json
+Documentation:
+  docs/integrations/GOOGLE_VERTEX_MIGRATION.md
 
-For code details:
-  src/services/model_transformations.py    - Model mapping logic
-  src/services/google_vertex_client.py     - API client
+Code Files:
+  src/services/google_models_config.py    - Multi-provider model definitions
+  src/services/google_vertex_client.py    - Vertex AI API client
+  src/services/model_transformations.py   - Model ID transformations
+  src/routes/catalog.py                   - Catalog API endpoints
 
+================================================================================
+LAST UPDATED: December 18, 2025
 ================================================================================

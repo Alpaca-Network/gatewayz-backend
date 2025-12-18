@@ -580,17 +580,25 @@ def get_referral_stats(user_id: int) -> dict[str, Any] | None:
 
             referral_details.append(
                 {
+                    "id": ref_user["id"],  # Frontend expects 'id' for React key prop
                     "user_id": ref_user["id"],
+                    "referee_id": ref_user["id"],  # Frontend normalizes to referee_id
                     "username": ref_user.get("username", "Unknown"),
                     "email": ref_user.get("email", "Unknown"),
-                    "date": ref_user.get("created_at"),  # Use 'date' for frontend compatibility
+                    "referee_email": ref_user.get("email", "Unknown"),  # Frontend expects referee_email
+                    "created_at": ref_user.get("created_at"),  # Frontend expects created_at
+                    "date": ref_user.get("created_at"),
                     "signed_up_at": ref_user.get("created_at"),
                     "status": "completed" if bonus_info else "pending",
                     "bonus_earned": bonus_info.get("bonus_earned", 0) if bonus_info else 0,
                     "bonus_date": bonus_info.get("bonus_date") if bonus_info else None,
+                    "completed_at": bonus_info.get("bonus_date") if bonus_info else None,  # Frontend expects completed_at
                     "reward": (
                         bonus_info.get("bonus_earned", 0) if bonus_info else 0
-                    ),  # Use 'reward' for frontend compatibility
+                    ),
+                    "reward_amount": (
+                        bonus_info.get("bonus_earned", 0) if bonus_info else REFERRAL_BONUS
+                    ),  # Frontend expects reward_amount, default to REFERRAL_BONUS for pending
                 }
             )
 
