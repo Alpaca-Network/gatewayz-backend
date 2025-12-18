@@ -226,6 +226,7 @@ async def get_providers(
             "groq",
             "fireworks",
             "together",
+            "google-vertex",
             "fal",
             "aihubmix",
             "anannas",
