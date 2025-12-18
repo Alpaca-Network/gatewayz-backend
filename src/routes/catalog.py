@@ -37,12 +37,12 @@ router = APIRouter()
 # Constants for query parameter descriptions (to avoid duplication)
 DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
-    "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
+    "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
-    "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
+    "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or 'all'"
 )
@@ -338,6 +338,7 @@ async def get_models(
         )
 
         openrouter_models: list[dict] = []
+        onerouter_models: list[dict] = []
         featherless_models: list[dict] = []
         deepinfra_models: list[dict] = []
         chutes_models: list[dict] = []
@@ -370,6 +371,11 @@ async def get_models(
                 )
                 # Don't fail with 503 - this prevents a single provider failure from breaking the entire API
                 # Users will get models from other providers if gateway="all", or empty list if gateway="openrouter"
+
+        if gateway_value in ("onerouter", "all"):
+            onerouter_models = get_cached_models("onerouter") or []
+            if not onerouter_models and gateway_value == "onerouter":
+                logger.warning("OneRouter models unavailable - continuing without them")
 
         if gateway_value in ("featherless", "all"):
             featherless_models = get_cached_models("featherless") or []
@@ -479,6 +485,8 @@ async def get_models(
 
         if gateway_value == "openrouter":
             models = openrouter_models
+        elif gateway_value == "onerouter":
+            models = onerouter_models
         elif gateway_value == "featherless":
             models = featherless_models
         elif gateway_value == "deepinfra":
@@ -523,6 +531,7 @@ async def get_models(
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
                 openrouter_models,
+                onerouter_models,
                 featherless_models,
                 deepinfra_models,
                 chutes_models,
@@ -569,6 +578,12 @@ async def get_models(
                 "openrouter",
             )
             provider_groups.append(enhanced_providers)
+
+        if gateway_value in ("onerouter", "all"):
+            models_for_providers = onerouter_models if gateway_value == "all" else models
+            onerouter_providers = derive_providers_from_models(models_for_providers, "onerouter")
+            annotated_onerouter = annotate_provider_sources(onerouter_providers, "onerouter")
+            provider_groups.append(annotated_onerouter)
 
         if gateway_value in ("featherless", "all"):
             models_for_providers = featherless_models if gateway_value == "all" else models
