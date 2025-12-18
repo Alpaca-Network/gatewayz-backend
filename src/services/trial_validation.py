@@ -115,7 +115,6 @@ def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
 
         # Check if trial is expired
         trial_end_date = key_data.get("trial_end_date")
-        trial_end_date = key_data.get("trial_end_date")
         if trial_end_date:
             try:
                 trial_end = _parse_trial_end_utc(trial_end_date)
