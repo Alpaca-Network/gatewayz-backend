@@ -508,35 +508,60 @@ def upsert_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def bulk_upsert_models(models_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def bulk_upsert_models(models_data: list[dict[str, Any]], batch_size: int = 500) -> list[dict[str, Any]]:
     """
-    Upsert multiple models at once
+    Upsert multiple models at once with batching to handle large catalogs
 
     Args:
         models_data: List of model data dictionaries
+        batch_size: Number of models to upsert per batch (default: 500)
 
     Returns:
         List of upserted model dictionaries
     """
+    if not models_data:
+        return []
+
     try:
         supabase = get_supabase_client()
 
         # Serialize Decimal objects to floats
         serialized_models = [_serialize_model_data(model) for model in models_data]
 
-        response = (
-            supabase.table("models")
-            .upsert(
-                serialized_models,
-                on_conflict="provider_id,provider_model_id"
-            )
-            .execute()
-        )
+        # Process in batches to avoid payload size and timeout issues
+        all_upserted = []
+        total_batches = (len(serialized_models) + batch_size - 1) // batch_size
 
-        if response.data:
-            logger.info(f"Upserted {len(response.data)} models")
-            return response.data
-        return []
+        for i in range(0, len(serialized_models), batch_size):
+            batch = serialized_models[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+
+            try:
+                logger.info(f"Upserting batch {batch_num}/{total_batches} ({len(batch)} models)")
+
+                response = (
+                    supabase.table("models")
+                    .upsert(
+                        batch,
+                        on_conflict="provider_id,provider_model_id"
+                    )
+                    .execute()
+                )
+
+                if response.data:
+                    all_upserted.extend(response.data)
+                    logger.info(f"Successfully upserted batch {batch_num}/{total_batches} ({len(response.data)} models)")
+                else:
+                    logger.warning(f"Batch {batch_num}/{total_batches} returned no data")
+
+            except Exception as batch_error:
+                logger.error(f"Error upserting batch {batch_num}/{total_batches}: {batch_error}")
+                # Continue with next batch instead of failing completely
+                continue
+
+        logger.info(f"Upserted {len(all_upserted)} total models across {total_batches} batches")
+        return all_upserted
+
     except Exception as e:
         logger.error(f"Error bulk upserting models: {e}")
         return []
