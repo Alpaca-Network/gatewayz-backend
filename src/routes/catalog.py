@@ -1117,7 +1117,7 @@ async def get_gateway_statistics(
     **This fixes the "Top Provider: N/A" issue in your UI!**
 
     Args:
-        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'helicone', etc.)
+        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'google-vertex', 'helicone', etc.)
         time_range: Time range for statistics
 
     Returns:
@@ -1148,6 +1148,7 @@ async def get_gateway_statistics(
             "groq",
             "fireworks",
             "together",
+            "google-vertex",
         ]
         if gateway.lower() not in valid_gateways:
             raise HTTPException(
@@ -1376,6 +1377,7 @@ async def compare_model_across_gateways(
                 "groq",
                 "fireworks",
                 "together",
+                "google-vertex",
                 "vercel-ai-gateway",
             ]
 
@@ -1519,6 +1521,7 @@ async def batch_compare_models(
                     "groq",
                     "fireworks",
                     "together",
+                    "google-vertex",
                     "vercel-ai-gateway",
                 ]
                 models_data = []
@@ -1795,7 +1798,7 @@ async def search_models(
     max_price: float | None = Query(None, description="Maximum price per token (USD)"),
     gateway: str | None = Query(
         "all",
-        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, helicone, aihubmix, vercel-ai-gateway, or all",
+        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, google-vertex, helicone, aihubmix, vercel-ai-gateway, or all",
     ),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),
