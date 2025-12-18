@@ -760,6 +760,7 @@ async def get_models(
             "groq": "Groq catalog",
             "fireworks": "Fireworks catalog",
             "together": "Together catalog",
+            "google-vertex": "Google Vertex AI catalog",
             "cerebras": "Cerebras catalog",
             "nebius": "Nebius catalog (no public listing is currently available)",
             "xai": "Xai catalog",
@@ -771,7 +772,7 @@ async def get_models(
             "anannas": "Anannas catalog",
             "aihubmix": "AiHubMix catalog",
             "vercel-ai-gateway": "Vercel AI Gateway catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, and Vercel AI Gateway catalogs",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, and Vercel AI Gateway catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         result = {
