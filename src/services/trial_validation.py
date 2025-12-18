@@ -7,7 +7,7 @@ PERF: Includes in-memory caching to reduce database queries by ~95%
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
