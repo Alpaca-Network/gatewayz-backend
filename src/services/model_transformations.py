@@ -78,7 +78,15 @@ MODEL_ID_ALIASES = {
     "gemini-3-pro": "google/gemini-3-pro-preview",
     # XAI Grok 3 series
     "grok-3": "x-ai/grok-3",
+    "grok-3-beta": "x-ai/grok-3-beta",
     "grok-3-mini": "x-ai/grok-3-mini",
+    "grok-3-mini-beta": "x-ai/grok-3-mini-beta",
+    # XAI Grok 4 series
+    "grok-4": "x-ai/grok-4",
+    "grok-4-fast": "x-ai/grok-4-fast",
+    "grok-4.1-fast": "x-ai/grok-4.1-fast",
+    # XAI Grok specialized models
+    "grok-code-fast-1": "x-ai/grok-code-fast-1",
     # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
     "grok-beta": "grok-3",
     "xai/grok-beta": "xai/grok-3",
