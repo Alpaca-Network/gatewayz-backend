@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timezone, timezone
 
 # =========================
 # In-memory Supabase stub
@@ -173,7 +173,7 @@ def sb(monkeypatch):
     return stub
 
 def iso_now():
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 # =========================
 # Tests
@@ -197,7 +197,7 @@ def test_create_and_get_session_with_messages(sb):
 def test_get_user_chat_sessions_pagination_and_sort(sb):
     import src.db.chat_history as ch
     # seed sessions with different updated_at
-    base = datetime.now(UTC)
+    base = datetime.now(timezone.utc)
     for i in range(5):
         s = {
             "user_id": 2,

@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from datetime import UTC
+from datetime import datetime, timezone
 
 from src.cache import _cerebras_models_cache
 
@@ -200,7 +200,7 @@ def fetch_models_from_cerebras():
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _cerebras_models_cache["data"] = models
-        _cerebras_models_cache["timestamp"] = datetime.now(UTC)
+        _cerebras_models_cache["timestamp"] = datetime.now(timezone.utc)
         return models
 
     try:

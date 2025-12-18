@@ -5,7 +5,7 @@ Fetches models from all provider APIs and syncs to database
 
 import logging
 from typing import Any
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.db.providers_db import (
@@ -209,7 +209,7 @@ def transform_normalized_model_to_db_schema(
 
         # Build metadata
         metadata = {
-            "synced_at": datetime.now(UTC).isoformat(),
+            "synced_at": datetime.now(timezone.utc).isoformat(),
             "source": provider_slug,
             "source_gateway": normalized_model.get("source_gateway", provider_slug),
             "provider_slug": normalized_model.get("provider_slug"),
@@ -583,7 +583,7 @@ def sync_all_providers(
             "errors": errors,
             "results": results,
             "dry_run": dry_run,
-            "synced_at": datetime.now(UTC).isoformat()
+            "synced_at": datetime.now(timezone.utc).isoformat()
         }
 
     except Exception as e:

@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -249,7 +249,7 @@ class IntelligentHealthMonitor:
                 supabase.table("model_health_tracking")
                 .select("*")
                 .eq("is_enabled", True)
-                .lte("next_check_at", datetime.now(UTC).isoformat())
+                .lte("next_check_at", datetime.now(timezone.utc).isoformat())
                 .order("priority_score", desc=True)
                 .order("next_check_at", desc=False)
                 .limit(self.batch_size * 2)  # Get more than we need for filtering
@@ -392,7 +392,7 @@ class IntelligentHealthMonitor:
             response_time_ms=response_time_ms,
             error_message=error_message,
             http_status_code=http_status_code,
-            checked_at=datetime.now(UTC),
+            checked_at=datetime.now(timezone.utc),
         )
 
     def _get_gateway_endpoint(self, gateway: str) -> str | None:
@@ -500,7 +500,7 @@ class IntelligentHealthMonitor:
             if not is_success and consecutive_failures > 1:
                 interval = min(interval, 300)  # Max 5 minutes for failing models
 
-            next_check_at = datetime.now(UTC) + timedelta(seconds=interval)
+            next_check_at = datetime.now(timezone.utc) + timedelta(seconds=interval)
 
             # Calculate uptime percentages (simplified - should use history)
             success_rate = success_count / call_count if call_count > 0 else 1.0
@@ -528,7 +528,7 @@ class IntelligentHealthMonitor:
                 "uptime_percentage_24h": uptime_percentage,  # Should be calculated from history
                 "uptime_percentage_7d": uptime_percentage,
                 "uptime_percentage_30d": uptime_percentage,
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             # Upsert to database
@@ -616,7 +616,7 @@ class IntelligentHealthMonitor:
                     {
                         "error_count": active.data["error_count"] + 1,
                         "error_message": result.error_message,
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("id", incident_id).execute()
             else:
@@ -645,7 +645,7 @@ class IntelligentHealthMonitor:
         try:
             from src.config.supabase_config import supabase
 
-            now = datetime.now(UTC)
+            now = datetime.now(timezone.utc)
 
             supabase.table("model_health_incidents").update(
                 {
@@ -843,7 +843,7 @@ class IntelligentHealthMonitor:
                 "tracked_models": tracked_models,
                 "tracked_providers": tracked_providers,
                 "system_uptime": system_uptime,
-                "last_updated": datetime.now(UTC).isoformat(),
+                "last_updated": datetime.now(timezone.utc).isoformat(),
             }
 
             simple_health_cache.cache_system_health(system_data)

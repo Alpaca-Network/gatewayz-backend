@@ -1,7 +1,7 @@
 """Cache module for storing model and provider data"""
 
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +309,7 @@ def is_cache_fresh(cache: dict) -> bool:
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
     return cache_age < cache.get("ttl", 3600)
 
 
@@ -321,7 +321,7 @@ def is_cache_stale_but_usable(cache: dict) -> bool:
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", ttl * 2)
     return ttl <= cache_age < stale_ttl
@@ -351,7 +351,7 @@ def initialize_fal_cache_from_catalog():
         # Store raw models temporarily - will be normalized on first access
         # This avoids circular import with models.py
         _fal_models_cache["data"] = raw_models
-        _fal_models_cache["timestamp"] = datetime.now(UTC)
+        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
         logger.debug(f"Preloaded {len(raw_models)} FAL models from catalog")
 
     except (ImportError, OSError) as error:
@@ -375,7 +375,7 @@ def initialize_featherless_cache_from_catalog():
         if raw_models and len(raw_models) > 0:
             # Successfully loaded from export
             _featherless_models_cache["data"] = raw_models
-            _featherless_models_cache["timestamp"] = datetime.now(UTC)
+            _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
             logger.debug(f"Preloaded {len(raw_models)} Featherless models from catalog export")
         else:
             # No export available - initialize empty to enable lazy loading via API
@@ -409,7 +409,7 @@ def set_gateway_error(gateway: str, error_message: str):
 
     _gateway_error_cache[gateway] = {
         "error": error_message,
-        "timestamp": datetime.now(UTC),
+        "timestamp": datetime.now(timezone.utc),
         "failure_count": failure_count,
     }
 
@@ -460,7 +460,7 @@ def is_gateway_in_error_state(gateway: str) -> bool:
         return False
 
     ttl = get_gateway_error_ttl(failure_count)
-    age = (datetime.now(UTC) - timestamp).total_seconds()
+    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
 
     if age >= ttl:
         # TTL expired, clear error state

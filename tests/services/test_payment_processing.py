@@ -5,7 +5,7 @@ Tests Stripe integration for checkout sessions, payment intents, webhooks
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock, call
-from datetime import datetime, timezone, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 import stripe
 
 from src.services.payments import StripeService
@@ -103,7 +103,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -168,7 +168,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_456'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_456'
-        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = 'pi_cs_test_456'
         mock_stripe_create.return_value = mock_session
 
@@ -263,7 +263,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -883,7 +883,7 @@ class TestRefunds:
         mock_refund.currency = 'usd'
         mock_refund.status = 'succeeded'
         mock_refund.reason = 'requested_by_customer'
-        mock_refund.created = int(datetime.now(UTC).timestamp())
+        mock_refund.created = int(datetime.now(timezone.utc).timestamp())
         mock_stripe_refund.return_value = mock_refund
 
         request = CreateRefundRequest(
@@ -998,7 +998,7 @@ class TestPaymentIntegration:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
