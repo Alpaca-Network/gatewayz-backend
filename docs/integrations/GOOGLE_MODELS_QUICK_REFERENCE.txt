@@ -27,7 +27,7 @@ LATEST MODELS (December 2025 - Use these first)
 ✨ GEMINI 3 FLASH (NEW - Dec 17, 2025)
   Model: gemini-3-flash
   ↳ Google's latest frontier model with breakthrough speed and intelligence
-  ↳ Pricing: $0.50/1M input, $3.00/1M output tokens
+  ↳ Pricing: $0.0005/1K input, $0.003/1K output tokens
   ↳ Features: streaming, multimodal, function_calling, thinking
   ↳ Context: 1M tokens, Max output: 8192 tokens
 
@@ -116,8 +116,9 @@ Each Google model can be accessed through multiple providers:
 2. OpenRouter (Proxy/Fallback)
    ↳ Priority: 2 (automatic fallback when Vertex credentials unavailable)
    ↳ Requires: OPENROUTER_API_KEY
-   ↳ Adds small markup to pricing
+   ↳ Adds small markup to pricing (~20%)
    ↳ Model prefix: google/ (e.g., google/gemini-3-flash-preview)
+   ↳ Note: OpenRouter uses -preview suffix for Gemini 3 Flash
 
 The system automatically selects the best provider based on:
 - Credential availability
@@ -287,9 +288,10 @@ Authentication errors?
   → System will fallback to OpenRouter if Vertex credentials unavailable
 
 Pricing discrepancies?
-  → Gemini 3 Flash: $0.50/1M = $0.0005/1K tokens
+  → Gemini 3 Flash: $0.0005/1K tokens = $0.50/1M tokens
   → Gemini 2.5 models: Check per-1K pricing in model listings above
   → OpenRouter adds markup (~20%) over direct Vertex pricing
+  → All pricing normalized to per-1K tokens for consistency
 
 ================================================================================
 CONFIGURATION FILES
