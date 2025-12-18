@@ -39,12 +39,12 @@ DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or auto-detect if not specified"
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', or 'all'"
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -226,6 +226,7 @@ async def get_providers(
             "groq",
             "fireworks",
             "together",
+            "google-vertex",
             "fal",
             "aihubmix",
             "anannas",
@@ -471,6 +472,11 @@ async def get_models(
             if not alibaba_models and gateway_value == "alibaba":
                 logger.warning("Alibaba Cloud models unavailable - continuing without them")
 
+        if gateway_value in ("google-vertex", "all"):
+            google_models = get_cached_models("google-vertex") or []
+            if not google_models and gateway_value == "google-vertex":
+                logger.warning("Google Vertex AI models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "featherless":
@@ -511,6 +517,8 @@ async def get_models(
             models = vercel_ai_gateway_models
         elif gateway_value == "alibaba":
             models = alibaba_models
+        elif gateway_value == "google-vertex":
+            models = google_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -521,6 +529,7 @@ async def get_models(
                 groq_models,
                 fireworks_models,
                 together_models,
+                google_models,
                 aimo_models,
                 near_models,
                 fal_models,
@@ -596,6 +605,12 @@ async def get_models(
             together_providers = derive_providers_from_models(models_for_providers, "together")
             annotated_together = annotate_provider_sources(together_providers, "together")
             provider_groups.append(annotated_together)
+
+        if gateway_value in ("google-vertex", "all"):
+            models_for_providers = google_models if gateway_value == "all" else models
+            google_providers = derive_providers_from_models(models_for_providers, "google-vertex")
+            annotated_google = annotate_provider_sources(google_providers, "google-vertex")
+            provider_groups.append(annotated_google)
 
         if gateway_value in ("cerebras", "all"):
             models_for_providers = cerebras_models if gateway_value == "all" else models
@@ -751,6 +766,7 @@ async def get_models(
             "groq": "Groq catalog",
             "fireworks": "Fireworks catalog",
             "together": "Together catalog",
+            "google-vertex": "Google Vertex AI catalog",
             "cerebras": "Cerebras catalog",
             "nebius": "Nebius catalog (no public listing is currently available)",
             "xai": "Xai catalog",
@@ -762,7 +778,7 @@ async def get_models(
             "anannas": "Anannas catalog",
             "aihubmix": "AiHubMix catalog",
             "vercel-ai-gateway": "Vercel AI Gateway catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, and Vercel AI Gateway catalogs",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, and Vercel AI Gateway catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         result = {
@@ -1108,7 +1124,7 @@ async def get_gateway_statistics(
     **This fixes the "Top Provider: N/A" issue in your UI!**
 
     Args:
-        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'helicone', etc.)
+        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'google-vertex', 'helicone', etc.)
         time_range: Time range for statistics
 
     Returns:
@@ -1139,6 +1155,7 @@ async def get_gateway_statistics(
             "groq",
             "fireworks",
             "together",
+            "google-vertex",
         ]
         if gateway.lower() not in valid_gateways:
             raise HTTPException(
@@ -1367,6 +1384,7 @@ async def compare_model_across_gateways(
                 "groq",
                 "fireworks",
                 "together",
+                "google-vertex",
                 "vercel-ai-gateway",
             ]
 
@@ -1510,6 +1528,7 @@ async def batch_compare_models(
                     "groq",
                     "fireworks",
                     "together",
+                    "google-vertex",
                     "vercel-ai-gateway",
                 ]
                 models_data = []
@@ -1786,7 +1805,7 @@ async def search_models(
     max_price: float | None = Query(None, description="Maximum price per token (USD)"),
     gateway: str | None = Query(
         "all",
-        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, helicone, aihubmix, vercel-ai-gateway, or all",
+        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, google-vertex, helicone, aihubmix, vercel-ai-gateway, or all",
     ),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),
@@ -1845,6 +1864,10 @@ async def search_models(
         if gateway_value in ("together", "all"):
             together_models = get_cached_models("together") or []
             all_models.extend(together_models)
+
+        if gateway_value in ("google-vertex", "all"):
+            google_models = get_cached_models("google-vertex") or []
+            all_models.extend(google_models)
 
         if gateway_value in ("aihubmix", "all"):
             aihubmix_models = get_cached_models("aihubmix") or []
