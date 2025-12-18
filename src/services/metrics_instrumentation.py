@@ -17,7 +17,7 @@ import logging
 from typing import Optional, Dict, Any, Callable
 from functools import wraps
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class MetricsCollector:
         self.db_query_latency = 0.0
         self.external_api_calls = defaultdict(int)  # {service: count}
         self.external_api_errors = defaultdict(int)  # {service: count}
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
 
     def record_request(
         self,
@@ -221,7 +221,7 @@ class MetricsCollector:
             self.db_query_latency / self.db_queries if self.db_queries > 0 else 0
         )
 
-        uptime_seconds = (datetime.utcnow() - self.start_time).total_seconds()
+        uptime_seconds = (datetime.now(timezone.utc) - self.start_time).total_seconds()
 
         return {
             "latency": latency_metrics,
@@ -260,7 +260,7 @@ class MetricsCollector:
         self.db_query_latency = 0.0
         self.external_api_calls.clear()
         self.external_api_errors.clear()
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
 
 
 # Global metrics collector instance

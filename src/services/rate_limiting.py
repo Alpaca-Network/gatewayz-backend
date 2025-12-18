@@ -191,7 +191,7 @@ class SlidingWindowRateLimiter:
                 reset_time=(
                     datetime.fromtimestamp(result.reset_time)
                     if result.reset_time
-                    else datetime.utcnow() + timedelta(minutes=1)
+                    else datetime.now(timezone.utc) + timedelta(minutes=1)
                 ),
                 retry_after=result.retry_after,
                 reason=result.reason,

@@ -48,7 +48,7 @@ async def health_check():
     """
     import datetime
 
-    return {"status": "healthy", "timestamp": datetime.datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.datetime.now(timezone.utc).isoformat()}
 
 
 @router.get("/ping")
