@@ -5,6 +5,7 @@ Provides API endpoints for viewing errors, generating fixes, and tracking status
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
@@ -281,7 +282,7 @@ async def error_dashboard():
             category_counts[cat] = category_counts.get(cat, 0) + pattern.count
 
         return {
-            "timestamp": __import__("datetime").datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "summary": {
                 "total_patterns": len(monitor.error_patterns),
                 "critical_errors": len(critical),

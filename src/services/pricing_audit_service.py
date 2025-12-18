@@ -396,7 +396,7 @@ class PricingAuditService:
         recent_records = [
             r
             for r in all_records
-            if datetime.fromisoformat(r.timestamp) >= cutoff
+            if datetime.fromisoformat(r.timestamp.replace('Z', '+00:00')).replace(tzinfo=timezone.utc) >= cutoff
         ]
 
         # Calculate statistics

@@ -330,7 +330,7 @@ class PricingSyncService:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
         for backup_file in BACKUP_DIR.glob("pricing_backup_*.json"):
-            if datetime.fromtimestamp(backup_file.stat().st_mtime) < cutoff:
+            if datetime.fromtimestamp(backup_file.stat().st_mtime, tz=timezone.utc) < cutoff:
                 backup_file.unlink()
                 logger.info(f"Deleted old backup: {backup_file}")
 
