@@ -13,10 +13,12 @@ Vercel AI Gateway: https://vercel.com/ai-gateway
 """
 
 import logging
+from collections.abc import AsyncIterator
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
+from src.services.connection_pool import get_pooled_async_client
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -159,4 +161,63 @@ def process_ai_sdk_response(response):
         }
     except Exception as e:
         logger.error(f"Failed to process AI SDK response: {e}")
+        raise
+
+
+def get_ai_sdk_async_client() -> AsyncOpenAI:
+    """Get async AI SDK client with connection pooling for better performance.
+
+    PERF: Uses AsyncOpenAI for non-blocking streaming, which prevents the
+    event loop from being blocked while waiting for the first chunk from the
+    AI provider. This is critical for reducing perceived TTFC.
+
+    Returns:
+        AsyncOpenAI: Async OpenAI-compatible client for making AI SDK requests
+
+    Raises:
+        ValueError: If API key is not configured
+    """
+    try:
+        api_key = validate_ai_sdk_api_key()
+
+        return get_pooled_async_client(
+            provider="ai_sdk",
+            base_url="https://ai-gateway.vercel.sh/v1",
+            api_key=api_key,
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize async AI SDK client: {e}")
+        raise
+
+
+async def make_ai_sdk_request_openai_stream_async(messages, model, **kwargs) -> AsyncIterator:
+    """Make async streaming request to AI SDK using AsyncOpenAI client.
+
+    PERF: This async version doesn't block the event loop while waiting for
+    the AI provider to start streaming. The caller can yield control back to
+    the event loop between chunks, improving overall concurrency.
+
+    Args:
+        messages: List of message objects with 'role' and 'content'
+        model: Model name (e.g., "gpt-4-turbo", "claude-3-opus")
+        **kwargs: Additional parameters like max_tokens, temperature, etc.
+
+    Returns:
+        AsyncIterator of streaming chunks
+
+    Raises:
+        ValueError: If API key is not configured
+        Exception: If the API request fails
+    """
+    try:
+        client = get_ai_sdk_async_client()
+        stream = await client.chat.completions.create(
+            model=model, messages=messages, stream=True, **kwargs
+        )
+        return stream
+    except ValueError as e:
+        logger.error(f"AI SDK configuration error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"AI SDK async streaming request failed: {e}")
         raise

@@ -280,6 +280,15 @@ streaming_duration_seconds = get_or_create_metric(Histogram,
     buckets=(0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 5.0, 10.0),
 )
 
+# TTFC (Time to First Chunk) - Critical metric for perceived streaming latency
+# Measures time from stream_generator() entry to first SSE chunk yielded
+time_to_first_chunk_seconds = get_or_create_metric(Histogram,
+    "time_to_first_chunk_seconds",
+    "Time from stream start to first SSE chunk sent to client (TTFC)",
+    ["provider", "model"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 10.0, 15.0),
+)
+
 frontend_processing_seconds = get_or_create_metric(Histogram,
     "frontend_processing_seconds",
     "Frontend processing time (request parsing, auth, preparation) in seconds",
@@ -717,6 +726,21 @@ def track_streaming_duration(provider: str, model: str, endpoint: str, duration:
     streaming_duration_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(
         duration
     )
+
+
+def track_time_to_first_chunk(provider: str, model: str, ttfc: float):
+    """Track Time to First Chunk (TTFC) - critical for perceived streaming latency.
+
+    This metric measures the time from when stream_generator() starts iterating
+    to when the first SSE chunk is yielded to the client. High TTFC values
+    indicate the AI provider is slow to start generating tokens.
+
+    Args:
+        provider: The AI provider name (e.g., "openrouter", "fireworks")
+        model: The model identifier
+        ttfc: Time to first chunk in seconds
+    """
+    time_to_first_chunk_seconds.labels(provider=provider, model=model).observe(ttfc)
 
 
 def track_frontend_processing(endpoint: str, duration: float):

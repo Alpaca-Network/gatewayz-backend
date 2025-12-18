@@ -1,6 +1,7 @@
 # GitGuardian configuration file
 # This file configures GitGuardian to handle false positives and known secrets
 # Updated: 2025-12-02 - All example keys from PR are allowlisted below
+# Note: Using specific file paths instead of broad patterns to maintain security
 
 # Paths to skip entirely
 paths-ignore:
@@ -12,9 +13,12 @@ paths-ignore:
   - "venv/**"
   - "dist/**"
   - "build/**"
-  - "scripts/validation/**"
-  - "docs/**"
-  - "**/*.md"
+  # Specific files with example keys (not broad patterns)
+  - "scripts/validation/validate_openrouter_auto_access.py"
+  - "tests/integration/test_openrouter_auto_live.py"
+  - "test_openrouter_auto_curl.sh"
+  - "docs/deployment/VERCEL_DEPLOYMENT.md"
+  - "docs/OPENROUTER_AUTH_FIX.md"
 
 # Explicitly allowlist secrets that were exposed in git history but are now removed
 # These test keys have been rotated and should not be used

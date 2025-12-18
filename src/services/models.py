@@ -19,6 +19,8 @@ from src.cache import (
     _anannas_models_cache,
     _cerebras_models_cache,
     _chutes_models_cache,
+    _clarifai_models_cache,
+    _cloudflare_workers_ai_models_cache,
     _deepinfra_models_cache,
     _fal_models_cache,
     _featherless_models_cache,
@@ -37,13 +39,12 @@ from src.cache import (
     _together_models_cache,
     _vercel_ai_gateway_models_cache,
     _xai_models_cache,
-    _cloudflare_workers_ai_models_cache,
-    is_cache_fresh,
-    should_revalidate_in_background,
-    set_gateway_error,
-    is_gateway_in_error_state,
     clear_gateway_error,
     get_gateway_error_message,
+    is_cache_fresh,
+    is_gateway_in_error_state,
+    set_gateway_error,
+    should_revalidate_in_background,
 )
 from src.config import Config
 from src.services.google_models_config import register_google_models_in_canonical_registry
@@ -54,6 +55,8 @@ from src.services.multi_provider_registry import (
     get_registry,
 )
 from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.clarifai_client import fetch_models_from_clarifai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
@@ -459,8 +462,11 @@ def get_all_models_parallel():
             "aihubmix",
             "alibaba",
             "onerouter",
+            "google-vertex",
+            "cloudflare-workers-ai",
+            "clarifai",
         ]
-        
+
         # Filter out gateways that are currently in error state (circuit breaker pattern)
         active_gateways = []
         for gw in gateways:
@@ -473,7 +479,7 @@ def get_all_models_parallel():
                 )
             else:
                 active_gateways.append(gw)
-        
+
         logger.info(
             "Fetching from %d/%d active gateways (%d in error state)",
             len(active_gateways),
@@ -536,6 +542,10 @@ def get_all_models_sequential():
     anannas_models = get_cached_models("anannas") or []
     aihubmix_models = get_cached_models("aihubmix") or []
     alibaba_models = get_cached_models("alibaba") or []
+    onerouter_models = get_cached_models("onerouter") or []
+    google_vertex_models = get_cached_models("google-vertex") or []
+    cloudflare_workers_ai_models = get_cached_models("cloudflare-workers-ai") or []
+    clarifai_models = get_cached_models("clarifai") or []
     return (
         openrouter_models
         + featherless_models
@@ -556,6 +566,10 @@ def get_all_models_sequential():
         + anannas_models
         + aihubmix_models
         + alibaba_models
+        + onerouter_models
+        + google_vertex_models
+        + cloudflare_workers_ai_models
+        + clarifai_models
     )
 
 
@@ -831,6 +845,14 @@ def get_cached_models(gateway: str = "openrouter"):
             _register_canonical_records("cloudflare-workers-ai", result)
             return result if result is not None else []
 
+        if gateway == "clarifai":
+            cached = _get_fresh_or_stale_cached_models(_clarifai_models_cache, "clarifai")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_clarifai()
+            _register_canonical_records("clarifai", result)
+            return result if result is not None else []
+
         if gateway == "all":
             cache = _multi_provider_catalog_cache
             # Check timestamp only - empty list [] is a valid cached value
@@ -898,7 +920,7 @@ def fetch_models_from_openrouter():
                 model["pricing"] = sanitize_pricing(model["pricing"])
         _models_cache["data"] = models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
-        
+
         # Clear error state on successful fetch
         clear_gateway_error("openrouter")
 
@@ -958,7 +980,7 @@ def fetch_models_from_deepinfra():
 
         _deepinfra_models_cache["data"] = normalized_models
         _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
+
         # Clear error state on successful fetch
         clear_gateway_error("deepinfra")
 
@@ -1024,7 +1046,7 @@ def fetch_models_from_featherless():
 
         _featherless_models_cache["data"] = normalized_models
         _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
+
         # Clear error state on successful fetch
         clear_gateway_error("featherless")
 
@@ -1177,7 +1199,7 @@ def fetch_models_from_groq():
 
         _groq_models_cache["data"] = normalized_models
         _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
+
         # Clear error state on successful fetch
         clear_gateway_error("groq")
 
@@ -1369,7 +1391,7 @@ def fetch_models_from_fireworks():
 
         _fireworks_models_cache["data"] = normalized_models
         _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
+
         # Clear error state on successful fetch
         clear_gateway_error("fireworks")
 
@@ -1378,14 +1400,14 @@ def fetch_models_from_fireworks():
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("Fireworks HTTP error: %s", error_msg)
-        
+
         # Cache error state to prevent continuous retries
         set_gateway_error("fireworks", error_msg)
         return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         logger.error("Failed to fetch models from Fireworks: %s", error_msg)
-        
+
         # Cache error state to prevent continuous retries
         set_gateway_error("fireworks", error_msg)
         return None
@@ -1517,7 +1539,7 @@ def fetch_models_from_together():
 
         _together_models_cache["data"] = normalized_models
         _together_models_cache["timestamp"] = datetime.now(timezone.utc)
-        
+
         # Clear error state on successful fetch
         clear_gateway_error("together")
 
@@ -1695,7 +1717,7 @@ def fetch_models_from_aimo():
 
                 return _aimo_models_cache["data"]
 
-            except httpx.TimeoutException as e:
+            except httpx.TimeoutException:
                 last_error = f"Timeout at {url} after {Config.AIMO_FETCH_TIMEOUT}s"
                 logger.warning("AIMO timeout: %s (attempt %d)", last_error, attempt + 1)
                 continue
@@ -1932,6 +1954,14 @@ def fetch_models_from_near():
                 "inputCostPerToken": {"amount": 0.75, "scale": -6},  # $0.75 per million tokens
                 "outputCostPerToken": {"amount": 2.0, "scale": -6},  # $2.00 per million tokens
                 "metadata": {"contextLength": 200000},
+            },
+            {
+                "id": "moonshotai/Kimi-K2-Thinking",
+                "modelId": "moonshotai/Kimi-K2-Thinking",
+                "owned_by": "Moonshot AI",
+                "inputCostPerToken": {"amount": 0.6, "scale": -6},  # $0.60 per million tokens
+                "outputCostPerToken": {"amount": 2.4, "scale": -6},  # $2.40 per million tokens
+                "metadata": {"contextLength": 128000},
             },
         ]
 
@@ -2681,11 +2711,48 @@ def fetch_specific_model_from_fal(provider_name: str, model_name: str):
         return None
 
 
+def fetch_specific_model_from_google_vertex(provider_name: str, model_name: str):
+    """Fetch specific model data from Google Vertex AI by searching cached models
+
+    Google Vertex models use a static catalog, so we search the cached models.
+    Model IDs can be in formats like:
+    - gemini-3-flash (simple name)
+    - google/gemini-3-flash (with provider prefix)
+    """
+    try:
+        model_id = f"{provider_name}/{model_name}"
+        model_id_lower = model_id.lower()
+        # Also check for simple model name without provider prefix
+        simple_name = model_name.lower()
+
+        google_models = get_cached_models("google-vertex")
+        if google_models:
+            for model in google_models:
+                cached_id = model.get("id", "").lower()
+                # Match full model_id or just the model name
+                if cached_id == model_id_lower or cached_id == simple_name:
+                    return model
+
+        logger.warning(
+            "Model %s not found in Google Vertex AI catalog",
+            sanitize_for_logging(model_id)
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            "Failed to fetch specific model %s/%s from Google Vertex AI: %s",
+            sanitize_for_logging(provider_name),
+            sanitize_for_logging(model_name),
+            sanitize_for_logging(str(e)),
+        )
+        return None
+
+
 def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
+        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
     """
     try:
         model_id = f"{provider_name}/{model_name}".lower()
@@ -2699,6 +2766,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             "groq",
             "fireworks",
             "together",
+            "google-vertex",
             "cerebras",
             "nebius",
             "xai",
@@ -2790,6 +2858,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             "groq": fetch_specific_model_from_groq,
             "fireworks": fetch_specific_model_from_fireworks,
             "together": fetch_specific_model_from_together,
+            "google-vertex": fetch_specific_model_from_google_vertex,
             "huggingface": fetch_specific_model_from_huggingface,
             "fal": fetch_specific_model_from_fal,
         }
@@ -3389,6 +3458,46 @@ def normalize_anannas_model(model) -> dict | None:
         return None
 
 
+def _is_alibaba_quota_error_cached() -> bool:
+    """Check if we're in a quota error backoff period.
+
+    Returns True if a quota error was recently recorded and we should skip
+    making API calls to avoid log spam.
+    """
+    if not _alibaba_models_cache.get("quota_error"):
+        return False
+
+    timestamp = _alibaba_models_cache.get("quota_error_timestamp")
+    if not timestamp:
+        return False
+
+    backoff = _alibaba_models_cache.get("quota_error_backoff", 900)  # Default 15 min
+    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    return age < backoff
+
+
+def _set_alibaba_quota_error():
+    """Record a quota error with backoff timing.
+
+    Note: We intentionally do NOT set the main cache timestamp here.
+    This ensures that the cache appears "stale" so that get_cached_models()
+    will call fetch_models_from_alibaba(), where the quota error backoff
+    check (_is_alibaba_quota_error_cached) is evaluated. If we set timestamp,
+    the 1-hour cache TTL would override our 15-minute quota error backoff.
+    """
+    _alibaba_models_cache["quota_error"] = True
+    _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
+    _alibaba_models_cache["data"] = []
+    # Don't set timestamp - let the cache appear stale so fetch_models_from_alibaba
+    # is called and can check the quota_error_backoff
+
+
+def _clear_alibaba_quota_error():
+    """Clear quota error state after successful fetch."""
+    _alibaba_models_cache["quota_error"] = False
+    _alibaba_models_cache["quota_error_timestamp"] = None
+
+
 def fetch_models_from_alibaba():
     """Fetch models from Alibaba Cloud (DashScope) via OpenAI-compatible API
 
@@ -3407,7 +3516,15 @@ def fetch_models_from_alibaba():
             _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
             return []
 
-        from src.services.alibaba_cloud_client import list_alibaba_models
+        # Check if we're in quota error backoff period
+        if _is_alibaba_quota_error_cached():
+            logger.debug(
+                "Alibaba Cloud quota error in backoff period - skipping API call. "
+                "Will retry after backoff expires."
+            )
+            return _alibaba_models_cache.get("data", [])
+
+        from src.services.alibaba_cloud_client import list_alibaba_models, QuotaExceededError
 
         response = list_alibaba_models()
 
@@ -3415,14 +3532,27 @@ def fetch_models_from_alibaba():
             logger.warning("No models returned from Alibaba Cloud")
             return []
 
-        # Normalize models
-        normalized_models = [normalize_alibaba_model(model) for model in response.data if model]
+        # Normalize models (filter out None values from normalization failures)
+        normalized_models = [
+            m for m in (normalize_alibaba_model(model) for model in response.data if model) if m
+        ]
 
         _alibaba_models_cache["data"] = normalized_models
         _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Clear any previous quota error state on success
+        _clear_alibaba_quota_error()
 
         logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
         return _alibaba_models_cache["data"]
+    except QuotaExceededError:
+        # Quota exceeded - cache the failure state to prevent repeated API calls
+        _set_alibaba_quota_error()
+        logger.warning(
+            "Alibaba Cloud quota exceeded. Caching empty result for %d seconds. "
+            "Please check your plan and billing details.",
+            _alibaba_models_cache.get("quota_error_backoff", 900),
+        )
+        return []
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         # Check if it's a 401 authentication error

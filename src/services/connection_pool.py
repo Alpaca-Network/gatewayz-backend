@@ -350,7 +350,7 @@ def get_huggingface_pooled_client() -> OpenAI:
 
     return get_pooled_client(
         provider="huggingface",
-        base_url="https://api-inference.huggingface.co/v1",
+        base_url="https://router.huggingface.co/v1",
         api_key=Config.HUGGINGFACE_API_KEY,
         timeout=HUGGINGFACE_TIMEOUT,
     )
@@ -451,3 +451,96 @@ def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
         base_url=base_url,
         api_key=Config.CLOUDFLARE_API_TOKEN,
     )
+
+
+def get_akash_pooled_client() -> OpenAI:
+    """Get pooled client for Akash ML.
+
+    Akash ML provides an OpenAI-compatible API endpoint.
+    See: https://api.akashml.com/v1
+    """
+    if not Config.AKASH_API_KEY:
+        raise ValueError("Akash API key not configured")
+
+    return get_pooled_client(
+        provider="akash",
+        base_url="https://api.akashml.com/v1",
+        api_key=Config.AKASH_API_KEY,
+    )
+
+
+def get_morpheus_pooled_client() -> OpenAI:
+    """Get pooled client for Morpheus AI Gateway.
+
+    Morpheus provides an OpenAI-compatible API endpoint for decentralized AI.
+    See: https://api.mor.org/api/v1
+    """
+    if not Config.MORPHEUS_API_KEY:
+        raise ValueError("Morpheus API key not configured")
+
+    return get_pooled_client(
+        provider="morpheus",
+        base_url="https://api.mor.org/api/v1",
+        api_key=Config.MORPHEUS_API_KEY,
+    )
+
+
+# =============================================================================
+# CONNECTION PRE-WARMING
+# =============================================================================
+# PERF: Pre-warm connections to frequently used providers on app startup.
+# This eliminates the cold-start penalty (~100-200ms) for TLS handshake,
+# HTTP/2 connection setup, and provider authentication on first requests.
+
+
+def warmup_provider_connections() -> dict[str, str]:
+    """
+    Pre-warm connections to frequently used providers.
+
+    This function creates pooled clients for high-traffic providers,
+    establishing TCP connections, completing TLS handshakes, and
+    setting up HTTP/2 multiplexing before any user requests arrive.
+
+    Returns:
+        Dict mapping provider names to their warmup status ("ok" or error message)
+    """
+    # Providers to pre-warm, ordered by typical traffic volume
+    providers_to_warm = [
+        ("openrouter", get_openrouter_pooled_client),
+        ("fireworks", get_fireworks_pooled_client),
+        ("together", get_together_pooled_client),
+        ("groq", get_groq_pooled_client),
+        ("featherless", get_featherless_pooled_client),
+        ("xai", get_xai_pooled_client),
+    ]
+
+    results = {}
+
+    for provider_name, get_client_fn in providers_to_warm:
+        try:
+            # Creating the client establishes the connection
+            client = get_client_fn()
+            # The client is now in the pool with an active connection
+            results[provider_name] = "ok"
+            logger.info(f"✅ Warmed up connection to {provider_name}")
+        except ValueError as e:
+            # API key not configured - expected for some providers
+            results[provider_name] = f"skipped: {e}"
+            logger.debug(f"⏭️  Skipping {provider_name} warmup: {e}")
+        except Exception as e:
+            # Connection error - log but don't fail startup
+            results[provider_name] = f"error: {e}"
+            logger.warning(f"⚠️  Failed to warm up {provider_name}: {e}")
+
+    return results
+
+
+async def warmup_provider_connections_async() -> dict[str, str]:
+    """
+    Async wrapper for pre-warming connections.
+
+    Runs the synchronous warmup in a thread pool to avoid blocking
+    the event loop during startup.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, warmup_provider_connections)

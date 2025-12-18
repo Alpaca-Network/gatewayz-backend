@@ -1,0 +1,24 @@
+# Virtual environments
+.venv*
+venv/
+gatewayz/
+.gatewayz/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Temp files
+tmp/
+*.log

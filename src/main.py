@@ -5,7 +5,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import REGISTRY
@@ -193,8 +193,14 @@ def create_app() -> FastAPI:
     logger.info(f"   Allowed Origins: {allowed_origins}")
     logger.info(f"   Allowed Headers: {allowed_headers}")
 
-    # OPTIMIZED: Add trace context middleware first (for distributed tracing)
+    # OPTIMIZED: Add request timeout middleware first to prevent 504 Gateway Timeouts
     # Middleware order matters! Last added = first executed
+    from src.middleware.request_timeout_middleware import RequestTimeoutMiddleware
+
+    app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
+    logger.info("  ⏱️  Request timeout middleware enabled (55s timeout to prevent 504 errors)")
+
+    # Add trace context middleware for distributed tracing
     from src.middleware.trace_context_middleware import TraceContextMiddleware
 
     app.add_middleware(TraceContextMiddleware)
@@ -224,9 +230,10 @@ def create_app() -> FastAPI:
 
     # OPTIMIZED: Add GZip compression last (larger threshold = 10KB for better CPU efficiency)
     # Only compress large responses (model catalogs, large JSON payloads)
-    # This significantly reduces payload size while avoiding compression overhead for small responses
-    app.add_middleware(GZipMiddleware, minimum_size=10000)
-    logger.info("  🗜  GZip compression middleware enabled (threshold: 10KB, optimized)")
+    # Uses SelectiveGZipMiddleware to skip compression for SSE streaming responses
+    # This prevents buffering issues where SSE chunks get bundled together
+    app.add_middleware(SelectiveGZipMiddleware, minimum_size=10000)
+    logger.info("  🗜  Selective GZip compression middleware enabled (threshold: 10KB, skips SSE)")
 
     # Security
     HTTPBearer()
@@ -259,6 +266,50 @@ def create_app() -> FastAPI:
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
+
+    # Add structured metrics endpoint (parses Prometheus metrics)
+    @app.get("/api/metrics/parsed", tags=["monitoring"], include_in_schema=False)
+    async def get_parsed_metrics():
+        """
+        Get parsed Prometheus metrics in structured JSON format.
+
+        Returns metrics in the following structure:
+        {
+            "latency": {
+                "/endpoint": {
+                    "avg": 0.123,
+                    "p50": 0.1,
+                    "p95": 0.25,
+                    "p99": 0.5
+                }
+            },
+            "requests": {
+                "/endpoint": {
+                    "GET": 123,
+                    "POST": 10
+                }
+            },
+            "errors": {
+                "/endpoint": {
+                    "GET": 2,
+                    "POST": 0
+                }
+            }
+        }
+
+        This endpoint reads from the /metrics endpoint and extracts:
+        - Latency metrics (p50, p95, p99, average) from http_request_latency_seconds_*
+        - Request counts by endpoint/method from http_requests_total
+        - Error counts by endpoint/method from http_request_errors_total
+        """
+        from src.services.metrics_parser import get_metrics_parser
+
+        # Get metrics from the local /metrics endpoint
+        parser = get_metrics_parser("http://localhost:8000/metrics")
+        metrics = await parser.get_metrics()
+        return metrics
+
+    logger.info("  [OK] Parsed metrics endpoint at /api/metrics/parsed")
 
     # ==================== Sentry Debug Endpoint ====================
     if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
@@ -326,6 +377,8 @@ def create_app() -> FastAPI:
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
+        ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
+        ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
@@ -426,6 +479,16 @@ def create_app() -> FastAPI:
     # Mount v1 router on app
     app.include_router(v1_router)
     logger.info("  [OK] v1 router mounted at /v1")
+
+    # Add /models route at root for backwards compatibility
+    # Only mount the specific /models endpoint, not the entire catalog router
+    try:
+        from src.routes.catalog import get_all_models
+
+        app.get("/models", tags=["models"])(get_all_models)
+        logger.info("  [OK] /models route added at root (backwards compatibility)")
+    except ImportError as e:
+        logger.warning(f"  [WARN] Could not add /models route for backwards compatibility: {e}")
 
     # Load non-v1 routes (mounted directly on app)
     logger.info("Loading non-v1 routes...")
@@ -610,15 +673,10 @@ def create_app() -> FastAPI:
             asyncio.create_task(warm_caches_async())
             logger.info("  🔥 Cache warming started in background (non-blocking)")
 
-            # Initialize intelligent health monitoring
-            try:
-                logger.info("   Starting intelligent health monitoring...")
-                from src.services.intelligent_health_monitor import intelligent_health_monitor
-
-                await intelligent_health_monitor.start_monitoring()
-                logger.info("   Intelligent health monitoring started")
-            except Exception as health_e:
-                logger.warning(f"    Health monitoring initialization warning: {health_e}")
+            # NOTE: Health monitoring is handled by the dedicated health-service container
+            # The main API reads health data from Redis cache populated by health-service
+            # See: health-service/main.py and DISABLE_ACTIVE_HEALTH_MONITORING env var
+            logger.info("   Health monitoring handled by dedicated health-service container")
 
         except Exception as e:
             logger.error(f"   Startup initialization failed: {e}")
@@ -634,14 +692,9 @@ def create_app() -> FastAPI:
     async def on_shutdown():
         logger.info("🛑 Shutting down application...")
 
-        # Shutdown health monitoring
-        try:
-            from src.services.intelligent_health_monitor import intelligent_health_monitor
-
-            await intelligent_health_monitor.stop_monitoring()
-            logger.info("   Health monitoring stopped")
-        except Exception as e:
-            logger.warning(f"    Health monitoring shutdown warning: {e}")
+        # NOTE: Health monitoring is handled by the dedicated health-service container
+        # No health monitor shutdown needed in main API
+        logger.info("   Health monitoring handled by health-service (no shutdown needed)")
 
         # Shutdown OpenTelemetry
         try:

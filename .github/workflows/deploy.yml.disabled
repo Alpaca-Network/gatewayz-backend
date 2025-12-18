@@ -16,7 +16,7 @@ jobs:
   # Only deploy if CI passed
   check-ci-status:
     name: Check CI Status
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: github.event.workflow_run.conclusion == 'success'
 
     outputs:
@@ -43,7 +43,7 @@ jobs:
   # Pre-deployment checks
   pre-deployment:
     name: Pre-Deployment Checks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: check-ci-status
     if: needs.check-ci-status.outputs.should_deploy == 'true'
 
@@ -92,7 +92,7 @@ jobs:
   # Railway deployment (automatic via Railway's GitHub integration)
   deploy-railway:
     name: Deploy to Railway
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [check-ci-status, pre-deployment]
     if: needs.check-ci-status.outputs.should_deploy == 'true'
     environment:
@@ -126,7 +126,7 @@ jobs:
   # Post-deployment verification
   post-deployment:
     name: Post-Deployment Health Check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [check-ci-status, deploy-railway]
     if: needs.check-ci-status.outputs.should_deploy == 'true'
 
@@ -180,7 +180,7 @@ jobs:
   # Deployment notification
   notify-deployment:
     name: Deployment Notification
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [check-ci-status, post-deployment]
     if: always() && needs.check-ci-status.outputs.should_deploy == 'true'
 
@@ -213,7 +213,7 @@ jobs:
   # Rollback job (manual trigger only)
   rollback:
     name: Rollback Deployment
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: github.event_name == 'workflow_dispatch'
 
     steps:

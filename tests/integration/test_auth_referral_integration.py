@@ -181,7 +181,7 @@ class TestAuthRegistrationReferralIntegration:
 
         # Verify response
         assert response.status_code in [200, 201]
-        print(f"✓ Auth request successful with referral code")
+        print("✓ Auth request successful with referral code")
 
         # Verify track_referral_signup was called
         assert mock_track_referral.called
@@ -255,11 +255,11 @@ class TestAuthRegistrationReferralIntegration:
 
         # Should still succeed (invalid referral doesn't block signup)
         assert response.status_code in [200, 201]
-        print(f"✓ Signup succeeded despite invalid referral code")
+        print("✓ Signup succeeded despite invalid referral code")
 
         # Verify track_referral_signup was called
         assert mock_track_referral.called
-        print(f"✓ Invalid referral code was attempted but didn't block signup")
+        print("✓ Invalid referral code was attempted but didn't block signup")
 
     @patch('src.db.users.get_user_by_privy_id')
     def test_existing_user_login_ignores_referral_code(
@@ -314,7 +314,7 @@ class TestAuthRegistrationReferralIntegration:
 
         # Should succeed
         assert response.status_code == 200
-        print(f"✓ Existing user login successful (referral code ignored)")
+        print("✓ Existing user login successful (referral code ignored)")
 
 
 class TestReferralTrackingIntegration:
@@ -343,7 +343,7 @@ class TestReferralTrackingIntegration:
         assert success is True
         assert error is None
         assert referrer['id'] == alice['user_id']
-        print(f"✓ Referral signup tracked successfully")
+        print("✓ Referral signup tracked successfully")
 
         # Verify pending record was created
         pending = supabase_client.table("referrals").select("*").eq(
@@ -356,7 +356,7 @@ class TestReferralTrackingIntegration:
         assert record['referral_code'] == alice_code
         assert record['status'] == 'pending'
         assert record['completed_at'] is None
-        print(f"✓ Pending referral record created in database")
+        print("✓ Pending referral record created in database")
 
     def test_store_referred_by_code_on_signup(
         self,
@@ -385,7 +385,7 @@ class TestReferralTrackingIntegration:
         ).execute()
 
         assert bob_user.data[0]['referred_by_code'] == alice_code
-        print(f"✓ referred_by_code stored correctly")
+        print("✓ referred_by_code stored correctly")
 
     def test_multiple_signups_same_code(
         self,
@@ -409,7 +409,7 @@ class TestReferralTrackingIntegration:
             assert success is True
             referees.append(user)
 
-        print(f"✓ 3 users signed up with same code")
+        print("✓ 3 users signed up with same code")
 
         # Verify 3 pending records
         pending = supabase_client.table("referrals").select("*").eq(
@@ -417,7 +417,7 @@ class TestReferralTrackingIntegration:
         ).eq("status", "pending").execute()
 
         assert len(pending.data) == 3
-        print(f"✓ 3 pending referral records created")
+        print("✓ 3 pending referral records created")
 
         # Verify stats
         from src.services.referral import get_referral_stats
@@ -426,7 +426,7 @@ class TestReferralTrackingIntegration:
         assert stats['total_uses'] == 3
         assert stats['pending_bonuses'] == 3
         assert stats['completed_bonuses'] == 0
-        print(f"✓ Stats show 3 pending referrals")
+        print("✓ Stats show 3 pending referrals")
 
 
 class TestReferralNotificationIntegration:
@@ -460,7 +460,7 @@ class TestReferralNotificationIntegration:
         )
 
         assert success is True
-        print(f"✓ Signup notification sent")
+        print("✓ Signup notification sent")
 
         # Verify email was sent
         assert mock_send_email.called
@@ -494,7 +494,304 @@ class TestReferralNotificationIntegration:
 
         # Returns False but doesn't raise exception
         assert success is False
-        print(f"✓ Notification failure handled gracefully")
+        print("✓ Notification failure handled gracefully")
+
+    @patch('src.enhanced_notification_service.enhanced_notification_service.send_email_notification')
+    @patch('src.services.professional_email_templates.email_templates.get_base_template')
+    def test_notification_logs_attempt_before_sending(
+        self,
+        mock_template,
+        mock_send_email,
+        test_auth_users,
+        caplog
+    ):
+        """
+        Test that notification logs attempt before sending email
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        mock_template.return_value.format.return_value = "<html>Test Email</html>"
+        mock_send_email.return_value = True
+
+        alice = test_auth_users("alice_log_attempt", credits=0.0)
+
+        from src.services.referral import send_referral_signup_notification
+        send_referral_signup_notification(
+            referrer_id=alice['user_id'],
+            referrer_email=alice['email'],
+            referrer_username=alice['username'],
+            referee_username="bob_log"
+        )
+
+        # Verify attempt log message
+        assert any(
+            "Attempting to send referral signup notification" in record.message
+            and str(alice['user_id']) in record.message
+            and alice['email'] in record.message
+            for record in caplog.records
+        ), "Should log attempt with user ID and email before sending"
+        print("✓ Notification logs attempt before sending")
+
+    @patch('src.enhanced_notification_service.enhanced_notification_service.send_email_notification')
+    @patch('src.services.professional_email_templates.email_templates.get_base_template')
+    def test_notification_logs_success_with_email(
+        self,
+        mock_template,
+        mock_send_email,
+        test_auth_users,
+        caplog
+    ):
+        """
+        Test that successful notification logs include email address
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        mock_template.return_value.format.return_value = "<html>Test Email</html>"
+        mock_send_email.return_value = True
+
+        alice = test_auth_users("alice_log_success", credits=0.0)
+
+        from src.services.referral import send_referral_signup_notification
+        success = send_referral_signup_notification(
+            referrer_id=alice['user_id'],
+            referrer_email=alice['email'],
+            referrer_username=alice['username'],
+            referee_username="bob_success"
+        )
+
+        assert success is True
+
+        # Verify success log message includes email
+        assert any(
+            "Successfully sent referral signup notification" in record.message
+            and alice['email'] in record.message
+            for record in caplog.records
+        ), "Success log should include email address"
+        print("✓ Success notification logs include email address")
+
+    @patch('src.enhanced_notification_service.enhanced_notification_service.send_email_notification')
+    @patch('src.services.professional_email_templates.email_templates.get_base_template')
+    def test_notification_logs_warning_on_failure(
+        self,
+        mock_template,
+        mock_send_email,
+        test_auth_users,
+        caplog
+    ):
+        """
+        Test that failed notification logs warning with email address
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        mock_template.return_value.format.return_value = "<html>Test Email</html>"
+        mock_send_email.return_value = False  # Simulate email service failure
+
+        alice = test_auth_users("alice_log_fail", credits=0.0)
+
+        from src.services.referral import send_referral_signup_notification
+        success = send_referral_signup_notification(
+            referrer_id=alice['user_id'],
+            referrer_email=alice['email'],
+            referrer_username=alice['username'],
+            referee_username="bob_fail_log"
+        )
+
+        assert success is False
+
+        # Verify warning log message
+        assert any(
+            "Failed to send referral signup notification" in record.message
+            and alice['email'] in record.message
+            and "email service returned False" in record.message
+            for record in caplog.records
+        ), "Failure should log warning with email and reason"
+        print("✓ Failed notification logs warning with email and reason")
+
+
+class TestReferralBackgroundTaskLogging:
+    """Test logging in the background task that processes referral codes"""
+
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
+    @patch('src.routes.auth.supabase_config.get_supabase_client')
+    def test_background_task_logs_when_referrer_has_no_email(
+        self,
+        mock_supabase,
+        mock_track,
+        mock_send_notification,
+        caplog
+    ):
+        """
+        Test that background task logs warning when referrer has no email
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        # Mock successful tracking but referrer has no email
+        mock_track.return_value = (True, None, {"id": 123, "username": "alice"})
+        mock_client = Mock()
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = Mock(data=[{}])
+        mock_supabase.return_value = mock_client
+
+        from src.routes.auth import _process_referral_code_background
+        _process_referral_code_background(
+            referral_code="TESTCODE",
+            user_id="456",
+            username="bob_no_email",
+            is_new_user=True
+        )
+
+        # Verify warning log for missing email
+        assert any(
+            "Cannot send referral notification" in record.message
+            and "has no email address" in record.message
+            for record in caplog.records
+        ), "Should log warning when referrer has no email"
+
+        # Notification should not be called
+        mock_send_notification.assert_not_called()
+        print("✓ Background task logs warning when referrer has no email")
+
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
+    @patch('src.routes.auth.supabase_config.get_supabase_client')
+    def test_background_task_logs_success_with_email(
+        self,
+        mock_supabase,
+        mock_track,
+        mock_send_notification,
+        caplog
+    ):
+        """
+        Test that background task logs success with referrer email
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        # Mock successful tracking with email
+        mock_track.return_value = (
+            True,
+            None,
+            {"id": 123, "email": "alice@example.com", "username": "alice"}
+        )
+        mock_client = Mock()
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = Mock(data=[{}])
+        mock_supabase.return_value = mock_client
+        # Mock successful notification send
+        mock_send_notification.return_value = True
+
+        from src.routes.auth import _process_referral_code_background
+        _process_referral_code_background(
+            referral_code="TESTCODE",
+            user_id="456",
+            username="bob_with_email",
+            is_new_user=True
+        )
+
+        # Verify success log includes email
+        assert any(
+            "Referral notification sent to referrer" in record.message
+            and "alice@example.com" in record.message
+            for record in caplog.records
+        ), "Success log should include referrer email"
+
+        mock_send_notification.assert_called_once()
+        print("✓ Background task logs success with email address")
+
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
+    @patch('src.routes.auth.supabase_config.get_supabase_client')
+    def test_background_task_logs_warning_when_notification_returns_false(
+        self,
+        mock_supabase,
+        mock_track,
+        mock_send_notification,
+        caplog
+    ):
+        """
+        Test that background task logs warning when notification returns False
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        # Mock successful tracking with email
+        mock_track.return_value = (
+            True,
+            None,
+            {"id": 123, "email": "alice@example.com", "username": "alice"}
+        )
+        mock_client = Mock()
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = Mock(data=[{}])
+        mock_supabase.return_value = mock_client
+        # Mock notification returning False (email service failure)
+        mock_send_notification.return_value = False
+
+        from src.routes.auth import _process_referral_code_background
+        _process_referral_code_background(
+            referral_code="TESTCODE",
+            user_id="456",
+            username="bob_notif_fail",
+            is_new_user=True
+        )
+
+        # Verify warning log for notification failure
+        assert any(
+            "Referral notification failed for referrer" in record.message
+            and "alice@example.com" in record.message
+            and "email service returned failure" in record.message
+            for record in caplog.records
+        ), "Should log warning when notification returns False"
+
+        mock_send_notification.assert_called_once()
+        print("✓ Background task logs warning when notification returns False")
+
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
+    @patch('src.routes.auth.supabase_config.get_supabase_client')
+    def test_background_task_logs_notification_error_with_details(
+        self,
+        mock_supabase,
+        mock_track,
+        mock_send_notification,
+        caplog
+    ):
+        """
+        Test that background task logs notification errors with full details
+        """
+        import logging
+        caplog.set_level(logging.ERROR)
+
+        # Mock successful tracking but notification fails
+        mock_track.return_value = (
+            True,
+            None,
+            {"id": 123, "email": "alice@example.com", "username": "alice"}
+        )
+        mock_client = Mock()
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = Mock(data=[{}])
+        mock_supabase.return_value = mock_client
+        mock_send_notification.side_effect = Exception("SMTP connection failed")
+
+        from src.routes.auth import _process_referral_code_background
+        _process_referral_code_background(
+            referral_code="TESTCODE",
+            user_id="456",
+            username="bob_error",
+            is_new_user=True
+        )
+
+        # Verify error log includes referrer ID, email, and error message
+        assert any(
+            "Failed to send referral notification" in record.message
+            and "123" in record.message
+            and "alice@example.com" in record.message
+            and "SMTP connection failed" in record.message
+            for record in caplog.records
+        ), "Error log should include referrer ID, email, and error details"
+        print("✓ Background task logs notification errors with full details")
 
 
 class TestReferralValidationDuringSignup:
@@ -523,7 +820,7 @@ class TestReferralValidationDuringSignup:
         assert valid is True
         assert error is None
         assert referrer['id'] == alice['user_id']
-        print(f"✓ Referral code validated before signup")
+        print("✓ Referral code validated before signup")
 
     def test_validate_prevents_self_referral_during_signup(
         self,
@@ -543,7 +840,7 @@ class TestReferralValidationDuringSignup:
 
         assert valid is False
         assert "own referral code" in error.lower()
-        print(f"✓ Self-referral prevented during validation")
+        print("✓ Self-referral prevented during validation")
 
     def test_validate_checks_usage_limit(
         self,
@@ -571,7 +868,7 @@ class TestReferralValidationDuringSignup:
 
         assert valid is False
         assert "usage limit" in error.lower()
-        print(f"✓ Validation enforces usage limit")
+        print("✓ Validation enforces usage limit")
 
 
 if __name__ == "__main__":

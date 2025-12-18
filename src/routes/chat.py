@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import secrets
 import time
 import uuid
 from contextvars import ContextVar
@@ -29,8 +30,14 @@ from src.services.prometheus_metrics import (
     model_inference_duration,
     tokens_used,
     credits_used,
+    track_time_to_first_chunk,
 )
 from src.services.redis_metrics import get_redis_metrics
+from src.services.stream_normalizer import (
+    StreamNormalizer,
+    create_error_sse_chunk,
+    create_done_sse,
+)
 from src.utils.sentry_context import capture_payment_error, capture_provider_error
 
 # Request correlation ID for distributed tracing
@@ -119,11 +126,13 @@ _openrouter = _safe_import_provider(
         "make_openrouter_request_openai",
         "process_openrouter_response",
         "make_openrouter_request_openai_stream",
+        "make_openrouter_request_openai_stream_async",
     ],
 )
 make_openrouter_request_openai = _openrouter.get("make_openrouter_request_openai")
 process_openrouter_response = _openrouter.get("process_openrouter_response")
 make_openrouter_request_openai_stream = _openrouter.get("make_openrouter_request_openai_stream")
+make_openrouter_request_openai_stream_async = _openrouter.get("make_openrouter_request_openai_stream_async")
 
 
 _featherless = _safe_import_provider(
@@ -370,6 +379,30 @@ make_cloudflare_workers_ai_request_openai_stream = _cloudflare_workers_ai.get(
     "make_cloudflare_workers_ai_request_openai_stream"
 )
 
+_morpheus = _safe_import_provider(
+    "morpheus",
+    [
+        "make_morpheus_request_openai",
+        "process_morpheus_response",
+        "make_morpheus_request_openai_stream",
+    ],
+)
+make_morpheus_request_openai = _morpheus.get("make_morpheus_request_openai")
+process_morpheus_response = _morpheus.get("process_morpheus_response")
+make_morpheus_request_openai_stream = _morpheus.get("make_morpheus_request_openai_stream")
+
+_onerouter = _safe_import_provider(
+    "onerouter",
+    [
+        "make_onerouter_request_openai",
+        "process_onerouter_response",
+        "make_onerouter_request_openai_stream",
+    ],
+)
+make_onerouter_request_openai = _onerouter.get("make_onerouter_request_openai")
+process_onerouter_response = _onerouter.get("process_onerouter_response")
+make_onerouter_request_openai_stream = _onerouter.get("make_onerouter_request_openai_stream")
+
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
@@ -432,6 +465,33 @@ def get_chat_session(*args, **kwargs):
 
 def log_activity(*args, **kwargs):
     return activity_module.log_activity(*args, **kwargs)
+
+
+def validate_and_adjust_max_tokens(optional: dict, model: str) -> None:
+    """
+    Validate and adjust max_tokens for models with minimum token requirements.
+
+    Google Gemini models require max_tokens >= 16. This function automatically
+    adjusts the value if it's below the minimum to prevent API errors.
+
+    Args:
+        optional: Dictionary of optional parameters (modified in-place)
+        model: The model ID being used
+    """
+    if "max_tokens" not in optional or optional["max_tokens"] is None:
+        return
+
+    model_lower = model.lower()
+
+    # Check if this is a Gemini model that requires min tokens >= 16
+    if "gemini" in model_lower or "google" in model_lower:
+        min_tokens = 16
+        if optional["max_tokens"] < min_tokens:
+            logger.warning(
+                f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
+                f"for Gemini model {model} (minimum requirement)"
+            )
+            optional["max_tokens"] = min_tokens
 
 
 def get_provider_from_model(*args, **kwargs):
@@ -582,15 +642,15 @@ async def _record_inference_metrics_and_health(
         }
 
         # Call passive health monitor in background (non-blocking)
+        # Note: capture_model_health is already async, so we just create a task for it
         asyncio.create_task(
-            asyncio.to_thread(
-                capture_model_health,
-                provider,
-                model,
-                response_time_ms,
-                health_status,
-                error_message,
-                usage
+            capture_model_health(
+                provider=provider,
+                model=model,
+                response_time_ms=response_time_ms,
+                status=health_status,
+                error_message=error_message,
+                usage=usage
             )
         )
 
@@ -786,6 +846,15 @@ async def _process_stream_completion_background(
             )
 
         # Save chat history
+        # Validate session_id before attempting to save
+        if session_id:
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -865,17 +934,27 @@ async def stream_generator(
     provider="openrouter",
     tracker=None,
     is_anonymous=False,
+    is_async_stream=False,  # PERF: Flag to indicate if stream is async
 ):
-    """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)"""
+    """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
+
+    Args:
+        is_async_stream: If True, stream is an async iterator and will be consumed with
+                        `async for` instead of `for`. This prevents blocking the event
+                        loop while waiting for chunks from slow AI providers.
+    """
     accumulated_content = ""
-    accumulated_thinking = ""
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
     start_time = time.monotonic()
     rate_limit_mgr is not None and not trial.get("is_trial", False)
-    has_thinking = False
     streaming_ctx = None
+    first_chunk_sent = False  # TTFC tracking
+    ttfc_start = time.monotonic()  # TTFC tracking
+
+    # Initialize normalizer
+    normalizer = StreamNormalizer(provider=provider, model=model)
 
     try:
         # Track streaming duration if tracker is provided
@@ -884,53 +963,66 @@ async def stream_generator(
             streaming_ctx.__enter__()
 
         chunk_count = 0
-        for chunk in stream:
+
+        # PERF: Use async iteration for async streams to avoid blocking the event loop
+        # This is critical for reducing perceived TTFC as it allows the server to handle
+        # other requests while waiting for the AI provider to start streaming
+
+        # Sentinel value to signal iterator exhaustion (PEP 479 compliance)
+        # StopIteration cannot be raised into a Future, so we use a sentinel instead
+        _STREAM_EXHAUSTED = object()
+
+        def _safe_next(iterator):
+            """Wrapper for next() that returns a sentinel instead of raising StopIteration.
+
+            This is necessary because StopIteration cannot be raised into a Future
+            (PEP 479), which causes issues when using asyncio.to_thread(next, iterator).
+            """
+            try:
+                return next(iterator)
+            except StopIteration:
+                return _STREAM_EXHAUSTED
+
+        async def iterate_stream():
+            """Helper to support both sync and async iteration"""
+            if is_async_stream:
+                async for chunk in stream:
+                    yield chunk
+            else:
+                # Use non-blocking iteration for sync streams to avoid blocking the event loop
+                iterator = iter(stream)
+                while True:
+                    try:
+                        # Run the blocking next() call in a thread using safe wrapper
+                        # to avoid "StopIteration interacts badly with generators" error
+                        chunk = await asyncio.to_thread(_safe_next, iterator)
+                        if chunk is _STREAM_EXHAUSTED:
+                            break
+                        yield chunk
+                    except Exception as e:
+                        logger.error(f"Error during sync stream iteration: {e}")
+                        raise e
+
+        async for chunk in iterate_stream():
             chunk_count += 1
+
+            # TTFC: Track time to first chunk for performance monitoring
+            if not first_chunk_sent:
+                ttfc = time.monotonic() - ttfc_start
+                first_chunk_sent = True
+                # Record TTFC metric
+                track_time_to_first_chunk(provider=provider, model=model, ttfc=ttfc)
+                # Log TTFC for debugging slow streams
+                if ttfc > 2.0:
+                    logger.warning(
+                        f"[TTFC] Slow first chunk: {ttfc:.2f}s for {provider}/{model} (threshold: 2.0s)"
+                    )
+                else:
+                    logger.info(f"[TTFC] First chunk in {ttfc:.2f}s for {provider}/{model}")
+
             logger.debug(f"[STREAM] Processing chunk {chunk_count} for model {model}")
 
-            # Extract chunk data
-            chunk_dict = {
-                "id": chunk.id,
-                "object": chunk.object,
-                "created": chunk.created,
-                "model": chunk.model,
-                "choices": [],
-            }
-
-            for choice in chunk.choices:
-                choice_dict = {
-                    "index": choice.index,
-                    "delta": {},
-                    "finish_reason": choice.finish_reason,
-                }
-
-                if hasattr(choice.delta, "role") and choice.delta.role:
-                    choice_dict["delta"]["role"] = choice.delta.role
-                if hasattr(choice.delta, "content") and choice.delta.content:
-                    content = choice.delta.content
-                    choice_dict["delta"]["content"] = content
-                    accumulated_content += content
-                    logger.debug(
-                        f"[STREAM] Chunk {chunk_count}: Added {len(content)} characters of content"
-                    )
-
-                    # Detect thinking tags for debug logging
-                    if "<thinking>" in content or "[THINKING" in content or "thinking>" in content:
-                        has_thinking = True
-                        accumulated_thinking += content
-                        # Log when we first detect thinking
-                        if accumulated_thinking.count("<thinking>") == 1:
-                            logger.info(
-                                f"[THINKING DEBUG] Detected thinking tag in stream for model {model}"
-                            )
-                else:
-                    logger.debug(f"[STREAM] Chunk {chunk_count}: No content in delta")
-
-                chunk_dict["choices"].append(choice_dict)
-
-            logger.debug(
-                f"[STREAM] Chunk {chunk_count} dict: {json.dumps(chunk_dict, default=str)}"
-            )
+            normalized_chunk = normalizer.normalize_chunk(chunk)
 
             # Check for usage in chunk (some providers send it in final chunk)
             if hasattr(chunk, "usage") and chunk.usage:
@@ -938,14 +1030,12 @@ async def stream_generator(
                 completion_tokens = chunk.usage.completion_tokens
                 total_tokens = chunk.usage.total_tokens
 
-            # Send SSE event with potential debug info
-            if has_thinking and not accumulated_thinking.endswith("DEBUG_LOGGED"):
-                logger.debug(
-                    f"[THINKING DEBUG] Streaming chunk with thinking content: {json.dumps(choice_dict)}"
-                )
+            if normalized_chunk:
+                yield normalized_chunk.to_sse()
+            else:
+                logger.debug(f"[STREAM] Chunk {chunk_count} resulted in no normalized output")
 
-            yield f"data: {json.dumps(chunk_dict)}\n\n"
-
+        accumulated_content = normalizer.get_accumulated_content()
         logger.info(
             f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
         )
@@ -956,17 +1046,13 @@ async def stream_generator(
                 f"[EMPTY STREAM] Provider {provider} returned zero chunks for model {model}. "
                 f"This indicates a provider routing or model ID transformation issue."
             )
-            # Send error chunk to client
-            error_chunk = {
-                "error": {
-                    "message": f"Provider returned empty stream for model {model}. Please try again or contact support.",
-                    "type": "empty_stream_error",
-                    "provider": provider,
-                    "model": model,
-                }
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
+            yield create_error_sse_chunk(
+                error_message=f"Provider returned empty stream for model {model}. Please try again or contact support.",
+                error_type="empty_stream_error",
+                provider=provider,
+                model=model
+            )
+            yield create_done_sse()
             return
         elif accumulated_content == "" and chunk_count > 0:
             logger.warning(
@@ -995,21 +1081,20 @@ async def stream_generator(
         elapsed = max(0.001, time.monotonic() - start_time)
 
         # OPTIMIZATION: Quick plan limit check (critical - must be synchronous)
-        post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
-        if not post_plan.get("allowed", False):
-            error_chunk = {
-                "error": {
-                    "message": f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
-                    "type": "plan_limit_exceeded",
-                }
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+        # Skip plan limit check for anonymous users (user is None)
+        if not is_anonymous and user is not None:
+            post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
+            if not post_plan.get("allowed", False):
+                yield create_error_sse_chunk(
+                    error_message=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
+                    error_type="plan_limit_exceeded"
+                )
+                yield create_done_sse()
+                return
 
         # OPTIMIZATION: Send [DONE] immediately, process credits/logging in background!
         # This makes the stream complete 100-200ms faster for the client
-        yield "data: [DONE]\n\n"
+        yield create_done_sse()
 
         # Schedule background processing (non-blocking)
         asyncio.create_task(
@@ -1033,9 +1118,45 @@ async def stream_generator(
 
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
-        error_chunk = {"error": {"message": "Streaming error occurred", "type": "stream_error"}}
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        yield "data: [DONE]\n\n"
+
+        # Extract meaningful error message for the client
+        error_str = str(e).lower()
+        error_message = "Streaming error occurred"
+        error_type = "stream_error"
+
+        # Check for rate limit errors
+        if "rate limit" in error_str or "429" in error_str or "too many" in error_str:
+            error_message = "Rate limit exceeded. Please wait a moment and try again."
+            error_type = "rate_limit_error"
+        # Check for authentication errors
+        elif "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
+            error_message = "Authentication failed. Please check your API key or sign in again."
+            error_type = "auth_error"
+        # Check for provider/upstream errors
+        elif "upstream" in error_str or "provider" in error_str or "503" in error_str or "502" in error_str:
+            error_message = f"Provider temporarily unavailable: {str(e)[:200]}"
+            error_type = "provider_error"
+        # Check for timeout errors
+        elif "timeout" in error_str or "timed out" in error_str:
+            error_message = "Request timed out. The model may be overloaded. Please try again."
+            error_type = "timeout_error"
+        # Check for model not found errors
+        elif "not found" in error_str or "404" in error_str:
+            error_message = f"Model or resource not found: {str(e)[:200]}"
+            error_type = "not_found_error"
+        # For other errors, include a sanitized version of the error message
+        else:
+            # Include the actual error message but truncate it for safety
+            sanitized_msg = str(e)[:300].replace('\n', ' ').replace('\r', ' ')
+            error_message = f"Streaming error: {sanitized_msg}"
+
+        yield create_error_sse_chunk(
+            error_message=error_message,
+            error_type=error_type,
+            provider=provider if 'provider' in dir() else None,
+            model=model if 'model' in dir() else None
+        )
+        yield create_done_sse()
     finally:
         # Record streaming duration
         if streaming_ctx:
@@ -1205,6 +1326,16 @@ async def chat_completions(
 
         # === 2.1) Inject conversation history if session_id provided ===
         # Chat history is only available for authenticated users
+        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
+        if session_id and not is_anonymous:
+            # Validate session_id is within valid PostgreSQL integer range
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s: out of PostgreSQL integer range. Ignoring session history.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None  # Ignore invalid session_id
+
         if session_id and not is_anonymous:
             try:
                 # Fetch the session with its message history
@@ -1266,6 +1397,9 @@ async def chat_completions(
                 val = getattr(req, name, None)
                 if val is not None:
                     optional[name] = val
+
+            # Validate and adjust max_tokens for models with minimum requirements
+            validate_and_adjust_max_tokens(optional, original_model)
 
             # Auto-detect provider if not specified
             req_provider_missing = req.provider is None or (
@@ -1361,6 +1495,7 @@ async def chat_completions(
                     )
 
                 request_model = attempt_model
+                is_async_stream = False  # Default to sync, only OpenRouter uses async currently
                 try:
                     if attempt_provider == "featherless":
                         stream = await _to_thread(
@@ -1477,13 +1612,42 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
-                    else:
+                    elif attempt_provider == "morpheus":
                         stream = await _to_thread(
-                            make_openrouter_request_openai_stream,
+                            make_morpheus_request_openai_stream,
                             messages,
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "onerouter":
+                        stream = await _to_thread(
+                            make_onerouter_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
+                    else:
+                        # PERF: Use async streaming for OpenRouter (default provider)
+                        # This is the most impactful optimization - prevents event loop blocking
+                        # while waiting for the AI provider to return the first chunk
+                        try:
+                            stream = await make_openrouter_request_openai_stream_async(
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                            is_async_stream = True
+                            logger.debug(f"Using async streaming for OpenRouter model {request_model}")
+                        except Exception as async_err:
+                            # Fallback to sync streaming if async fails
+                            logger.warning(f"Async streaming failed, falling back to sync: {async_err}")
+                            stream = await _to_thread(
+                                make_openrouter_request_openai_stream,
+                                messages,
+                                request_model,
+                                **optional,
+                            )
+                            is_async_stream = False
 
                     provider = attempt_provider
                     model = request_model
@@ -1491,6 +1655,19 @@ async def chat_completions(
                     stream_headers = {}
                     if rl_pre is not None:
                         stream_headers.update(get_rate_limit_headers(rl_pre))
+
+                    # PERF: Add timing headers for debugging stream startup latency
+                    if tracker:
+                        prep_time_ms = tracker.get_total_duration() * 1000
+                        stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
+                    stream_headers["X-Provider"] = provider
+                    stream_headers["X-Model"] = model
+                    stream_headers["X-Requested-Model"] = original_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers["X-Accel-Buffering"] = "no"
+                    stream_headers["Cache-Control"] = "no-cache, no-transform"
+                    stream_headers["Connection"] = "keep-alive"
 
                     return StreamingResponse(
                         stream_generator(
@@ -1506,6 +1683,7 @@ async def chat_completions(
                             provider,
                             tracker,
                             is_anonymous,
+                            is_async_stream=is_async_stream,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -1765,6 +1943,28 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_cloudflare_workers_ai_response, resp_raw)
+                elif attempt_provider == "morpheus":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_morpheus_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_morpheus_response, resp_raw)
+                elif attempt_provider == "onerouter":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_onerouter_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_onerouter_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -1945,7 +2145,7 @@ async def chat_completions(
                     tokens=total_tokens,
                     cost=cost if not trial.get("is_trial", False) else 0.0,
                     speed=speed,
-                    finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                    finish_reason=(processed.get("choices") or [{}])[0].get("finish_reason", "stop"),
                     app="API",
                     metadata={
                         "prompt_tokens": prompt_tokens,
@@ -1962,6 +2162,16 @@ async def chat_completions(
 
         # === 5) History (use the last user message in this request only) ===
         # Chat history is only saved for authenticated users
+        # Validate session_id before attempting to save
+        if session_id and not is_anonymous:
+            # Re-validate session_id in case it was modified during request processing
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s during history save: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id and not is_anonymous:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -1983,9 +2193,11 @@ async def chat_completions(
                             user["id"],
                         )
 
-                    assistant_content = (
-                        processed.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    )
+                    # Safely extract assistant content (handle None values in choices)
+                    choices = processed.get("choices") or [{}]
+                    first_choice = choices[0] if choices else {}
+                    message = first_choice.get("message") or {}
+                    assistant_content = message.get("content", "")
                     if assistant_content:
                         await _to_thread(
                             save_chat_message,
@@ -2021,9 +2233,14 @@ async def chat_completions(
             messages_for_log = [
                 m.model_dump() if hasattr(m, "model_dump") else m for m in req.messages
             ]
+            # Safely extract output content for Braintrust logging
+            bt_choices = processed.get("choices") or [{}]
+            bt_first_choice = bt_choices[0] if bt_choices else {}
+            bt_message = bt_first_choice.get("message") or {}
+            bt_output = bt_message.get("content", "")
             span.log(
                 input=messages_for_log,
-                output=processed.get("choices", [{}])[0].get("message", {}).get("content", ""),
+                output=bt_output,
                 metrics={
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
@@ -2202,6 +2419,13 @@ async def unified_responses(
                                 transformed_content.append(
                                     {"type": "text", "text": item.get("text", "")}
                                 )
+                            elif item.get("type") == "output_text":
+                                # Transform Responses API output_text to standard text format
+                                # This handles cases where clients send assistant messages with
+                                # output_text content type from previous response conversations
+                                transformed_content.append(
+                                    {"type": "text", "text": item.get("text", "")}
+                                )
                             elif item.get("type") == "input_image_url":
                                 transformed_content.append(
                                     {"type": "image_url", "image_url": item.get("image_url", {})}
@@ -2210,8 +2434,9 @@ async def unified_responses(
                                 # Already in correct format
                                 transformed_content.append(item)
                             else:
-                                logger.warning(f"Unknown content type: {item.get('type')}")
-                                transformed_content.append(item)
+                                logger.warning(f"Unknown content type: {item.get('type')}, skipping")
+                                # Skip unknown types instead of passing them through to avoid
+                                # provider API errors like "Unexpected content chunk type"
                         else:
                             logger.warning(f"Invalid content item (not a dict): {type(item)}")
 
@@ -2226,6 +2451,16 @@ async def unified_responses(
             raise HTTPException(status_code=400, detail=f"Invalid input format: {str(e)}")
 
         # === 2.1) Inject conversation history if session_id provided ===
+        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
+        if session_id:
+            # Validate session_id is within valid PostgreSQL integer range
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s for /v1/responses: out of PostgreSQL integer range. Ignoring session history.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -2270,6 +2505,9 @@ async def unified_responses(
             val = getattr(req, name, None)
             if val is not None:
                 optional[name] = val
+
+        # Validate and adjust max_tokens for models with minimum requirements
+        validate_and_adjust_max_tokens(optional, original_model)
 
         # Add response_format if specified
         if req.response_format:
@@ -2430,7 +2668,28 @@ async def unified_responses(
                         )
 
                     async def response_stream_generator(stream=stream, request_model=request_model):
-                        """Transform chat/completions stream to responses format with usage tracking"""
+                        """Transform chat/completions stream to OpenAI Responses API format.
+
+                        OpenAI Responses API uses SSE with event: and data: fields.
+                        Events emitted:
+                        - response.created: Initial response object
+                        - response.output_item.added: New output item started
+                        - response.output_text.delta: Text content delta
+                        - response.output_item.done: Output item completed
+                        - response.completed: Final response with usage
+                        """
+                        sequence_number = 0
+                        # Generate stable response ID upfront for consistency across events
+                        response_id = f"resp_{secrets.token_hex(12)}"
+                        created_timestamp = int(time.time())
+                        model_name = request_model
+                        has_sent_created = False
+                        has_error = False  # Track if any errors occurred during streaming
+                        usage_data = None
+                        # Track multiple choices (n > 1) separately by index
+                        # Each choice gets its own item_id, accumulated_content, etc.
+                        items_by_index: dict[int, dict] = {}  # choice_index -> item state
+
                         async for chunk_data in stream_generator(
                             stream,
                             user,
@@ -2441,55 +2700,240 @@ async def unified_responses(
                             session_id,
                             messages,
                             rate_limit_mgr,
-                            provider="openrouter",
+                            provider=attempt_provider,
                             tracker=None,
                         ):
                             if chunk_data.startswith("data: "):
                                 data_str = chunk_data[6:].strip()
                                 if data_str == "[DONE]":
-                                    yield chunk_data
+                                    # Ensure response.created is always sent first
+                                    if not has_sent_created:
+                                        created_event = {
+                                            "type": "response.created",
+                                            "sequence_number": sequence_number,
+                                            "response": {
+                                                "id": response_id,
+                                                "object": "response",
+                                                "created_at": created_timestamp,
+                                                "model": model_name,
+                                                "status": "in_progress",
+                                                "output": [],
+                                            },
+                                        }
+                                        yield f"event: response.created\ndata: {json.dumps(created_event)}\n\n"
+                                        sequence_number += 1
+                                        has_sent_created = True
+
+                                    # Emit done events only for items that were announced as added
+                                    for idx in sorted(items_by_index.keys()):
+                                        item_state = items_by_index[idx]
+                                        # Only emit done events for items that had item_added sent
+                                        if not item_state["item_added_sent"]:
+                                            continue
+                                        done_event = {
+                                            "type": "response.output_text.done",
+                                            "sequence_number": sequence_number,
+                                            "response_id": response_id,
+                                            "item_id": item_state["item_id"],
+                                            "output_index": idx,
+                                            "content_index": 0,
+                                            "text": item_state["content"],
+                                        }
+                                        yield f"event: response.output_text.done\ndata: {json.dumps(done_event)}\n\n"
+                                        sequence_number += 1
+
+                                        item_done_event = {
+                                            "type": "response.output_item.done",
+                                            "sequence_number": sequence_number,
+                                            "response_id": response_id,
+                                            "output_index": idx,
+                                            "item": {
+                                                "id": item_state["item_id"],
+                                                "type": "message",
+                                                "role": "assistant",
+                                                "status": "completed",
+                                                "content": [{"type": "output_text", "text": item_state["content"]}],
+                                            },
+                                        }
+                                        yield f"event: response.output_item.done\ndata: {json.dumps(item_done_event)}\n\n"
+                                        sequence_number += 1
+
+                                    # Build output list only from items that were announced
+                                    output_list = [
+                                        {
+                                            "id": items_by_index[idx]["item_id"],
+                                            "type": "message",
+                                            "role": "assistant",
+                                            "status": "completed",
+                                            "content": [{"type": "output_text", "text": items_by_index[idx]["content"]}],
+                                        }
+                                        for idx in sorted(items_by_index.keys())
+                                        if items_by_index[idx]["item_added_sent"]
+                                    ]
+
+                                    # Emit response.completed with appropriate status
+                                    response_status = "failed" if has_error else "completed"
+                                    completed_event = {
+                                        "type": "response.completed",
+                                        "sequence_number": sequence_number,
+                                        "response": {
+                                            "id": response_id,
+                                            "object": "response",
+                                            "created_at": created_timestamp,
+                                            "model": model_name,
+                                            "status": response_status,
+                                            "output": output_list,
+                                        },
+                                    }
+                                    # Add usage if available
+                                    if usage_data:
+                                        completed_event["response"]["usage"] = usage_data
+                                    yield f"event: response.completed\ndata: {json.dumps(completed_event)}\n\n"
                                     continue
 
                                 try:
                                     chunk_json = json.loads(data_str)
-                                    if "choices" in chunk_json:
-                                        output = []
-                                        for choice in chunk_json["choices"]:
-                                            output_item = {"index": choice.get("index", 0)}
-                                            if "delta" in choice:
-                                                if "role" in choice["delta"]:
-                                                    output_item["role"] = choice["delta"]["role"]
-                                                if "content" in choice["delta"]:
-                                                    output_item["content"] = choice["delta"][
-                                                        "content"
-                                                    ]
-                                            if choice.get("finish_reason"):
-                                                output_item["finish_reason"] = choice[
-                                                    "finish_reason"
-                                                ]
-                                            output.append(output_item)
 
-                                        transformed_chunk = {
-                                            "id": chunk_json.get("id"),
-                                            "object": "response.chunk",
-                                            "created": chunk_json.get("created"),
-                                            "model": chunk_json.get("model"),
-                                            "output": output,
+                                    # Extract model name from chunk if available
+                                    if chunk_json.get("model"):
+                                        model_name = chunk_json["model"]
+
+                                    # Extract usage if present (some providers include it in final chunk)
+                                    if chunk_json.get("usage"):
+                                        usage_data = chunk_json["usage"]
+
+                                    # Check for errors first (handles cases where both error and empty choices exist)
+                                    if chunk_json.get("error"):
+                                        # Transform error to Responses API error event
+                                        # Handle both dict and string error formats
+                                        error_field = chunk_json["error"]
+                                        if isinstance(error_field, dict):
+                                            error_message = error_field.get("message", "Unknown error")
+                                        else:
+                                            error_message = str(error_field)
+                                        error_event = {
+                                            "type": "error",
+                                            "sequence_number": sequence_number,
+                                            "error": {
+                                                "type": "server_error",
+                                                "message": error_message,
+                                            },
                                         }
-                                        yield f"data: {json.dumps(transformed_chunk)}\n\n"
-                                    else:
-                                        yield chunk_data
+                                        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                        sequence_number += 1
+                                        has_error = True
+                                    elif "choices" in chunk_json and chunk_json["choices"]:
+                                        for choice in chunk_json["choices"]:
+                                            choice_index = choice.get("index", 0)
+
+                                            # Emit response.created on first chunk
+                                            if not has_sent_created:
+                                                created_event = {
+                                                    "type": "response.created",
+                                                    "sequence_number": sequence_number,
+                                                    "response": {
+                                                        "id": response_id,
+                                                        "object": "response",
+                                                        "created_at": created_timestamp,
+                                                        "model": model_name,
+                                                        "status": "in_progress",
+                                                        "output": [],
+                                                    },
+                                                }
+                                                yield f"event: response.created\ndata: {json.dumps(created_event)}\n\n"
+                                                sequence_number += 1
+                                                has_sent_created = True
+
+                                            # Initialize item state for this choice if not seen before
+                                            if choice_index not in items_by_index:
+                                                items_by_index[choice_index] = {
+                                                    "item_id": f"item_{secrets.token_hex(8)}",
+                                                    "content": "",
+                                                    "item_added_sent": False,
+                                                }
+
+                                            item_state = items_by_index[choice_index]
+
+                                            # Emit response.output_item.added on first content for this choice
+                                            if not item_state["item_added_sent"] and "delta" in choice:
+                                                item_added_event = {
+                                                    "type": "response.output_item.added",
+                                                    "sequence_number": sequence_number,
+                                                    "response_id": response_id,
+                                                    "output_index": choice_index,
+                                                    "item": {
+                                                        "id": item_state["item_id"],
+                                                        "type": "message",
+                                                        "role": choice["delta"].get("role", "assistant"),
+                                                        "status": "in_progress",
+                                                        "content": [],
+                                                    },
+                                                }
+                                                yield f"event: response.output_item.added\ndata: {json.dumps(item_added_event)}\n\n"
+                                                sequence_number += 1
+                                                item_state["item_added_sent"] = True
+
+                                            # Emit response.output_text.delta for content
+                                            if "delta" in choice and "content" in choice["delta"]:
+                                                delta_content = choice["delta"]["content"]
+                                                if delta_content:
+                                                    item_state["content"] += delta_content
+                                                    delta_event = {
+                                                        "type": "response.output_text.delta",
+                                                        "sequence_number": sequence_number,
+                                                        "response_id": response_id,
+                                                        "item_id": item_state["item_id"],
+                                                        "output_index": choice_index,
+                                                        "content_index": 0,
+                                                        "delta": delta_content,
+                                                    }
+                                                    yield f"event: response.output_text.delta\ndata: {json.dumps(delta_event)}\n\n"
+                                                    sequence_number += 1
                                 except json.JSONDecodeError:
-                                    yield chunk_data
-                            else:
+                                    # Emit as error event for malformed JSON
+                                    error_event = {
+                                        "type": "error",
+                                        "sequence_number": sequence_number,
+                                        "error": {
+                                            "type": "invalid_response",
+                                            "message": f"Malformed response chunk: {data_str[:100]}",
+                                        },
+                                    }
+                                    yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                    sequence_number += 1
+                                    has_error = True
+                            elif chunk_data.startswith("event:") or chunk_data.strip() == "":
+                                # Pass through SSE event lines and empty lines (SSE formatting)
                                 yield chunk_data
+                            else:
+                                # Unknown format - emit as error
+                                error_event = {
+                                    "type": "error",
+                                    "sequence_number": sequence_number,
+                                    "error": {
+                                        "type": "invalid_response",
+                                        "message": "Unexpected chunk format",
+                                    },
+                                }
+                                yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                                sequence_number += 1
+                                has_error = True
 
                     stream_release_handled = True
                     provider = attempt_provider
                     model = request_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers = {
+                        "X-Accel-Buffering": "no",
+                        "Cache-Control": "no-cache, no-transform",
+                        "Connection": "keep-alive",
+                    }
+
                     return StreamingResponse(
                         response_stream_generator(),
                         media_type="text/event-stream",
+                        headers=stream_headers,
                     )
                 except Exception as exc:
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
@@ -2757,7 +3201,7 @@ async def unified_responses(
                 tokens=total_tokens,
                 cost=cost if not trial.get("is_trial", False) else 0.0,
                 speed=speed,
-                finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                finish_reason=(processed.get("choices") or [{}])[0].get("finish_reason", "stop"),
                 app="API",
                 metadata={
                     "prompt_tokens": prompt_tokens,
@@ -2773,6 +3217,15 @@ async def unified_responses(
             )
 
         # === 5) History ===
+        # Validate session_id before attempting to save
+        if session_id:
+            if session_id < -2147483648 or session_id > 2147483647:
+                logger.warning(
+                    "Invalid session_id %s during /v1/responses history save: out of PostgreSQL integer range. Skipping history save.",
+                    sanitize_for_logging(str(session_id)),
+                )
+                session_id = None
+
         if session_id:
             try:
                 session = await _to_thread(get_chat_session, session_id, user["id"])
@@ -2805,9 +3258,11 @@ async def unified_responses(
                             user["id"],
                         )
 
-                    assistant_content = (
-                        processed.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    )
+                    # Safely extract assistant content (handle None values in choices)
+                    choices = processed.get("choices") or [{}]
+                    first_choice = choices[0] if choices else {}
+                    message = first_choice.get("message") or {}
+                    assistant_content = message.get("content", "")
                     if assistant_content:
                         await _to_thread(
                             save_chat_message,

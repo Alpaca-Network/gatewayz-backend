@@ -64,6 +64,11 @@ Best regards,
 The AI Gateway Team
 """
 
+        logger.info(
+            f"Attempting to send referral signup notification to user {referrer_id} "
+            f"at email {referrer_email}"
+        )
+
         success = enhanced_notification_service.send_email_notification(
             to_email=referrer_email,
             subject=subject,
@@ -72,7 +77,15 @@ The AI Gateway Team
         )
 
         if success:
-            logger.info(f"Sent referral signup notification to user {referrer_id}")
+            logger.info(
+                f"Successfully sent referral signup notification to user {referrer_id} "
+                f"at email {referrer_email}"
+            )
+        else:
+            logger.warning(
+                f"Failed to send referral signup notification to user {referrer_id} "
+                f"at email {referrer_email} - email service returned False"
+            )
 
         return success
 
@@ -567,17 +580,25 @@ def get_referral_stats(user_id: int) -> dict[str, Any] | None:
 
             referral_details.append(
                 {
+                    "id": ref_user["id"],  # Frontend expects 'id' for React key prop
                     "user_id": ref_user["id"],
+                    "referee_id": ref_user["id"],  # Frontend normalizes to referee_id
                     "username": ref_user.get("username", "Unknown"),
                     "email": ref_user.get("email", "Unknown"),
-                    "date": ref_user.get("created_at"),  # Use 'date' for frontend compatibility
+                    "referee_email": ref_user.get("email", "Unknown"),  # Frontend expects referee_email
+                    "created_at": ref_user.get("created_at"),  # Frontend expects created_at
+                    "date": ref_user.get("created_at"),
                     "signed_up_at": ref_user.get("created_at"),
                     "status": "completed" if bonus_info else "pending",
                     "bonus_earned": bonus_info.get("bonus_earned", 0) if bonus_info else 0,
                     "bonus_date": bonus_info.get("bonus_date") if bonus_info else None,
+                    "completed_at": bonus_info.get("bonus_date") if bonus_info else None,  # Frontend expects completed_at
                     "reward": (
                         bonus_info.get("bonus_earned", 0) if bonus_info else 0
-                    ),  # Use 'reward' for frontend compatibility
+                    ),
+                    "reward_amount": (
+                        bonus_info.get("bonus_earned", 0) if bonus_info else REFERRAL_BONUS
+                    ),  # Frontend expects reward_amount, default to REFERRAL_BONUS for pending
                 }
             )
 
@@ -624,40 +645,87 @@ def track_referral_signup(
         if referrer["id"] == referred_user_id:
             return False, "Cannot use your own referral code", None
 
-        # Check how many times this referral code has been used
-        usage_count_result = (
+        # Check if there's already a referral record for this user BEFORE checking usage limits
+        # This allows idempotent retries even if the code has since reached its limit
+        existing_referral = (
             client.table("referrals")
-            .select("id", count="exact")
-            .eq("referral_code", referral_code)
+            .select("*")
+            .eq("referred_user_id", referred_user_id)
             .execute()
         )
 
-        usage_count = usage_count_result.count if usage_count_result.count else 0
+        if existing_referral.data:
+            # User already has a referral record - use the ORIGINAL referral code
+            # to maintain data consistency (don't let them switch referrers)
+            original_code = existing_referral.data[0].get("referral_code")
+            if original_code != referral_code:
+                logger.warning(
+                    f"User {referred_user_id} already referred by code {original_code}, "
+                    f"ignoring new code {referral_code}"
+                )
+                return False, "You have already been referred by another user", None
 
-        if usage_count >= MAX_REFERRAL_USES:
-            return (
-                False,
-                f"This referral code has reached its usage limit ({MAX_REFERRAL_USES} uses)",
-                None,
+            # Same code, just ensure referred_by_code is set (idempotent)
+            # Skip usage limit check since this user is already counted
+            logger.info(
+                f"Referral record already exists for user {referred_user_id} with same code, "
+                f"ensuring referred_by_code is set"
+            )
+            code_to_set = original_code
+        else:
+            # New referral - check usage limits before creating record
+            usage_count_result = (
+                client.table("referrals")
+                .select("id", count="exact")
+                .eq("referral_code", referral_code)
+                .execute()
             )
 
-        # Create pending referral record (will be completed when they make first purchase)
-        referral_data = {
-            "referrer_id": referrer["id"],
-            "referred_user_id": referred_user_id,
-            "referral_code": referral_code,
-            "bonus_amount": REFERRAL_BONUS,
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+            usage_count = usage_count_result.count if usage_count_result.count else 0
 
-        referral_result = client.table("referrals").insert(referral_data).execute()
+            if usage_count >= MAX_REFERRAL_USES:
+                return (
+                    False,
+                    f"This referral code has reached its usage limit ({MAX_REFERRAL_USES} uses)",
+                    None,
+                )
 
-        if not referral_result.data:
-            return False, "Failed to create referral record", None
+            # Create pending referral record (will be completed when they make first purchase)
+            referral_data = {
+                "referrer_id": referrer["id"],
+                "referred_user_id": referred_user_id,
+                "referral_code": referral_code,
+                "bonus_amount": REFERRAL_BONUS,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            referral_result = client.table("referrals").insert(referral_data).execute()
+
+            if not referral_result.data:
+                return False, "Failed to create referral record", None
+
+            code_to_set = referral_code
+
+        # CRITICAL: Set referred_by_code on the user record so they appear in referral stats
+        # This must be done here to ensure the user appears on the referrer's page
+        update_result = (
+            client.table("users")
+            .update({"referred_by_code": code_to_set})
+            .eq("id", referred_user_id)
+            .execute()
+        )
+
+        if not update_result.data:
+            logger.error(
+                f"Failed to set referred_by_code for user {referred_user_id}, "
+                f"they will not appear in referral stats"
+            )
+            return False, "Failed to update user referral information", None
 
         logger.info(
-            f"Tracked referral signup: user {referred_user_id} used code {referral_code} from user {referrer['id']}"
+            f"Tracked referral signup: user {referred_user_id} used code {code_to_set} "
+            f"from user {referrer['id']}"
         )
 
         return True, None, referrer

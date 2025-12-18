@@ -126,19 +126,27 @@ class TestAISDKEndpoint:
         assert response.status_code == 422  # Validation error
 
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
-    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream_async")
     def test_ai_sdk_streaming_request(self, mock_stream, mock_validate):
         """Test streaming response from AI SDK endpoint"""
+        from unittest.mock import AsyncMock
+
         mock_validate.return_value = "test-api-key"
 
-        # Mock streaming response
+        # Mock streaming response with async iterator
         mock_chunk1 = MagicMock()
         mock_chunk1.choices = [MagicMock(delta=MagicMock(content="Hello"))]
 
         mock_chunk2 = MagicMock()
         mock_chunk2.choices = [MagicMock(delta=MagicMock(content=" world"))]
 
-        mock_stream.return_value = iter([mock_chunk1, mock_chunk2])
+        # Create async iterator mock
+        async def mock_async_iter():
+            for chunk in [mock_chunk1, mock_chunk2]:
+                yield chunk
+
+        # Use AsyncMock so the await works, then return the async generator
+        mock_stream.return_value = mock_async_iter()
 
         # Make streaming request using Vercel AI Gateway model format
         response = client.post(
@@ -153,6 +161,10 @@ class TestAISDKEndpoint:
         assert response.status_code == 200
         # Check content-type contains text/event-stream (may have charset appended)
         assert "text/event-stream" in response.headers["content-type"]
+        # Verify actual streaming content was received
+        content = response.text
+        assert "Hello" in content
+        assert "world" in content
 
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
@@ -383,7 +395,7 @@ class TestAISDKModelRouting:
         assert call_args[0][1] == "openrouter/auto"
 
     @patch("src.routes.ai_sdk.get_openrouter_client")
-    @patch("src.routes.ai_sdk.make_openrouter_request_openai_stream")
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai_stream_async")
     def test_openrouter_auto_streaming_routes_to_openrouter(self, mock_stream, mock_get_client):
         """Test that openrouter/auto streaming is routed directly to OpenRouter"""
         # Mock successful client creation
@@ -395,7 +407,13 @@ class TestAISDKModelRouting:
         mock_chunk2 = MagicMock()
         mock_chunk2.choices = [MagicMock(delta=MagicMock(content=" from OpenRouter!"))]
 
-        mock_stream.return_value = iter([mock_chunk1, mock_chunk2])
+        # Create async iterator mock
+        async def mock_async_iter():
+            for chunk in [mock_chunk1, mock_chunk2]:
+                yield chunk
+
+        # Use return_value for the async function mock
+        mock_stream.return_value = mock_async_iter()
 
         response = client.post(
             "/api/chat/ai-sdk",
@@ -408,6 +426,10 @@ class TestAISDKModelRouting:
 
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
+        # Verify actual streaming content was received
+        content = response.text
+        assert "Hello" in content
+        assert "OpenRouter" in content
         # Verify that the client was validated first
         mock_get_client.assert_called_once()
         # Verify that the request was made to OpenRouter
@@ -564,7 +586,7 @@ class TestAISDKSentryIntegration:
 
     @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", True)
     @patch("src.routes.ai_sdk.sentry_sdk")
-    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream_async")
     def test_streaming_error_captured_to_sentry(self, mock_stream, mock_sentry):
         """Test that streaming errors are captured to Sentry"""
         mock_stream.side_effect = RuntimeError("Streaming failed")

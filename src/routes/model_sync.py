@@ -4,7 +4,6 @@ Dynamically fetches and syncs models from provider APIs to database
 """
 
 import logging
-from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
@@ -31,7 +30,7 @@ class SyncResponse(BaseModel):
 
 class ProviderListResponse(BaseModel):
     """Response with list of available providers"""
-    providers: List[str] = Field(..., description="List of provider slugs")
+    providers: list[str] = Field(..., description="List of provider slugs")
     count: int = Field(..., description="Number of providers")
 
 
@@ -113,7 +112,7 @@ async def sync_single_provider(
 
 @router.post("/all", response_model=SyncResponse)
 async def sync_all_provider_models(
-    providers: Optional[List[str]] = Query(
+    providers: list[str] | None = Query(
         None,
         description="Specific providers to sync (comma-separated). If not provided, syncs all providers."
     ),

@@ -4,7 +4,6 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
-from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from src.schemas.providers import (
@@ -13,7 +12,6 @@ from src.schemas.providers import (
     ProviderResponse,
     ProviderHealthUpdate,
     ProviderStats,
-    ProviderWithModelCount,
 )
 from src.db.providers_db import (
     get_all_providers,
@@ -39,7 +37,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=List[ProviderResponse])
+@router.get("/", response_model=list[ProviderResponse])
 async def list_providers(
     is_active_only: bool = Query(True, description="Only return active providers"),
     include_inactive: bool = Query(False, description="Include inactive providers"),
@@ -84,7 +82,7 @@ async def get_provider_statistics():
         )
 
 
-@router.get("/search", response_model=List[ProviderResponse])
+@router.get("/search", response_model=list[ProviderResponse])
 async def search_providers_endpoint(
     q: str = Query(..., min_length=1, description="Search query"),
 ):
@@ -107,7 +105,7 @@ async def search_providers_endpoint(
         )
 
 
-@router.get("/health/{health_status}", response_model=List[ProviderResponse])
+@router.get("/health/{health_status}", response_model=list[ProviderResponse])
 async def get_providers_by_health(
     health_status: str = Path(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
 ):

@@ -10,6 +10,7 @@ import src.config.supabase_config as supabase_config
 import src.db.users as users_module
 import src.enhanced_notification_service as notif_module
 from src.db.activity import log_activity
+from src.db.users import _is_temporary_api_key
 from src.schemas import (
     AuthMethod,
     PrivyAuthRequest,
@@ -156,29 +157,16 @@ def _handle_existing_user(
         )
 
     # Validate that we're not returning a temporary key pattern
-    # Temporary keys created during user registration: gw_live_{token_urlsafe(16)}
-    #   - Format: "gw_live_" (8 chars) + token_urlsafe(16) (22 chars) = 30 chars total
-    # Proper keys from create_api_key: gw_live_{token_urlsafe(32)}
-    #   - Format: "gw_live_" (8 chars) + token_urlsafe(32) (43 chars) = 51 chars total
-    # Note: token_urlsafe() can contain underscores, so we check total length, not split by _
-    if api_key_to_return and api_key_to_return.startswith("gw_live_"):
-        key_length = len(api_key_to_return)
-        # Threshold: midpoint between 30 (temp) and 51 (proper) = 40
-        # Any gw_live_ key shorter than 40 chars is a temp key
-        if key_length < 40:
-            logger.error(
-                "Detected temporary API key pattern for user %s: %s (length: %d). "
-                "This key should have been replaced during user creation.",
-                existing_user["id"],
-                api_key_to_return[:15] + "...",
-                key_length,
-            )
-            # Don't return temporary keys - force key recreation by setting to None
-            api_key_to_return = None
-            logger.warning(
-                "Nullified temporary key for user %s to force proper key recreation",
-                existing_user["id"],
-            )
+    if api_key_to_return and _is_temporary_api_key(api_key_to_return):
+        logger.warning(
+            "Detected temporary API key for user %s (length: %d). "
+            "This key was created during registration but never properly replaced. "
+            "Will create a new proper key.",
+            existing_user["id"],
+            len(api_key_to_return),
+        )
+        # Don't return temporary keys - force key recreation by setting to None
+        api_key_to_return = None
 
     user_credits = existing_user.get("credits")
     try:
@@ -480,20 +468,32 @@ def _process_referral_code_background(
                 # Send notification to referrer
                 if referrer.get("email"):
                     try:
-                        send_referral_signup_notification(
+                        notification_sent = send_referral_signup_notification(
                             referrer_id=referrer["id"],
                             referrer_email=referrer["email"],
                             referrer_username=referrer.get("username", "User"),
                             referee_username=username,
                         )
-                        logger.info(
-                            f"Background task: Referral notification sent to referrer "
-                            f"{referrer['id']}"
-                        )
+                        if notification_sent:
+                            logger.info(
+                                f"Background task: Referral notification sent to referrer "
+                                f"{referrer['id']} at {referrer['email']}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Background task: Referral notification failed for referrer "
+                                f"{referrer['id']} at {referrer['email']} - email service returned failure"
+                            )
                     except Exception as notify_error:
                         logger.error(
-                            f"Background task: Failed to send referral notification: {notify_error}"
+                            f"Background task: Failed to send referral notification to "
+                            f"referrer {referrer['id']} at {referrer.get('email')}: {notify_error}"
                         )
+                else:
+                    logger.warning(
+                        f"Background task: Cannot send referral notification - "
+                        f"referrer {referrer['id']} has no email address"
+                    )
             except Exception as store_error:
                 logger.error(
                     f"Background task: Failed to store referral code: {store_error}"
@@ -602,7 +602,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
         # If not in cache, try database with timeout
         if not existing_user:
             try:
-                logger.debug(f"Cache miss for Privy ID, querying database...")
+                logger.debug("Cache miss for Privy ID, querying database...")
                 existing_user = safe_query_with_timeout(
                     supabase_config.get_supabase_client(),
                     "users",
@@ -628,7 +628,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
             if not existing_user:
                 try:
-                    logger.debug(f"Cache miss for username, querying database...")
+                    logger.debug("Cache miss for username, querying database...")
                     existing_user = safe_query_with_timeout(
                         supabase_config.get_supabase_client(),
                         "users",
@@ -1305,3 +1305,139 @@ async def reset_password(token: str):
     except Exception as e:
         logger.error(f"Error resetting password: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.get("/auth/health", tags=["authentication", "health"])
+async def auth_health_check():
+    """
+    Dedicated health check endpoint for authentication service.
+
+    Returns comprehensive health status including:
+    - Database connectivity (Supabase)
+    - Redis cache availability
+    - Auth cache statistics
+    - Query timeout configuration
+    - Overall auth service status
+
+    This endpoint does not require authentication and is suitable for
+    load balancer health checks and monitoring systems.
+    """
+    import time
+
+    from src.config.redis_config import get_redis_client
+    from src.services.auth_cache import get_auth_cache_stats_lightweight
+
+    start_time = time.time()
+    health_status = {
+        "service": "auth",
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {},
+        "latency_ms": 0,
+    }
+
+    issues = []
+
+    # Check 1: Database connectivity
+    # Use execute_with_timeout directly (not safe_query_with_timeout) so we can
+    # properly distinguish between timeouts and database errors
+    from src.services.query_timeout import execute_with_timeout
+
+    db_check_start = time.time()
+    try:
+        client = supabase_config.get_supabase_client()
+        # Simple query to verify connection - use timeout
+        result = execute_with_timeout(
+            lambda: client.table("users").select("id").limit(1).execute(),
+            timeout_seconds=3,
+            operation_name="auth health check",
+        )
+        db_latency = (time.time() - db_check_start) * 1000
+
+        health_status["checks"]["database"] = {
+            "status": "healthy",
+            "latency_ms": round(db_latency, 2),
+        }
+    except QueryTimeoutError as e:
+        db_latency = (time.time() - db_check_start) * 1000
+        health_status["checks"]["database"] = {
+            "status": "timeout",
+            "latency_ms": round(db_latency, 2),
+            "error": str(e),
+        }
+        issues.append("database_timeout")
+    except Exception as e:
+        db_latency = (time.time() - db_check_start) * 1000
+        health_status["checks"]["database"] = {
+            "status": "unhealthy",
+            "latency_ms": round(db_latency, 2),
+            "error": str(e),
+        }
+        issues.append("database_error")
+
+    # Check 2: Redis cache availability
+    redis_check_start = time.time()
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            # Ping Redis
+            redis_client.ping()
+            redis_latency = (time.time() - redis_check_start) * 1000
+            health_status["checks"]["redis"] = {
+                "status": "healthy",
+                "latency_ms": round(redis_latency, 2),
+            }
+        else:
+            redis_latency = (time.time() - redis_check_start) * 1000
+            health_status["checks"]["redis"] = {
+                "status": "unavailable",
+                "latency_ms": round(redis_latency, 2),
+                "note": "Redis client not configured - using fallback caching",
+            }
+            # Redis being unavailable is not critical - we have in-memory fallback
+    except Exception as e:
+        redis_latency = (time.time() - redis_check_start) * 1000
+        health_status["checks"]["redis"] = {
+            "status": "unhealthy",
+            "latency_ms": round(redis_latency, 2),
+            "error": str(e),
+        }
+        issues.append("redis_error")
+
+    # Check 3: Auth cache statistics (using lightweight O(1) operations only)
+    try:
+        cache_stats = get_auth_cache_stats_lightweight()
+        health_status["checks"]["auth_cache"] = {
+            "status": "healthy" if cache_stats.get("redis_available", False) else "degraded",
+            "stats": cache_stats,
+        }
+    except Exception as e:
+        health_status["checks"]["auth_cache"] = {
+            "status": "error",
+            "error": str(e),
+        }
+
+    # Check 4: Query timeout configuration
+    health_status["checks"]["timeouts"] = {
+        "auth_query_timeout_seconds": AUTH_QUERY_TIMEOUT,
+        "user_lookup_timeout_seconds": USER_LOOKUP_TIMEOUT,
+    }
+
+    # Calculate total latency
+    total_latency = (time.time() - start_time) * 1000
+    health_status["latency_ms"] = round(total_latency, 2)
+
+    # Determine overall status
+    if "database_error" in issues:
+        health_status["status"] = "unhealthy"
+    elif "database_timeout" in issues or "redis_error" in issues:
+        health_status["status"] = "degraded"
+    elif total_latency > 5000:  # > 5 seconds is concerning
+        health_status["status"] = "degraded"
+        health_status["warning"] = f"High latency detected: {total_latency:.0f}ms"
+
+    # Add issues list if any
+    if issues:
+        health_status["issues"] = issues
+
+    return health_status

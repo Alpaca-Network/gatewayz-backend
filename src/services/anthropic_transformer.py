@@ -17,23 +17,38 @@ def extract_message_with_tools(choice_message: Any) -> dict[str, Any]:
 
     Handles both object-based messages (with attributes) and dict-based messages.
 
+    For reasoning/thinking models (e.g., Kimi-K2-Thinking, GPT-OSS-120B on Near AI),
+    content may be null while the response is in 'reasoning' or 'reasoning_content' fields.
+    This function extracts and includes reasoning content when present.
+
     Args:
         choice_message: The message object/dict from a choice in the response
 
     Returns:
-        Dictionary with role, content, and optionally tool_calls/function_call
+        Dictionary with role, content, and optionally tool_calls/function_call/reasoning_content
     """
     # Extract basic message data
     if isinstance(choice_message, dict):
         role = choice_message.get("role", "assistant")
-        content = choice_message.get("content", "")
+        content = choice_message.get("content")
         tool_calls = choice_message.get("tool_calls")
         function_call = choice_message.get("function_call")
+        # Extract reasoning content for thinking models
+        reasoning = choice_message.get("reasoning") or choice_message.get("reasoning_content")
     else:
         role = choice_message.role
         content = choice_message.content
         tool_calls = getattr(choice_message, "tool_calls", None)
         function_call = getattr(choice_message, "function_call", None)
+        # Extract reasoning content for thinking models
+        reasoning = getattr(choice_message, "reasoning", None) or getattr(
+            choice_message, "reasoning_content", None
+        )
+
+    # Handle case where content is None but reasoning is present (thinking models)
+    # For compatibility, we keep content as-is but also expose reasoning
+    if content is None:
+        content = ""
 
     # Build message dict with available fields
     msg = {"role": role, "content": content}
@@ -41,6 +56,9 @@ def extract_message_with_tools(choice_message: Any) -> dict[str, Any]:
         msg["tool_calls"] = tool_calls
     if function_call:
         msg["function_call"] = function_call
+    # Include reasoning content if present (for thinking/reasoning models)
+    if reasoning:
+        msg["reasoning_content"] = reasoning
 
     return msg
 
