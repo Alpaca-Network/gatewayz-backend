@@ -38,6 +38,7 @@ from src.services.models import (
     fetch_models_from_openrouter,
     fetch_models_from_together,
 )
+from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
 from src.services.providers import (
@@ -90,6 +91,7 @@ def get_all_gateway_names() -> list[str]:
         "near",
         "nebius",
         "novita",
+        "onerouter",
         "openrouter",
         "together",
         "xai",
@@ -122,6 +124,7 @@ def get_cacheable_gateways() -> list[str]:
         "near": fetch_models_from_near,
         "nebius": fetch_models_from_nebius,
         "novita": fetch_models_from_novita,
+        "onerouter": fetch_models_from_onerouter,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
         "xai": fetch_models_from_xai,
@@ -152,6 +155,7 @@ def get_fetch_function(gateway: str):
         "near": fetch_models_from_near,
         "nebius": fetch_models_from_nebius,
         "novita": fetch_models_from_novita,
+        "onerouter": fetch_models_from_onerouter,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
         "xai": fetch_models_from_xai,
