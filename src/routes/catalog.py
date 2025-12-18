@@ -606,6 +606,12 @@ async def get_models(
             annotated_together = annotate_provider_sources(together_providers, "together")
             provider_groups.append(annotated_together)
 
+        if gateway_value in ("google-vertex", "all"):
+            models_for_providers = google_models if gateway_value == "all" else models
+            google_providers = derive_providers_from_models(models_for_providers, "google-vertex")
+            annotated_google = annotate_provider_sources(google_providers, "google-vertex")
+            provider_groups.append(annotated_google)
+
         if gateway_value in ("cerebras", "all"):
             models_for_providers = cerebras_models if gateway_value == "all" else models
             cerebras_providers = derive_providers_from_models(models_for_providers, "cerebras")
@@ -1858,6 +1864,10 @@ async def search_models(
         if gateway_value in ("together", "all"):
             together_models = get_cached_models("together") or []
             all_models.extend(together_models)
+
+        if gateway_value in ("google-vertex", "all"):
+            google_models = get_cached_models("google-vertex") or []
+            all_models.extend(google_models)
 
         if gateway_value in ("aihubmix", "all"):
             aihubmix_models = get_cached_models("aihubmix") or []
