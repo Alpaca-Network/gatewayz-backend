@@ -614,8 +614,8 @@ class TestReferralNotificationIntegration:
 class TestReferralBackgroundTaskLogging:
     """Test logging in the background task that processes referral codes"""
 
-    @patch('src.routes.auth.send_referral_signup_notification')
-    @patch('src.routes.auth.track_referral_signup')
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
     @patch('src.routes.auth.supabase_config.get_supabase_client')
     def test_background_task_logs_when_referrer_has_no_email(
         self,
@@ -655,8 +655,8 @@ class TestReferralBackgroundTaskLogging:
         mock_send_notification.assert_not_called()
         print("✓ Background task logs warning when referrer has no email")
 
-    @patch('src.routes.auth.send_referral_signup_notification')
-    @patch('src.routes.auth.track_referral_signup')
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
     @patch('src.routes.auth.supabase_config.get_supabase_client')
     def test_background_task_logs_success_with_email(
         self,
@@ -701,8 +701,8 @@ class TestReferralBackgroundTaskLogging:
         mock_send_notification.assert_called_once()
         print("✓ Background task logs success with email address")
 
-    @patch('src.routes.auth.send_referral_signup_notification')
-    @patch('src.routes.auth.track_referral_signup')
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
     @patch('src.routes.auth.supabase_config.get_supabase_client')
     def test_background_task_logs_warning_when_notification_returns_false(
         self,
@@ -748,8 +748,8 @@ class TestReferralBackgroundTaskLogging:
         mock_send_notification.assert_called_once()
         print("✓ Background task logs warning when notification returns False")
 
-    @patch('src.routes.auth.send_referral_signup_notification')
-    @patch('src.routes.auth.track_referral_signup')
+    @patch('src.services.referral.send_referral_signup_notification')
+    @patch('src.services.referral.track_referral_signup')
     @patch('src.routes.auth.supabase_config.get_supabase_client')
     def test_background_task_logs_notification_error_with_details(
         self,
