@@ -468,16 +468,22 @@ def _process_referral_code_background(
                 # Send notification to referrer
                 if referrer.get("email"):
                     try:
-                        send_referral_signup_notification(
+                        notification_sent = send_referral_signup_notification(
                             referrer_id=referrer["id"],
                             referrer_email=referrer["email"],
                             referrer_username=referrer.get("username", "User"),
                             referee_username=username,
                         )
-                        logger.info(
-                            f"Background task: Referral notification sent to referrer "
-                            f"{referrer['id']} at {referrer['email']}"
-                        )
+                        if notification_sent:
+                            logger.info(
+                                f"Background task: Referral notification sent to referrer "
+                                f"{referrer['id']} at {referrer['email']}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Background task: Referral notification failed for referrer "
+                                f"{referrer['id']} at {referrer['email']} - email service returned failure"
+                            )
                     except Exception as notify_error:
                         logger.error(
                             f"Background task: Failed to send referral notification to "
