@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from datetime import timezone
+from datetime import datetime, timezone
 
 from src.cache import _cerebras_models_cache
 

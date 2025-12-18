@@ -14,7 +14,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.services.notification import NotificationService
 from src.schemas.notification import NotificationPreferences, LowBalanceAlert, TrialExpiryAlert

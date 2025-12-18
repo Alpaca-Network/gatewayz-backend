@@ -6,7 +6,7 @@ Uses the same in-memory Supabase stub as test_chat_history.py for consistency.
 """
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timezone
 
 # =========================
 # In-memory Supabase stub (same as test_chat_history.py)

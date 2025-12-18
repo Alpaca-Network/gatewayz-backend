@@ -425,6 +425,15 @@ class TestFetchModelsFromOneRouter:
             assert _onerouter_models_cache["timestamp"] is not None
             assert isinstance(_onerouter_models_cache["timestamp"], datetime)
 
+            # Verify timestamp is recent (within last 5 seconds)
+            cache_age = (datetime.now(timezone.utc) - _onerouter_models_cache["timestamp"]).total_seconds()
+            assert cache_age < 5
+
+    def test_fetch_models_context_length_priority(self, mock_onerouter_api_key):
+        """Test that context_length is prioritized over context_window"""
+        # TODO: Add implementation
+        pytest.skip("Test implementation pending")
+
     def test_fetch_models_skip_empty_model_id(self, mock_onerouter_api_key):
         """Test that models without id are skipped"""
         from src.services.onerouter_client import fetch_models_from_onerouter

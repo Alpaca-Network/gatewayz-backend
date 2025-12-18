@@ -11,7 +11,7 @@ Tests cover:
 """
 import os
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timezone
 from fastapi.testclient import TestClient
 from unittest.mock import patch, Mock
 

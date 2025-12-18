@@ -13,7 +13,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from src.db.coupons import (
     create_coupon,

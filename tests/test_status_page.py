@@ -4,7 +4,7 @@ Tests for the Public Status Page API
 Tests the status page endpoints that provide public health information.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
