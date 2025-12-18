@@ -14,7 +14,6 @@ The db.users module handles:
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.db.users import (
@@ -49,33 +48,7 @@ def get_user(api_key: str) -> dict[str, Any] | None:
     Returns:
         User dict if found, None otherwise
     """
-    # Check cache first
-    if api_key in _user_cache:
-        entry = _user_cache[api_key]
-        cache_time = entry["timestamp"]
-        ttl = entry["ttl"]
-
-        # Check if cache is still valid
-        if datetime.now(UTC) - cache_time < timedelta(seconds=ttl):
-            logger.debug(f"Cache hit for API key {api_key[:10]}... (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s)")
-            return entry["user"]
-        else:
-            # Cache expired, remove it
-            del _user_cache[api_key]
-            logger.debug(f"Cache expired for API key {api_key[:10]}...")
-
-    # Cache miss or expired - fetch from database
-    logger.debug(f"Cache miss for API key {api_key[:10]}... - fetching from database")
-    user = db_get_user(api_key)
-
-    # Cache the result (even if None, to avoid repeated DB queries)
-    _user_cache[api_key] = {
-        "user": user,
-        "timestamp": datetime.now(UTC),
-        "ttl": _cache_ttl,
-    }
-
-    return user
+    return db_get_user(api_key)
 
 
 def invalidate_user(api_key: str) -> None:
