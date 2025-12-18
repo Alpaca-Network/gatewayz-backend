@@ -1,7 +1,7 @@
 # tests/db/test_rate_limits_store.py
 import types
 import copy
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 

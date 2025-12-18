@@ -4,7 +4,7 @@ Tests for the Health Alerting Service
 Tests alert creation, sending, and de-duplication.
 """
 
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
