@@ -190,6 +190,19 @@ async def lifespan(app):
         get_cache()
         logger.info("Response cache initialized")
 
+        # Initialize Google Vertex AI models catalog
+        def init_google_models_background():
+            try:
+                from src.services.google_models_config import initialize_google_models
+
+                initialize_google_models()
+                logger.info("✓ Google Vertex AI models initialized")
+            except Exception as e:
+                logger.warning(f"Google models initialization warning: {e}", exc_info=True)
+
+        # Run synchronous initialization in executor to avoid blocking
+        asyncio.get_event_loop().run_in_executor(None, init_google_models_background)
+
         # Initialize autonomous error monitoring in background
         async def init_error_monitoring_background():
             try:
