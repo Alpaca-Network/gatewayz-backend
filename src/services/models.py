@@ -62,6 +62,7 @@ from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.xai_client import fetch_models_from_xai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
 

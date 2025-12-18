@@ -1074,6 +1074,12 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
     # Normalize to lowercase for consistency in all @ prefix checks
     normalized_model = model_id.lower()
 
+    # Check for Cloudflare Workers AI models (use @cf/ prefix)
+    # IMPORTANT: This must come before the general @ prefix check below
+    if normalized_model.startswith("@cf/"):
+        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
+        return "cloudflare-workers-ai"
+
     # Check for Google Vertex AI models first (before Portkey check)
     if model_id.startswith("projects/") and "/models/" in model_id:
         return "google-vertex"
