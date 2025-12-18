@@ -15,7 +15,7 @@ Features:
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 import shutil
@@ -87,7 +87,7 @@ class PricingSyncService:
         result = {
             "provider": provider_name,
             "dry_run": dry_run,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": "pending",
             "models_updated": 0,
             "models_skipped": 0,
@@ -284,7 +284,7 @@ class PricingSyncService:
             if "_metadata" not in pricing_data:
                 pricing_data["_metadata"] = {}
 
-            pricing_data["_metadata"]["last_updated"] = datetime.utcnow().strftime(
+            pricing_data["_metadata"]["last_updated"] = datetime.now(timezone.utc).strftime(
                 "%Y-%m-%d"
             )
             pricing_data["_metadata"]["last_sync_providers"] = (
@@ -310,7 +310,7 @@ class PricingSyncService:
 
     def _create_backup(self) -> Path:
         """Create backup of current pricing file."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         backup_file = BACKUP_DIR / f"pricing_backup_{timestamp}.json"
 
         if PRICING_FILE.exists():
@@ -327,17 +327,17 @@ class PricingSyncService:
 
     def cleanup_old_backups(self, retention_days: int = PricingSyncConfig.BACKUP_RETENTION_DAYS):
         """Remove old backup files."""
-        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
         for backup_file in BACKUP_DIR.glob("pricing_backup_*.json"):
-            if datetime.fromtimestamp(backup_file.stat().st_mtime) < cutoff:
+            if datetime.fromtimestamp(backup_file.stat().st_mtime, tz=timezone.utc) < cutoff:
                 backup_file.unlink()
                 logger.info(f"Deleted old backup: {backup_file}")
 
     def _log_sync(self, provider: str, status: str, message: str) -> None:
         """Log sync operation."""
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "provider": provider,
             "status": status,
             "message": message,
@@ -372,7 +372,7 @@ class PricingSyncService:
         total_errors = sum(len(r.get("errors", [])) for r in results.values())
 
         summary = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "dry_run": dry_run,
             "providers_synced": len([r for r in results.values() if r["status"] == "success"]),
             "total_models_updated": total_updated,

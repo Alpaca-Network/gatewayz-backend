@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.config.supabase_config import get_supabase_client
 
@@ -38,7 +38,7 @@ def ensure_scope_permissions_table(table_name: str) -> int:
                     client.table(table_name).update(
                         {
                             "scope_permissions": DEFAULT_SCOPE_PERMISSIONS,
-                            "updated_at": datetime.utcnow().isoformat(),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
                         }
                     ).eq("id", row["id"]).execute()
                     updated += 1

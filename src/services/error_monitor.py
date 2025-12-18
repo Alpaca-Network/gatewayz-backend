@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
@@ -228,14 +228,14 @@ class ErrorMonitor:
         """Extract details from error log."""
         message = error_data.get("message", "Unknown error")
         stack_trace = error_data.get("stack_trace", "")
-        timestamp = error_data.get("timestamp", datetime.utcnow())
+        timestamp = error_data.get("timestamp", datetime.now(timezone.utc))
 
         # Parse timestamp if it's a string
         if isinstance(timestamp, str):
             try:
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             except (ValueError, AttributeError):
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
 
         # Extract file, line, and function from stack trace
         file_match = re.search(r'File "([^"]+)", line (\d+)', stack_trace)
