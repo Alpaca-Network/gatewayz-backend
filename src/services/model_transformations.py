@@ -33,11 +33,66 @@ MODEL_ID_ALIASES = {
     "gpt5_1": "openai/gpt-5.1",
     "gpt5.1": "openai/gpt-5.1",
     "gpt-5.1": "openai/gpt-5.1",
+    # OpenAI o-series reasoning models (o1, o3, o4-mini)
+    # o1 variants
+    "o1": "openai/o1",
+    "o1-pro": "openai/o1-pro",
+    # o3 variants
+    "o3": "openai/o3",
+    "o3-mini": "openai/o3-mini",
+    "o3-mini-high": "openai/o3-mini-high",
+    "o3-pro": "openai/o3-pro",
+    "o3-deep-research": "openai/o3-deep-research",
+    # o4-mini variants
+    "o4-mini": "openai/o4-mini",
+    "o4-mini-high": "openai/o4-mini-high",
+    "o4-mini-deep-research": "openai/o4-mini-deep-research",
+    # Anthropic Claude models - aliases for version variants
+    # Claude 3.5 Haiku
+    "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
+    # Claude 3.7 Sonnet
+    "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
+    # Claude 4 series - Opus variants
+    "claude-opus-4": "anthropic/claude-opus-4",
+    "claude-opus-4.1": "anthropic/claude-opus-4.1",
+    "claude-opus-4.5": "anthropic/claude-opus-4.5",
+    "opus-4": "anthropic/claude-opus-4",
+    "opus-4.1": "anthropic/claude-opus-4.1",
+    "opus-4.5": "anthropic/claude-opus-4.5",
+    # Claude 4 series - Sonnet variants
+    "claude-sonnet-4": "anthropic/claude-sonnet-4",
+    "sonnet-4": "anthropic/claude-sonnet-4",
+    # Claude 4 series - Haiku variants
+    "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+    "haiku-4.5": "anthropic/claude-haiku-4.5",
+    # DeepSeek R1 and V3 series - newest variants
+    "deepseek-r1": "deepseek/deepseek-r1",
+    "r1": "deepseek/deepseek-r1",
+    "deepseek-v3.2": "deepseek/deepseek-v3.2",
+    # Meta Llama 4 series
+    "llama-4-scout": "meta-llama/llama-4-scout",
+    "llama-4-maverick": "meta-llama/llama-4-maverick",
+    # Google Gemini 3 series
+    "gemini-3": "google/gemini-3-flash-preview",
+    "gemini-3-flash": "google/gemini-3-flash-preview",
+    "gemini-3-pro": "google/gemini-3-pro-preview",
+    # XAI Grok 3 series
+    "grok-3": "x-ai/grok-3",
+    "grok-3-beta": "x-ai/grok-3-beta",
+    "grok-3-mini": "x-ai/grok-3-mini",
+    "grok-3-mini-beta": "x-ai/grok-3-mini-beta",
+    # XAI Grok 4 series
+    "grok-4": "x-ai/grok-4",
+    "grok-4-fast": "x-ai/grok-4-fast",
+    "grok-4.1-fast": "x-ai/grok-4.1-fast",
+    # XAI Grok specialized models
+    "grok-code-fast-1": "x-ai/grok-code-fast-1",
     # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
-    "grok-beta": "grok-3",
-    "xai/grok-beta": "xai/grok-3",
-    "grok-vision-beta": "grok-3",
-    "xai/grok-vision-beta": "xai/grok-3",
+    # Note: Map directly to canonical x-ai/ prefix since apply_model_alias doesn't chain
+    "grok-beta": "x-ai/grok-3",
+    "xai/grok-beta": "x-ai/grok-3",
+    "grok-vision-beta": "x-ai/grok-3",
+    "xai/grok-vision-beta": "x-ai/grok-3",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
