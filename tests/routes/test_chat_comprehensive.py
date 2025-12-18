@@ -333,7 +333,25 @@ def client(sb, monkeypatch):
 
     monkeypatch.setattr(openrouter_module, "process_openrouter_response", mock_process_openrouter_response)
 
-    # Mock streaming endpoint
+    # Mock streaming endpoint - use plain classes, NOT MagicMock (for JSON serialization)
+    class MockDelta:
+        def __init__(self, role=None, content=None, tool_calls=None):
+            self.role = role
+            self.content = content
+            self.tool_calls = tool_calls
+
+    class MockStreamChoice:
+        def __init__(self, index, delta, finish_reason=None):
+            self.index = index
+            self.delta = delta
+            self.finish_reason = finish_reason
+
+    class MockStreamUsage:
+        def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0):
+            self.prompt_tokens = prompt_tokens
+            self.completion_tokens = completion_tokens
+            self.total_tokens = total_tokens
+
     class MockStreamChunk:
         def __init__(self, content_chunk, finish_reason=None):
             self.id = "chatcmpl-stream123"
@@ -341,17 +359,19 @@ def client(sb, monkeypatch):
             self.created = 1234567890
             self.model = "test-model"
 
-            delta = MagicMock()
-            delta.role = "assistant" if finish_reason is None else None
-            delta.content = content_chunk if finish_reason is None else None
+            delta = MockDelta(
+                role="assistant" if finish_reason is None else None,
+                content=content_chunk if finish_reason is None else None
+            )
 
-            choice = MagicMock()
-            choice.index = 0
-            choice.delta = delta
-            choice.finish_reason = finish_reason
+            choice = MockStreamChoice(
+                index=0,
+                delta=delta,
+                finish_reason=finish_reason
+            )
 
             self.choices = [choice]
-            self.usage = MagicMock(prompt_tokens=10, completion_tokens=15, total_tokens=25) if finish_reason else None
+            self.usage = MockStreamUsage(prompt_tokens=10, completion_tokens=15, total_tokens=25) if finish_reason else None
 
     def mock_openrouter_stream(messages, model, **kwargs):
         chunks = [
@@ -362,6 +382,18 @@ def client(sb, monkeypatch):
         return iter(chunks)
 
     monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream", mock_openrouter_stream)
+
+    # Mock async streaming endpoint (also needed for chat routes)
+    async def mock_openrouter_stream_async(messages, model, **kwargs):
+        chunks = [
+            MockStreamChunk("Hello"),
+            MockStreamChunk(" world"),
+            MockStreamChunk("!", finish_reason="stop")
+        ]
+        for chunk in chunks:
+            yield chunk
+
+    monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream_async", mock_openrouter_stream_async)
 
     # 3b) Mock Vercel AI Gateway (for failover compatibility)
     def mock_vercel_request(messages, model, **kwargs):
@@ -677,36 +709,33 @@ def test_chat_completions_streaming_success(client, sb):
 
 
 def test_chat_completions_streaming_anonymous_success(client):
-    """Test successful streaming chat completion for anonymous user.
+    """Test streaming chat completion for anonymous users (no API key).
 
-    This test verifies that anonymous users (without API key) can successfully
-    stream chat completions. The fix ensures that plan limit checks are skipped
-    for anonymous users, preventing TypeError from accessing user["id"] when
-    user is None.
+    This is a critical regression test for the bug where anonymous users
+    would get "Streaming error occurred" because the code attempted to
+    call enforce_plan_limits(user["id"], ...) when user is None.
 
-    Related fix: Skip enforce_plan_limits() for anonymous requests in stream_generator()
+    The fix skips plan limit enforcement for anonymous users (is_anonymous=True).
     """
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": "Hello"}],
+            "messages": [{"role": "user", "content": "Hello from anonymous user"}],
             "stream": True
         }
-        # No Authorization header - anonymous request
+        # No Authorization header = anonymous request
     )
 
-    # Anonymous streaming should succeed
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
-    # Parse SSE stream
+    # Parse SSE stream - should NOT contain "Streaming error occurred"
     content = response.text
     assert "data:" in content
     assert "[DONE]" in content
-
-    # Ensure no error in the stream
-    assert '"error":' not in content or '"type": "stream_error"' not in content
+    assert "Streaming error occurred" not in content
+    assert "stream_error" not in content
 
 
 # ==================================================
@@ -905,6 +934,56 @@ def test_unified_responses_with_multimodal_input(client, sb):
         headers={"Authorization": "Bearer test-multimodal-key"}
     )
 
+    assert response.status_code == 200
+
+
+def test_unified_responses_with_output_text_transformation(client, sb):
+    """Test /v1/responses properly transforms output_text content type to text.
+
+    This tests the fix for the Fireworks streaming error:
+    'Unexpected content chunk type output_text'
+
+    When clients send assistant messages from previous response conversations
+    with output_text content type, it should be transformed to standard text type.
+    """
+    sb.table("users").insert({
+        "id": 1,
+        "api_key": "test-output-text-key",
+        "credits": 100.0,
+        "is_trial": False
+    }).execute()
+
+    # Simulate a conversation continuation where a previous assistant response
+    # with output_text type content is included
+    response = client.post(
+        "/v1/responses",
+        json={
+            "model": "gpt-4",
+            "input": [
+                {
+                    "role": "user",
+                    "content": "Hello"
+                },
+                {
+                    # Assistant message from a previous Responses API response
+                    # that used output_text content type
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Hello! How can I help you today?"}
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": "What's the weather?"
+                }
+            ],
+            "stream": False
+        },
+        headers={"Authorization": "Bearer test-output-text-key"}
+    )
+
+    # Should succeed - the output_text type should be transformed to text type
+    # before being sent to the provider
     assert response.status_code == 200
 
 

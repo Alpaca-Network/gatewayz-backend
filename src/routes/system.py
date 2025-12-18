@@ -1908,7 +1908,7 @@ async def invalidate_cache(
 
         return {
             "success": True,
-            "message": f"Cache invalidated successfully",
+            "message": "Cache invalidated successfully",
             "invalidated": invalidated,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

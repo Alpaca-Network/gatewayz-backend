@@ -120,11 +120,104 @@ def process_onerouter_response(response):
         raise
 
 
+def _parse_token_limit(value) -> int:
+    """Parse token limit from various formats (string with commas, int, float, etc.)"""
+    if value is None:
+        return 4096
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            # Remove commas and convert to int
+            return int(value.replace(",", ""))
+        except ValueError:
+            return 4096
+    return 4096
+
+
+def _parse_pricing(value) -> str:
+    """Parse pricing value from various formats"""
+    if value is None:
+        return "0"
+    if isinstance(value, str):
+        # Remove $ sign and commas, then return as string
+        return value.replace("$", "").replace(",", "").strip()
+    return str(value)
+
+
+def _fetch_display_models_pricing() -> dict:
+    """Fetch pricing info from display_models endpoint and return as a lookup dict."""
+    try:
+        response = httpx.get(
+            "https://app.onerouter.pro/api/display_models/",
+            headers={"Content-Type": "application/json"},
+            timeout=10.0,
+            follow_redirects=True
+        )
+        response.raise_for_status()
+        models = response.json().get("data", [])
+
+        pricing_map = {}
+        for model in models:
+            model_id = model.get("invoke_name") or model.get("name", "")
+            if not model_id:
+                continue
+
+            # Parse pricing (sale price if available, otherwise retail)
+            prompt_price = _parse_pricing(model.get("sale_input_cost"))
+            completion_price = _parse_pricing(model.get("sale_output_cost"))
+
+            # If sale price is 0, use retail price
+            try:
+                if float(prompt_price) == 0:
+                    prompt_price = _parse_pricing(model.get("retail_input_cost"))
+            except ValueError:
+                # Keep original price if parsing fails (e.g., malformed value)
+                pass
+            try:
+                if float(completion_price) == 0:
+                    completion_price = _parse_pricing(model.get("retail_output_cost"))
+            except ValueError:
+                # Keep original price if parsing fails (e.g., malformed value)
+                pass
+
+            # Parse modalities (handle null values from API)
+            input_modalities_str = model.get("input_modalities") or "Text"
+            output_modalities_str = model.get("output_modalities") or "Text"
+            input_modalities = [m.strip().lower() for m in input_modalities_str.split(",")]
+            output_modalities = [m.strip().lower() for m in output_modalities_str.split(",")]
+
+            # Determine modality type
+            has_image_input = any(m in ["images", "image"] for m in input_modalities)
+            modality = "text+image->text" if has_image_input else "text->text"
+
+            # Parse context lengths, using 128000 as default if not provided
+            input_token_limit = model.get("input_token_limit")
+            output_token_limit = model.get("output_token_limit")
+            context_length = _parse_token_limit(input_token_limit) if input_token_limit else 128000
+            max_completion_tokens = _parse_token_limit(output_token_limit) if output_token_limit else 4096
+
+            pricing_map[model_id] = {
+                "prompt": prompt_price,
+                "completion": completion_price,
+                "context_length": context_length,
+                "max_completion_tokens": max_completion_tokens,
+                "input_modalities": input_modalities,
+                "output_modalities": output_modalities,
+                "modality": modality,
+            }
+        return pricing_map
+    except Exception as e:
+        logger.warning(f"Failed to fetch display_models pricing: {e}")
+        return {}
+
+
 def fetch_models_from_onerouter():
     """Fetch models from OneRouter API
 
     OneRouter provides access to multiple AI models through their API.
-    This function fetches the list of available models from their endpoint.
+    This function fetches the complete model list from the authenticated /v1/models
+    endpoint and enriches it with pricing data from the display_models endpoint.
 
     Models are cached with a 1-hour TTL to reduce API calls and improve performance.
     """
@@ -136,47 +229,82 @@ def fetch_models_from_onerouter():
         return models
 
     try:
+        logger.info("Fetching models from OneRouter API...")
+
         if not Config.ONEROUTER_API_KEY:
-            logger.warning("OneRouter API key not configured, cannot fetch models")
+            logger.warning("OneRouter API key not configured, skipping model fetch")
             return _cache_and_return([])
 
         headers = {
-            "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {Config.ONEROUTER_API_KEY}",
         }
 
-        # Try the standard OpenAI-compatible models endpoint
+        # Use the authenticated /v1/models endpoint for complete model list
         response = httpx.get(
-            "https://llm.onerouter.pro/v1/models",
+            "https://api.onerouter.pro/v1/models",
             headers=headers,
-            timeout=10.0
+            timeout=15.0,
+            follow_redirects=True
         )
         response.raise_for_status()
 
         models_data = response.json()
         models = models_data.get("data", [])
 
+        # Fetch pricing data from display_models to enrich the model list
+        pricing_map = _fetch_display_models_pricing()
+
+        if pricing_map:
+            logger.debug(f"Loaded pricing data for {len(pricing_map)} models from display_models")
+
         # Transform to our standard format
+        # The /v1/models endpoint returns OpenAI-compatible format with fields:
+        # id, object, created, owned_by
         transformed_models = []
+        enriched_count = 0
         for model in models:
+            # Use the model id directly (this is what's used for API calls)
             model_id = model.get("id", "")
-            # Check both context_length and context_window fields (prioritize context_length)
-            context_length = model.get("context_length") or model.get("context_window", 4096)
+            if not model_id:
+                continue
+
+            # Get pricing/context info from display_models if available
+            # Note: We assume the 'id' from /v1/models matches 'invoke_name' from display_models
+            pricing_info = pricing_map.get(model_id, {})
+            if pricing_info:
+                enriched_count += 1
+            context_length = pricing_info.get("context_length", 128000)
+            max_completion_tokens = pricing_info.get("max_completion_tokens", 4096)
+            prompt_price = pricing_info.get("prompt", "0")
+            completion_price = pricing_info.get("completion", "0")
+            modality = pricing_info.get("modality", "text->text")
+            input_modalities = pricing_info.get("input_modalities", ["text"])
+            output_modalities = pricing_info.get("output_modalities", ["text"])
+
+            # Build a readable name from the model ID
+            model_name = model_id.replace("-", " ").replace("_", " ").title()
+
+            # Build the full model ID with onerouter prefix for consistent display
+            # This ensures models are grouped under "OneRouter" in the UI
+            full_model_id = f"onerouter/{model_id}"
+
             transformed_model = {
-                "id": model_id,
+                "id": full_model_id,
                 "slug": model_id,
                 "canonical_slug": model_id,
-                "name": model.get("id", "Unknown Model"),
-                "description": f"OneRouter model: {model_id}",
+                "name": model_name,
+                "description": f"OneRouter model: {model_name}",
                 "context_length": context_length,
+                "max_completion_tokens": max_completion_tokens,
                 "architecture": {
-                    "modality": "text->text",
-                    "input_modalities": ["text"],
-                    "output_modalities": ["text"],
+                    "modality": modality,
+                    "input_modalities": input_modalities,
+                    "output_modalities": output_modalities,
                 },
                 "pricing": {
-                    "prompt": "0",  # Pricing varies by model, set defaults
-                    "completion": "0",
+                    "prompt": prompt_price,
+                    "completion": completion_price,
                     "request": "0",
                     "image": "0",
                 },
@@ -185,11 +313,17 @@ def fetch_models_from_onerouter():
             }
             transformed_models.append(transformed_model)
 
-        logger.info(f"Successfully fetched {len(transformed_models)} models from OneRouter")
+        logger.info(
+            f"Successfully fetched {len(transformed_models)} models from OneRouter "
+            f"({enriched_count} enriched with pricing data)"
+        )
         return _cache_and_return(transformed_models)
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching OneRouter models: {e}")
+        logger.error(
+            f"HTTP error fetching OneRouter models: {e.response.status_code} - "
+            f"{e.response.text[:200] if e.response.text else 'No response body'}"
+        )
         capture_provider_error(
             e,
             provider='onerouter',
@@ -197,7 +331,7 @@ def fetch_models_from_onerouter():
         )
         return _cache_and_return([])
     except Exception as e:
-        logger.error(f"Failed to fetch models from OneRouter: {e}")
+        logger.error(f"Failed to fetch models from OneRouter: {type(e).__name__}: {e}")
         capture_provider_error(
             e,
             provider='onerouter',

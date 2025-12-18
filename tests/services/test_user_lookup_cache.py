@@ -1,5 +1,8 @@
 """
 Tests for user lookup cache service
+
+NOTE: user_lookup_cache now delegates to db.users which has the cache.
+Tests patch at the db.users level to test caching behavior.
 """
 
 import pytest
@@ -14,7 +17,10 @@ from src.services.user_lookup_cache import (
 
 
 class TestUserLookupCache:
-    """Test user lookup caching functionality"""
+    """Test user lookup caching functionality
+
+    Note: The cache is now in db.users, so we patch _get_user_uncached there.
+    """
 
     def setup_method(self):
         """Clear cache before each test"""
@@ -24,7 +30,7 @@ class TestUserLookupCache:
         """First call to get_user should hit the database"""
         test_user = {"id": 1, "email": "test@example.com", "credits": 100}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.return_value = test_user
 
             result = get_user("test_api_key")
@@ -36,7 +42,7 @@ class TestUserLookupCache:
         """Second call with same API key should use cache (not hit database)"""
         test_user = {"id": 1, "email": "test@example.com", "credits": 100}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.return_value = test_user
 
             # First call
@@ -54,7 +60,7 @@ class TestUserLookupCache:
         user1 = {"id": 1, "email": "user1@example.com"}
         user2 = {"id": 2, "email": "user2@example.com"}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.side_effect = [user1, user2]
 
             result1 = get_user("api_key_1")
@@ -66,8 +72,8 @@ class TestUserLookupCache:
             assert mock_db.call_count == 2
 
     def test_cache_returns_none_when_user_not_found(self):
-        """Cache should handle None returns from database"""
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        """Cache should handle None returns from database (None is NOT cached)"""
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.return_value = None
 
             result1 = get_user("invalid_key")
@@ -75,14 +81,15 @@ class TestUserLookupCache:
 
             assert result1 is None
             assert result2 is None
-            # Should not hit DB again (None is also cached)
-            assert mock_db.call_count == 1
+            # Note: None is NOT cached (to avoid caching typos/invalid keys)
+            # So DB is called twice
+            assert mock_db.call_count == 2
 
     def test_clear_cache_all(self):
         """clear_cache() with no arguments should clear entire cache"""
         test_user = {"id": 1, "email": "test@example.com"}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.return_value = test_user
 
             # First call (hits DB)
@@ -101,7 +108,7 @@ class TestUserLookupCache:
         user1 = {"id": 1, "email": "user1@example.com"}
         user2 = {"id": 2, "email": "user2@example.com"}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.side_effect = [user1, user2, user1]
 
             # Cache both keys
@@ -124,7 +131,7 @@ class TestUserLookupCache:
         """invalidate_user should clear cache for specific user"""
         test_user = {"id": 1, "email": "test@example.com"}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.return_value = test_user
 
             get_user("test_key")
@@ -138,7 +145,7 @@ class TestUserLookupCache:
         """get_cache_stats should return cache statistics"""
         test_user = {"id": 1, "email": "test@example.com"}
 
-        with patch("src.services.user_lookup_cache.db_get_user") as mock_db:
+        with patch("src.db.users._get_user_uncached") as mock_db:
             mock_db.return_value = test_user
 
             # Cache some users
@@ -148,7 +155,6 @@ class TestUserLookupCache:
             stats = get_cache_stats()
 
             assert "cached_users" in stats
-            assert "cache_size_bytes" in stats
             assert "ttl_seconds" in stats
             assert stats["cached_users"] == 2
             assert stats["ttl_seconds"] == 300  # Default TTL
@@ -171,5 +177,4 @@ class TestUserLookupCache:
         stats = get_cache_stats()
 
         assert stats["cached_users"] == 0
-        assert stats["cache_size_bytes"] >= 0
         assert stats["ttl_seconds"] == 300

@@ -39,7 +39,7 @@ jobs:
   # Job 1: Validate migration files
   validate-migrations:
     name: Validate Migration Files
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout code
@@ -158,7 +158,7 @@ jobs:
   # Job 2: Test schema against local Supabase
   test-local-schema:
     name: Test Schema (Local Supabase)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: validate-migrations
 
     services:
@@ -255,7 +255,7 @@ jobs:
   # Job 3: Compare against production (optional, requires secrets)
   compare-production:
     name: Compare with Production
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test-local-schema
     if: |
       github.event_name == 'schedule' ||
@@ -309,7 +309,7 @@ jobs:
   # Job 4: Post results to PR
   report:
     name: Report Results
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [validate-migrations, test-local-schema]
     if: github.event_name == 'pull_request'
 

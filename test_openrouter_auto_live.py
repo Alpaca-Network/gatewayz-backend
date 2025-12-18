@@ -39,7 +39,7 @@ def test_openrouter_auto():
     ]
 
     print("\n📤 Sending test request to openrouter/auto...")
-    print(f"   Model: openrouter/auto")
+    print("   Model: openrouter/auto")
     print(f"   Message: {messages[0]['content']}")
 
     try:
@@ -52,12 +52,12 @@ def test_openrouter_auto():
         )
 
         print("\n✅ Request successful!")
-        print(f"\n📥 Response:")
+        print("\n📥 Response:")
         print(f"   Model used: {response.model}")
         print(f"   Response: {response.choices[0].message.content}")
 
         if response.usage:
-            print(f"\n📊 Token usage:")
+            print("\n📊 Token usage:")
             print(f"   Prompt tokens: {response.usage.prompt_tokens}")
             print(f"   Completion tokens: {response.usage.completion_tokens}")
             print(f"   Total tokens: {response.usage.total_tokens}")

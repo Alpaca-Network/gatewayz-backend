@@ -590,3 +590,355 @@ def test_provider_failover_on_404_to_huggingface(
     assert data["choices"][0]["message"]["content"] == "fallback success"
     assert mock_make_featherless.call_count == 1
     assert mock_make_hf.call_count == 1
+
+
+# ----------------------------------------------------------------------
+#                    NONE-SAFETY TESTS
+# ----------------------------------------------------------------------
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_response_with_none_choices(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    client, payload_basic, auth_headers
+):
+    """Test that responses with None choices are handled safely (no NoneType error)"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    # Response with choices set to None
+    mock_process.return_value = {
+        "choices": None,
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
+    mock_calculate_cost.return_value = 0.001
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
+
+    # Should not raise NoneType error - should return the response
+    assert r.status_code == 200
+    data = r.json()
+    # Choices may still be None in response, that's expected
+    assert "usage" in data
+
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_response_with_empty_choices(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    client, payload_basic, auth_headers
+):
+    """Test that responses with empty choices are handled safely"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    # Response with empty choices list
+    mock_process.return_value = {
+        "choices": [],
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
+    mock_calculate_cost.return_value = 0.001
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
+
+    # Should not raise IndexError - should return the response
+    assert r.status_code == 200
+
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_response_with_none_message(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    client, payload_basic, auth_headers
+):
+    """Test that responses with None message in choices are handled safely"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    # Response with message set to None
+    mock_process.return_value = {
+        "choices": [{"message": None, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+    }
+    mock_calculate_cost.return_value = 0.001
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
+
+    # Should not raise NoneType error - should return the response
+    assert r.status_code == 200
+
+
+# ----------------------------------------------------------------------
+#                    ONEROUTER PROVIDER TESTS
+# ----------------------------------------------------------------------
+
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_onerouter_response')
+@patch('src.routes.chat.make_onerouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_happy_path_onerouter(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider,
+    client, auth_headers
+):
+    """Test successful chat completion with OneRouter provider"""
+    # Setup mocks
+    mock_detect_provider.return_value = "onerouter"
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Hi from OneRouter"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 30, "prompt_tokens": 10, "completion_tokens": 20},
+    }
+    mock_calculate_cost.return_value = 0.012345
+
+    payload = {
+        "model": "onerouter/claude-3-5-sonnet",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["choices"][0]["message"]["content"] == "Hi from OneRouter"
+    assert data["usage"]["total_tokens"] == 30
+    mock_make_request.assert_called_once()
+
+
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.make_onerouter_request_openai_stream')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_onerouter_streaming_response(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_stream, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider,
+    client, auth_headers
+):
+    """Test streaming response with OneRouter provider"""
+    mock_detect_provider.return_value = "onerouter"
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_calculate_cost.return_value = 0.001
+
+    # Mock streaming response
+    class MockStreamChunk:
+        def __init__(self, content, finish_reason=None):
+            self.id = "chatcmpl-onerouter-123"
+            self.object = "chat.completion.chunk"
+            self.created = 1234567890
+            self.model = "claude-3-5-sonnet@20240620"
+            self.choices = [MockChoice(content, finish_reason)]
+            self.usage = None
+
+    class MockChoice:
+        def __init__(self, content, finish_reason=None):
+            self.index = 0
+            self.delta = MockDelta(content)
+            self.finish_reason = finish_reason
+
+    class MockDelta:
+        def __init__(self, content):
+            self.content = content
+            self.role = "assistant" if content else None
+
+    def make_stream(*args, **kwargs):
+        return [
+            MockStreamChunk("Hello"),
+            MockStreamChunk(" from"),
+            MockStreamChunk(" OneRouter!", "stop")
+        ]
+
+    mock_make_stream.return_value = make_stream()
+
+    payload = {
+        "model": "onerouter/gpt-4",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "stream": True,
+    }
+
+    rate_mgr = _RateLimitMgr(True, True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers.get("content-type", "")
+    content = r.text
+    assert "data: " in content
+    assert "[DONE]" in content
+    mock_make_stream.assert_called_once()
+
+
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.make_onerouter_request_openai')
+def test_onerouter_upstream_error_handling(
+    mock_make_request, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider,
+    client, auth_headers
+):
+    """Test that OneRouter upstream errors are properly handled"""
+    mock_detect_provider.return_value = "onerouter"
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+
+    # Make upstream raise HTTPStatusError(429)
+    def boom(*a, **k):
+        req = Request("POST", "https://llm.onerouter.pro/v1/chat/completions")
+        resp = Response(429, request=req, headers={"retry-after": "5"}, text="Rate limited")
+        raise HTTPStatusError("rate limit", request=req, response=resp)
+    mock_make_request.side_effect = boom
+
+    payload = {
+        "model": "onerouter/gpt-4",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(True, True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+    assert r.status_code == 429
+    assert r.headers.get("retry-after") in ("5", "5.0")
+
+
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_onerouter_response')
+@patch('src.routes.chat.make_onerouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_onerouter_versioned_model_format(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider,
+    client, auth_headers
+):
+    """Test OneRouter with @ versioned model format (e.g., claude-3-5-sonnet@20240620)"""
+    mock_detect_provider.return_value = "onerouter"
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Versioned model response"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 25, "prompt_tokens": 10, "completion_tokens": 15},
+    }
+    mock_calculate_cost.return_value = 0.01
+
+    # Test with @ versioned model format (native OneRouter format)
+    payload = {
+        "model": "claude-3-5-sonnet@20240620",
+        "messages": [{"role": "user", "content": "Test versioned model"}],
+    }
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["choices"][0]["message"]["content"] == "Versioned model response"
+    mock_make_request.assert_called_once()
+
+
+@patch('src.routes.chat.build_provider_failover_chain')
+@patch('src.routes.chat.should_failover')
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.make_onerouter_request_openai')
+def test_onerouter_network_error_handling(
+    mock_make_request, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider, mock_should_failover, mock_failover_chain,
+    client, auth_headers
+):
+    """Test that OneRouter network errors are properly handled"""
+    mock_detect_provider.return_value = "onerouter"
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_should_failover.return_value = False  # Disable failover
+    mock_failover_chain.return_value = ["onerouter"]  # Only try onerouter
+
+    # Simulate network error
+    def boom(*a, **k):
+        raise RequestError("Network unreachable", request=Request("POST", "https://llm.onerouter.pro/v1/chat/completions"))
+    mock_make_request.side_effect = boom
+
+    payload = {
+        "model": "onerouter/gpt-4o",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(True, True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+    # Network errors should result in 503 Service Unavailable
+    assert r.status_code == 503

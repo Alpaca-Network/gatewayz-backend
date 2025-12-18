@@ -10,6 +10,7 @@ import src.config.supabase_config as supabase_config
 import src.db.users as users_module
 import src.enhanced_notification_service as notif_module
 from src.db.activity import log_activity
+from src.db.users import _is_temporary_api_key
 from src.schemas import (
     AuthMethod,
     PrivyAuthRequest,
@@ -156,29 +157,16 @@ def _handle_existing_user(
         )
 
     # Validate that we're not returning a temporary key pattern
-    # Temporary keys created during user registration: gw_live_{token_urlsafe(16)}
-    #   - Format: "gw_live_" (8 chars) + token_urlsafe(16) (22 chars) = 30 chars total
-    # Proper keys from create_api_key: gw_live_{token_urlsafe(32)}
-    #   - Format: "gw_live_" (8 chars) + token_urlsafe(32) (43 chars) = 51 chars total
-    # Note: token_urlsafe() can contain underscores, so we check total length, not split by _
-    if api_key_to_return and api_key_to_return.startswith("gw_live_"):
-        key_length = len(api_key_to_return)
-        # Threshold: midpoint between 30 (temp) and 51 (proper) = 40
-        # Any gw_live_ key shorter than 40 chars is a temp key
-        if key_length < 40:
-            logger.error(
-                "Detected temporary API key pattern for user %s: %s (length: %d). "
-                "This key should have been replaced during user creation.",
-                existing_user["id"],
-                api_key_to_return[:15] + "...",
-                key_length,
-            )
-            # Don't return temporary keys - force key recreation by setting to None
-            api_key_to_return = None
-            logger.warning(
-                "Nullified temporary key for user %s to force proper key recreation",
-                existing_user["id"],
-            )
+    if api_key_to_return and _is_temporary_api_key(api_key_to_return):
+        logger.warning(
+            "Detected temporary API key for user %s (length: %d). "
+            "This key was created during registration but never properly replaced. "
+            "Will create a new proper key.",
+            existing_user["id"],
+            len(api_key_to_return),
+        )
+        # Don't return temporary keys - force key recreation by setting to None
+        api_key_to_return = None
 
     user_credits = existing_user.get("credits")
     try:
@@ -488,12 +476,18 @@ def _process_referral_code_background(
                         )
                         logger.info(
                             f"Background task: Referral notification sent to referrer "
-                            f"{referrer['id']}"
+                            f"{referrer['id']} at {referrer['email']}"
                         )
                     except Exception as notify_error:
                         logger.error(
-                            f"Background task: Failed to send referral notification: {notify_error}"
+                            f"Background task: Failed to send referral notification to "
+                            f"referrer {referrer['id']} at {referrer.get('email')}: {notify_error}"
                         )
+                else:
+                    logger.warning(
+                        f"Background task: Cannot send referral notification - "
+                        f"referrer {referrer['id']} has no email address"
+                    )
             except Exception as store_error:
                 logger.error(
                     f"Background task: Failed to store referral code: {store_error}"
@@ -602,7 +596,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
         # If not in cache, try database with timeout
         if not existing_user:
             try:
-                logger.debug(f"Cache miss for Privy ID, querying database...")
+                logger.debug("Cache miss for Privy ID, querying database...")
                 existing_user = safe_query_with_timeout(
                     supabase_config.get_supabase_client(),
                     "users",
@@ -628,7 +622,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
             if not existing_user:
                 try:
-                    logger.debug(f"Cache miss for username, querying database...")
+                    logger.debug("Cache miss for username, querying database...")
                     existing_user = safe_query_with_timeout(
                         supabase_config.get_supabase_client(),
                         "users",

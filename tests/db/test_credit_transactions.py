@@ -346,7 +346,7 @@ class TestGetUserTransactions:
         assert len(result) == 10
         assert result[0]['id'] == 11  # First item after offset 10
         assert result[9]['id'] == 20  # Last item
-        
+
         # Verify database-side pagination was used
         order_mock.range.assert_called_once_with(10, 19)  # offset 10, limit 10 -> range(10, 19)
         range_mock.execute.assert_called_once()

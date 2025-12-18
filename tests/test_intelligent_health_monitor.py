@@ -179,7 +179,7 @@ async def test_check_model_health_timeout(health_monitor):
     # Patch _check_model_health_with_timeout to simulate timeout
     async def mock_check_with_timeout(model):
         # Simulate a timeout by raising asyncio.TimeoutError
-        raise asyncio.TimeoutError("Request timeout")
+        raise TimeoutError("Request timeout")
 
     # Mock the internal HTTP client to raise timeout
     original_check = health_monitor._check_model_health
@@ -346,3 +346,112 @@ async def test_concurrent_check_limiting(health_monitor):
     """Test that concurrent checks are limited by semaphore"""
     # The semaphore should limit concurrent execution
     assert health_monitor._semaphore._value == health_monitor.max_concurrent_checks
+
+
+@pytest.mark.asyncio
+async def test_tier_update_loop_handles_missing_function():
+    """Test that tier update loop gracefully handles PGRST202 errors when function is not found"""
+    monitor = IntelligentHealthMonitor(batch_size=10, max_concurrent_checks=5, redis_coordination=False)
+    monitor.monitoring_active = True
+
+    # Mock supabase to simulate PGRST202 error
+    with patch("src.services.intelligent_health_monitor.logger") as mock_logger:
+        with patch("src.config.supabase_config.supabase") as mock_supabase:
+            # Simulate the PGRST202 error from PostgREST
+            mock_rpc = MagicMock()
+            mock_rpc.execute.side_effect = Exception(
+                "{'code': 'PGRST202', 'details': 'Searched for the function public.update_model_tier "
+                "without parameters or with a single unnamed json/jsonb parameter, but no matches were "
+                "found in the schema cache.', 'hint': None, 'message': 'Could not find the function "
+                "public.update_model_tier without parameters in the schema cache'}"
+            )
+            mock_supabase.rpc.return_value = mock_rpc
+
+            # We need to allow the loop to execute the RPC call
+            # Store original sleep to avoid recursion
+            original_sleep = asyncio.sleep
+            call_count = [0]
+
+            async def mock_sleep_fn(delay):
+                call_count[0] += 1
+                # First call is from the loop's initial sleep, let it proceed
+                # After that, we'll stop
+                if call_count[0] > 1:
+                    # Set flag to stop after first iteration executes
+                    monitor.monitoring_active = False
+                await original_sleep(0)  # Yield to event loop
+
+            with patch("src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn) as mock_sleep:
+                monitor.monitoring_active = True
+
+                # Start the tier update loop task
+                task = asyncio.create_task(monitor._tier_update_loop())
+
+                # Wait for execution to complete
+                try:
+                    await asyncio.wait_for(task, timeout=1.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        # Task cancellation during test cleanup is expected; ignore
+                        pass
+
+                # Verify the error was handled gracefully with a warning
+                assert mock_logger.warning.called
+                warning_call = mock_logger.warning.call_args[0][0]
+                assert "update_model_tier" in warning_call
+                assert "not found in schema cache" in warning_call
+                assert "PGRST202" in warning_call or "Could not find the function" in warning_call
+
+
+@pytest.mark.asyncio
+async def test_tier_update_loop_handles_other_errors():
+    """Test that tier update loop properly logs other unexpected errors"""
+    monitor = IntelligentHealthMonitor(batch_size=10, max_concurrent_checks=5, redis_coordination=False)
+
+    # Mock supabase to simulate a different error
+    with patch("src.services.intelligent_health_monitor.logger") as mock_logger:
+        with patch("src.config.supabase_config.supabase") as mock_supabase:
+            # Simulate a different error (e.g., network error)
+            mock_rpc = MagicMock()
+            mock_rpc.execute.side_effect = Exception("Network timeout error")
+            mock_supabase.rpc.return_value = mock_rpc
+
+            # We need to allow the loop to execute the RPC call
+            # Store original sleep to avoid recursion
+            original_sleep = asyncio.sleep
+            call_count = [0]
+
+            async def mock_sleep_fn(delay):
+                call_count[0] += 1
+                # First call is from the loop's initial sleep, let it proceed
+                # Second call is from error handler's sleep, then stop
+                if call_count[0] > 1:
+                    # Set flag to stop after first iteration executes
+                    monitor.monitoring_active = False
+                await original_sleep(0)  # Yield to event loop
+
+            with patch("src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn) as mock_sleep:
+                monitor.monitoring_active = True
+
+                # Start the tier update loop task
+                task = asyncio.create_task(monitor._tier_update_loop())
+
+                # Wait for execution to complete
+                try:
+                    await asyncio.wait_for(task, timeout=1.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        # Task cancellation during test cleanup is expected; ignore
+                        pass
+
+                # Verify the error was logged properly as an ERROR (not a warning)
+                assert mock_logger.error.called
+                error_call = mock_logger.error.call_args[0][0]
+                assert "Error in tier update loop" in error_call
+                assert "Network timeout error" in error_call

@@ -30,4 +30,12 @@ export PYTHONPATH="${PYTHONPATH}:${PWD}/src"
 # Start the application
 echo "🚀 Starting Gatewayz API..."
 # Note: No --reload to avoid Prometheus metric duplication
-exec uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
+# Timeout settings to prevent 504 Gateway Timeouts:
+# - timeout-keep-alive: 75s (slightly more than typical load balancer timeout of 60s)
+# - timeout-graceful-shutdown: 30s (time for graceful shutdown)
+exec uvicorn src.main:app \
+  --host 0.0.0.0 \
+  --port ${PORT:-8000} \
+  --workers 1 \
+  --timeout-keep-alive 75 \
+  --timeout-graceful-shutdown 30

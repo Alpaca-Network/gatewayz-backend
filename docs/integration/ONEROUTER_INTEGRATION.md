@@ -19,7 +19,7 @@ OneRouter is a unified AI gateway that provides access to multiple AI models wit
 
 - **Base URL**: `https://llm.onerouter.pro/v1`
 - **Chat Completions**: `/chat/completions`
-- **Models List**: `/v1/models`
+- **Models List**: `https://app.onerouter.pro/api/display_models/` (public, no auth required)
 
 ### Authentication
 

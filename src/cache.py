@@ -174,6 +174,9 @@ _alibaba_models_cache = {
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Alibaba Cloud catalog
     "stale_ttl": 7200,
+    "quota_error": False,  # Track if quota error occurred
+    "quota_error_timestamp": None,  # When the quota error was recorded
+    "quota_error_backoff": 900,  # 15 minutes backoff for quota errors
 }
 
 _onerouter_models_cache = {
@@ -187,6 +190,13 @@ _cloudflare_workers_ai_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,  # 1 hour TTL for Cloudflare Workers AI catalog
+    "stale_ttl": 7200,
+}
+
+_clarifai_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Clarifai catalog
     "stale_ttl": 7200,
 }
 
@@ -227,6 +237,7 @@ def get_models_cache(gateway: str):
         "alibaba": _alibaba_models_cache,
         "onerouter": _onerouter_models_cache,
         "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
+        "clarifai": _clarifai_models_cache,
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -264,6 +275,7 @@ def clear_models_cache(gateway: str):
         "alibaba": _alibaba_models_cache,
         "onerouter": _onerouter_models_cache,
         "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
+        "clarifai": _clarifai_models_cache,
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())
@@ -390,17 +402,17 @@ def set_gateway_error(gateway: str, error_message: str):
     """
     current_error = _gateway_error_cache.get(gateway)
     failure_count = 1
-    
+
     if current_error:
         # Increment failure count for exponential backoff
         failure_count = current_error.get("failure_count", 0) + 1
-    
+
     _gateway_error_cache[gateway] = {
         "error": error_message,
         "timestamp": datetime.now(timezone.utc),
         "failure_count": failure_count,
     }
-    
+
     logger.debug(
         f"Cached error state for {gateway} (failure #{failure_count}): {error_message[:100]}"
     )
@@ -436,25 +448,25 @@ def is_gateway_in_error_state(gateway: str) -> bool:
         True if gateway is in error state and TTL hasn't expired, False otherwise
     """
     error_state = _gateway_error_cache.get(gateway)
-    
+
     if not error_state:
         return False
-    
+
     # Check if error TTL has expired
     timestamp = error_state.get("timestamp")
     failure_count = error_state.get("failure_count", 1)
-    
+
     if not timestamp:
         return False
-    
+
     ttl = get_gateway_error_ttl(failure_count)
     age = (datetime.now(timezone.utc) - timestamp).total_seconds()
-    
+
     if age >= ttl:
         # TTL expired, clear error state
         clear_gateway_error(gateway)
         return False
-    
+
     return True
 
 

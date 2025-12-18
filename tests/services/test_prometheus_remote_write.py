@@ -225,6 +225,9 @@ class TestPrometheusRemoteWrite:
         assert stats["push_count"] == 10
         assert stats["push_errors"] == 2
         assert stats["success_rate"] == 80.0
+        # Check circuit breaker stats are included
+        assert "circuit_breaker" in stats
+        assert stats["circuit_breaker"]["open"] is False
 
     def test_get_stats_no_pushes(self):
         """Test get_stats with no pushes returns 0 success rate"""
@@ -234,6 +237,116 @@ class TestPrometheusRemoteWrite:
         stats = writer.get_stats()
 
         assert stats["success_rate"] == 0
+
+    def test_circuit_breaker_initial_state(self):
+        """Test circuit breaker is initially closed"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+
+        writer = PrometheusRemoteWriter(enabled=True)
+        assert writer._circuit_open is False
+        assert writer._consecutive_failures == 0
+        assert writer._check_circuit_breaker() is True
+
+    def test_circuit_breaker_opens_after_threshold(self):
+        """Test circuit breaker opens after consecutive failures"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+
+        writer = PrometheusRemoteWriter(enabled=True)
+
+        # Simulate consecutive failures up to threshold
+        for _ in range(writer.CIRCUIT_BREAKER_THRESHOLD):
+            writer._record_failure()
+
+        assert writer._circuit_open is True
+        assert writer._consecutive_failures == writer.CIRCUIT_BREAKER_THRESHOLD
+        assert writer._check_circuit_breaker() is False
+
+    def test_circuit_breaker_resets_on_success(self):
+        """Test circuit breaker resets after successful push"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+
+        writer = PrometheusRemoteWriter(enabled=True)
+
+        # Simulate some failures (but not enough to open circuit)
+        writer._consecutive_failures = 3
+
+        # Record a success
+        writer._record_success()
+
+        assert writer._consecutive_failures == 0
+        assert writer._circuit_open is False
+
+    def test_circuit_breaker_closes_after_timeout(self):
+        """Test circuit breaker allows retry after timeout"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        import time
+
+        writer = PrometheusRemoteWriter(enabled=True)
+
+        # Open the circuit
+        writer._circuit_open = True
+        writer._circuit_open_time = time.time() - writer.CIRCUIT_BREAKER_RESET_TIMEOUT - 1
+
+        # Check should return True and reset the circuit
+        assert writer._check_circuit_breaker() is True
+        assert writer._circuit_open is False
+
+    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    async def test_push_metrics_skipped_when_circuit_open(self, mock_serialize):
+        """Test push_metrics is skipped when circuit is open"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        import time
+
+        writer = PrometheusRemoteWriter(enabled=True)
+        writer.client = AsyncMock()
+        writer._circuit_open = True
+        writer._circuit_open_time = time.time()  # Recent, so it won't reset
+
+        result = await writer.push_metrics()
+
+        assert result is False
+        mock_serialize.assert_not_called()
+        writer.client.post.assert_not_called()
+
+    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    async def test_circuit_breaker_opens_on_connection_errors(self, mock_serialize):
+        """Test circuit breaker opens after repeated connection errors"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        import httpx
+
+        mock_serialize.return_value = b"compressed_data"
+
+        writer = PrometheusRemoteWriter(enabled=True)
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = httpx.ConnectError("Connection refused")
+        writer.client = mock_client
+
+        # Push until circuit opens
+        for _ in range(writer.CIRCUIT_BREAKER_THRESHOLD):
+            await writer.push_metrics()
+
+        assert writer._circuit_open is True
+        assert writer._push_errors == writer.CIRCUIT_BREAKER_THRESHOLD
+
+    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    async def test_circuit_breaker_opens_on_timeout_errors(self, mock_serialize):
+        """Test circuit breaker opens after repeated timeout errors"""
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        import httpx
+
+        mock_serialize.return_value = b"compressed_data"
+
+        writer = PrometheusRemoteWriter(enabled=True)
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = httpx.TimeoutException("Request timeout")
+        writer.client = mock_client
+
+        # Push until circuit opens
+        for _ in range(writer.CIRCUIT_BREAKER_THRESHOLD):
+            await writer.push_metrics()
+
+        assert writer._circuit_open is True
+        assert writer._push_errors == writer.CIRCUIT_BREAKER_THRESHOLD
 
     @patch("src.services.prometheus_remote_write.Config")
     async def test_init_prometheus_remote_write_disabled(self, mock_config):

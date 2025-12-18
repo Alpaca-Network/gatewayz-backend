@@ -213,34 +213,130 @@ async def health_check():
     }
 
 
-async def _get_intelligent_monitor_counts() -> tuple[int, int]:
-    """Get model and provider counts from database for intelligent monitor."""
+async def _get_intelligent_monitor_counts() -> tuple[int, int, int]:
+    """Get model, provider, and gateway counts from database for intelligent monitor.
+    
+    Queries the 'models' catalog table (which has 9000+ models) for total counts,
+    NOT the 'model_health_tracking' table (which only has models that have been called).
+    """
     try:
         from src.config.supabase_config import supabase
 
-        # Get count of tracked models
-        models_response = (
-            supabase.table("model_health_tracking")
-            .select("id", count="exact")
-            .eq("is_enabled", True)
-            .execute()
-        )
-        models_count = models_response.count or 0
+        # Get count of all models from openrouter_models table (9000+ models)
+        try:
+            models_response = (
+                supabase.table("openrouter_models")
+                .select("id", count="exact", head=True)
+                .execute()
+            )
+            models_count = models_response.count if models_response.count is not None else 0
+            logger.info(f"Models catalog query successful: {models_count} models from openrouter_models")
+        except Exception as e:
+            logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
+            # Fallback to models table
+            try:
+                models_response = (
+                    supabase.table("models")
+                    .select("id", count="exact", head=True)
+                    .execute()
+                )
+                models_count = models_response.count if models_response.count is not None else 0
+                logger.info(f"Models from models table: {models_count} models")
+            except Exception as e2:
+                logger.error(f"Failed to get models count: {e2}")
+                models_count = 0
 
-        # Get distinct provider count
-        providers_response = (
-            supabase.table("model_health_tracking")
-            .select("provider")
-            .eq("is_enabled", True)
-            .execute()
-        )
-        providers = set(row.get("provider") for row in (providers_response.data or []))
-        providers_count = len(providers)
+        # Get all provider count from providers table (3000+ providers)
+        try:
+            providers_response = (
+                supabase.table("providers")
+                .select("id", count="exact", head=True)
+                .execute()
+            )
+            providers_count = providers_response.count if providers_response.count is not None else 0
+            logger.info(f"Providers catalog query successful: {providers_count} total providers from providers table")
+        except Exception as e:
+            logger.warning(f"Failed to get providers from 'providers' table: {e}")
+            logger.error(f"Failed to get providers count: {e}")
+            providers_count = 0
 
-        return models_count, providers_count
+        # Get gateway count - gateways are defined in GATEWAY_CONFIG, not a database table
+        # Count distinct gateways from the models table's gateway column
+        try:
+            from src.services.gateway_health_service import GATEWAY_CONFIG
+            gateways_count = len(GATEWAY_CONFIG)
+        except Exception:
+            # Fallback: count distinct gateways from models table
+            try:
+                gateways_response = (
+                    supabase.table("models")
+                    .select("gateway")
+                    .execute()
+                )
+                gateways = set(row.get("gateway") for row in (gateways_response.data or []) if row.get("gateway"))
+                gateways_count = len(gateways)
+            except Exception:
+                gateways_count = 0
+        
+        logger.debug(f"Catalog counts: {models_count} models, {providers_count} providers, {gateways_count} gateways")
+
+        return models_count, providers_count, gateways_count
     except Exception as e:
-        logger.warning(f"Failed to get intelligent monitor counts: {e}")
-        return 0, 0
+        logger.warning(f"Failed to get catalog counts: {e}")
+        # Fallback: try to get counts from model_health_tracking if catalog tables don't exist
+        try:
+            return await _get_health_tracking_counts()
+        except Exception:
+            return 0, 0, 0
+
+
+async def _get_health_tracking_counts() -> tuple[int, int, int]:
+    """Fallback: Get counts from model_health_tracking table if catalog tables unavailable."""
+    from src.config.supabase_config import supabase
+    
+    # Get count of tracked models (use * for count since id column may not exist)
+    models_response = (
+        supabase.table("model_health_tracking")
+        .select("*", count="exact")
+        .eq("is_enabled", True)
+        .execute()
+    )
+    models_count = models_response.count or 0
+
+    # Get distinct provider and gateway counts with pagination
+    all_providers = set()
+    all_gateways = set()
+    
+    batch_size = 1000
+    offset = 0
+    
+    while True:
+        response = (
+            supabase.table("model_health_tracking")
+            .select("provider, gateway")
+            .eq("is_enabled", True)
+            .range(offset, offset + batch_size - 1)
+            .execute()
+        )
+        
+        rows = response.data or []
+        if not rows:
+            break
+        
+        for row in rows:
+            provider = row.get("provider")
+            gateway = row.get("gateway")
+            if provider:
+                all_providers.add(provider)
+            if gateway:
+                all_gateways.add(gateway)
+        
+        if len(rows) < batch_size:
+            break
+        
+        offset += batch_size
+    
+    return models_count, len(all_providers), len(all_gateways)
 
 
 @app.get("/status")
@@ -272,13 +368,57 @@ async def get_status():
             from src.services.intelligent_health_monitor import intelligent_health_monitor
             monitor = intelligent_health_monitor
             # Intelligent monitor stores data in database, not memory
-            models_count, providers_count = await _get_intelligent_monitor_counts()
+            # Get TRACKED counts (not catalog totals)
+            try:
+                from src.config.supabase_config import supabase
+                # Get tracked models count
+                # Note: model_health_tracking has composite PK (provider, model), no 'id' column
+                tracked_models_response = (
+                    supabase.table("model_health_tracking")
+                    .select("*", count="exact", head=True)
+                    .execute()
+                )
+                models_count = tracked_models_response.count or 0
+                
+                # Get tracked providers count (distinct providers from model_health_tracking)
+                # Use pagination to handle large datasets
+                providers = set()
+                offset = 0
+                batch_size = 1000
+                while True:
+                    tracked_providers_response = (
+                        supabase.table("model_health_tracking")
+                        .select("provider")
+                        .range(offset, offset + batch_size - 1)
+                        .execute()
+                    )
+                    rows = tracked_providers_response.data or []
+                    if not rows:
+                        break
+                    for row in rows:
+                        provider = row.get("provider")
+                        if provider:
+                            providers.add(provider)
+                    if len(rows) < batch_size:
+                        break
+                    offset += batch_size
+                
+                providers_count = len(providers)
+                logger.info(f"Tracked: {models_count} models, {providers_count} distinct providers")
+                
+                # Get gateway count from GATEWAY_CONFIG
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                gateways_count = len(GATEWAY_CONFIG)
+            except Exception as e:
+                logger.error(f"Failed to get tracked counts: {e}")
+                models_count, providers_count, gateways_count = 0, 0, 0
         else:
             from src.services.model_health_monitor import health_monitor
             monitor = health_monitor
             # Simple monitor stores data in memory
             models_count = len(getattr(monitor, "health_data", {}))
             providers_count = len(getattr(monitor, "provider_data", {}))
+            gateways_count = len(getattr(monitor, "gateway_data", {}))
 
         from src.services.model_availability import availability_service
 
@@ -290,6 +430,7 @@ async def get_status():
             "availability_monitoring_active": availability_service.monitoring_active,
             "models_tracked": models_count,
             "providers_tracked": providers_count,
+            "gateways_tracked": gateways_count,
             "availability_cache_size": len(availability_service.availability_cache),
             "health_check_interval": HEALTH_CHECK_INTERVAL,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -311,37 +452,62 @@ async def _get_intelligent_monitor_summary() -> dict:
     try:
         from src.config.supabase_config import supabase
 
-        # Get accurate total count of tracked models
-        count_response = (
-            supabase.table("model_health_tracking")
-            .select("id", count="exact")
-            .eq("is_enabled", True)
-            .execute()
-        )
-        total_models = count_response.count or 0
+        # Get total counts from openrouter_models table
+        try:
+            catalog_models = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
+            total_models = catalog_models.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
+            try:
+                catalog_models = supabase.table("models").select("id", count="exact", head=True).execute()
+                total_models = catalog_models.count or 0
+            except Exception as e2:
+                logger.warning(f"Failed to get models count: {e2}")
+                total_models = 0
+            
+        try:
+            # Get all providers from providers table
+            providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
+            total_providers = providers_response.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get providers count: {e}")
+            total_providers = 0
+            
+        # Get gateway count from GATEWAY_CONFIG (not a database table)
+        try:
+            from src.services.gateway_health_service import GATEWAY_CONFIG
+            total_gateways = len(GATEWAY_CONFIG)
+        except Exception:
+            total_gateways = 0
 
-        # Get recent health data sample from database
-        models_response = (
-            supabase.table("model_health_tracking")
-            .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
-            .eq("is_enabled", True)
-            .order("last_check_at", desc=True)
-            .limit(100)
-            .execute()
-        )
-
-        models_data = models_response.data or []
+        # Get recent health data sample from model_health_tracking
+        try:
+            models_response = (
+                supabase.table("model_health_tracking")
+                .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
+                .eq("is_enabled", True)
+                .order("last_check_at", desc=True)
+                .limit(100)
+                .execute()
+            )
+            models_data = models_response.data or []
+        except Exception as tracking_err:
+            logger.warning(f"Failed to get health tracking data: {tracking_err}")
+            models_data = []
 
         # Get active incidents
-        incidents_response = (
-            supabase.table("model_health_incidents")
-            .select("*")
-            .eq("resolved", False)
-            .execute()
-        )
-        incidents = incidents_response.data or []
+        try:
+            incidents_response = (
+                supabase.table("model_health_incidents")
+                .select("*")
+                .eq("resolved", False)
+                .execute()
+            )
+            incidents = incidents_response.data or []
+        except Exception:
+            incidents = []
 
-        # Calculate summary stats from sample (note: this is from the 100 most recent)
+        # Calculate summary stats from sample
         status_counts = {}
         for model in models_data:
             status = model.get("current_status", "unknown")
@@ -350,9 +516,12 @@ async def _get_intelligent_monitor_summary() -> dict:
         return {
             "monitoring_active": True,
             "monitor_type": "intelligent",
-            "models_sample": models_data[:20],  # Return sample of recent models
-            "total_models_tracked": total_models,  # Accurate count from database
-            "status_distribution": status_counts,  # Distribution from recent 100 models
+            "models_sample": models_data[:20],
+            "total_models": total_models,
+            "total_providers": total_providers,
+            "total_gateways": total_gateways,
+            "tracked_models": len(models_data),
+            "status_distribution": status_counts,
             "active_incidents": len(incidents),
             "last_check": datetime.now(timezone.utc).isoformat(),
         }
