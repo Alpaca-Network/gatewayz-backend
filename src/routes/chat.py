@@ -391,6 +391,18 @@ make_morpheus_request_openai = _morpheus.get("make_morpheus_request_openai")
 process_morpheus_response = _morpheus.get("process_morpheus_response")
 make_morpheus_request_openai_stream = _morpheus.get("make_morpheus_request_openai_stream")
 
+_onerouter = _safe_import_provider(
+    "onerouter",
+    [
+        "make_onerouter_request_openai",
+        "process_onerouter_response",
+        "make_onerouter_request_openai_stream",
+    ],
+)
+make_onerouter_request_openai = _onerouter.get("make_onerouter_request_openai")
+process_onerouter_response = _onerouter.get("process_onerouter_response")
+make_onerouter_request_openai_stream = _onerouter.get("make_onerouter_request_openai_stream")
+
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
@@ -1607,6 +1619,13 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "onerouter":
+                        stream = await _to_thread(
+                            make_onerouter_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
+                        )
                     else:
                         # PERF: Use async streaming for OpenRouter (default provider)
                         # This is the most impactful optimization - prevents event loop blocking
@@ -1935,6 +1954,17 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_morpheus_response, resp_raw)
+                elif attempt_provider == "onerouter":
+                    resp_raw = await asyncio.wait_for(
+                        _to_thread(
+                            make_onerouter_request_openai,
+                            messages,
+                            request_model,
+                            **optional,
+                        ),
+                        timeout=request_timeout,
+                    )
+                    processed = await _to_thread(process_onerouter_response, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -2389,6 +2419,13 @@ async def unified_responses(
                                 transformed_content.append(
                                     {"type": "text", "text": item.get("text", "")}
                                 )
+                            elif item.get("type") == "output_text":
+                                # Transform Responses API output_text to standard text format
+                                # This handles cases where clients send assistant messages with
+                                # output_text content type from previous response conversations
+                                transformed_content.append(
+                                    {"type": "text", "text": item.get("text", "")}
+                                )
                             elif item.get("type") == "input_image_url":
                                 transformed_content.append(
                                     {"type": "image_url", "image_url": item.get("image_url", {})}
@@ -2397,8 +2434,9 @@ async def unified_responses(
                                 # Already in correct format
                                 transformed_content.append(item)
                             else:
-                                logger.warning(f"Unknown content type: {item.get('type')}")
-                                transformed_content.append(item)
+                                logger.warning(f"Unknown content type: {item.get('type')}, skipping")
+                                # Skip unknown types instead of passing them through to avoid
+                                # provider API errors like "Unexpected content chunk type"
                         else:
                             logger.warning(f"Invalid content item (not a dict): {type(item)}")
 

@@ -163,3 +163,98 @@ def test_transform_groq_model_without_prefix():
     for model_id, expected in test_cases:
         result = transform_model_id(model_id, "groq")
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+# ============================================================================
+# OneRouter Provider Tests
+# ============================================================================
+
+def test_detect_provider_onerouter_prefixed_models():
+    """Test that onerouter/ prefixed models are detected as 'onerouter' provider"""
+    test_cases = [
+        ("onerouter/claude-3-5-sonnet", "onerouter"),
+        ("onerouter/gpt-4", "onerouter"),
+        ("onerouter/gpt-4o", "onerouter"),
+        ("onerouter/gpt-3.5-turbo", "onerouter"),
+        ("onerouter/llama-3.1-70b", "onerouter"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_detect_provider_onerouter_versioned_models():
+    """Test that OneRouter models with @ version suffix are detected correctly"""
+    test_cases = [
+        ("claude-3-5-sonnet@20240620", "onerouter"),
+        ("gpt-4@latest", "onerouter"),
+        ("gpt-4o@latest", "onerouter"),
+        ("gpt-3.5-turbo@latest", "onerouter"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_onerouter_strips_prefix():
+    """Test that onerouter/ prefix is stripped when transforming for OneRouter provider"""
+    test_cases = [
+        ("onerouter/claude-3-5-sonnet", "claude-3-5-sonnet@20240620"),
+        ("onerouter/gpt-4", "gpt-4@latest"),
+        ("onerouter/gpt-4o", "gpt-4o@latest"),
+        ("onerouter/gpt-3.5-turbo", "gpt-3.5-turbo@latest"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "onerouter")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_onerouter_passthrough_versioned():
+    """Test that versioned OneRouter models pass through correctly"""
+    test_cases = [
+        ("claude-3-5-sonnet@20240620", "claude-3-5-sonnet@20240620"),
+        ("gpt-4@latest", "gpt-4@latest"),
+        ("gpt-4o@latest", "gpt-4o@latest"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "onerouter")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_onerouter_simple_names():
+    """Test that simple model names get @ version suffix added"""
+    test_cases = [
+        ("claude-3-5-sonnet", "claude-3-5-sonnet@20240620"),
+        ("gpt-4", "gpt-4@latest"),
+        ("gpt-4o", "gpt-4o@latest"),
+        ("gpt-3.5-turbo", "gpt-3.5-turbo@latest"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "onerouter")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_onerouter_unknown_model_passthrough():
+    """Test that unknown models pass through as lowercase"""
+    # Unknown models should pass through (lowercased)
+    result = transform_model_id("some-unknown-model", "onerouter")
+    assert result == "some-unknown-model", f"Expected passthrough, got {result}"
+
+    result = transform_model_id("org/custom-model", "onerouter")
+    assert result == "org/custom-model", f"Expected passthrough, got {result}"
+
+
+def test_onerouter_model_id_mapping_exists():
+    """Test that OneRouter has model ID mappings defined"""
+    from src.services.model_transformations import get_model_id_mapping
+
+    mapping = get_model_id_mapping("onerouter")
+    assert mapping is not None
+    assert len(mapping) > 0
+    assert "onerouter/claude-3-5-sonnet" in mapping
+    assert "gpt-4" in mapping

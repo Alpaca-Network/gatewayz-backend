@@ -937,6 +937,56 @@ def test_unified_responses_with_multimodal_input(client, sb):
     assert response.status_code == 200
 
 
+def test_unified_responses_with_output_text_transformation(client, sb):
+    """Test /v1/responses properly transforms output_text content type to text.
+
+    This tests the fix for the Fireworks streaming error:
+    'Unexpected content chunk type output_text'
+
+    When clients send assistant messages from previous response conversations
+    with output_text content type, it should be transformed to standard text type.
+    """
+    sb.table("users").insert({
+        "id": 1,
+        "api_key": "test-output-text-key",
+        "credits": 100.0,
+        "is_trial": False
+    }).execute()
+
+    # Simulate a conversation continuation where a previous assistant response
+    # with output_text type content is included
+    response = client.post(
+        "/v1/responses",
+        json={
+            "model": "gpt-4",
+            "input": [
+                {
+                    "role": "user",
+                    "content": "Hello"
+                },
+                {
+                    # Assistant message from a previous Responses API response
+                    # that used output_text content type
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Hello! How can I help you today?"}
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": "What's the weather?"
+                }
+            ],
+            "stream": False
+        },
+        headers={"Authorization": "Bearer test-output-text-key"}
+    )
+
+    # Should succeed - the output_text type should be transformed to text type
+    # before being sent to the provider
+    assert response.status_code == 200
+
+
 # ==================================================
 # CHAT HISTORY / SESSION TESTS
 # ==================================================

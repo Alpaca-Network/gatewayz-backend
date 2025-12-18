@@ -1190,4 +1190,4 @@ def fetch_models_from_google_vertex():
 
     except Exception as e:
         logger.error(f"Failed to load Google Vertex AI models: {e}")
-        return None
+        return []

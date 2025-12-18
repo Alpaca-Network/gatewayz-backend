@@ -1,0 +1,51 @@
+# Codecov Configuration
+# https://docs.codecov.com/docs/codecov-yaml
+
+codecov:
+  require_ci_to_pass: yes
+
+coverage:
+  precision: 2
+  round: down
+  range: "25...90"  # Color range: red at 25%, green at 90%
+
+  status:
+    project:
+      default:
+        target: auto  # Use coverage from base commit
+        threshold: 1%  # Allow 1% decrease
+        informational: false
+        only_pulls: true
+    patch:
+      default:
+        target: 80%  # New code should have 80% coverage
+        threshold: 5%
+        informational: false
+
+parsers:
+  gcov:
+    branch_detection:
+      conditional: yes
+      loop: yes
+      method: no
+      macro: no
+
+comment:
+  layout: "reach,diff,flags,files,footer"
+  behavior: default
+  require_changes: no
+  require_base: no
+  require_head: yes
+
+ignore:
+  - "tests/**/*"
+  - "**/__pycache__/**"
+  - "**/conftest.py"
+  - "scripts/**/*"
+  - "docs/**/*"
+
+flags:
+  unittests:
+    paths:
+      - src/
+    carryforward: true

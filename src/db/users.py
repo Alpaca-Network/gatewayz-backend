@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 # PERF: In-memory cache for user lookups to reduce database queries
 # Structure: {api_key: {"user": dict, "timestamp": float}}
 _user_cache: dict[str, dict[str, Any]] = {}
-_user_cache_ttl = 60  # 60 seconds TTL - balances freshness with performance
+_user_cache_ttl = 300  # 5 minutes TTL - increased for better cache hit rate
+# Note: Cache is invalidated on credit/profile updates, so longer TTL is safe
 
 
 def clear_user_cache(api_key: str | None = None) -> None:
@@ -258,8 +259,47 @@ def create_enhanced_user(
         raise RuntimeError(f"Failed to create enhanced user: {e}")
 
 
+def _schedule_background_migration(client, user: dict[str, Any], api_key: str) -> None:
+    """Schedule legacy API key migration to run in background (non-blocking).
+
+    This allows legacy keys to authenticate immediately without waiting for migration.
+    Migration happens asynchronously after the auth response is sent.
+    """
+    import threading
+
+    def do_migration():
+        try:
+            migrated = _migrate_legacy_api_key(client, user, api_key)
+            if migrated:
+                logger.info(
+                    "Background migration completed for user %s",
+                    sanitize_for_logging(str(user.get("id"))),
+                )
+            else:
+                logger.debug(
+                    "Background migration skipped/failed for user %s (may already exist)",
+                    sanitize_for_logging(str(user.get("id"))),
+                )
+        except Exception as e:
+            logger.warning(
+                "Background migration error for user %s: %s",
+                sanitize_for_logging(str(user.get("id"))),
+                sanitize_for_logging(str(e)),
+            )
+
+    # Run migration in background thread - don't block auth
+    thread = threading.Thread(target=do_migration, daemon=True)
+    thread.start()
+
+
 def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
-    """Internal function: Get user by API key from database (no caching)"""
+    """Internal function: Get user by API key from database (no caching)
+
+    PERF OPTIMIZATIONS:
+    1. Legacy keys authenticate immediately without blocking on migration
+    2. Migration runs in background thread after auth succeeds
+    3. Reduced logging for common paths
+    """
     try:
         client = get_supabase_client()
 
@@ -286,6 +326,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                 return user
 
         # Fallback: Check if this is a legacy key (for backward compatibility during migration)
+        # PERF: Legacy keys are allowed to authenticate immediately - no blocking
         with track_database_query(table="users", operation="select"):
             legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
         if legacy_result.data:
@@ -293,36 +334,27 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
 
             # Check if this is a temporary key that should be replaced
             if _is_temporary_api_key(api_key):
-                logger.warning(
-                    "Temporary API key detected for user %s (length: %d). "
-                    "This key was created during registration but never properly replaced. "
-                    "The auth flow should create a new proper key for this user.",
+                logger.debug(
+                    "Temporary API key detected for user %s (length: %d) - allowing auth",
                     user.get("id"),
                     len(api_key),
                 )
                 # Mark the user as having an unmigrated temporary key
                 user["_has_temporary_key"] = True
+                # Allow auth to proceed - temporary keys work fine
                 return user
 
-            logger.warning(
-                "Legacy API key %s detected for user %s - attempting automatic migration",
-                sanitize_for_logging(api_key[:20] + "..."),
+            # PERF: Allow legacy key auth immediately, migrate in background
+            # This removes the blocking migration from the auth hot path
+            logger.debug(
+                "Legacy API key detected for user %s - scheduling background migration",
                 user.get("id"),
             )
 
-            # Attempt automatic migration of the legacy key to api_keys_new
-            migrated = _migrate_legacy_api_key(client, user, api_key)
-            if migrated:
-                logger.info(
-                    "Successfully migrated legacy API key for user %s to api_keys_new",
-                    user.get("id"),
-                )
-            else:
-                logger.warning(
-                    "Could not migrate legacy API key for user %s - manual migration required",
-                    user.get("id"),
-                )
+            # Schedule non-blocking background migration
+            _schedule_background_migration(client, user, api_key)
 
+            # Return user immediately - don't wait for migration
             return user
 
         return None

@@ -41,7 +41,7 @@ jobs:
   # Determine environment based on branch
   setup-environment:
     name: Setup Environment
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
 
@@ -71,7 +71,7 @@ jobs:
   # Validate migrations before applying
   validate-migrations:
     name: Validate Migrations
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: setup-environment
 
     steps:
@@ -185,7 +185,7 @@ jobs:
   # Apply migrations to Supabase
   apply-migrations:
     name: Apply Migrations (${{ needs.setup-environment.outputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment, validate-migrations]
     if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
     environment:
@@ -329,7 +329,7 @@ jobs:
   # Rollback on failure (optional - be careful with this)
   rollback-on-failure:
     name: Rollback on Failure
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment, apply-migrations]
     if: failure() && needs.setup-environment.outputs.environment == 'staging'
 
@@ -349,7 +349,7 @@ jobs:
   # Notification job
   notify:
     name: Notify Migration Status
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment, apply-migrations]
     if: always() && github.event_name != 'pull_request'
 

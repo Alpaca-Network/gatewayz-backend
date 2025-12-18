@@ -267,6 +267,50 @@ def create_app() -> FastAPI:
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
 
+    # Add structured metrics endpoint (parses Prometheus metrics)
+    @app.get("/api/metrics/parsed", tags=["monitoring"], include_in_schema=False)
+    async def get_parsed_metrics():
+        """
+        Get parsed Prometheus metrics in structured JSON format.
+
+        Returns metrics in the following structure:
+        {
+            "latency": {
+                "/endpoint": {
+                    "avg": 0.123,
+                    "p50": 0.1,
+                    "p95": 0.25,
+                    "p99": 0.5
+                }
+            },
+            "requests": {
+                "/endpoint": {
+                    "GET": 123,
+                    "POST": 10
+                }
+            },
+            "errors": {
+                "/endpoint": {
+                    "GET": 2,
+                    "POST": 0
+                }
+            }
+        }
+
+        This endpoint reads from the /metrics endpoint and extracts:
+        - Latency metrics (p50, p95, p99, average) from http_request_latency_seconds_*
+        - Request counts by endpoint/method from http_requests_total
+        - Error counts by endpoint/method from http_request_errors_total
+        """
+        from src.services.metrics_parser import get_metrics_parser
+
+        # Get metrics from the local /metrics endpoint
+        parser = get_metrics_parser("http://localhost:8000/metrics")
+        metrics = await parser.get_metrics()
+        return metrics
+
+    logger.info("  [OK] Parsed metrics endpoint at /api/metrics/parsed")
+
     # ==================== Sentry Debug Endpoint ====================
     if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         @app.get("/sentry-debug", tags=["monitoring"], include_in_schema=False)
@@ -333,6 +377,8 @@ def create_app() -> FastAPI:
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
+        ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
+        ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations

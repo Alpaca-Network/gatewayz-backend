@@ -21,7 +21,7 @@ jobs:
   # Run tests unless explicitly skipped
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: ${{ !inputs.skip_tests }}
 
     steps:
@@ -45,7 +45,7 @@ jobs:
   # Manual deployment using Railway CLI
   deploy:
     name: Deploy to ${{ inputs.environment }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [test]
     if: always() && (needs.test.result == 'success' || inputs.skip_tests)
     environment:
@@ -99,7 +99,7 @@ jobs:
   # Health check after deployment
   health-check:
     name: Health Check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [deploy]
 
     steps:

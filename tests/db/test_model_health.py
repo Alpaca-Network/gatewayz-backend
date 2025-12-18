@@ -243,6 +243,78 @@ class TestRecordModelCall:
         assert call_args.get("output_tokens") == 50
         assert call_args.get("total_tokens") == 150
 
+    @patch("src.db.model_health.get_supabase_client")
+    def test_record_model_call_with_gateway(self, mock_get_client):
+        """Test recording model call with explicit gateway parameter"""
+        from src.db.model_health import record_model_call
+
+        mock_client = Mock()
+        mock_get_client.return_value = mock_client
+
+        mock_select = Mock()
+        mock_select.data = []
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_select
+        )
+
+        mock_upsert = Mock()
+        mock_upsert.data = [
+            {
+                "provider": "openrouter",
+                "model": "gpt-4",
+                "gateway": "openrouter",
+            }
+        ]
+        mock_client.table.return_value.upsert.return_value.execute.return_value = mock_upsert
+
+        record_model_call(
+            provider="openrouter",
+            model="gpt-4",
+            response_time_ms=150.5,
+            status="success",
+            gateway="openrouter",
+        )
+
+        # Verify upsert was called with gateway
+        call_args = mock_client.table.return_value.upsert.call_args[0][0]
+        assert call_args.get("gateway") == "openrouter"
+
+    @patch("src.db.model_health.get_supabase_client")
+    def test_record_model_call_gateway_defaults_to_provider(self, mock_get_client):
+        """Test gateway defaults to provider when not specified"""
+        from src.db.model_health import record_model_call
+
+        mock_client = Mock()
+        mock_get_client.return_value = mock_client
+
+        mock_select = Mock()
+        mock_select.data = []
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_select
+        )
+
+        mock_upsert = Mock()
+        mock_upsert.data = [
+            {
+                "provider": "featherless",
+                "model": "meta-llama/Llama-3-70b",
+                "gateway": "featherless",
+            }
+        ]
+        mock_client.table.return_value.upsert.return_value.execute.return_value = mock_upsert
+
+        # Call without gateway parameter
+        record_model_call(
+            provider="featherless",
+            model="meta-llama/Llama-3-70b",
+            response_time_ms=200.0,
+            status="success",
+        )
+
+        # Verify gateway defaults to provider value
+        call_args = mock_client.table.return_value.upsert.call_args[0][0]
+        assert call_args.get("gateway") == "featherless"
+
 
 class TestGetModelHealth:
     """Tests for the get_model_health function"""
