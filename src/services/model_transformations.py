@@ -33,6 +33,11 @@ MODEL_ID_ALIASES = {
     "gpt5_1": "openai/gpt-5.1",
     "gpt5.1": "openai/gpt-5.1",
     "gpt-5.1": "openai/gpt-5.1",
+    # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
+    "grok-beta": "grok-3",
+    "xai/grok-beta": "xai/grok-3",
+    "grok-vision-beta": "grok-3",
+    "xai/grok-vision-beta": "xai/grok-3",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
@@ -45,7 +50,7 @@ OPENROUTER_AUTO_FALLBACKS = {
     "featherless": "meta-llama/llama-3.3-70b",
     "fireworks": "meta-llama/llama-3.3-70b",
     "together": "meta-llama/llama-3.3-70b",
-    "google-vertex": "gemini-1.5-pro",
+    "google-vertex": "gemini-2.5-flash",  # Updated from retired gemini-1.5-pro
     "vercel-ai-gateway": "openai/gpt-4o-mini",
     "aihubmix": "openai/gpt-4o-mini",
     "anannas": "openai/gpt-4o-mini",
@@ -65,6 +70,7 @@ def apply_model_alias(model_id: str | None) -> str | None:
     return model_id
 
 # Gemini model name constants to reduce duplication
+GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
 GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
@@ -185,17 +191,18 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         return model_id
 
     # Special handling for OpenRouter: strip 'openrouter/' prefix if present
-    # EXCEPT for openrouter/auto which needs to keep the prefix
+    # EXCEPT for OpenRouter meta-models which need to keep the prefix
+    OPENROUTER_META_MODELS = {"openrouter/auto", "openrouter/bodybuilder"}
     if provider_lower == "openrouter" and model_id.startswith("openrouter/"):
-        # Don't strip the prefix from openrouter/auto - it needs the full ID
-        if model_id != "openrouter/auto":
+        # Don't strip the prefix from OpenRouter meta-models - they need the full ID
+        if model_id not in OPENROUTER_META_MODELS:
             stripped = model_id[len("openrouter/") :]
             logger.info(
                 f"Stripped 'openrouter/' prefix: '{model_id}' -> '{stripped}' for OpenRouter"
             )
             model_id = stripped
         else:
-            logger.info("Preserving 'openrouter/auto' - this model requires the full ID")
+            logger.info(f"Preserving '{model_id}' - this OpenRouter meta-model requires the full ID")
 
     # Special handling for Near: strip 'near/' prefix if present
     if provider_lower == "near" and model_id.startswith("near/"):
@@ -216,6 +223,20 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     if provider_lower == "groq" and model_id.startswith("groq/"):
         stripped = model_id[len("groq/") :]
         logger.info(f"Stripped 'groq/' prefix: '{model_id}' -> '{stripped}' for Groq")
+        model_id = stripped
+
+    # Special handling for Morpheus: strip 'morpheus/' prefix if present
+    # Morpheus API expects just the model name without the provider prefix
+    if provider_lower == "morpheus" and model_id.startswith("morpheus/"):
+        stripped = model_id[len("morpheus/") :]
+        logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
+        model_id = stripped
+
+    # Special handling for OneRouter: strip 'onerouter/' prefix if present
+    # OneRouter API expects just the model name without the provider prefix
+    if provider_lower == "onerouter" and model_id.startswith("onerouter/"):
+        stripped = model_id[len("onerouter/") :]
+        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for OneRouter")
         model_id = stripped
 
     # Get the mapping for this provider
@@ -273,6 +294,11 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
+            # Alternative "deepseek/" org prefix (common user input format)
+            "deepseek/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             # Llama models
             "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "meta-llama/llama-3.3-70b-instruct": "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -425,6 +451,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         "google-vertex": {
             # Google Vertex AI models - simple names
             # Full resource names are constructed by the client
+            # Gemini 3 models (latest - released Dec 17, 2025)
+            "gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
             # Gemini 2.5 models (newest)
             # Flash Lite (stable GA version - use stable by default)
             "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
@@ -436,19 +469,19 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
             "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
             "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
-            # Gemini 2.5 flash models
-            "gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            # Gemini 2.5 flash models (use stable GA version by default)
+            "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
+            "google/gemini-2.5-flash": "gemini-2.5-flash",
+            "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
+            # Preview version (only if explicitly requested)
             "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
-            "google/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "@google/models/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            # Image-specific models
+            # Image-specific models (GA version only - no preview version exists)
             "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
             "gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
+            "@google/models/gemini-2.5-flash-image": "gemini-2.5-flash-image",
             # Pro (use stable GA version by default)
             "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
             "google/gemini-2.5-pro": "gemini-2.5-pro",
@@ -476,15 +509,10 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.0-pro-001": "gemini-2.0-pro-001",
             "google/gemini-2.0-pro": GEMINI_2_0_PRO,
             "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
-            # Gemini 1.5 models
-            "gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-pro-002": "gemini-1.5-pro-002",
-            "google/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "@google/models/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "gemini-1.5-flash-002": "gemini-1.5-flash-002",
-            "google/gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "@google/models/gemini-1.5-flash": GEMINI_1_5_FLASH,
+            # Gemini 1.5 models - RETIRED (April-September 2025)
+            # These models are NO LONGER AVAILABLE on Google Vertex AI
+            # Removed all google-vertex mappings to prevent 404 errors
+            # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
             # Gemini 1.0 models
             "gemini-1.0-pro": GEMINI_1_0_PRO,
             "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
@@ -492,7 +520,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
             # Aliases for convenience
             "gemini-2.0": GEMINI_2_0_FLASH,
-            "gemini-1.5": GEMINI_1_5_PRO,
+            # Note: gemini-1.5 alias removed - model is retired on Vertex AI
             # Gemma models (open source models from Google)
             "google/gemma-2-9b": "gemma-2-9b-it",
             "google/gemma-2-9b-it": "gemma-2-9b-it",
@@ -564,6 +592,11 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "zai-org/glm-4.6": "zai-org/GLM-4.6",
             "glm-4.6-fp8": "zai-org/GLM-4.6",
             "glm-4.6": "zai-org/GLM-4.6",
+
+            # Moonshot AI Kimi models (thinking/reasoning)
+            "moonshotai/kimi-k2-thinking": "moonshotai/Kimi-K2-Thinking",
+            "kimi-k2-thinking": "moonshotai/Kimi-K2-Thinking",
+            "kimi-k2": "moonshotai/Kimi-K2-Thinking",
         },
         "alpaca-network": {
             # Alpaca Network uses Anyscale infrastructure with DeepSeek models
@@ -688,16 +721,19 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         },
         "xai": {
             # XAI Grok models - pass-through format
-            # Models are referenced by their simple names (e.g., "grok-2", "grok-beta")
+            # Models are referenced by their simple names (e.g., "grok-2", "grok-3")
             # Can also use xai/grok-* format
-            "grok-beta": "grok-beta",
+            # Note: grok-beta was deprecated on 2025-09-15, now redirected to grok-3
+            "grok-beta": "grok-3",
             "grok-2": "grok-2",
             "grok-2-1212": "grok-2-1212",
-            "grok-vision-beta": "grok-vision-beta",
-            "xai/grok-beta": "grok-beta",
+            "grok-3": "grok-3",
+            "grok-vision-beta": "grok-3",  # grok-vision-beta also deprecated
+            "xai/grok-beta": "grok-3",
             "xai/grok-2": "grok-2",
             "xai/grok-2-1212": "grok-2-1212",
-            "xai/grok-vision-beta": "grok-vision-beta",
+            "xai/grok-3": "grok-3",
+            "xai/grok-vision-beta": "grok-3",
         },
         "cerebras": {
             # Cerebras API expects model IDs without the "cerebras/" prefix
@@ -854,6 +890,41 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@cf/nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
             "@cf/microsoft/phi-2": "@cf/microsoft/phi-2",
         },
+        "morpheus": {
+            # Morpheus AI Gateway uses OpenAI-compatible model identifiers
+            # Models are dynamically fetched from the Morpheus API
+            # Pass-through format - model IDs from the Morpheus /models endpoint
+            # Strip morpheus/ prefix for actual API calls
+            "morpheus/llama-3.1-8b": "llama-3.1-8b",
+            "morpheus/llama-3.1-70b": "llama-3.1-70b",
+            "morpheus/mistral-7b": "mistral-7b",
+            "morpheus/deepseek-r1": "deepseek-r1",
+            # Direct model names (passthrough)
+            "llama-3.1-8b": "llama-3.1-8b",
+            "llama-3.1-70b": "llama-3.1-70b",
+            "mistral-7b": "mistral-7b",
+            "deepseek-r1": "deepseek-r1",
+        },
+        "onerouter": {
+            # OneRouter uses OpenAI-compatible model identifiers with @ versioning
+            # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
+            # Models are dynamically fetched from OneRouter's /v1/models endpoint
+            # Strip onerouter/ prefix for actual API calls
+            "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+            "onerouter/gpt-4": "gpt-4@latest",
+            "onerouter/gpt-4o": "gpt-4o@latest",
+            "onerouter/gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+            # Direct model names (passthrough with @ version suffix)
+            "claude-3-5-sonnet@20240620": "claude-3-5-sonnet@20240620",
+            "gpt-4@latest": "gpt-4@latest",
+            "gpt-4o@latest": "gpt-4o@latest",
+            "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
+            # Models can also use simpler names - OneRouter handles routing
+            "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+            "gpt-4": "gpt-4@latest",
+            "gpt-4o": "gpt-4o@latest",
+            "gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+        },
     }
 
     return mappings.get(provider, {})
@@ -1003,23 +1074,31 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
     # Normalize to lowercase for consistency in all @ prefix checks
     normalized_model = model_id.lower()
 
+    # Check for Cloudflare Workers AI models (use @cf/ prefix)
+    # IMPORTANT: This must come before the general @ prefix check below
+    if normalized_model.startswith("@cf/"):
+        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
+        return "cloudflare-workers-ai"
+
     # Check for Google Vertex AI models first (before Portkey check)
     if model_id.startswith("projects/") and "/models/" in model_id:
         return "google-vertex"
     if normalized_model.startswith("@google/models/") and any(
         pattern in normalized_model
-        for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+        for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
     ):
-        # Patterns like "@google/models/gemini-2.5-flash"
+        # Patterns like "@google/models/gemini-3-flash" or "@google/models/gemini-2.5-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if (
         any(
             pattern in normalized_model
-            for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+            for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
         )
         and "/" not in model_id
     ):
-        # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
+        # Simple patterns like "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
@@ -1044,12 +1123,6 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             # No Vertex credentials, route to OpenRouter which supports google/ prefix
             logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
             return "openrouter"
-
-    # Check for Cloudflare Workers AI models (use @cf/ prefix)
-    # IMPORTANT: This must come before the general @ prefix check below
-    if model_id.startswith("@cf/"):
-        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
-        return "cloudflare-workers-ai"
 
     # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
     # After Portkey removal, @ prefix models are now routed through OpenRouter
@@ -1081,6 +1154,8 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "xai",
         "groq",
         "cloudflare-workers-ai",
+        "morpheus",
+        "onerouter",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:
@@ -1122,6 +1197,14 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org == "helicone":
             return "helicone"
 
+        # Morpheus models (e.g., "morpheus/llama-3.1-8b")
+        if org == "morpheus":
+            return "morpheus"
+
+        # OneRouter models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
+        if org == "onerouter":
+            return "onerouter"
+
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
             return "alpaca-network"
@@ -1131,7 +1214,8 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "alibaba-cloud"
 
         # DeepSeek models are primarily on Fireworks in this system
-        if org == "deepseek-ai" and "deepseek" in model_name.lower():
+        # Support both "deepseek-ai/" and "deepseek/" org prefixes
+        if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
             return "fireworks"
 
         # OpenAI models go to OpenRouter
