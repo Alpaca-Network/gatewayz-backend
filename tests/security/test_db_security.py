@@ -472,7 +472,7 @@ class TestValidateSecureAPIKey:
         mock_get_audit.return_value = mock_audit_logger
 
         # Set expiration to past date
-        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat() + '+00:00'
+        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         sample_api_key_data['expiration_date'] = past_date
 
         table_mock.execute.return_value = Mock(data=[sample_api_key_data])
