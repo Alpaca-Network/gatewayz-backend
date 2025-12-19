@@ -9,11 +9,13 @@ echo "Claude Superpowers Sync"
 echo "=================================================="
 echo ""
 
-# Configuration
+# Configuration - use absolute paths to work from any directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_URL="https://github.com/obra/superpowers"
-TMP_DIR="./tmp"
+TMP_DIR="$PROJECT_ROOT/tmp"
 SUPERPOWERS_DIR="${TMP_DIR}/superpowers"
-TARGET_CLAUDE_DIR="./.claude"
+TARGET_CLAUDE_DIR="$PROJECT_ROOT/.claude"
 
 # Step 1: Clone or update the superpowers repository
 echo "[1/3] Cloning/updating superpowers repository..."
@@ -25,7 +27,9 @@ fi
 if [ -d "$SUPERPOWERS_DIR" ]; then
     echo "Superpowers repo already exists, updating with git pull..."
     cd "$SUPERPOWERS_DIR"
-    git pull origin main || {
+    # Detect the default branch dynamically
+    DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+    git pull origin "$DEFAULT_BRANCH" || {
         echo "ERROR: Failed to pull latest changes from superpowers"
         exit 1
     }
@@ -59,10 +63,12 @@ if [ ! -d "${SUPERPOWERS_DIR}/.claude" ]; then
 fi
 
 # Sync using rsync (preserves permissions, timestamps, and directory structure)
+# Exclude settings.local.json to preserve local configuration
 echo "Syncing files from ${SUPERPOWERS_DIR}/.claude/ to ${TARGET_CLAUDE_DIR}/"
 rsync -av --delete \
     --exclude='.git' \
     --exclude='.gitignore' \
+    --exclude='settings.local.json' \
     "${SUPERPOWERS_DIR}/.claude/" "${TARGET_CLAUDE_DIR}/" || {
     echo "ERROR: Failed to sync .claude folder"
     exit 1
