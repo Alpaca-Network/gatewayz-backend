@@ -5,7 +5,7 @@ import os
 import pytest
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Set test environment variables before any imports
 # NOTE: These are MOCK/FAKE placeholder credentials for testing only
@@ -123,7 +123,7 @@ def clean_test_user(supabase_client, test_prefix):
                 "username": username,
                 "email": email,
                 "credits": credits,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
 
             result = supabase_client.table("users").insert(user_data).execute()

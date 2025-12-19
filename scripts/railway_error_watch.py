@@ -13,7 +13,7 @@ import logging
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Add parent directory to path
@@ -45,7 +45,7 @@ class RailwayLogMonitor:
         self.interval = interval
         self.error_monitor = ErrorMonitor()
         self.bug_fix_generator = BugFixGenerator() if auto_fix else None
-        self.last_log_time = datetime.utcnow() - timedelta(hours=1)
+        self.last_log_time = datetime.now(timezone.utc) - timedelta(hours=1)
         self.processed_errors = set()
 
     async def initialize(self):
@@ -131,12 +131,12 @@ class RailwayLogMonitor:
                     else:
                         event = {
                             "message": line,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
                 except json.JSONDecodeError:
                     event = {
                         "message": line,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
                 events.append(event)
@@ -239,7 +239,7 @@ class RailwayLogMonitor:
         print("\n" + "=" * 60)
         print("Railway Error Monitor Status")
         print("=" * 60)
-        print(f"Timestamp:          {datetime.utcnow().isoformat()}")
+        print(f"Timestamp:          {datetime.now(timezone.utc).isoformat()}")
         print(f"Service:            {self.service or 'all'}")
         print(f"Auto-fix Enabled:   {self.auto_fix}")
         print(f"Check Interval:     {self.interval}s")
