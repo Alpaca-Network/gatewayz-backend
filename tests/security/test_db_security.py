@@ -92,9 +92,9 @@ def sample_api_key_data():
         'ip_allowlist': [],
         'domain_referrers': [],
         'created_by_user_id': 100,
-        'last_used_at': datetime.utcnow().isoformat(),
-        'created_at': datetime.utcnow().isoformat(),
-        'updated_at': datetime.utcnow().isoformat()
+        'last_used_at': datetime.now(timezone.utc).isoformat(),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'updated_at': datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -472,7 +472,7 @@ class TestValidateSecureAPIKey:
         mock_get_audit.return_value = mock_audit_logger
 
         # Set expiration to past date
-        past_date = (datetime.utcnow() - timedelta(days=1)).isoformat() + '+00:00'
+        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat() + '+00:00'
         sample_api_key_data['expiration_date'] = past_date
 
         table_mock.execute.return_value = Mock(data=[sample_api_key_data])
@@ -843,8 +843,8 @@ class TestGetAuditLogs:
 
         table_mock.execute.return_value = Mock(data=[])
 
-        start = datetime.utcnow() - timedelta(days=7)
-        end = datetime.utcnow()
+        start = datetime.now(timezone.utc) - timedelta(days=7)
+        end = datetime.now(timezone.utc)
 
         result = get_audit_logs(start_date=start, end_date=end)
 

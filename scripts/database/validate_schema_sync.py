@@ -30,7 +30,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -112,7 +112,7 @@ class SchemaInfo:
     constraints: list = field(default_factory=list)
     triggers: list = field(default_factory=list)
     enums: list = field(default_factory=list)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict:
         return {

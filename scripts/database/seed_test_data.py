@@ -27,7 +27,7 @@ import os
 import random
 import secrets
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Add project root to path
@@ -111,8 +111,8 @@ class TestDataSeeder:
 
     def _random_date(self, start_days_ago: int = 90, end_days_ago: int = 0) -> str:
         """Generate a random date between start and end days ago"""
-        start = datetime.utcnow() - timedelta(days=start_days_ago)
-        end = datetime.utcnow() - timedelta(days=end_days_ago)
+        start = datetime.now(timezone.utc) - timedelta(days=start_days_ago)
+        end = datetime.now(timezone.utc) - timedelta(days=end_days_ago)
         random_date = start + timedelta(
             seconds=random.randint(0, int((end - start).total_seconds()))
         )
@@ -188,7 +188,7 @@ class TestDataSeeder:
 
             # Set trial expiration for trial users
             if status == "trial":
-                trial_end = datetime.utcnow() + timedelta(days=random.randint(-3, 7))
+                trial_end = datetime.now(timezone.utc) + timedelta(days=random.randint(-3, 7))
                 user["trial_expires_at"] = trial_end.isoformat()
 
             users.append(user)
@@ -234,7 +234,7 @@ class TestDataSeeder:
 
                 # Some keys have expiration
                 if random.random() > 0.7:
-                    exp_date = datetime.utcnow() + timedelta(days=random.randint(-10, 90))
+                    exp_date = datetime.now(timezone.utc) + timedelta(days=random.randint(-10, 90))
                     key_data["expiration_date"] = exp_date.isoformat()
 
                 # Some keys have IP restrictions
@@ -521,7 +521,7 @@ class TestDataSeeder:
                 "max_uses": max_uses,
                 "times_used": random.randint(0, max_uses - 1),
                 "valid_from": self._random_date(30, 0),
-                "valid_until": (datetime.utcnow() + timedelta(days=random.randint(30, 180))).isoformat(),
+                "valid_until": (datetime.now(timezone.utc) + timedelta(days=random.randint(30, 180))).isoformat(),
                 "description": f"Test coupon worth ${value}",
                 "coupon_type": random.choice(coupon_types),
                 "is_active": random.random() > 0.2,  # 80% active
