@@ -13,6 +13,87 @@ from src.config.supabase_config import get_supabase_client
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Prototype fallback data
+# ---------------------------------------------------------------------------
+PROTOTYPE_MODELS: list[dict[str, Any]] = [
+    {
+        "id": -1,
+        "model_id": "prototype/gpt-4",
+        "model_name": "Prototype GPT-4",
+        "provider_id": -10,
+        "description": "Prototype record used when Supabase is unavailable.",
+        "pricing_prompt": 0.03,
+        "pricing_completion": 0.06,
+        "context_length": 8192,
+        "health_status": "unknown",
+        "supports_streaming": True,
+        "is_active": True,
+        "providers": {
+            "id": -10,
+            "name": "Prototype Provider",
+            "slug": "prototype",
+        },
+    },
+    {
+        "id": -2,
+        "model_id": "prototype/claude-3",
+        "model_name": "Prototype Claude 3",
+        "provider_id": -11,
+        "description": "Prototype Claude entry for fallback search responses.",
+        "pricing_prompt": 0.015,
+        "pricing_completion": 0.03,
+        "context_length": 120000,
+        "health_status": "unknown",
+        "supports_streaming": True,
+        "is_active": True,
+        "providers": {
+            "id": -11,
+            "name": "Prototype Anthropic",
+            "slug": "prototype-anthropic",
+        },
+    },
+    {
+        "id": -3,
+        "model_id": "prototype/mixtral-8x7b",
+        "model_name": "Prototype Mixtral 8x7B",
+        "provider_id": -12,
+        "description": "Prototype Mixtral entry (placeholder).",
+        "pricing_prompt": 0.006,
+        "pricing_completion": 0.006,
+        "context_length": 32768,
+        "health_status": "unknown",
+        "supports_streaming": False,
+        "is_active": True,
+        "providers": {
+            "id": -12,
+            "name": "Prototype Mixtral",
+            "slug": "prototype-mixtral",
+        },
+    },
+]
+
+
+def _get_prototype_search_results(query: str) -> list[dict[str, Any]]:
+    """Return prototype search results when real data is unavailable."""
+    if not query:
+        return PROTOTYPE_MODELS
+
+    q_lower = query.lower()
+    matches: list[dict[str, Any]] = []
+    for entry in PROTOTYPE_MODELS:
+        haystacks = [
+            entry.get("model_name", ""),
+            entry.get("model_id", ""),
+            entry.get("description", ""),
+            entry.get("providers", {}).get("name", ""),
+        ]
+        if any(q_lower in str(h or "").lower() for h in haystacks):
+            matches.append(entry)
+
+    return matches or PROTOTYPE_MODELS
+
+
 def _serialize_model_data(data: dict[str, Any]) -> dict[str, Any]:
     """Convert Decimal and other non-JSON-serializable types to JSON-compatible types"""
     serialized = {}
@@ -466,8 +547,13 @@ def search_models(query: str, provider_id: int | None = None) -> list[dict[str, 
 
         return unique_results
     except Exception as e:
-        logger.error(f"Error searching models with query '{query}': {e}")
-        return []
+        logger.error(
+            "Error searching models with query '%s': %s. "
+            "Returning prototype fallback results.",
+            query,
+            e,
+        )
+        return _get_prototype_search_results(query)
 
 
 def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
