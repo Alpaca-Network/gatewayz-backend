@@ -37,16 +37,23 @@ WHERE cm.id = nm.id;
 -- Create function to auto-assign sequence numbers on insert
 CREATE OR REPLACE FUNCTION assign_chat_message_sequence()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_max_seq INTEGER;
 BEGIN
   -- Auto-assign sequence number if not provided
   IF NEW.sequence_number IS NULL THEN
-    -- Use FOR UPDATE to lock the row and prevent race conditions
-    -- This ensures concurrent inserts get unique sequence numbers
-    SELECT COALESCE(MAX(sequence_number), 0) + 1
-    INTO NEW.sequence_number
+    -- Lock the session row to prevent concurrent inserts from racing
+    -- This is more efficient than locking all message rows
+    PERFORM 1 FROM chat_sessions WHERE id = NEW.session_id FOR UPDATE;
+
+    -- Now safely get the max sequence number for this session
+    SELECT COALESCE(MAX(sequence_number), 0)
+    INTO v_max_seq
     FROM chat_messages
-    WHERE session_id = NEW.session_id
-    FOR UPDATE;
+    WHERE session_id = NEW.session_id;
+
+    -- Assign next sequence number
+    NEW.sequence_number := v_max_seq + 1;
   END IF;
 
   RETURN NEW;

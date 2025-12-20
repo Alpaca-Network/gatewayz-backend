@@ -28,6 +28,7 @@ from src.db.rate_limits import create_rate_limit_alert, update_rate_limit_usage
 from src.db.users import get_user, deduct_credits, log_api_usage_transaction, record_usage
 from src.db.chat_history import create_chat_session, save_chat_message, get_chat_session
 from src.db.activity import log_activity, get_provider_from_model
+from src.db.chat_completion_requests import save_chat_completion_request
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
@@ -314,6 +315,7 @@ async def _process_stream_completion_background(
     elapsed,
     provider,
     is_anonymous=False,
+    request_id=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -543,6 +545,25 @@ async def _process_stream_completion_background(
         except Exception as e:
             logger.debug(f"Failed to capture health metric: {e}")
 
+        # Save chat completion request to database
+        if request_id:
+            try:
+                user_id_str = str(user.get("id")) if user and user.get("id") else None
+                await _to_thread(
+                    save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    processing_time_ms=int(elapsed * 1000),
+                    status="completed",
+                    error_message=None,
+                    user_id=user_id_str,
+                    provider_name=provider,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to save chat completion request: {e}")
+
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
@@ -735,6 +756,7 @@ async def stream_generator(
                 elapsed=elapsed,
                 provider=provider,
                 is_anonymous=is_anonymous,
+                request_id=request_id_var.get(),
             )
         )
 
@@ -1399,6 +1421,22 @@ async def chat_completions(
                 "total_tokens": total_tokens,
             },
         )
+
+        # Save chat completion request to database - run as background task
+        if not is_anonymous:
+            user_id_str = str(user.get("id")) if user and user.get("id") else None
+            background_tasks.add_task(
+                save_chat_completion_request,
+                request_id=request_id,
+                model_name=model,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                processing_time_ms=int(elapsed * 1000),
+                status="completed",
+                error_message=None,
+                user_id=user_id_str,
+                provider_name=provider,
+            )
 
         # Prepare headers including rate limit information
         headers = {}

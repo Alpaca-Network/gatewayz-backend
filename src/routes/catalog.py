@@ -12,6 +12,8 @@ from src.db.gateway_analytics import (
     get_top_models_by_provider,
     get_trending_models,
 )
+from src.db.chat_completion_requests import search_models_with_chat_summary
+from src.db.models_requests_search import search_chat_requests, get_model_requests_by_id
 from src.services.models import (
     enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
@@ -1594,6 +1596,229 @@ def _extract_availability_comparison(
     for item in models_data:
         availability[item["gateway"]] = True
     return availability
+
+
+# ============================================================================
+# MODEL CATALOG SEARCH (Provider Discovery with Summary Stats)
+# ============================================================================
+
+
+@router.get("/models/catalog/search", tags=["models", "catalog"])
+@handle_endpoint_errors("Failed to search catalog models")
+async def search_catalog_models(
+    q: str = Query(..., description="Search query for model name (e.g., 'gpt 4', 'claude', 'llama')"),
+    provider: str | None = Query(
+        None,
+        description="Optional provider slug or name to filter results (e.g., 'openrouter', 'portkey')"
+    ),
+    limit: int = Query(100, description="Maximum number of models to return", ge=1, le=500),
+):
+    """
+    **FEATURE 1: Model Catalog Search - Find models across providers with summary statistics**
+
+    Use this endpoint to:
+    - Discover which providers have a specific model
+    - Compare average performance across providers
+    - Get pricing and capability information
+    - View summary statistics (averages, totals, success rates)
+
+    **Search Features:**
+    - Flexible matching handles variations: "gpt 4" matches "gpt-4", "gpt4", "gpt-4o", "gpt-4-turbo"
+    - Searches across: model_name, model_id, provider_model_id, description
+    - Case-insensitive provider filtering
+
+    **Examples:**
+    - Find all GPT-4 models: `?q=gpt 4`
+    - Find GPT-4 on OpenRouter: `?q=gpt 4&provider=openrouter`
+    - Find all Claude models: `?q=claude`
+    - Find Llama on specific provider: `?q=llama&provider=together`
+
+    **Response includes:**
+    - Model information (name, identifier, description)
+    - Provider details (name, slug, pricing)
+    - Capabilities (context length, streaming, vision, etc.)
+    - **Summary statistics**:
+        - `total_requests`: Total number of requests
+        - `avg_input_tokens`: Average input tokens per request
+        - `avg_output_tokens`: Average output tokens per request
+        - `avg_processing_time_ms`: Average processing time
+        - `success_rate`: Percentage of completed requests
+        - `completed_requests` / `failed_requests`: Breakdown by status
+        - `last_request_at`: Most recent request timestamp
+
+    **Use Cases:**
+    - "Which providers have GPT-4?" - Search without provider filter
+    - "What's the average performance of GPT-4 on OpenRouter?" - Search with provider
+    - "Compare Claude pricing across providers" - Search claude, compare pricing
+    - "Find fastest Llama 3 provider" - Search llama 3, sort by avg_processing_time_ms
+    """
+    try:
+        results = search_models_with_chat_summary(
+            query=q,
+            provider_name=provider,
+            limit=limit
+        )
+
+        return {
+            "success": True,
+            "query": q,
+            "provider_filter": provider,
+            "total_results": len(results),
+            "models": results,
+            "timestamp": get_timestamp()
+        }
+
+    except Exception as e:
+        logger.error(f"Error searching catalog models: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to search catalog models: {str(e)}"
+        )
+
+
+# ============================================================================
+# CHAT REQUESTS SEARCH (Raw Data for Graphing)
+# ============================================================================
+
+
+@router.get("/models/requests/search", tags=["models", "requests"])
+@handle_endpoint_errors("Failed to search chat completion requests")
+async def search_model_requests(
+    q: str = Query(..., description="Search query for model name (e.g., 'gpt 4', 'claude', 'llama')"),
+    provider: str | None = Query(
+        None,
+        description="Optional provider slug or name to filter results (e.g., 'openrouter', 'portkey')"
+    ),
+    limit: int = Query(500, description="Max requests to return per model", ge=1, le=10000),
+    offset: int = Query(0, description="Offset for pagination", ge=0),
+):
+    """
+    **FEATURE 2: Chat Requests Search - Get individual request data for plotting graphs**
+
+    Use this endpoint to:
+    - Get actual chat completion request records (not averages)
+    - Plot graphs and visualizations
+    - Analyze trends over time
+    - Compare request patterns across providers
+
+    **What you get:**
+    - **Individual request records** with timestamps
+    - Each record includes: tokens, processing time, status, created_at
+    - Ready for plotting with matplotlib, Chart.js, D3.js, etc.
+
+    **Examples:**
+    - Get 500 GPT-4 requests across all providers: `?q=gpt 4&limit=500`
+    - Get 1000 GPT-4 requests from OpenRouter: `?q=gpt 4&provider=openrouter&limit=1000`
+    - Get all Claude requests: `?q=claude&limit=5000`
+    - Paginate through data: `?q=llama&limit=500&offset=500`
+
+    **Response includes:**
+    For each matching model:
+    - Model information and provider details
+    - `requests`: Array of individual request records:
+        - `id`, `request_id`: Identifiers
+        - `input_tokens`, `output_tokens`, `total_tokens`: Token counts
+        - `processing_time_ms`: Processing time
+        - `status`: completed, failed, partial
+        - `created_at`: **Timestamp for graphing**
+        - `error_message`, `user_id`: Optional fields
+    - `total_requests`: Total count in database
+    - `returned_requests`: Number of requests in response
+
+    **Graphing Use Cases:**
+    - Token usage over time: Plot `created_at` vs `total_tokens`
+    - Processing time trends: Plot `created_at` vs `processing_time_ms`
+    - Success rate timeline: Plot `status` over time
+    - Provider comparison: Plot same model from different providers
+    - Cost analysis: Calculate costs using pricing + token counts
+
+    **Sorting:**
+    - Results sorted by total requests (most used first)
+    - Requests within each model sorted by created_at (most recent first)
+    """
+    try:
+        results = search_chat_requests(
+            query=q,
+            provider_name=provider,
+            requests_limit=limit,
+            offset=offset
+        )
+
+        return {
+            "success": True,
+            "query": q,
+            "provider_filter": provider,
+            "limit": limit,
+            "offset": offset,
+            "total_results": len(results),
+            "models": results,
+            "timestamp": get_timestamp()
+        }
+
+    except Exception as e:
+        logger.error(f"Error searching chat requests: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to search chat requests: {str(e)}"
+        )
+
+
+@router.get("/models/{model_id}/requests", tags=["models", "requests"])
+@handle_endpoint_errors("Failed to get model requests")
+async def get_model_requests(
+    model_id: int,
+    limit: int = Query(500, description="Max requests to return", ge=1, le=10000),
+    offset: int = Query(0, description="Offset for pagination", ge=0),
+    status: str | None = Query(None, description="Filter by status: completed, failed, partial"),
+):
+    """
+    Get chat completion requests for a specific model by ID.
+
+    **Use this when:**
+    - You already know the model_id
+    - You want requests from a specific model only
+    - You need pagination for large datasets
+
+    **Parameters:**
+    - `model_id`: The database model ID
+    - `limit`: Max requests to return (default 500, max 10000)
+    - `offset`: Pagination offset
+    - `status`: Filter by request status (optional)
+
+    **Examples:**
+    - Get 500 most recent requests: `/models/123/requests`
+    - Get next 500: `/models/123/requests?offset=500`
+    - Get only failed requests: `/models/123/requests?status=failed`
+    - Get 1000 requests: `/models/123/requests?limit=1000`
+    """
+    try:
+        result = get_model_requests_by_id(
+            model_id=model_id,
+            limit=limit,
+            offset=offset,
+            status_filter=status
+        )
+
+        if result.get('error'):
+            raise HTTPException(
+                status_code=404,
+                detail=result['error']
+            )
+
+        return {
+            "success": True,
+            "model": result,
+            "timestamp": get_timestamp()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting requests for model {model_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get model requests: {str(e)}"
+        )
 
 
 # ============================================================================

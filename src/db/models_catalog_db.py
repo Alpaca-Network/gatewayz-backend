@@ -392,7 +392,12 @@ def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
 
 def search_models(query: str, provider_id: int | None = None) -> list[dict[str, Any]]:
     """
-    Search models by name, model_id, or description
+    Search models by name, model_id, or description with flexible matching.
+    Handles variations in spacing, hyphens, and special characters.
+
+    Examples:
+        - "gpt 4" matches "gpt-4", "gpt4", "gpt-4o", "gpt 4 turbo"
+        - "claude3" matches "claude-3", "claude 3", "claude-3-opus"
 
     Args:
         query: Search query string
@@ -403,19 +408,63 @@ def search_models(query: str, provider_id: int | None = None) -> list[dict[str, 
     """
     try:
         supabase = get_supabase_client()
+        import re
 
-        # Search in model_name, model_id, and description
+        # Create multiple search variations to handle different separator styles
+        # E.g., "gpt 4" will search for "gpt 4", "gpt-4", "gpt4", "gpt_4"
+        search_variations = [query]
+
+        # Create normalized version (no separators)
+        normalized = re.sub(r'[\s\-_.]+', '', query)
+        if normalized != query:
+            search_variations.append(normalized)
+
+        # Create hyphen version
+        hyphenated = re.sub(r'[\s\-_.]+', '-', query)
+        if hyphenated != query and hyphenated not in search_variations:
+            search_variations.append(hyphenated)
+
+        # Create space version
+        spaced = re.sub(r'[\s\-_.]+', ' ', query)
+        if spaced != query and spaced not in search_variations:
+            search_variations.append(spaced)
+
+        # Create underscore version
+        underscored = re.sub(r'[\s\-_.]+', '_', query)
+        if underscored != query and underscored not in search_variations:
+            search_variations.append(underscored)
+
+        # Build OR conditions for all variations across all searchable fields
+        or_conditions = []
+        for variant in search_variations:
+            or_conditions.extend([
+                f"model_name.ilike.%{variant}%",
+                f"model_id.ilike.%{variant}%",
+                f"description.ilike.%{variant}%"
+            ])
+
         search_query = (
             supabase.table("models")
             .select("*, providers!inner(*)")
-            .or_(f"model_name.ilike.%{query}%,model_id.ilike.%{query}%,description.ilike.%{query}%")
+            .or_(','.join(or_conditions))
         )
 
         if provider_id:
             search_query = search_query.eq("provider_id", provider_id)
 
         response = search_query.execute()
-        return response.data or []
+        results = response.data or []
+
+        # Remove duplicates (same model might match multiple variations)
+        seen_ids = set()
+        unique_results = []
+        for result in results:
+            model_id = result.get('id')
+            if model_id not in seen_ids:
+                seen_ids.add(model_id)
+                unique_results.append(result)
+
+        return unique_results
     except Exception as e:
         logger.error(f"Error searching models with query '{query}': {e}")
         return []
