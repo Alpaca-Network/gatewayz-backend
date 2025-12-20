@@ -438,9 +438,9 @@ def search_models(query: str, provider_id: int | None = None) -> list[dict[str, 
         or_conditions = []
         for variant in search_variations:
             or_conditions.extend([
-                f"model_name.ilike.%{variant}%",
-                f"model_id.ilike.%{variant}%",
-                f"description.ilike.%{variant}%"
+                f"model_name.ilike.*{variant}*",
+                f"model_id.ilike.*{variant}*",
+                f"description.ilike.*{variant}*"
             ])
 
         search_query = (
