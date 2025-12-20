@@ -10,11 +10,20 @@ ADD COLUMN IF NOT EXISTS sequence_number INTEGER;
 CREATE INDEX IF NOT EXISTS idx_chat_messages_sequence
 ON chat_messages(session_id, sequence_number);
 
--- Add composite index to help with duplicate detection
--- Note: We can't use a partial index with NOW() since it's not IMMUTABLE
--- Instead, we rely on application-level duplicate detection within time windows
+-- Add content hash column for efficient duplicate detection
+-- Using MD5 hash to avoid index size limitations (content can be very large)
+ALTER TABLE chat_messages
+ADD COLUMN IF NOT EXISTS content_hash TEXT;
+
+-- Update existing rows with content hashes
+UPDATE chat_messages
+SET content_hash = md5(content)
+WHERE content_hash IS NULL;
+
+-- Create index for duplicate detection using hash
+-- This avoids the 8KB index size limit that occurs when indexing large TEXT columns
 CREATE INDEX IF NOT EXISTS idx_chat_messages_duplicate_check
-ON chat_messages (session_id, role, content, created_at DESC);
+ON chat_messages (session_id, role, content_hash, created_at DESC);
 
 -- Add index on session_id and created_at for efficient history queries
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_created
@@ -34,12 +43,17 @@ SET sequence_number = nm.seq_num
 FROM numbered_messages nm
 WHERE cm.id = nm.id;
 
--- Create function to auto-assign sequence numbers on insert
+-- Create function to auto-assign sequence numbers and content hash on insert
 CREATE OR REPLACE FUNCTION assign_chat_message_sequence()
 RETURNS TRIGGER AS $$
 DECLARE
   v_max_seq INTEGER;
 BEGIN
+  -- Auto-assign content hash if not provided
+  IF NEW.content_hash IS NULL THEN
+    NEW.content_hash := md5(NEW.content);
+  END IF;
+
   -- Auto-assign sequence number if not provided
   IF NEW.sequence_number IS NULL THEN
     -- Lock the session row to prevent concurrent inserts from racing
