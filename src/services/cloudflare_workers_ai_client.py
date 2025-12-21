@@ -535,7 +535,7 @@ def fetch_models_from_cloudflare_workers_ai() -> list[dict[str, Any]]:
     try:
         # Try to get the current event loop
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # If we're already in an async context, we can't use asyncio.run()
             # Instead, we'll return the static list and log a warning
             logger.warning(
