@@ -804,9 +804,17 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Qwen models
             "cerebras/qwen-3-32b": "qwen-3-32b",
             "cerebras/qwen-3-32b-instruct": "qwen-3-32b",
+            "cerebras/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+            "cerebras/qwen-3-235b-instruct": "qwen-3-235b-a22b-instruct-2507",
             "qwen-3-32b": "qwen-3-32b",
             "qwen3-32b": "qwen-3-32b",
             "qwen/qwen3-32b": "qwen-3-32b",
+            "qwen/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+            "qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+            # Z.ai GLM models
+            "cerebras/zai-glm-4.6": "zai-glm-4.6",
+            "zai-glm-4.6": "zai-glm-4.6",
+            "zai/glm-4.6": "zai-glm-4.6",
             # Support direct model names (passthrough)
             "llama-3.3-70b": "llama-3.3-70b",
             "llama-3.3-405b": "llama-3.3-405b",

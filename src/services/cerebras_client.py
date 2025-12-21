@@ -55,6 +55,18 @@ DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
         "owned_by": "qwen",
         "context_length": 131072,
     },
+    {
+        "id": "qwen-3-235b-a22b-instruct-2507",
+        "name": "Qwen 3 235B Instruct (Preview)",
+        "owned_by": "qwen",
+        "context_length": 131072,
+    },
+    {
+        "id": "zai-glm-4.6",
+        "name": "Z.ai GLM 4.6 (Preview)",
+        "owned_by": "zai",
+        "context_length": 131072,
+    },
 ]
 
 DEFAULT_SUPPORTED_PARAMETERS = [
