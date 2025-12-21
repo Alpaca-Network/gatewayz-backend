@@ -49,6 +49,12 @@ DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
         "owned_by": "meta",
         "context_length": 131072,
     },
+    {
+        "id": "qwen-3-32b",
+        "name": "Qwen 3 32B",
+        "owned_by": "qwen",
+        "context_length": 131072,
+    },
 ]
 
 DEFAULT_SUPPORTED_PARAMETERS = [

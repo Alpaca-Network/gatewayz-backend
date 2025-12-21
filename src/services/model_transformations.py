@@ -801,6 +801,12 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "cerebras/llama-3.1-8b": "llama3.1-8b",
             "cerebras/llama-3.1-8b-instruct": "llama3.1-8b",
             "cerebras/llama-3.1-405b": "llama3.1-405b",
+            # Qwen models
+            "cerebras/qwen-3-32b": "qwen-3-32b",
+            "cerebras/qwen-3-32b-instruct": "qwen-3-32b",
+            "qwen-3-32b": "qwen-3-32b",
+            "qwen3-32b": "qwen-3-32b",
+            "qwen/qwen3-32b": "qwen-3-32b",
             # Support direct model names (passthrough)
             "llama-3.3-70b": "llama-3.3-70b",
             "llama-3.3-405b": "llama-3.3-405b",
