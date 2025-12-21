@@ -68,6 +68,29 @@ def _ensure_vertex_imports():
     return _vertexai, _GenerativeModel
 
 
+def _get_model_location(model_name: str) -> str:
+    """
+    Determine the appropriate GCP location for a given model.
+
+    Some models are only available on global endpoints (e.g., Gemini 3 preview models),
+    while others can use regional endpoints.
+
+    Args:
+        model_name: The model name to check
+
+    Returns:
+        The location string to use ('global' or the configured regional location)
+    """
+    # Gemini 3 models are only available on the global endpoint
+    # See: https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-flash
+    if "gemini-3" in model_name.lower():
+        logger.debug(f"Model {model_name} requires global endpoint (preview model)")
+        return "global"
+
+    # All other models use the configured regional location
+    return Config.GOOGLE_VERTEX_LOCATION
+
+
 def _prepare_vertex_environment():
     """Validate config and prepare credential files for Vertex AI access."""
     if not Config.GOOGLE_PROJECT_ID:
@@ -216,7 +239,7 @@ def _prepare_vertex_contents(messages: list) -> tuple[list, str | None]:
     return contents, system_instruction
 
 
-def initialize_vertex_ai():
+def initialize_vertex_ai(location: str | None = None):
     """Initialize Vertex AI using Application Default Credentials (ADC)
 
     This function initializes Vertex AI with your project and location.
@@ -229,11 +252,17 @@ def initialize_vertex_ai():
     3. If GOOGLE_VERTEX_CREDENTIALS_JSON is set (raw JSON), we'll write it to a temp file
        and set GOOGLE_APPLICATION_CREDENTIALS to point to it
 
+    Args:
+        location: Optional GCP location override. If not provided, uses Config.GOOGLE_VERTEX_LOCATION
+
     Raises:
         ValueError: If project_id or location is not configured
     """
     try:
-        logger.info("Initializing Vertex AI with Application Default Credentials")
+        # Use provided location or fall back to config
+        effective_location = location or Config.GOOGLE_VERTEX_LOCATION
+
+        logger.info(f"Initializing Vertex AI with Application Default Credentials (location: {effective_location})")
 
         # Validate configuration & prepare environment
         _prepare_vertex_environment()
@@ -243,9 +272,9 @@ def initialize_vertex_ai():
 
         # Initialize Vertex AI - DO NOT pass credentials parameter
         # The library will automatically find them from the environment
-        vertexai.init(project=Config.GOOGLE_PROJECT_ID, location=Config.GOOGLE_VERTEX_LOCATION)
+        vertexai.init(project=Config.GOOGLE_PROJECT_ID, location=effective_location)
 
-        logger.info(f"✓ Successfully initialized Vertex AI for project: {Config.GOOGLE_PROJECT_ID}")
+        logger.info(f"✓ Successfully initialized Vertex AI for project: {Config.GOOGLE_PROJECT_ID} in {effective_location}")
 
     except Exception as e:
         error_msg = f"Failed to initialize Vertex AI: {str(e)}"
@@ -301,14 +330,7 @@ def _make_google_vertex_request_sdk(
     try:
         logger.info(f"Making Google Vertex request for model: {model}")
 
-        # Step 1: Initialize Vertex AI (will use ADC)
-        try:
-            initialize_vertex_ai()
-        except Exception as init_error:
-            logger.error(f"Failed to initialize Vertex AI: {init_error}", exc_info=True)
-            raise
-
-        # Step 2: Transform model ID
+        # Step 1: Transform model ID first to determine location
         try:
             model_name = transform_google_vertex_model_id(model)
             logger.info(f"Using model name: {model_name}")
@@ -316,7 +338,18 @@ def _make_google_vertex_request_sdk(
             logger.error(f"Failed to transform model ID: {transform_error}", exc_info=True)
             raise
 
-        # Step 3: Create GenerativeModel instance
+        # Step 2: Determine the appropriate location for this model
+        location = _get_model_location(model_name)
+        logger.info(f"Using location '{location}' for model '{model_name}'")
+
+        # Step 3: Initialize Vertex AI with the appropriate location (will use ADC)
+        try:
+            initialize_vertex_ai(location=location)
+        except Exception as init_error:
+            logger.error(f"Failed to initialize Vertex AI: {init_error}", exc_info=True)
+            raise
+
+        # Step 4: Create GenerativeModel instance
         try:
             _, GenerativeModel = _ensure_vertex_imports()
             gemini_model = GenerativeModel(model_name)
@@ -464,10 +497,14 @@ def _make_google_vertex_request_rest(
         if kwargs.get("safety_settings"):
             request_body["safetySettings"] = kwargs["safety_settings"]
 
+        # Determine the appropriate location for this model
+        location = _get_model_location(model_name)
+        logger.info(f"Using location '{location}' for model '{model_name}'")
+
         url = (
-            f"https://{Config.GOOGLE_VERTEX_LOCATION}-aiplatform.googleapis.com/v1/"
+            f"https://{location}-aiplatform.googleapis.com/v1/"
             f"projects/{Config.GOOGLE_PROJECT_ID}/"
-            f"locations/{Config.GOOGLE_VERTEX_LOCATION}/"
+            f"locations/{location}/"
             f"publishers/google/models/{model_name}:generateContent"
         )
 
