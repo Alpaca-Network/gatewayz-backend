@@ -14,7 +14,7 @@ Features:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from dataclasses import dataclass, asdict
 import httpx
@@ -65,7 +65,7 @@ class PricingProviderAuditor:
         return ProviderPricingData(
             provider_name="deepinfra",
             models={},
-            fetched_at=datetime.utcnow().isoformat(),
+            fetched_at=datetime.now(timezone.utc).isoformat(),
             status="error",
             error_message="DeepInfra does not expose pricing via public API. Manual verification required.",
         )
@@ -89,7 +89,7 @@ class PricingProviderAuditor:
                     return ProviderPricingData(
                         provider_name="featherless",
                         models={},
-                        fetched_at=datetime.utcnow().isoformat(),
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
                         status="error",
                         error_message=f"HTTP {response.status_code}: {response.text[:200]}",
                     )
@@ -108,7 +108,7 @@ class PricingProviderAuditor:
                 return ProviderPricingData(
                     provider_name="featherless",
                     models=models,
-                    fetched_at=datetime.utcnow().isoformat(),
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
                     status="success" if models else "partial",
                 )
         except Exception as e:
@@ -116,7 +116,7 @@ class PricingProviderAuditor:
             return ProviderPricingData(
                 provider_name="featherless",
                 models={},
-                fetched_at=datetime.utcnow().isoformat(),
+                fetched_at=datetime.now(timezone.utc).isoformat(),
                 status="error",
                 error_message=str(e),
             )
@@ -136,7 +136,7 @@ class PricingProviderAuditor:
                     return ProviderPricingData(
                         provider_name="near",
                         models={},
-                        fetched_at=datetime.utcnow().isoformat(),
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
                         status="error",
                         error_message=f"HTTP {response.status_code}",
                     )
@@ -161,7 +161,7 @@ class PricingProviderAuditor:
                 return ProviderPricingData(
                     provider_name="near",
                     models=models,
-                    fetched_at=datetime.utcnow().isoformat(),
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
                     status="success" if models else "partial",
                 )
         except Exception as e:
@@ -169,7 +169,7 @@ class PricingProviderAuditor:
             return ProviderPricingData(
                 provider_name="near",
                 models={},
-                fetched_at=datetime.utcnow().isoformat(),
+                fetched_at=datetime.now(timezone.utc).isoformat(),
                 status="error",
                 error_message=str(e),
             )
@@ -184,7 +184,7 @@ class PricingProviderAuditor:
         return ProviderPricingData(
             provider_name="alibaba-cloud",
             models={},
-            fetched_at=datetime.utcnow().isoformat(),
+            fetched_at=datetime.now(timezone.utc).isoformat(),
             status="error",
             error_message="Alibaba Cloud pricing requires authenticated API access. Manual verification recommended.",
         )
@@ -204,7 +204,7 @@ class PricingProviderAuditor:
                     return ProviderPricingData(
                         provider_name="openrouter",
                         models={},
-                        fetched_at=datetime.utcnow().isoformat(),
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
                         status="error",
                         error_message=f"HTTP {response.status_code}",
                     )
@@ -228,7 +228,7 @@ class PricingProviderAuditor:
                 return ProviderPricingData(
                     provider_name="openrouter",
                     models=models,
-                    fetched_at=datetime.utcnow().isoformat(),
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
                     status="success" if models else "partial",
                 )
         except Exception as e:
@@ -236,7 +236,7 @@ class PricingProviderAuditor:
             return ProviderPricingData(
                 provider_name="openrouter",
                 models={},
-                fetched_at=datetime.utcnow().isoformat(),
+                fetched_at=datetime.now(timezone.utc).isoformat(),
                 status="error",
                 error_message=str(e),
             )
@@ -353,7 +353,7 @@ class PricingProviderAuditor:
         """
         report = {
             "report_type": "provider_pricing_audit",
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "audit_results": [],
             "discrepancies": [],
             "summary": {

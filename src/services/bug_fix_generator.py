@@ -10,7 +10,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -229,7 +229,7 @@ Format your response as JSON:
                 code_changes=code_changes,
                 files_affected=files_affected,
                 severity=error.severity.value,
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(timezone.utc),
             )
 
             self.generated_fixes[fix.id] = fix

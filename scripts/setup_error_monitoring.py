@@ -332,7 +332,7 @@ def run_final_test() -> bool:
 
     try:
         from src.services.error_monitor import ErrorPattern, ErrorCategory, ErrorSeverity
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         # Create a test error
         test_error = ErrorPattern(
@@ -344,7 +344,7 @@ def run_final_test() -> bool:
             line=42,
             function="test_func",
             stack_trace="",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         print_check("Error pattern creation", True)

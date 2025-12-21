@@ -86,7 +86,11 @@ def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
             )
 
             if not legacy_result.data:
-                return {"is_valid": False, "is_trial": False, "error": "API key not found"}
+                return {
+                    "is_valid": False,
+                    "is_trial": False,
+                    "error": "Access forbidden. Your API key may be invalid, expired, or failed to migrate to the new system. Please check your API key or contact support if this issue persists.",
+                }
 
             # For legacy keys, map users table fields to api_keys_new structure
             # Note: tokens_used, requests_used, credits_used are not stored in users table anymore
@@ -190,7 +194,11 @@ def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
         import traceback
 
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return {"is_valid": False, "is_trial": False, "error": f"Validation error: {str(e)}"}
+        return {
+            "is_valid": False,
+            "is_trial": False,
+            "error": f"Access forbidden. An error occurred while validating your API key: {str(e)}. Please contact support if this issue persists.",
+        }
 
 
 def validate_trial_access(api_key: str) -> dict[str, Any]:

@@ -6,7 +6,7 @@ Tests the fix for metadata field naming and webhook processing
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest

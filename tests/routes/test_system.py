@@ -13,7 +13,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from fastapi.testclient import TestClient
 import httpx
 

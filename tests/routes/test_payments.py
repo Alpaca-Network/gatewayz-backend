@@ -15,7 +15,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from fastapi.testclient import TestClient
 
 from src.main import app

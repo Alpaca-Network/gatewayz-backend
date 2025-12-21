@@ -5,7 +5,7 @@ Tests the plan upgrade recognition fix
 
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 import sys
 import types
 import importlib
