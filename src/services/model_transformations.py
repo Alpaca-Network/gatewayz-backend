@@ -1209,7 +1209,9 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "openrouter"
 
     # Check all mappings to see if this model exists
+    # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
+        "cerebras",  # Check Cerebras first for cerebras/ prefix models
         "fireworks",
         "openrouter",
         "featherless",
@@ -1285,7 +1287,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "alpaca-network"
 
         # Alibaba Cloud / Qwen models (e.g., "qwen/qwen-plus", "alibaba-cloud/qwen-max")
+        # IMPORTANT: Check if this is a Cerebras-specific Qwen model first
+        # Cerebras supports: qwen-3-32b, qwen-3-235b
         if org == "qwen" or org == "alibaba-cloud" or org == "alibaba":
+            # Check if this specific qwen model is available on Cerebras
+            cerebras_qwen_models = ["qwen-3-32b", "qwen3-32b", "qwen-3-235b"]
+            model_base = model_name.lower().replace("-instruct", "").replace("-a22b-instruct-2507", "")
+            if model_base in cerebras_qwen_models:
+                logger.info(f"Routing qwen model '{model_id}' to cerebras (model supported by both)")
+                return "cerebras"
             return "alibaba-cloud"
 
         # DeepSeek models are primarily on Fireworks in this system
