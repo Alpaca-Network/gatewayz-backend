@@ -462,6 +462,14 @@ class IntelligentHealthMonitor:
                 .execute()
             )
 
+            # Handle case where response is None (e.g., Supabase client not initialized)
+            if current is None:
+                logger.warning(
+                    f"Supabase query returned None for health tracking on {result.model}. "
+                    "Skipping health result processing."
+                )
+                return
+
             current_data = current.data if current.data else {}
 
             # Calculate new values
@@ -608,6 +616,14 @@ class IntelligentHealthMonitor:
                 .maybe_single()
                 .execute()
             )
+
+            # Handle case where response is None (e.g., Supabase client not initialized)
+            if active is None:
+                logger.warning(
+                    f"Supabase query returned None for incident check on {result.model}. "
+                    "Skipping incident creation/update."
+                )
+                return
 
             if active.data:
                 # Update existing incident
