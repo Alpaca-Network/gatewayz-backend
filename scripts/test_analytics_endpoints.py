@@ -89,8 +89,8 @@ async def test_analytics_endpoints():
         # 3. Create/Upsert Rollup
         rollup_data = {
             "bucket": datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat(),
-            "model_id": 101,
-            "provider_id": 1,
+            "model_id": model_id,
+            "provider_id": provider_id,
             "request_count": 15,
             "sum_input_tokens": 1500,
             "sum_output_tokens": 800,
