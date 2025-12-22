@@ -486,15 +486,54 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     if not model_id:
                         continue
 
+                    # Handle properties - can be a list of property dicts or a dict
+                    properties = model.get("properties", {})
+                    context_length = 8192  # Default fallback
+                    if isinstance(properties, list):
+                        # Properties is a list of {"property_id": "...", "value": "..."} dicts
+                        for prop in properties:
+                            if isinstance(prop, dict) and prop.get("property_id") == "max_total_tokens":
+                                try:
+                                    context_length = int(prop.get("value", 8192))
+                                except (ValueError, TypeError):
+                                    # Keep default context_length when value is malformed
+                                    bad_value = prop.get("value")
+                                    logger.warning(
+                                        "Invalid max_total_tokens value %r for model %r; using default %d",
+                                        bad_value,
+                                        model_id,
+                                        context_length,
+                                    )
+                                break
+                    elif isinstance(properties, dict):
+                        # Properties is a dict with direct key-value mapping
+                        raw_value = properties.get("max_total_tokens", 8192)
+                        try:
+                            context_length = int(raw_value)
+                        except (ValueError, TypeError):
+                            logger.warning(
+                                "Invalid max_total_tokens value %r for model %r; using default %d",
+                                raw_value,
+                                model_id,
+                                context_length,
+                            )
+
+                    # Handle task - can be a dict with "name" or just a string, or None
+                    task = model.get("task")
+                    if isinstance(task, dict):
+                        task_name = task.get("name", "Text Generation")
+                    elif task is not None:
+                        task_name = str(task)
+                    else:
+                        task_name = "Text Generation"
+
                     models.append({
                         "id": model_id,
                         "name": model.get("description", model_id.split("/")[-1]),
                         "description": model.get("description", ""),
-                        "context_length": model.get("properties", {}).get(
-                            "max_total_tokens", 8192
-                        ),
+                        "context_length": context_length,
                         "provider": "cloudflare-workers-ai",
-                        "task": model.get("task", {}).get("name", "Text Generation"),
+                        "task": task_name,
                     })
 
                 # Check if there are more pages
