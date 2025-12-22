@@ -93,7 +93,7 @@ class ModelResponse(ModelBase):
 
 class ModelWithProvider(ModelResponse):
     """Schema for model with provider information"""
-    provider: dict[str, Any] = Field(..., description="Provider information")
+    provider: dict[str, Any] = Field(..., description="Provider information", validation_alias="providers")
 
 
 class ModelHealthHistoryResponse(BaseModel):
