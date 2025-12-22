@@ -1,7 +1,8 @@
 """Tests for Cloudflare Workers AI client"""
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
+import httpx
 
 from src.services.cloudflare_workers_ai_client import (
     get_cloudflare_workers_ai_client,
@@ -9,6 +10,7 @@ from src.services.cloudflare_workers_ai_client import (
     make_cloudflare_workers_ai_request_openai_stream,
     process_cloudflare_workers_ai_response,
     fetch_models_from_cloudflare_workers_ai,
+    fetch_models_from_cloudflare_api,
     DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS,
 )
 
@@ -277,3 +279,179 @@ class TestCloudflareWorkersAIClient:
         assert "@cf/openai/gpt-oss-120b" in model_ids
         assert "@cf/meta/llama-3.1-8b-instruct" in model_ids
         assert "@cf/qwen/qwq-32b" in model_ids
+
+
+class TestCloudflareAPIPropertiesHandling:
+    """Test handling of different Cloudflare API response formats for properties field"""
+
+    @pytest.mark.asyncio
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_ACCOUNT_ID", "test_account")
+    async def test_fetch_models_properties_as_dict(self):
+        """Test fetching models when properties is a dictionary (old format)"""
+        mock_response_data = {
+            "success": True,
+            "result": [
+                {
+                    "name": "@cf/meta/llama-3.1-8b-instruct",
+                    "description": "Llama 3.1 8B Instruct",
+                    "properties": {"max_total_tokens": 16384},
+                    "task": {"name": "Text Generation"},
+                }
+            ],
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.json.return_value = mock_response_data
+            mock_response.raise_for_status = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+
+            models = await fetch_models_from_cloudflare_api()
+
+            assert len(models) == 1
+            assert models[0]["id"] == "@cf/meta/llama-3.1-8b-instruct"
+            assert models[0]["context_length"] == 16384
+            assert models[0]["task"] == "Text Generation"
+
+    @pytest.mark.asyncio
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_ACCOUNT_ID", "test_account")
+    async def test_fetch_models_properties_as_list(self):
+        """Test fetching models when properties is a list (new API format)"""
+        mock_response_data = {
+            "success": True,
+            "result": [
+                {
+                    "name": "@cf/meta/llama-3.1-8b-instruct",
+                    "description": "Llama 3.1 8B Instruct",
+                    "properties": [
+                        {"property_id": "max_total_tokens", "value": 32768},
+                        {"property_id": "some_other_prop", "value": "test"},
+                    ],
+                    "task": {"name": "Text Generation"},
+                }
+            ],
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.json.return_value = mock_response_data
+            mock_response.raise_for_status = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+
+            models = await fetch_models_from_cloudflare_api()
+
+            assert len(models) == 1
+            assert models[0]["id"] == "@cf/meta/llama-3.1-8b-instruct"
+            assert models[0]["context_length"] == 32768
+            assert models[0]["task"] == "Text Generation"
+
+    @pytest.mark.asyncio
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_ACCOUNT_ID", "test_account")
+    async def test_fetch_models_properties_as_list_with_name_key(self):
+        """Test fetching models when properties list uses 'name' key instead of 'property_id'"""
+        mock_response_data = {
+            "success": True,
+            "result": [
+                {
+                    "name": "@cf/qwen/qwq-32b",
+                    "description": "Qwen QWQ 32B",
+                    "properties": [
+                        {"name": "max_total_tokens", "value": 65536},
+                    ],
+                    "task": "Text Generation",  # Test string task too
+                }
+            ],
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.json.return_value = mock_response_data
+            mock_response.raise_for_status = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+
+            models = await fetch_models_from_cloudflare_api()
+
+            assert len(models) == 1
+            assert models[0]["id"] == "@cf/qwen/qwq-32b"
+            assert models[0]["context_length"] == 65536
+            assert models[0]["task"] == "Text Generation"
+
+    @pytest.mark.asyncio
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_ACCOUNT_ID", "test_account")
+    async def test_fetch_models_empty_properties_list(self):
+        """Test fetching models when properties is an empty list (should use default)"""
+        mock_response_data = {
+            "success": True,
+            "result": [
+                {
+                    "name": "@cf/test/model",
+                    "description": "Test Model",
+                    "properties": [],
+                    "task": {"name": "Text Generation"},
+                }
+            ],
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.json.return_value = mock_response_data
+            mock_response.raise_for_status = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+
+            models = await fetch_models_from_cloudflare_api()
+
+            assert len(models) == 1
+            assert models[0]["id"] == "@cf/test/model"
+            assert models[0]["context_length"] == 8192  # Default value
+
+    @pytest.mark.asyncio
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_ACCOUNT_ID", "test_account")
+    async def test_fetch_models_missing_properties(self):
+        """Test fetching models when properties field is missing entirely"""
+        mock_response_data = {
+            "success": True,
+            "result": [
+                {
+                    "name": "@cf/test/model",
+                    "description": "Test Model",
+                    # No properties field
+                    "task": {"name": "Text Generation"},
+                }
+            ],
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.json.return_value = mock_response_data
+            mock_response.raise_for_status = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+
+            models = await fetch_models_from_cloudflare_api()
+
+            assert len(models) == 1
+            assert models[0]["context_length"] == 8192  # Default value

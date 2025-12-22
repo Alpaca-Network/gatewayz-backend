@@ -486,15 +486,39 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     if not model_id:
                         continue
 
+                    # Handle properties field - can be dict or list depending on API version
+                    properties = model.get("properties", {})
+                    if isinstance(properties, list):
+                        # Convert list of property objects to dict
+                        # Each item may have "property_id" and "value" keys
+                        props_dict = {}
+                        for prop in properties:
+                            if isinstance(prop, dict):
+                                prop_id = prop.get("property_id", prop.get("name", ""))
+                                if prop_id:
+                                    props_dict[prop_id] = prop.get("value", prop)
+                        context_length = props_dict.get("max_total_tokens", 8192)
+                    elif isinstance(properties, dict):
+                        context_length = properties.get("max_total_tokens", 8192)
+                    else:
+                        context_length = 8192
+
+                    # Handle task field - can be dict or string depending on API version
+                    task_field = model.get("task", {})
+                    if isinstance(task_field, dict):
+                        task_name = task_field.get("name", "Text Generation")
+                    elif isinstance(task_field, str):
+                        task_name = task_field
+                    else:
+                        task_name = "Text Generation"
+
                     models.append({
                         "id": model_id,
                         "name": model.get("description", model_id.split("/")[-1]),
                         "description": model.get("description", ""),
-                        "context_length": model.get("properties", {}).get(
-                            "max_total_tokens", 8192
-                        ),
+                        "context_length": context_length,
                         "provider": "cloudflare-workers-ai",
-                        "task": model.get("task", {}).get("name", "Text Generation"),
+                        "task": task_name,
                     })
 
                 # Check if there are more pages
