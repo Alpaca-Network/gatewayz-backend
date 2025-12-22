@@ -39,6 +39,7 @@ class ProxyRequest(BaseModel):
     stream: bool | None = False
     tools: list[dict] | None = None  # Function calling tools
     provider: str | None = None  # Provider selection: "openrouter", etc
+    enable_web_search: bool | None = False  # Enable server-side web search tool
 
     class Config:
         extra = "allow"
@@ -89,6 +90,7 @@ class ResponseRequest(BaseModel):
     tools: list[dict] | None = None  # Function calling tools
     response_format: ResponseFormat | None = None
     provider: str | None = None
+    enable_web_search: bool | None = False  # Enable server-side web search tool
 
     class Config:
         extra = "allow"

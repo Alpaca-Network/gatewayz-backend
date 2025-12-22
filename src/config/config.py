@@ -219,6 +219,22 @@ class Config:
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
     CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 
+    # Tavily Web Search Configuration
+    TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+    TAVILY_SEARCH_DEPTH = os.environ.get("TAVILY_SEARCH_DEPTH", "basic")  # "basic" or "advanced"
+    TAVILY_MAX_RESULTS = int(os.environ.get("TAVILY_MAX_RESULTS", "5"))
+    TAVILY_INCLUDE_ANSWER = os.environ.get("TAVILY_INCLUDE_ANSWER", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    WEB_SEARCH_ENABLED = os.environ.get("WEB_SEARCH_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    WEB_SEARCH_MAX_ITERATIONS = int(os.environ.get("WEB_SEARCH_MAX_ITERATIONS", "3"))
+
     # Google Vertex AI Configuration (for image generation & generative APIs)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")
     GOOGLE_VERTEX_LOCATION = os.environ.get("GOOGLE_VERTEX_LOCATION", "us-central1")

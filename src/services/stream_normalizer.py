@@ -246,3 +246,42 @@ def create_error_sse_chunk(error_message: str, error_type: str, provider: str = 
 
 def create_done_sse() -> str:
     return "data: [DONE]\n\n"
+
+
+def create_tool_call_sse(
+    tool_call_id: str,
+    name: str,
+    arguments: dict,
+) -> str:
+    """Create SSE chunk for tool call notification.
+
+    This notifies the frontend that a tool is being executed server-side.
+    """
+    data = {
+        "type": "tool_call",
+        "tool_call_id": tool_call_id,
+        "name": name,
+        "arguments": arguments,
+    }
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def create_tool_result_sse(
+    tool_call_id: str,
+    name: str,
+    result: Any,
+    error: str | None = None,
+) -> str:
+    """Create SSE chunk for tool result.
+
+    This sends the tool execution result to the frontend.
+    """
+    data = {
+        "type": "tool_result",
+        "tool_call_id": tool_call_id,
+        "name": name,
+        "success": error is None,
+        "result": result if error is None else None,
+        "error": error,
+    }
+    return f"data: {json.dumps(data)}\n\n"

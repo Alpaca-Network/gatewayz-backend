@@ -37,6 +37,14 @@ from src.services.stream_normalizer import (
     StreamNormalizer,
     create_error_sse_chunk,
     create_done_sse,
+    create_tool_call_sse,
+    create_tool_result_sse,
+)
+from src.services.tool_definitions import get_enabled_tools, is_server_side_tool
+from src.services.tool_executor import (
+    execute_tool_calls,
+    build_tool_messages,
+    create_tool_call_sse_event,
 )
 from src.utils.sentry_context import capture_payment_error, capture_provider_error
 
@@ -1400,6 +1408,19 @@ async def chat_completions(
 
             # Validate and adjust max_tokens for models with minimum requirements
             validate_and_adjust_max_tokens(optional, original_model)
+
+            # Inject server-side tools if enabled (e.g., web search)
+            enable_web_search = getattr(req, "enable_web_search", False) or False
+            if enable_web_search:
+                user_tools = optional.get("tools", [])
+                optional["tools"] = get_enabled_tools(
+                    enable_web_search=True,
+                    user_tools=user_tools,
+                )
+                logger.info(
+                    "Web search enabled: injected %d server-side tools",
+                    len(optional["tools"]) - len(user_tools),
+                )
 
             # Auto-detect provider if not specified
             req_provider_missing = req.provider is None or (
