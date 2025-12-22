@@ -62,6 +62,28 @@ def invalidate_user_cache_by_id(user_id: int) -> None:
         logger.debug(f"Invalidated {len(keys_to_remove)} cache entries for user ID {user_id}")
 
 
+def prepopulate_user_cache(api_key: str, user_data: dict[str, Any]) -> None:
+    """Pre-populate the user cache with user data for a given API key.
+
+    This is used to prevent race conditions when a new API key is created
+    and the frontend immediately makes requests with that key before the
+    database has fully committed/indexed the new key.
+
+    Args:
+        api_key: The API key to cache
+        user_data: The user data dictionary to cache
+    """
+    global _user_cache
+    if api_key and user_data:
+        _user_cache[api_key] = {
+            "user": user_data,
+            "timestamp": time.time(),
+        }
+        logger.debug(
+            f"Pre-cached user {user_data.get('id')} with API key {api_key[:15]}..."
+        )
+
+
 def _is_temporary_api_key(api_key: str) -> bool:
     """Check if an API key is a temporary key that should be replaced.
 
@@ -242,6 +264,38 @@ def create_enhanced_user(
             sanitize_for_logging(primary_key[:15] + "..."),
         )
 
+        # Pre-populate the user cache with the new API key to prevent race conditions
+        # This ensures the key is immediately available for authentication requests
+        try:
+            # Fetch the complete user data for caching
+            full_user = client.table("users").select("*").eq("id", user_id).execute()
+            if full_user.data:
+                user_data = full_user.data[0]
+                # Add key metadata that would normally come from api_keys_new lookup
+                user_data["key_id"] = 0  # Will be updated on next full lookup
+                user_data["key_name"] = "Primary Key"
+                user_data["environment_tag"] = "live"
+                user_data["scope_permissions"] = {"read": ["*"], "write": ["*"], "admin": ["*"]}
+                user_data["is_primary"] = True
+
+                # Add to cache immediately
+                _user_cache[primary_key] = {
+                    "user": user_data,
+                    "timestamp": time.time(),
+                }
+                logger.debug(
+                    "Pre-cached user %s with new API key %s",
+                    sanitize_for_logging(str(user_id)),
+                    sanitize_for_logging(primary_key[:15] + "..."),
+                )
+        except Exception as cache_error:
+            logger.warning(
+                "Failed to pre-cache user %s: %s (non-blocking)",
+                sanitize_for_logging(str(user_id)),
+                sanitize_for_logging(str(cache_error)),
+            )
+            # Don't fail user creation if caching fails
+
         # Return user info with primary key
         return {
             "user_id": user_id,
@@ -292,14 +346,26 @@ def _schedule_background_migration(client, user: dict[str, Any], api_key: str) -
     thread.start()
 
 
-def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
+def _get_user_uncached(api_key: str, retry_count: int = 0) -> dict[str, Any] | None:
     """Internal function: Get user by API key from database (no caching)
 
     PERF OPTIMIZATIONS:
     1. Legacy keys authenticate immediately without blocking on migration
     2. Migration runs in background thread after auth succeeds
     3. Reduced logging for common paths
+    4. Retry mechanism for newly created API keys (race condition handling)
+
+    Args:
+        api_key: The API key to look up
+        retry_count: Current retry attempt (0 = first attempt)
+
+    Returns:
+        User dict if found, None otherwise
     """
+    # Configuration for retry mechanism to handle race conditions with newly created keys
+    MAX_RETRIES = 2
+    RETRY_DELAY_MS = 150  # 150ms delay between retries
+
     try:
         client = get_supabase_client()
 
@@ -356,6 +422,24 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
 
             # Return user immediately - don't wait for migration
             return user
+
+        # API key not found - check if we should retry
+        # This handles race conditions when a newly created API key hasn't been
+        # fully committed/indexed in the database yet
+        if retry_count < MAX_RETRIES:
+            # Only retry for keys that look like valid gw_ format keys
+            # (not obviously invalid/malformed keys)
+            if api_key and api_key.startswith("gw_") and len(api_key) > 20:
+                logger.debug(
+                    "API key %s not found, retrying (%d/%d) after %dms delay",
+                    sanitize_for_logging(api_key[:15] + "..."),
+                    retry_count + 1,
+                    MAX_RETRIES,
+                    RETRY_DELAY_MS,
+                )
+                # Sleep for a short time to allow DB to commit/index the new key
+                time.sleep(RETRY_DELAY_MS / 1000.0)
+                return _get_user_uncached(api_key, retry_count + 1)
 
         return None
 

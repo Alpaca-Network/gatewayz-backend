@@ -339,6 +339,28 @@ def create_api_key(
                 sanitize_for_logging(str(audit_error)),
             )
 
+        # Pre-populate user cache to prevent race conditions
+        # When a new API key is created, immediately cache the user data
+        # so authentication requests don't fail before DB commits
+        try:
+            from src.db.users import prepopulate_user_cache
+
+            user_result = client.table("users").select("*").eq("id", user_id).execute()
+            if user_result.data:
+                user_data = user_result.data[0]
+                # Add key metadata from the newly created key
+                user_data["key_id"] = result.data[0]["id"]
+                user_data["key_name"] = key_name
+                user_data["environment_tag"] = environment_tag
+                user_data["scope_permissions"] = scope_permissions
+                user_data["is_primary"] = is_primary
+                prepopulate_user_cache(api_key, user_data)
+        except Exception as cache_error:
+            logger.debug(
+                "Failed to pre-populate cache for new API key (non-blocking): %s",
+                sanitize_for_logging(str(cache_error)),
+            )
+
         return api_key, result.data[0]["id"]
 
     except Exception as e:
