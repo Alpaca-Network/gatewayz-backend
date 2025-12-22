@@ -48,6 +48,8 @@ from src.routes.helpers.catalog import (
     enhance_models_batch,
     get_timestamp,
     handle_endpoint_errors,
+    annotate_provider_sources,
+    merge_provider_lists,
 )
 from src.utils.security_validators import sanitize_for_logging
 
@@ -102,16 +104,8 @@ def normalize_model_segment(value: str | None) -> str | None:
     return normalized or None
 
 
-def annotate_provider_sources(providers: list[dict], source: str) -> list[dict]:
-    annotated = []
-    for provider in providers or []:
-        entry = provider.copy()
-        entry.setdefault("source_gateway", source)
-        entry.setdefault("source_gateways", [source])
-        if source not in entry["source_gateways"]:
-            entry["source_gateways"].append(source)
-        annotated.append(entry)
-    return annotated
+
+# REMOVED: annotate_provider_sources moved to helpers/catalog.py
 
 
 def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[dict]:
@@ -158,32 +152,8 @@ def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[
     return list(providers.values())
 
 
-def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
-    merged: dict[str, dict] = {}
-    for providers in provider_lists:
-        for provider in providers or []:
-            slug = provider.get("slug")
-            if not slug:
-                continue
-            if slug not in merged:
-                copied = provider.copy()
-                sources = list(copied.get("source_gateways", []) or [])
-                source = copied.get("source_gateway")
-                if source and source not in sources:
-                    sources.append(source)
-                copied["source_gateways"] = sources
-                merged[slug] = copied
-            else:
-                existing = merged[slug]
-                sources = existing.get("source_gateways", [])
-                for src in provider.get("source_gateways", []) or []:
-                    if src and src not in sources:
-                        sources.append(src)
-                source = provider.get("source_gateway")
-                if source and source not in sources:
-                    sources.append(source)
-                existing["source_gateways"] = sources
-    return list(merged.values())
+
+# REMOVED: merge_provider_lists moved to helpers/catalog.py
 
 
 def merge_models_by_slug(*model_lists: list[dict]) -> list[dict]:

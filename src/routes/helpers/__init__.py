@@ -14,6 +14,8 @@ from src.routes.helpers.catalog import (
     enhance_models_batch,
     get_timestamp,
     fetch_and_merge_providers,
+    annotate_provider_sources,
+    merge_provider_lists,
 )
 
 # Chat helpers
