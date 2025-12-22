@@ -407,6 +407,7 @@ def create_app() -> FastAPI:
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
+        ("analytics_data", "Analytics Data Tables"),  # Time-series and rollup data
         ("pricing_audit", "Pricing Audit Dashboard"),
         ("pricing_sync", "Pricing Sync Service"),
     ]
