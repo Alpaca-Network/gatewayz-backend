@@ -630,9 +630,10 @@ class TestModelLocationRouting:
         assert result["choices"][0]["message"]["content"] == "Gemini 3 response"
 
         # Verify the URL used the global endpoint
+        # Global endpoint uses https://aiplatform.googleapis.com (no region prefix)
         assert client_factory.calls == 1
         request_url = client_factory.payloads[0]["url"]
-        assert "global-aiplatform.googleapis.com" in request_url, f"URL should use global endpoint: {request_url}"
+        assert "https://aiplatform.googleapis.com/v1/" in request_url, f"URL should use global endpoint (no region prefix): {request_url}"
         assert "locations/global/" in request_url, f"URL should use global location: {request_url}"
 
     @pytest.mark.usefixtures("force_rest_transport")

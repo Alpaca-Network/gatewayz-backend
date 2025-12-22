@@ -501,8 +501,16 @@ def _make_google_vertex_request_rest(
         location = _get_model_location(model_name)
         logger.info(f"Using location '{location}' for model '{model_name}'")
 
+        # Build the API URL based on location
+        # For global endpoints, the URL is https://aiplatform.googleapis.com/v1/...
+        # For regional endpoints, the URL is https://{region}-aiplatform.googleapis.com/v1/...
+        if location == "global":
+            base_url = "https://aiplatform.googleapis.com/v1"
+        else:
+            base_url = f"https://{location}-aiplatform.googleapis.com/v1"
+
         url = (
-            f"https://{location}-aiplatform.googleapis.com/v1/"
+            f"{base_url}/"
             f"projects/{Config.GOOGLE_PROJECT_ID}/"
             f"locations/{location}/"
             f"publishers/google/models/{model_name}:generateContent"
