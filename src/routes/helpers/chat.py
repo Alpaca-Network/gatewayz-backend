@@ -12,20 +12,55 @@ This module contains reusable utilities for chat endpoints including:
 
 import logging
 import time
+import asyncio
+import importlib
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException
 
 from src.config.config import Config
-from src.services.auth import get_user, _fallback_get_user
-from src.services.trial import validate_trial_access
-from src.services.plan_limits import enforce_plan_limits, _ensure_plan_capacity
-from src.services.rate_limit import get_rate_limit_manager, create_rate_limit_alert
-from src.services.billing import calculate_cost, deduct_credits, log_api_usage_transaction
-from src.services.usage import record_usage, increment_api_key_usage, update_rate_limit_usage
+from src.db.users import get_user, deduct_credits, log_api_usage_transaction, record_usage
+from src.services.trial_validation import validate_trial_access
+from src.db.plans import enforce_plan_limits
+from src.services.rate_limiting import get_rate_limit_manager
+from src.db.rate_limits import create_rate_limit_alert, update_rate_limit_usage
+from src.services.pricing import calculate_cost
+from src.db.api_keys import increment_api_key_usage
 from src.utils.logging_utils import mask_key, sanitize_for_logging
+from src.db.chat_history import get_chat_session
 
 logger = logging.getLogger(__name__)
+
+
+def _fallback_get_user(api_key: str):
+    try:
+        supabase_module = importlib.import_module("src.config.supabase_config")
+        client = supabase_module.get_supabase_client()
+        result = client.table("users").select("*").eq("api_key", api_key).execute()
+        if result.data:
+            logging.getLogger(__name__).debug("Fallback user lookup succeeded for %s", api_key)
+            return result.data[0]
+        logging.getLogger(__name__).debug(
+            "Fallback lookup found no data; table snapshot=%s",
+            client.table("users").select("*").execute().data,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "Fallback user lookup error for %s: %s", mask_key(api_key), exc
+        )
+        return None
+    return None
+
+
+async def _ensure_plan_capacity(user_id: int, environment_tag: str, _to_thread_func) -> dict[str, Any]:
+    """Run a lightweight plan-limit precheck before making upstream calls."""
+    plan_check = await _to_thread_func(enforce_plan_limits, user_id, 0, environment_tag)
+    if not plan_check.get("allowed", False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Plan limit exceeded: {plan_check.get('reason', 'unknown')}",
+        )
+    return plan_check
 
 
 # ============================================================================
@@ -34,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 async def validate_user_and_auth(
     api_key: Optional[str],
-    _to_thread,
+    _to_thread_func,
     request_id: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], bool]:
     """
@@ -42,7 +77,7 @@ async def validate_user_and_auth(
 
     Args:
         api_key: API key from request (None for anonymous)
-        _to_thread: Thread executor function
+        _to_thread_func: Thread executor function
         request_id: Request correlation ID for logging
 
     Returns:
@@ -58,10 +93,10 @@ async def validate_user_and_auth(
         return None, True
 
     # Authenticated user - get user info
-    user = await _to_thread(get_user, api_key)
+    user = await _to_thread_func(get_user, api_key)
     if not user and Config.IS_TESTING:
         logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
-        user = await _to_thread(_fallback_get_user, api_key)
+        user = await _to_thread_func(_fallback_get_user, api_key)
 
     if not user:
         logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
@@ -76,14 +111,14 @@ async def validate_user_and_auth(
 
 async def validate_trial(
     api_key: str,
-    _to_thread,
+    _to_thread_func,
 ) -> Dict[str, Any]:
     """
     Validate trial access for a user.
 
     Args:
         api_key: User's API key
-        _to_thread: Thread executor function
+        _to_thread_func: Thread executor function
 
     Returns:
         Trial validation result dict
@@ -91,7 +126,7 @@ async def validate_trial(
     Raises:
         HTTPException: If trial is expired or limits exceeded
     """
-    trial = await _to_thread(validate_trial_access, api_key)
+    trial = await _to_thread_func(validate_trial_access, api_key)
 
     if not trial.get("is_valid", False):
         if trial.get("is_trial") and trial.get("is_expired"):
@@ -123,7 +158,7 @@ async def check_plan_limits(
     user_id: int,
     environment_tag: str,
     tokens_used: int,
-    _to_thread,
+    _to_thread_func,
 ) -> Dict[str, Any]:
     """
     Check if user is within plan limits.
@@ -132,7 +167,7 @@ async def check_plan_limits(
         user_id: User's database ID
         environment_tag: Environment (live/staging)
         tokens_used: Number of tokens to check (0 for pre-check)
-        _to_thread: Thread executor function
+        _to_thread_func: Thread executor function
 
     Returns:
         Plan limit check result
@@ -140,7 +175,7 @@ async def check_plan_limits(
     Raises:
         HTTPException: If plan limits exceeded
     """
-    plan_result = await _to_thread(enforce_plan_limits, user_id, tokens_used, environment_tag)
+    plan_result = await _to_thread_func(enforce_plan_limits, user_id, tokens_used, environment_tag)
 
     if not plan_result.get("allowed", False):
         raise HTTPException(
@@ -162,7 +197,7 @@ async def check_plan_limits(
 async def ensure_capacity(
     user_id: int,
     environment_tag: str,
-    _to_thread,
+    _to_thread_func,
 ) -> None:
     """
     Fast-fail check for plan capacity before provider requests.
@@ -170,12 +205,13 @@ async def ensure_capacity(
     Args:
         user_id: User's database ID
         environment_tag: Environment (live/staging)
-        _to_thread: Thread executor function
+        _to_thread_func: Thread executor function
 
     Raises:
         HTTPException: If capacity check fails
     """
-    await _to_thread(_ensure_plan_capacity, user_id, environment_tag)
+    # Use the local helper which uses the passed _to_thread_func
+    await _ensure_plan_capacity(user_id, environment_tag, _to_thread_func)
 
 
 # ============================================================================
@@ -186,7 +222,7 @@ async def check_rate_limits(
     api_key: str,
     tokens_used: int,
     is_trial: bool,
-    _to_thread,
+    _to_thread_func,
 ) -> Optional[Any]:
     """
     Check rate limits for non-trial users.
@@ -195,7 +231,7 @@ async def check_rate_limits(
         api_key: User's API key
         tokens_used: Number of tokens (0 for pre-check)
         is_trial: Whether user is on trial
-        _to_thread: Thread executor function
+        _to_thread_func: Thread executor function
 
     Returns:
         Rate limit check result or None if trial user
@@ -210,7 +246,7 @@ async def check_rate_limits(
     rl_result = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=tokens_used)
 
     if not rl_result.allowed:
-        await _to_thread(
+        await _to_thread_func(
             create_rate_limit_alert,
             api_key,
             "rate_limit_exceeded",
@@ -246,7 +282,7 @@ async def handle_billing(
     total_tokens: int,
     elapsed_ms: int,
     is_trial: bool,
-    _to_thread,
+    _to_thread_func,
 ) -> float:
     """
     Handle billing and usage recording for a request.
@@ -260,7 +296,7 @@ async def handle_billing(
         total_tokens: Total tokens used
         elapsed_ms: Request latency in milliseconds
         is_trial: Whether user is on trial
-        _to_thread: Thread executor function
+        _to_thread_func: Thread executor function
 
     Returns:
         Cost in USD
@@ -273,7 +309,7 @@ async def handle_billing(
     if is_trial:
         # Log transaction for trial users (with $0 cost)
         try:
-            await _to_thread(
+            await _to_thread_func(
                 log_api_usage_transaction,
                 api_key,
                 0.0,
@@ -293,7 +329,7 @@ async def handle_billing(
     else:
         # For non-trial users, deduct credits
         try:
-            await _to_thread(
+            await _to_thread_func(
                 deduct_credits,
                 api_key,
                 cost,
@@ -306,7 +342,7 @@ async def handle_billing(
                     "cost_usd": cost,
                 },
             )
-            await _to_thread(
+            await _to_thread_func(
                 record_usage,
                 user_id,
                 api_key,
@@ -321,10 +357,10 @@ async def handle_billing(
             logger.error("Usage recording error: %s", e)
 
     # Update rate limit usage
-    await _to_thread(update_rate_limit_usage, api_key, total_tokens)
+    await _to_thread_func(update_rate_limit_usage, api_key, total_tokens)
 
     # Increment API key usage counter
-    await _to_thread(increment_api_key_usage, api_key)
+    await _to_thread_func(increment_api_key_usage, api_key)
 
     return cost
 
@@ -369,7 +405,7 @@ async def inject_chat_history(
     session_id: Optional[int],
     user_id: int,
     messages: list,
-    _to_thread,
+    _to_thread_func,
     get_chat_session_func,
 ) -> list:
     """
@@ -379,8 +415,8 @@ async def inject_chat_history(
         session_id: Chat session ID (can be None)
         user_id: User's database ID
         messages: Current request messages
-        _to_thread: Thread executor function
-        get_chat_session_func: Function to fetch chat session
+        _to_thread_func: Thread executor function
+        get_chat_session_func: Function to fetch chat session (deprecated param if direct import used, but keeping for compatibility)
 
     Returns:
         Messages list with history prepended (or original if no history)
@@ -389,7 +425,9 @@ async def inject_chat_history(
         return messages
 
     try:
-        session = await _to_thread(get_chat_session_func, session_id, user_id)
+        # Use get_chat_session directly from import or passed function
+        func_to_call = get_chat_session_func or get_chat_session
+        session = await _to_thread_func(func_to_call, session_id, user_id)
         if session and session.get("messages"):
             # Transform DB messages to OpenAI format and prepend to current messages
             history_messages = [
