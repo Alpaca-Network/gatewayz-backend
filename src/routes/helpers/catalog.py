@@ -1,6 +1,11 @@
 """
-Helper functions for catalog.py to eliminate code duplication
-Extracted common patterns for gateway normalization, model enhancement, and descriptions
+Catalog route helpers - Functions for model/provider fetching, normalization, and enhancement.
+
+This module contains reusable utilities for catalog endpoints including:
+- Gateway normalization and validation
+- Model and provider enhancement
+- Error handling decorators
+- Timestamp utilities
 """
 
 from datetime import datetime, timezone

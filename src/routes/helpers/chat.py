@@ -1,14 +1,13 @@
 """
-Shared Helper Functions for Chat Endpoints
+Chat route helpers - Functions for authentication, billing, rate limiting, and message handling.
 
-This module contains shared logic extracted from chat_completions() and unified_responses()
-to eliminate ~585 lines of code duplication.
-
-Benefits:
-- Single source of truth for auth, validation, billing logic
-- Easier to maintain and test
-- Consistent behavior across endpoints
-- Reduced code duplication by 50%+
+This module contains reusable utilities for chat endpoints including:
+- User authentication and validation
+- Trial access validation
+- Plan limit enforcement
+- Rate limiting checks
+- Billing and usage recording
+- Message transformation and validation
 """
 
 import logging

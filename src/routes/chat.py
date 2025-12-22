@@ -104,7 +104,7 @@ from src.config.providers import PROVIDER_CONFIGS, DEFAULT_PROVIDER, AUTO_DETECT
 load_all_providers()
 
 # Shared helper functions for chat endpoints (eliminates ~320 lines of duplication)
-from src.routes.chat_helpers import (
+from src.routes.helpers.chat import (
     validate_user_and_auth,
     validate_trial,
     check_plan_limits,

@@ -42,7 +42,7 @@ from src.config.gateway_registry import (
     is_valid_gateway,
     get_gateway_description_text,
 )
-from src.routes.catalog_helpers import (
+from src.routes.helpers.catalog import (
     normalize_gateway_value,
     get_graduation_filter_description,
     enhance_models_batch,
