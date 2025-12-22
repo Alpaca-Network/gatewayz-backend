@@ -62,6 +62,7 @@ from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.xai_client import fetch_models_from_xai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
 
@@ -2710,11 +2711,48 @@ def fetch_specific_model_from_fal(provider_name: str, model_name: str):
         return None
 
 
+def fetch_specific_model_from_google_vertex(provider_name: str, model_name: str):
+    """Fetch specific model data from Google Vertex AI by searching cached models
+
+    Google Vertex models use a static catalog, so we search the cached models.
+    Model IDs can be in formats like:
+    - gemini-3-flash (simple name)
+    - google/gemini-3-flash (with provider prefix)
+    """
+    try:
+        model_id = f"{provider_name}/{model_name}"
+        model_id_lower = model_id.lower()
+        # Also check for simple model name without provider prefix
+        simple_name = model_name.lower()
+
+        google_models = get_cached_models("google-vertex")
+        if google_models:
+            for model in google_models:
+                cached_id = model.get("id", "").lower()
+                # Match full model_id or just the model name
+                if cached_id == model_id_lower or cached_id == simple_name:
+                    return model
+
+        logger.warning(
+            "Model %s not found in Google Vertex AI catalog",
+            sanitize_for_logging(model_id)
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            "Failed to fetch specific model %s/%s from Google Vertex AI: %s",
+            sanitize_for_logging(provider_name),
+            sanitize_for_logging(model_name),
+            sanitize_for_logging(str(e)),
+        )
+        return None
+
+
 def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
+        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'helicone', 'vercel-ai-gateway', 'aihubmix', 'anannas', 'near', 'aimo', or 'openrouter' (default)
     """
     try:
         model_id = f"{provider_name}/{model_name}".lower()
@@ -2728,6 +2766,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             "groq",
             "fireworks",
             "together",
+            "google-vertex",
             "cerebras",
             "nebius",
             "xai",
@@ -2819,6 +2858,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             "groq": fetch_specific_model_from_groq,
             "fireworks": fetch_specific_model_from_fireworks,
             "together": fetch_specific_model_from_together,
+            "google-vertex": fetch_specific_model_from_google_vertex,
             "huggingface": fetch_specific_model_from_huggingface,
             "fal": fetch_specific_model_from_fal,
         }

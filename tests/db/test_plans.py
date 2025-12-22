@@ -2,7 +2,7 @@
 import sys
 import types
 import importlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timezone
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -548,3 +548,124 @@ def test_get_plan_id_by_tier_error_returns_none(monkeypatch):
 
     plan_id = m.get_plan_id_by_tier("pro")
     assert plan_id is None
+
+
+# ----------------------------- tests: usage cache -----------------------------
+
+def test_usage_cache_hit_skips_database(supabase_module, monkeypatch):
+    """Second call with same user_id should use cache (not hit database)"""
+    mod = supabase_module
+
+    # Clear cache before test
+    mod.clear_usage_cache()
+
+    call_count = 0
+    original_uncached = mod._get_user_usage_within_plan_limits_uncached
+
+    def counting_wrapper(user_id):
+        nonlocal call_count
+        call_count += 1
+        return original_uncached(user_id)
+
+    monkeypatch.setattr(mod, "_get_user_usage_within_plan_limits_uncached", counting_wrapper)
+
+    # First call (should hit database)
+    result1 = mod.get_user_usage_within_plan_limits(101)
+    assert result1 is not None
+    assert call_count == 1
+
+    # Second call (should use cache)
+    result2 = mod.get_user_usage_within_plan_limits(101)
+    assert result2 is not None
+    assert call_count == 1  # No additional database call
+
+
+def test_usage_cache_different_users_separate_entries(supabase_module, monkeypatch):
+    """Different user IDs should have separate cache entries"""
+    mod = supabase_module
+
+    mod.clear_usage_cache()
+
+    call_count = 0
+    original_uncached = mod._get_user_usage_within_plan_limits_uncached
+
+    def counting_wrapper(user_id):
+        nonlocal call_count
+        call_count += 1
+        return original_uncached(user_id)
+
+    monkeypatch.setattr(mod, "_get_user_usage_within_plan_limits_uncached", counting_wrapper)
+
+    mod.get_user_usage_within_plan_limits(101)
+    mod.get_user_usage_within_plan_limits(102)
+
+    # Both users should hit database
+    assert call_count == 2
+
+
+def test_clear_usage_cache_all(supabase_module, monkeypatch):
+    """clear_usage_cache() with no arguments should clear entire cache"""
+    mod = supabase_module
+
+    mod.clear_usage_cache()
+
+    call_count = 0
+    original_uncached = mod._get_user_usage_within_plan_limits_uncached
+
+    def counting_wrapper(user_id):
+        nonlocal call_count
+        call_count += 1
+        return original_uncached(user_id)
+
+    monkeypatch.setattr(mod, "_get_user_usage_within_plan_limits_uncached", counting_wrapper)
+
+    mod.get_user_usage_within_plan_limits(101)
+    assert call_count == 1
+
+    mod.clear_usage_cache()
+
+    mod.get_user_usage_within_plan_limits(101)
+    assert call_count == 2  # Should hit database again
+
+
+def test_invalidate_usage_cache_specific_user(supabase_module, monkeypatch):
+    """invalidate_usage_cache should clear cache for specific user"""
+    mod = supabase_module
+
+    mod.clear_usage_cache()
+
+    call_count = 0
+    original_uncached = mod._get_user_usage_within_plan_limits_uncached
+
+    def counting_wrapper(user_id):
+        nonlocal call_count
+        call_count += 1
+        return original_uncached(user_id)
+
+    monkeypatch.setattr(mod, "_get_user_usage_within_plan_limits_uncached", counting_wrapper)
+
+    mod.get_user_usage_within_plan_limits(101)
+    mod.get_user_usage_within_plan_limits(102)
+    assert call_count == 2
+
+    # Invalidate only user 101
+    mod.invalidate_usage_cache(101)
+
+    mod.get_user_usage_within_plan_limits(101)  # Should hit database
+    assert call_count == 3
+
+    mod.get_user_usage_within_plan_limits(102)  # Should use cache
+    assert call_count == 3
+
+
+def test_get_usage_cache_stats(supabase_module):
+    """get_usage_cache_stats should return cache statistics"""
+    mod = supabase_module
+
+    mod.clear_usage_cache()
+
+    stats = mod.get_usage_cache_stats()
+    assert "cached_users" in stats
+    assert "ttl_seconds" in stats
+    assert stats["cached_users"] == 0
+    assert stats["ttl_seconds"] == 10  # Short TTL for usage data

@@ -30,6 +30,7 @@ try:
         _process_google_vertex_rest_response,
         _ensure_vertex_imports,
         _ensure_protobuf_imports,
+        _get_model_location,
     )
     GOOGLE_VERTEX_AVAILABLE = True
 except ImportError:
@@ -530,6 +531,180 @@ class TestFetchModelsFromGoogleVertex:
         assert _google_vertex_models_cache["data"] is not None
         assert _google_vertex_models_cache["timestamp"] is not None
         assert len(_google_vertex_models_cache["data"]) == len(models)
+
+
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
+class TestModelLocationRouting:
+    """Tests for region-specific model routing"""
+
+    def test_gemini_3_uses_global_endpoint(self, monkeypatch):
+        """Test that Gemini 3 models use the global endpoint"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+
+        # Test various Gemini 3 model names
+        gemini_3_models = [
+            "gemini-3-flash",
+            "gemini-3-flash-preview",
+            "gemini-3-pro",
+            "GEMINI-3-FLASH",  # Test case insensitivity
+        ]
+
+        for model_name in gemini_3_models:
+            location = _get_model_location(model_name)
+            assert location == "global", f"Model {model_name} should use 'global' endpoint, got '{location}'"
+
+    def test_gemini_2_uses_regional_endpoint(self, monkeypatch):
+        """Test that Gemini 2.x models use the configured regional endpoint"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+
+        # Test various Gemini 2.x model names
+        gemini_2_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+        ]
+
+        for model_name in gemini_2_models:
+            location = _get_model_location(model_name)
+            assert location == "us-central1", f"Model {model_name} should use 'us-central1' endpoint, got '{location}'"
+
+    def test_gemini_1_uses_regional_endpoint(self, monkeypatch):
+        """Test that Gemini 1.x models use the configured regional endpoint"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "europe-west4")
+
+        # Test various Gemini 1.x model names (though these are deprecated)
+        gemini_1_models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-1.0-pro",
+        ]
+
+        for model_name in gemini_1_models:
+            location = _get_model_location(model_name)
+            assert location == "europe-west4", f"Model {model_name} should use 'europe-west4' endpoint, got '{location}'"
+
+    def test_gemma_models_use_regional_endpoint(self, monkeypatch):
+        """Test that Gemma models use the configured regional endpoint"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-west1")
+
+        gemma_models = [
+            "gemma-2-9b-it",
+            "gemma-2-27b-it",
+        ]
+
+        for model_name in gemma_models:
+            location = _get_model_location(model_name)
+            assert location == "us-west1", f"Model {model_name} should use 'us-west1' endpoint, got '{location}'"
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_rest_request_uses_global_for_gemini_3(self, monkeypatch):
+        """Ensure REST transport constructs URL with global endpoint for Gemini 3"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Gemini 3 response"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-3-flash-preview"
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Gemini 3 response"
+
+        # Verify the URL used the global endpoint
+        # Global endpoint uses https://aiplatform.googleapis.com (no region prefix)
+        assert client_factory.calls == 1
+        request_url = client_factory.payloads[0]["url"]
+        assert "https://aiplatform.googleapis.com/v1/" in request_url, f"URL should use global endpoint (no region prefix): {request_url}"
+        assert "locations/global/" in request_url, f"URL should use global location: {request_url}"
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_rest_request_uses_regional_for_gemini_2(self, monkeypatch):
+        """Ensure REST transport constructs URL with regional endpoint for Gemini 2"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Gemini 2.5 response"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-2.5-flash"
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Gemini 2.5 response"
+
+        # Verify the URL used the regional endpoint
+        assert client_factory.calls == 1
+        request_url = client_factory.payloads[0]["url"]
+        assert "us-central1-aiplatform.googleapis.com" in request_url, f"URL should use regional endpoint: {request_url}"
+        assert "locations/us-central1/" in request_url, f"URL should use regional location: {request_url}"
+
+    @patch("src.services.google_vertex_client.initialize_vertex_ai")
+    @patch("src.services.google_vertex_client._ensure_vertex_imports")
+    def test_sdk_request_uses_global_for_gemini_3(self, mock_ensure_imports, mock_init_vertex, monkeypatch):
+        """Ensure SDK transport initializes with global location for Gemini 3"""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_TRANSPORT", "sdk")
+
+        # Mock the lazy import to return a mock GenerativeModel class
+        mock_generative_model_class = Mock()
+        mock_model_instance = Mock()
+        mock_response = Mock()
+        mock_response.text = "Gemini 3 SDK response"
+        mock_response.usage_metadata = Mock()
+        mock_response.usage_metadata.prompt_token_count = 5
+        mock_response.usage_metadata.candidates_token_count = 10
+        mock_response.candidates = [Mock()]
+        mock_response.candidates[0].finish_reason = 1  # STOP
+
+        mock_model_instance.generate_content.return_value = mock_response
+        mock_generative_model_class.return_value = mock_model_instance
+        mock_ensure_imports.return_value = (Mock(), mock_generative_model_class)
+
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-3-flash-preview"
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Gemini 3 SDK response"
+
+        # Verify initialize_vertex_ai was called with location='global'
+        mock_init_vertex.assert_called_once_with(location="global")
 
 
 if __name__ == "__main__":

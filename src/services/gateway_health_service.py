@@ -29,6 +29,7 @@ from src.cache import (
     _near_models_cache,
     _nebius_models_cache,
     _novita_models_cache,
+    _onerouter_models_cache,
     _together_models_cache,
     _xai_models_cache,
 )
@@ -189,6 +190,15 @@ GATEWAY_CONFIG = {
         "api_key": Config.ANANNAS_API_KEY,
         "cache": _anannas_models_cache,
         "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "onerouter": {
+        "name": "OneRouter",
+        "url": "https://api.onerouter.pro/v1/models",
+        "api_key_env": "ONEROUTER_API_KEY",
+        "api_key": Config.ONEROUTER_API_KEY,
+        "cache": _onerouter_models_cache,
+        "min_expected_models": 100,
         "header_type": "bearer",
     },
 }

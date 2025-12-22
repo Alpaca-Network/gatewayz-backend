@@ -12,7 +12,7 @@ import sys
 import httpx
 from pathlib import Path
 from typing import Dict, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from unittest.mock import Mock, patch
 
 # Add project root to path

@@ -27,6 +27,36 @@ def get_google_models() -> list[MultiProviderModel]:
     """
 
     models = [
+        # Gemini 3 Models
+        MultiProviderModel(
+            id="gemini-3-flash",
+            name="Gemini 3 Flash",
+            description="Google's latest frontier model with breakthrough speed and intelligence",
+            context_length=1000000,
+            modalities=["text", "image", "audio", "video"],
+            providers=[
+                ProviderConfig(
+                    name="google-vertex",
+                    model_id="gemini-3-flash-preview",
+                    priority=1,
+                    requires_credentials=True,
+                    cost_per_1k_input=0.0005,  # $0.50/1M tokens
+                    cost_per_1k_output=0.003,  # $3.00/1M tokens
+                    max_tokens=8192,
+                    features=["streaming", "multimodal", "function_calling", "thinking"],
+                ),
+                ProviderConfig(
+                    name="openrouter",
+                    model_id="google/gemini-3-flash-preview",
+                    priority=2,
+                    requires_credentials=False,
+                    cost_per_1k_input=0.0006,  # $0.60/1M tokens (OpenRouter markup)
+                    cost_per_1k_output=0.0035,  # $3.50/1M tokens
+                    max_tokens=8192,
+                    features=["streaming", "multimodal"],
+                ),
+            ],
+        ),
         # Gemini 2.5 Models
         MultiProviderModel(
             id="gemini-2.5-flash",
@@ -37,17 +67,17 @@ def get_google_models() -> list[MultiProviderModel]:
             providers=[
                 ProviderConfig(
                     name="google-vertex",
-                    model_id="gemini-2.5-flash-preview-09-2025",
+                    model_id="gemini-2.5-flash",  # Use stable GA version for production
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.075,  # Example pricing
+                    cost_per_1k_input=0.075,
                     cost_per_1k_output=0.30,
                     max_tokens=8192,
-                    features=["streaming", "multimodal", "function_calling"],
+                    features=["streaming", "multimodal", "function_calling", "thinking"],
                 ),
                 ProviderConfig(
                     name="openrouter",
-                    model_id="google/gemini-2.5-flash-preview-09-2025",
+                    model_id="google/gemini-2.5-flash",
                     priority=2,
                     requires_credentials=False,
                     cost_per_1k_input=0.10,  # OpenRouter markup
@@ -174,65 +204,17 @@ def get_google_models() -> list[MultiProviderModel]:
                 ),
             ],
         ),
-        # Gemini 1.5 Models
-        MultiProviderModel(
-            id="gemini-1.5-pro",
-            name="Gemini 1.5 Pro",
-            description="Mid-generation model with excellent performance",
-            context_length=1000000,
-            modalities=["text", "image", "audio", "video"],
-            providers=[
-                ProviderConfig(
-                    name="google-vertex",
-                    model_id="gemini-1.5-pro",
-                    priority=1,
-                    requires_credentials=True,
-                    cost_per_1k_input=1.25,
-                    cost_per_1k_output=5.00,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal", "function_calling"],
-                ),
-                ProviderConfig(
-                    name="openrouter",
-                    model_id="google/gemini-pro-1.5",
-                    priority=2,
-                    requires_credentials=False,
-                    cost_per_1k_input=1.50,
-                    cost_per_1k_output=6.00,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal"],
-                ),
-            ],
-        ),
-        MultiProviderModel(
-            id="gemini-1.5-flash",
-            name="Gemini 1.5 Flash",
-            description="Fast and efficient model for everyday tasks",
-            context_length=1000000,
-            modalities=["text", "image", "audio", "video"],
-            providers=[
-                ProviderConfig(
-                    name="google-vertex",
-                    model_id="gemini-1.5-flash",
-                    priority=1,
-                    requires_credentials=True,
-                    cost_per_1k_input=0.075,
-                    cost_per_1k_output=0.30,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal", "function_calling"],
-                ),
-                ProviderConfig(
-                    name="openrouter",
-                    model_id="google/gemini-flash-1.5",
-                    priority=2,
-                    requires_credentials=False,
-                    cost_per_1k_input=0.10,
-                    cost_per_1k_output=0.40,
-                    max_tokens=8192,
-                    features=["streaming", "multimodal"],
-                ),
-            ],
-        ),
+        # Gemini 1.5 Models - REMOVED
+        # These models were fully retired by Google in April-September 2025
+        # They return 404 errors on Vertex AI and have been removed from this registry
+        # to prevent them from appearing in catalog listings or causing routing errors.
+        #
+        # Recommended replacements:
+        #   - gemini-1.5-pro -> gemini-2.5-pro or gemini-2.0-flash
+        #   - gemini-1.5-flash -> gemini-2.5-flash or gemini-2.0-flash-lite
+        #
+        # Note: OpenRouter may still support these models. If needed, they can be
+        # accessed directly via OpenRouter without going through this registry.
         # Gemma Models (Open source)
         MultiProviderModel(
             id="gemma-2-9b-it",

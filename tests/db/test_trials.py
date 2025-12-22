@@ -13,7 +13,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.db.trials import (
     start_trial_for_key,

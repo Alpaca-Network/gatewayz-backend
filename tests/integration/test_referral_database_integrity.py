@@ -12,7 +12,7 @@ import os
 import pytest
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.config.supabase_config import get_supabase_client

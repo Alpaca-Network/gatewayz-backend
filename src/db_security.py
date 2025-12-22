@@ -5,7 +5,7 @@ Implements secure key storage, audit logging, and advanced security features.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -56,7 +56,7 @@ def create_secure_api_key(
         # Calculate expiration date if specified
         expiration_date = None
         if expiration_days:
-            expiration_date = (datetime.utcnow() + timedelta(days=expiration_days)).isoformat()
+            expiration_date = (datetime.now(timezone.utc) + timedelta(days=expiration_days)).isoformat()
 
         # Set default permissions if none provided
         if scope_permissions is None:
@@ -81,9 +81,9 @@ def create_secure_api_key(
                     "ip_allowlist": ip_allowlist or [],
                     "domain_referrers": domain_referrers or [],
                     "created_by_user_id": user_id,
-                    "last_used_at": datetime.utcnow().isoformat(),
-                    "created_at": datetime.utcnow().isoformat(),
-                    "updated_at": datetime.utcnow().isoformat(),
+                    "last_used_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             .execute()
@@ -134,7 +134,7 @@ def create_secure_api_key(
                         "ip_allowlist": ip_allowlist,
                         "domain_referrers": domain_referrers,
                     },
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:
@@ -205,7 +205,7 @@ def validate_secure_api_key(
                                     expiration_str = expiration_str + "+00:00"
 
                                 expiration = datetime.fromisoformat(expiration_str)
-                                now = datetime.utcnow().replace(tzinfo=expiration.tzinfo)
+                                now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
 
                                 if expiration < now:
                                     audit_logger.log_security_violation(
@@ -261,8 +261,8 @@ def validate_secure_api_key(
                     try:
                         client.table("api_keys_new").update(
                             {
-                                "last_used_at": datetime.utcnow().isoformat(),
-                                "updated_at": datetime.utcnow().isoformat(),
+                                "last_used_at": datetime.now(timezone.utc).isoformat(),
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
                             }
                         ).eq("id", key_id).execute()
                     except Exception as update_error:
@@ -340,7 +340,7 @@ def rotate_api_key(key_id: int, user_id: int, new_key_name: str = None) -> str |
         update_data = {
             "api_key": new_encrypted_key,
             "key_hash": new_key_hash,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         if new_key_name:
@@ -370,9 +370,9 @@ def rotate_api_key(key_id: int, user_id: int, new_key_name: str = None) -> str |
                     "details": {
                         "old_key_name": old_key_name,
                         "new_key_name": new_key_name or old_key_name,
-                        "rotated_at": datetime.utcnow().isoformat(),
+                        "rotated_at": datetime.now(timezone.utc).isoformat(),
                     },
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:

@@ -324,16 +324,28 @@ async def get_models(
     # Handle empty results
     if not models:
         config = get_gateway_config(gateway_value)
-        if config and not config["supports_public_catalog"]:
+        if config and not config.get("supports_public_catalog", True):
             logger.info(
                 f"Returning empty {config['name']} catalog response because no public model listing exists"
+            )
+            raise HTTPException(
+                status_code=404, detail=f"No models available for gateway={gateway_value}"
             )
         else:
             logger.warning(
                 "No models available for gateway=%s. Returning empty response. "
                 "This may indicate provider API keys not configured or all providers are down.",
-                gateway_value
+                gateway_value,
             )
+            return {
+                "data": [],
+                "total": 0,
+                "returned": 0,
+                "offset": offset or 0,
+                "limit": limit,
+                "gateway": gateway_value,
+                "timestamp": get_timestamp(),
+            }
 
     # REFACTORED: Build provider lists (replaces 115 lines)
     provider_groups: list[list[dict]] = []
@@ -369,8 +381,9 @@ async def get_models(
         for model in models:
             model_id = (model.get("id") or "").lower()
             provider_slug = (model.get("provider_slug") or "").lower()
-            if provider_lower in model_id or provider_lower == provider_slug:
+            if model_id.startswith(f"{provider_lower}/") or provider_slug == provider_lower:
                 filtered_models.append(model)
+
         models = filtered_models
         logger.info(
             f"Filtered models by provider '{provider}': {original_count} -> {len(models)}"
@@ -714,7 +727,7 @@ async def get_gateway_statistics(
     **This fixes the "Top Provider: N/A" issue in your UI!**
 
     Args:
-        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'helicone', etc.)
+        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'google-vertex', 'helicone', etc.)
         time_range: Time range for statistics
 
     Returns:
@@ -1167,14 +1180,18 @@ async def get_low_latency_models_api(
     Returns models with sub-500ms average response times based on production metrics.
     Useful for real-time applications, chatbots, and latency-sensitive use cases.
 
-    **Ultra-low-latency models** (<100ms):
-    - groq/moonshotai/kimi-k2-instruct-0905 (29ms)
-    - groq/openai/gpt-oss-120b (74ms)
+    **Examples:**
+    - Search for cheap models: `?max_price=0.0001&sort_by=price`
+    - Find models with large context: `?min_context=100000&sort_by=context&order=desc`
+    - Search by name: `?q=gpt-4&gateway=openrouter`
+    - Filter by modality: `?modality=image&sort_by=popularity`
+    - Filter for private models only: `?is_private=true`
+    - Exclude private models: `?is_private=false`
 
-    **Low-latency models** (<500ms):
-    - Groq models (fastest provider)
-    - Select OpenRouter models (gemini-flash, gemma, etc.)
-    - Fireworks optimized models
+    **Returns:**
+    - List of models matching the criteria
+    - Total count of matching models
+    - Applied filters
     """
     from src.services.request_prioritization import (
         get_low_latency_models,
@@ -1319,7 +1336,7 @@ async def search_models(
     max_price: float | None = Query(None, description="Maximum price per token (USD)"),
     gateway: str | None = Query(
         "all",
-        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, helicone, aihubmix, vercel-ai-gateway, or all",
+        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, google-vertex, helicone, aihubmix, vercel-ai-gateway, or all",
     ),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),

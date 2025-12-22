@@ -14,7 +14,7 @@ Features:
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Any
 from dataclasses import dataclass, asdict
 from collections import defaultdict
@@ -44,7 +44,7 @@ class PricingRecord:
 
     def __post_init__(self):
         if not self.timestamp:
-            self.timestamp = datetime.utcnow().isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
@@ -97,7 +97,7 @@ class PricingAuditService:
         Returns:
             Snapshot filename
         """
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         filename = f"pricing_snapshot_{timestamp.strftime('%Y%m%d_%H%M%S')}.json"
         filepath = self.snapshot_dir / filename
 
@@ -389,14 +389,14 @@ class PricingAuditService:
         Returns:
             Audit report dict
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Get records from period
         all_records = self.get_pricing_history()
         recent_records = [
             r
             for r in all_records
-            if datetime.fromisoformat(r.timestamp) >= cutoff
+            if datetime.fromisoformat(r.timestamp.replace('Z', '+00:00')).replace(tzinfo=timezone.utc) >= cutoff
         ]
 
         # Calculate statistics
@@ -419,7 +419,7 @@ class PricingAuditService:
 
         report = {
             "report_type": "pricing_audit",
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "period_days": days,
             "summary": {
                 "total_records": len(recent_records),
@@ -489,7 +489,7 @@ class PricingAuditService:
             Filename saved to
         """
         if not filename:
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             filename = f"audit_report_{timestamp}.json"
 
         filepath = PRICING_HISTORY_DIR / filename

@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from datetime import timezone
+from datetime import datetime, timezone
 
 from src.cache import _cerebras_models_cache
 
@@ -47,6 +47,24 @@ DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
         "id": "llama-3.3-405b",
         "name": "Llama 3.3 405B",
         "owned_by": "meta",
+        "context_length": 131072,
+    },
+    {
+        "id": "qwen-3-32b",
+        "name": "Qwen 3 32B",
+        "owned_by": "qwen",
+        "context_length": 131072,
+    },
+    {
+        "id": "qwen-3-235b-a22b-instruct-2507",
+        "name": "Qwen 3 235B Instruct (Preview)",
+        "owned_by": "qwen",
+        "context_length": 131072,
+    },
+    {
+        "id": "zai-glm-4.6",
+        "name": "Z.ai GLM 4.6 (Preview)",
+        "owned_by": "zai",
         "context_length": 131072,
     },
 ]

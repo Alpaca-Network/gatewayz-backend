@@ -41,9 +41,9 @@ def get_cloudflare_workers_ai_client():
     Requires both an API token and an account ID.
     """
     try:
-        if not Config.CLOUDFLARE_API_TOKEN:
+        if not Config.CLOUDFLARE_API_TOKEN or Config.CLOUDFLARE_API_TOKEN.strip() == "":
             raise ValueError("Cloudflare API token not configured")
-        if not Config.CLOUDFLARE_ACCOUNT_ID:
+        if not Config.CLOUDFLARE_ACCOUNT_ID or Config.CLOUDFLARE_ACCOUNT_ID.strip() == "":
             raise ValueError("Cloudflare Account ID not configured")
 
         # Use pooled client for ~10-20ms performance improvement per request
@@ -438,7 +438,12 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
     Returns:
         List of model dictionaries with id, name, description, context_length, provider
     """
-    if not Config.CLOUDFLARE_API_TOKEN or not Config.CLOUDFLARE_ACCOUNT_ID:
+    if (
+        not Config.CLOUDFLARE_API_TOKEN
+        or Config.CLOUDFLARE_API_TOKEN.strip() == ""
+        or not Config.CLOUDFLARE_ACCOUNT_ID
+        or Config.CLOUDFLARE_ACCOUNT_ID.strip() == ""
+    ):
         logger.warning("Cloudflare credentials not configured, returning empty list from API")
         return []
 
@@ -481,15 +486,54 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     if not model_id:
                         continue
 
+                    # Handle properties - can be a list of property dicts or a dict
+                    properties = model.get("properties", {})
+                    context_length = 8192  # Default fallback
+                    if isinstance(properties, list):
+                        # Properties is a list of {"property_id": "...", "value": "..."} dicts
+                        for prop in properties:
+                            if isinstance(prop, dict) and prop.get("property_id") == "max_total_tokens":
+                                try:
+                                    context_length = int(prop.get("value", 8192))
+                                except (ValueError, TypeError):
+                                    # Keep default context_length when value is malformed
+                                    bad_value = prop.get("value")
+                                    logger.warning(
+                                        "Invalid max_total_tokens value %r for model %r; using default %d",
+                                        bad_value,
+                                        model_id,
+                                        context_length,
+                                    )
+                                break
+                    elif isinstance(properties, dict):
+                        # Properties is a dict with direct key-value mapping
+                        raw_value = properties.get("max_total_tokens", 8192)
+                        try:
+                            context_length = int(raw_value)
+                        except (ValueError, TypeError):
+                            logger.warning(
+                                "Invalid max_total_tokens value %r for model %r; using default %d",
+                                raw_value,
+                                model_id,
+                                context_length,
+                            )
+
+                    # Handle task - can be a dict with "name" or just a string, or None
+                    task = model.get("task")
+                    if isinstance(task, dict):
+                        task_name = task.get("name", "Text Generation")
+                    elif task is not None:
+                        task_name = str(task)
+                    else:
+                        task_name = "Text Generation"
+
                     models.append({
                         "id": model_id,
                         "name": model.get("description", model_id.split("/")[-1]),
                         "description": model.get("description", ""),
-                        "context_length": model.get("properties", {}).get(
-                            "max_total_tokens", 8192
-                        ),
+                        "context_length": context_length,
                         "provider": "cloudflare-workers-ai",
-                        "task": model.get("task", {}).get("name", "Text Generation"),
+                        "task": task_name,
                     })
 
                 # Check if there are more pages
@@ -516,13 +560,34 @@ def fetch_models_from_cloudflare_workers_ai() -> list[dict[str, Any]]:
     """
     Return the list of available Cloudflare Workers AI models.
 
-    Returns a static curated list of text generation models. For production use,
-    use fetch_models_from_cloudflare_api() to get the dynamic list.
+    Attempts to fetch models dynamically from Cloudflare API. If that fails
+    (due to missing credentials, network issues, etc.), falls back to the
+    curated static model list.
 
-    The static list is maintained as a fallback and for environments where
-    API credentials are not available.
+    This is a synchronous wrapper around fetch_models_from_cloudflare_workers_ai_async().
+
+    Returns:
+        List of model dictionaries with id, name, description, context_length, provider
     """
-    return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
+    import asyncio
+
+    try:
+        # Try to get the current event loop
+        try:
+            asyncio.get_running_loop()
+            # If we're already in an async context, we can't use asyncio.run()
+            # Instead, we'll return the static list and log a warning
+            logger.warning(
+                "fetch_models_from_cloudflare_workers_ai called from async context, "
+                "returning static list. Use fetch_models_from_cloudflare_workers_ai_async() instead."
+            )
+            return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
+        except RuntimeError:
+            # No event loop running, we can use asyncio.run()
+            return asyncio.run(fetch_models_from_cloudflare_workers_ai_async())
+    except Exception as e:
+        logger.error(f"Error in fetch_models_from_cloudflare_workers_ai: {e}")
+        return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
 
 
 async def fetch_models_from_cloudflare_workers_ai_async() -> list[dict[str, Any]]:

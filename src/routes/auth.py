@@ -270,6 +270,22 @@ def _handle_existing_user(
 
     logger.info("Returning login response with credits: %s", user_credits)
 
+    # CRITICAL: Verify API key exists before returning success for existing users
+    # This prevents silent failures where user exists but has no working key
+    if not api_key_to_return:
+        logger.critical(
+            "CRITICAL: Existing user %s login but NO API KEY available! "
+            "This user will not be able to authenticate API requests. "
+            "Privy ID: %s, Email: %s",
+            existing_user["id"],
+            request.user.id,
+            user_email,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Your account exists but no API key is available. Please try again or contact support.",
+        )
+
     return PrivyAuthResponse(
         success=True,
         message="Login successful",
@@ -468,16 +484,22 @@ def _process_referral_code_background(
                 # Send notification to referrer
                 if referrer.get("email"):
                     try:
-                        send_referral_signup_notification(
+                        notification_sent = send_referral_signup_notification(
                             referrer_id=referrer["id"],
                             referrer_email=referrer["email"],
                             referrer_username=referrer.get("username", "User"),
                             referee_username=username,
                         )
-                        logger.info(
-                            f"Background task: Referral notification sent to referrer "
-                            f"{referrer['id']} at {referrer['email']}"
-                        )
+                        if notification_sent:
+                            logger.info(
+                                f"Background task: Referral notification sent to referrer "
+                                f"{referrer['id']} at {referrer['email']}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Background task: Referral notification failed for referrer "
+                                f"{referrer['id']} at {referrer['email']} - email service returned failure"
+                            )
                     except Exception as notify_error:
                         logger.error(
                             f"Background task: Failed to send referral notification to "
@@ -987,6 +1009,22 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             logger.info(f"Returning registration response with credits: {new_user_credits}")
 
             tier_value = user_data.get("tier")
+
+            # CRITICAL: Verify API key exists before returning success
+            # This prevents silent failures where user is created but has no working key
+            if not user_data.get("primary_api_key"):
+                logger.critical(
+                    "CRITICAL: User %s created but NO API KEY generated! "
+                    "This user will not be able to authenticate API requests. "
+                    "Privy ID: %s, Email: %s",
+                    user_data["user_id"],
+                    request.user.id,
+                    email,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Account created but API key generation failed. Please try again or contact support.",
+                )
 
             return PrivyAuthResponse(
                 success=True,

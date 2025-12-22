@@ -167,14 +167,14 @@ class TestModelAvailabilityDataclass:
 
     def test_create_model_availability(self):
         """Test creating ModelAvailability instance"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         availability = ModelAvailability(
             model_id="gpt-4",
             provider="openai",
             gateway="openrouter",
             status=AvailabilityStatus.AVAILABLE,
-            last_checked=datetime.now(UTC),
+            last_checked=datetime.now(timezone.utc),
             success_rate=0.95,
             response_time_ms=150.0,
             error_count=2,
@@ -235,7 +235,7 @@ class TestModelAvailabilityService:
 
     def test_get_model_availability_with_gateway(self):
         """Test getting availability with specific gateway"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
@@ -245,7 +245,7 @@ class TestModelAvailabilityService:
             provider="openai",
             gateway="openrouter",
             status=AvailabilityStatus.AVAILABLE,
-            last_checked=datetime.now(UTC),
+            last_checked=datetime.now(timezone.utc),
             success_rate=0.95,
             response_time_ms=150.0,
             error_count=0,
@@ -272,7 +272,7 @@ class TestModelAvailabilityService:
 
     def test_get_available_models_filtered(self):
         """Test getting available models with filters"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
@@ -280,19 +280,19 @@ class TestModelAvailabilityService:
         models = [
             ModelAvailability(
                 model_id="gpt-4", provider="openai", gateway="openrouter",
-                status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+                status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
                 success_rate=0.95, response_time_ms=150.0, error_count=0,
                 circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
             ),
             ModelAvailability(
                 model_id="claude-3", provider="anthropic", gateway="openrouter",
-                status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+                status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
                 success_rate=0.90, response_time_ms=200.0, error_count=0,
                 circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
             ),
             ModelAvailability(
                 model_id="llama-3", provider="meta", gateway="huggingface",
-                status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
+                status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(timezone.utc),
                 success_rate=0.50, response_time_ms=None, error_count=5,
                 circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
             ),
@@ -316,14 +316,14 @@ class TestModelAvailabilityService:
 
     def test_is_model_available(self):
         """Test model availability check"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # Add available model
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
         )
@@ -333,14 +333,14 @@ class TestModelAvailabilityService:
 
     def test_is_model_available_with_open_circuit(self):
         """Test availability check with open circuit breaker"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # Add model with OPEN circuit
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
         )
@@ -350,17 +350,17 @@ class TestModelAvailabilityService:
 
     def test_is_model_available_during_maintenance(self):
         """Test availability check during maintenance"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # Add model in maintenance
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[],
-            maintenance_until=datetime.now(UTC) + timedelta(hours=1)
+            maintenance_until=datetime.now(timezone.utc) + timedelta(hours=1)
         )
 
         # Should return False because of maintenance
@@ -368,13 +368,13 @@ class TestModelAvailabilityService:
 
     def test_get_best_available_model_preferred_available(self):
         """Test best model selection when preferred is available"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
         )
@@ -384,14 +384,14 @@ class TestModelAvailabilityService:
 
     def test_get_best_available_model_with_fallback(self):
         """Test best model selection falls back when preferred unavailable"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # gpt-4 unavailable
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.50, response_time_ms=None, error_count=10,
             circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
         )
@@ -399,7 +399,7 @@ class TestModelAvailabilityService:
         # gpt-3.5-turbo available (fallback)
         service.availability_cache["openrouter:gpt-3.5-turbo"] = ModelAvailability(
             model_id="gpt-3.5-turbo", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=100.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
         )
@@ -419,26 +419,26 @@ class TestModelAvailabilityService:
 
     def test_get_availability_summary(self):
         """Test availability summary with data"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # Add models
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
         )
         service.availability_cache["openrouter:gpt-3.5"] = ModelAvailability(
             model_id="gpt-3.5", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.50, response_time_ms=None, error_count=5,
             circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
         )
         service.availability_cache["huggingface:llama"] = ModelAvailability(
             model_id="llama", provider="meta", gateway="huggingface",
-            status=AvailabilityStatus.DEGRADED, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.DEGRADED, last_checked=datetime.now(timezone.utc),
             success_rate=0.75, response_time_ms=500.0, error_count=2,
             circuit_breaker_state=CircuitBreakerState.HALF_OPEN, fallback_models=[]
         )
@@ -455,20 +455,20 @@ class TestModelAvailabilityService:
 
     def test_set_maintenance_mode(self):
         """Test setting maintenance mode"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # Add model
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
         )
 
         # Set maintenance
-        maintenance_end = datetime.now(UTC) + timedelta(hours=2)
+        maintenance_end = datetime.now(timezone.utc) + timedelta(hours=2)
         service.set_maintenance_mode("gpt-4", "openrouter", maintenance_end)
 
         availability = service.availability_cache["openrouter:gpt-4"]
@@ -477,17 +477,17 @@ class TestModelAvailabilityService:
 
     def test_clear_maintenance_mode(self):
         """Test clearing maintenance mode"""
-        from datetime import UTC
+from datetime import datetime, timezone
 
         service = ModelAvailabilityService()
 
         # Add model in maintenance
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
             model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.MAINTENANCE, last_checked=datetime.now(UTC),
+            status=AvailabilityStatus.MAINTENANCE, last_checked=datetime.now(timezone.utc),
             success_rate=0.95, response_time_ms=150.0, error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[],
-            maintenance_until=datetime.now(UTC) + timedelta(hours=2)
+            maintenance_until=datetime.now(timezone.utc) + timedelta(hours=2)
         )
 
         # Clear maintenance

@@ -10,7 +10,7 @@ This module provides endpoints for:
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -48,7 +48,7 @@ async def instrumentation_health():
     """
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "loki": {
             "enabled": Config.LOKI_ENABLED,
             "url": Config.LOKI_PUSH_URL if Config.LOKI_ENABLED else None,
@@ -78,7 +78,7 @@ async def get_trace_context():
     return {
         "trace_id": trace_id or "none",
         "span_id": span_id or "none",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -103,7 +103,7 @@ async def loki_status(admin_key: str = Depends(get_admin_key)):
             "environment": Config.APP_ENV,
             "service": "gatewayz-api",
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -128,7 +128,7 @@ async def tempo_status(admin_key: str = Depends(get_admin_key)):
             "service.version": "2.0.3",
             "deployment.environment": Config.APP_ENV,
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -173,7 +173,7 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
             "OTEL_SERVICE_NAME": Config.OTEL_SERVICE_NAME,
             "APP_ENV": Config.APP_ENV,
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -199,7 +199,7 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
 
     with tracer.start_as_current_span("test_trace") as span:
         span.set_attribute("test", True)
-        span.set_attribute("timestamp", datetime.utcnow().isoformat())
+        span.set_attribute("timestamp", datetime.now(timezone.utc).isoformat())
 
         trace_id = get_current_trace_id()
         span_id = get_current_span_id()
@@ -218,7 +218,7 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
             "trace_id": trace_id,
             "span_id": span_id,
             "message": "Test trace generated successfully. Check Tempo for trace details.",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 
@@ -250,7 +250,7 @@ async def test_log(admin_key: str = Depends(get_admin_key)):
         "trace_id": trace_id,
         "span_id": span_id,
         "message": "Test log generated successfully. Check Loki for log details.",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -283,5 +283,5 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
             "ENVIRONMENT": os.environ.get("ENVIRONMENT", "development"),
             "OTEL_SERVICE_NAME": os.environ.get("OTEL_SERVICE_NAME", "gatewayz-api"),
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }

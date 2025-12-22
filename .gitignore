@@ -112,3 +112,4 @@ performance_results*.json
 performance_summary*.txt
 comprehensive_performance_test*.py
 rate_limit_monitor.py
+gatewayz/

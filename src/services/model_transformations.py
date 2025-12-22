@@ -33,11 +33,66 @@ MODEL_ID_ALIASES = {
     "gpt5_1": "openai/gpt-5.1",
     "gpt5.1": "openai/gpt-5.1",
     "gpt-5.1": "openai/gpt-5.1",
+    # OpenAI o-series reasoning models (o1, o3, o4-mini)
+    # o1 variants
+    "o1": "openai/o1",
+    "o1-pro": "openai/o1-pro",
+    # o3 variants
+    "o3": "openai/o3",
+    "o3-mini": "openai/o3-mini",
+    "o3-mini-high": "openai/o3-mini-high",
+    "o3-pro": "openai/o3-pro",
+    "o3-deep-research": "openai/o3-deep-research",
+    # o4-mini variants
+    "o4-mini": "openai/o4-mini",
+    "o4-mini-high": "openai/o4-mini-high",
+    "o4-mini-deep-research": "openai/o4-mini-deep-research",
+    # Anthropic Claude models - aliases for version variants
+    # Claude 3.5 Haiku
+    "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
+    # Claude 3.7 Sonnet
+    "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
+    # Claude 4 series - Opus variants
+    "claude-opus-4": "anthropic/claude-opus-4",
+    "claude-opus-4.1": "anthropic/claude-opus-4.1",
+    "claude-opus-4.5": "anthropic/claude-opus-4.5",
+    "opus-4": "anthropic/claude-opus-4",
+    "opus-4.1": "anthropic/claude-opus-4.1",
+    "opus-4.5": "anthropic/claude-opus-4.5",
+    # Claude 4 series - Sonnet variants
+    "claude-sonnet-4": "anthropic/claude-sonnet-4",
+    "sonnet-4": "anthropic/claude-sonnet-4",
+    # Claude 4 series - Haiku variants
+    "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+    "haiku-4.5": "anthropic/claude-haiku-4.5",
+    # DeepSeek R1 and V3 series - newest variants
+    "deepseek-r1": "deepseek/deepseek-r1",
+    "r1": "deepseek/deepseek-r1",
+    "deepseek-v3.2": "deepseek/deepseek-v3.2",
+    # Meta Llama 4 series
+    "llama-4-scout": "meta-llama/llama-4-scout",
+    "llama-4-maverick": "meta-llama/llama-4-maverick",
+    # Google Gemini 3 series
+    "gemini-3": "google/gemini-3-flash-preview",
+    "gemini-3-flash": "google/gemini-3-flash-preview",
+    "gemini-3-pro": "google/gemini-3-pro-preview",
+    # XAI Grok 3 series
+    "grok-3": "x-ai/grok-3",
+    "grok-3-beta": "x-ai/grok-3-beta",
+    "grok-3-mini": "x-ai/grok-3-mini",
+    "grok-3-mini-beta": "x-ai/grok-3-mini-beta",
+    # XAI Grok 4 series
+    "grok-4": "x-ai/grok-4",
+    "grok-4-fast": "x-ai/grok-4-fast",
+    "grok-4.1-fast": "x-ai/grok-4.1-fast",
+    # XAI Grok specialized models
+    "grok-code-fast-1": "x-ai/grok-code-fast-1",
     # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
-    "grok-beta": "grok-3",
-    "xai/grok-beta": "xai/grok-3",
-    "grok-vision-beta": "grok-3",
-    "xai/grok-vision-beta": "xai/grok-3",
+    # Note: Map directly to canonical x-ai/ prefix since apply_model_alias doesn't chain
+    "grok-beta": "x-ai/grok-3",
+    "xai/grok-beta": "x-ai/grok-3",
+    "grok-vision-beta": "x-ai/grok-3",
+    "xai/grok-vision-beta": "x-ai/grok-3",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
@@ -50,7 +105,7 @@ OPENROUTER_AUTO_FALLBACKS = {
     "featherless": "meta-llama/llama-3.3-70b",
     "fireworks": "meta-llama/llama-3.3-70b",
     "together": "meta-llama/llama-3.3-70b",
-    "google-vertex": "gemini-1.5-pro",
+    "google-vertex": "gemini-2.5-flash",  # Updated from retired gemini-1.5-pro
     "vercel-ai-gateway": "openai/gpt-4o-mini",
     "aihubmix": "openai/gpt-4o-mini",
     "anannas": "openai/gpt-4o-mini",
@@ -70,6 +125,7 @@ def apply_model_alias(model_id: str | None) -> str | None:
     return model_id
 
 # Gemini model name constants to reduce duplication
+GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
 GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
 GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
@@ -450,6 +506,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         "google-vertex": {
             # Google Vertex AI models - simple names
             # Full resource names are constructed by the client
+            # Gemini 3 models (latest - released Dec 17, 2025)
+            "gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "google/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+            "@google/models/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
             # Gemini 2.5 models (newest)
             # Flash Lite (stable GA version - use stable by default)
             "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
@@ -461,19 +524,19 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
             "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
             "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
-            # Gemini 2.5 flash models
-            "gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
+            # Gemini 2.5 flash models (use stable GA version by default)
+            "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
+            "google/gemini-2.5-flash": "gemini-2.5-flash",
+            "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
+            # Preview version (only if explicitly requested)
             "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
-            "google/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "@google/models/gemini-2.5-flash": GEMINI_2_5_FLASH_PREVIEW,
             "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            # Image-specific models
+            # Image-specific models (GA version only - no preview version exists)
             "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
             "gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
+            "@google/models/gemini-2.5-flash-image": "gemini-2.5-flash-image",
             # Pro (use stable GA version by default)
             "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
             "google/gemini-2.5-pro": "gemini-2.5-pro",
@@ -501,15 +564,10 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.0-pro-001": "gemini-2.0-pro-001",
             "google/gemini-2.0-pro": GEMINI_2_0_PRO,
             "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
-            # Gemini 1.5 models
-            "gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-pro-002": "gemini-1.5-pro-002",
-            "google/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "@google/models/gemini-1.5-pro": GEMINI_1_5_PRO,
-            "gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "gemini-1.5-flash-002": "gemini-1.5-flash-002",
-            "google/gemini-1.5-flash": GEMINI_1_5_FLASH,
-            "@google/models/gemini-1.5-flash": GEMINI_1_5_FLASH,
+            # Gemini 1.5 models - RETIRED (April-September 2025)
+            # These models are NO LONGER AVAILABLE on Google Vertex AI
+            # Removed all google-vertex mappings to prevent 404 errors
+            # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
             # Gemini 1.0 models
             "gemini-1.0-pro": GEMINI_1_0_PRO,
             "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
@@ -517,7 +575,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
             # Aliases for convenience
             "gemini-2.0": GEMINI_2_0_FLASH,
-            "gemini-1.5": GEMINI_1_5_PRO,
+            # Note: gemini-1.5 alias removed - model is retired on Vertex AI
             # Gemma models (open source models from Google)
             "google/gemma-2-9b": "gemma-2-9b-it",
             "google/gemma-2-9b-it": "gemma-2-9b-it",
@@ -743,6 +801,20 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "cerebras/llama-3.1-8b": "llama3.1-8b",
             "cerebras/llama-3.1-8b-instruct": "llama3.1-8b",
             "cerebras/llama-3.1-405b": "llama3.1-405b",
+            # Qwen models
+            "cerebras/qwen-3-32b": "qwen-3-32b",
+            "cerebras/qwen-3-32b-instruct": "qwen-3-32b",
+            "cerebras/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+            "cerebras/qwen-3-235b-instruct": "qwen-3-235b-a22b-instruct-2507",
+            "qwen-3-32b": "qwen-3-32b",
+            "qwen3-32b": "qwen-3-32b",
+            "qwen/qwen3-32b": "qwen-3-32b",
+            "qwen/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+            "qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+            # Z.ai GLM models
+            "cerebras/zai-glm-4.6": "zai-glm-4.6",
+            "zai-glm-4.6": "zai-glm-4.6",
+            "zai/glm-4.6": "zai-glm-4.6",
             # Support direct model names (passthrough)
             "llama-3.3-70b": "llama-3.3-70b",
             "llama-3.3-405b": "llama-3.3-405b",
@@ -1071,23 +1143,31 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
     # Normalize to lowercase for consistency in all @ prefix checks
     normalized_model = model_id.lower()
 
+    # Check for Cloudflare Workers AI models (use @cf/ prefix)
+    # IMPORTANT: This must come before the general @ prefix check below
+    if normalized_model.startswith("@cf/"):
+        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
+        return "cloudflare-workers-ai"
+
     # Check for Google Vertex AI models first (before Portkey check)
     if model_id.startswith("projects/") and "/models/" in model_id:
         return "google-vertex"
     if normalized_model.startswith("@google/models/") and any(
         pattern in normalized_model
-        for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+        for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
     ):
-        # Patterns like "@google/models/gemini-2.5-flash"
+        # Patterns like "@google/models/gemini-3-flash" or "@google/models/gemini-2.5-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if (
         any(
             pattern in normalized_model
-            for pattern in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]
+            for pattern in ["gemini-3", "gemini-2.5", "gemini-2.0", "gemini-1.0"]
         )
         and "/" not in model_id
     ):
-        # Simple patterns like "gemini-2.5-flash", "gemini-2.0-flash" or "gemini-1.5-pro"
+        # Simple patterns like "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash"
+        # Note: gemini-1.5 excluded - models are retired on Vertex AI
         return "google-vertex"
     if model_id.startswith("google/") and "gemini" in normalized_model:
         # Patterns like "google/gemini-2.5-flash" or "google/gemini-2.0-flash-001"
@@ -1129,7 +1209,9 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "openrouter"
 
     # Check all mappings to see if this model exists
+    # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
+        "cerebras",  # Check Cerebras first for cerebras/ prefix models
         "fireworks",
         "openrouter",
         "featherless",
@@ -1205,7 +1287,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             return "alpaca-network"
 
         # Alibaba Cloud / Qwen models (e.g., "qwen/qwen-plus", "alibaba-cloud/qwen-max")
+        # IMPORTANT: Check if this is a Cerebras-specific Qwen model first
+        # Cerebras supports: qwen-3-32b, qwen-3-235b
         if org == "qwen" or org == "alibaba-cloud" or org == "alibaba":
+            # Check if this specific qwen model is available on Cerebras
+            cerebras_qwen_models = ["qwen-3-32b", "qwen3-32b", "qwen-3-235b"]
+            model_base = model_name.lower().replace("-instruct", "").replace("-a22b-instruct-2507", "")
+            if model_base in cerebras_qwen_models:
+                logger.info(f"Routing qwen model '{model_id}' to cerebras (model supported by both)")
+                return "cerebras"
             return "alibaba-cloud"
 
         # DeepSeek models are primarily on Fireworks in this system

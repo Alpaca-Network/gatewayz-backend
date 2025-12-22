@@ -12,7 +12,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from typing import Dict, Any, List
 
 from src.db.credit_transactions import (
