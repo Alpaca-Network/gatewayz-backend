@@ -455,3 +455,77 @@ async def test_tier_update_loop_handles_other_errors():
                 error_call = mock_logger.error.call_args[0][0]
                 assert "Error in tier update loop" in error_call
                 assert "Network timeout error" in error_call
+
+
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_create_or_update_incident_handles_none_response(mock_supabase, mock_logger, health_monitor):
+    """Test that _create_or_update_incident handles None response from Supabase gracefully"""
+    # Create a mock that returns None when execute() is called
+    mock_table = MagicMock()
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.order.return_value = mock_table
+    mock_table.limit.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+    mock_table.execute.return_value = None  # Simulate None response
+
+    mock_supabase.table.return_value = mock_table
+
+    # Create a test health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4",
+        gateway="openrouter",
+        status=HealthCheckStatus.ERROR,
+        response_time_ms=150.5,
+        error_message="Test error",
+        http_status_code=500,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    # Should not raise an exception
+    await health_monitor._create_or_update_incident(result, consecutive_failures=3)
+
+    # Verify warning was logged
+    mock_logger.warning.assert_called_once()
+    warning_call = mock_logger.warning.call_args[0][0]
+    assert "Supabase query returned None" in warning_call
+    assert "gpt-4" in warning_call
+
+
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_process_health_check_result_handles_none_response(mock_supabase, mock_logger, health_monitor):
+    """Test that _process_health_check_result handles None response from Supabase gracefully"""
+    # Create a mock that returns None when execute() is called
+    mock_table = MagicMock()
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+    mock_table.execute.return_value = None  # Simulate None response
+
+    mock_supabase.table.return_value = mock_table
+
+    # Create a test health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4",
+        gateway="openrouter",
+        status=HealthCheckStatus.SUCCESS,
+        response_time_ms=150.5,
+        error_message=None,
+        http_status_code=200,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    # Should not raise an exception
+    await health_monitor._process_health_check_result(result)
+
+    # Verify warning was logged
+    mock_logger.warning.assert_called_once()
+    warning_call = mock_logger.warning.call_args[0][0]
+    assert "Supabase query returned None" in warning_call
+    assert "gpt-4" in warning_call
