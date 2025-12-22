@@ -250,6 +250,54 @@ class TestAIMORetryLogic:
         assert result == []
 
 
+class TestRedirectHandling:
+    """Test HTTP redirect handling for AIMO model fetching."""
+
+    @patch("src.services.models.httpx.get")
+    def test_follows_http_308_redirect(self, mock_get, reset_aimo_cache):
+        """Should follow HTTP 308 redirects by using follow_redirects=True."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "name": "model-1",
+                    "providers": [{"name": "provider1", "pricing": {}}],
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        with patch("src.config.Config.AIMO_API_KEY", "test-key"):
+            fetch_models_from_aimo()
+
+        # Verify httpx.get was called with follow_redirects=True
+        call_kwargs = mock_get.call_args[1]
+        assert call_kwargs.get("follow_redirects") is True
+
+    @patch("src.services.models.httpx.get")
+    def test_redirect_preserves_headers(self, mock_get, reset_aimo_cache):
+        """Should preserve authorization headers during redirect."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "name": "model-1",
+                    "providers": [{"name": "provider1", "pricing": {}}],
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        with patch("src.config.Config.AIMO_API_KEY", "test-key"):
+            fetch_models_from_aimo()
+
+        # Verify headers contain authorization
+        call_kwargs = mock_get.call_args[1]
+        assert "headers" in call_kwargs
+        assert "Authorization" in call_kwargs["headers"]
+        assert call_kwargs["headers"]["Authorization"] == "Bearer test-key"
+
+
 class TestTimeoutConfiguration:
     """Test that timeout configuration prevents thread blocking."""
 

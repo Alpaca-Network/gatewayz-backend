@@ -1674,7 +1674,9 @@ def fetch_models_from_aimo():
                     f"URL {url_idx + 1}/{len(urls_to_try)}: {url}"
                 )
 
-                response = httpx.get(url, headers=headers, timeout=timeout_config)
+                response = httpx.get(
+                    url, headers=headers, timeout=timeout_config, follow_redirects=True
+                )
                 response.raise_for_status()
 
                 payload = response.json()
