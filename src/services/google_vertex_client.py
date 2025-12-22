@@ -700,11 +700,11 @@ def make_google_vertex_request_openai_stream(
     temperature: float | None = None,
     top_p: float | None = None,
     **kwargs,
-) -> Iterator[str]:
+) -> Iterator[dict]:
     """Make streaming request to Google Vertex AI
 
     NOTE: For compatibility, this implementation gets the full response
-    and returns it in OpenAI SSE streaming format.
+    and returns it in OpenAI-compatible streaming format as dict objects.
 
     Args:
         messages: List of message objects in OpenAI format
@@ -715,7 +715,7 @@ def make_google_vertex_request_openai_stream(
         **kwargs: Additional parameters
 
     Yields:
-        SSE-formatted stream chunks
+        OpenAI-compatible streaming chunk dicts (NOT SSE strings)
     """
     try:
         logger.info(f"Starting streaming request for model {model}")
@@ -743,10 +743,10 @@ def make_google_vertex_request_openai_stream(
         logger.info(f"Content length: {len(content)}, finish_reason: {finish_reason}")
 
         # Convert to streaming format by yielding complete response as single chunk
-        # This maintains compatibility with streaming clients
+        # Yield dict objects (NOT SSE strings) for StreamNormalizer compatibility
         chunk = {
             "id": response.get("id"),
-            "object": "text_completion.chunk",
+            "object": "chat.completion.chunk",
             "created": response.get("created"),
             "model": response.get("model"),
             "choices": [
@@ -759,20 +759,19 @@ def make_google_vertex_request_openai_stream(
         }
 
         logger.debug(f"Yielding chunk: {json.dumps(chunk, indent=2, default=str)}")
-        yield f"data: {json.dumps(chunk)}\n\n"
+        yield chunk
 
         # Final chunk with finish_reason
         finish_chunk = {
             "id": response.get("id"),
-            "object": "text_completion.chunk",
+            "object": "chat.completion.chunk",
             "created": response.get("created"),
             "model": response.get("model"),
-            "choices": [{"index": 0, "delta": {"content": None}, "finish_reason": finish_reason}],
+            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
         }
 
         logger.debug(f"Yielding finish chunk: {json.dumps(finish_chunk, indent=2, default=str)}")
-        yield f"data: {json.dumps(finish_chunk)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield finish_chunk
 
     except Exception as e:
         logger.error(f"Google Vertex AI streaming request failed: {e}", exc_info=True)
