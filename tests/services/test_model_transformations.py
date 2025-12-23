@@ -111,6 +111,37 @@ def test_z_ai_glm_with_exacto_suffix():
     assert transformed == "z-ai/glm-4.6:exacto", f"Expected 'z-ai/glm-4.6:exacto', got {transformed}"
 
 
+def test_z_ai_glm_prefix_detected_as_openrouter():
+    """Test that z-ai/ prefixed models are detected as OpenRouter provider"""
+    test_cases = [
+        ("z-ai/glm-4-flash", "openrouter"),
+        ("z-ai/glm-4.5", "openrouter"),
+        ("z-ai/glm-4.6", "openrouter"),
+        ("z-ai/glm-4.7", "openrouter"),  # Non-existent but should still route to OpenRouter
+        ("zai/glm-4-flash", "openrouter"),  # Alternate prefix without hyphen
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_z_ai_glm_47_alias_transforms():
+    """Test that z-ai/glm-4.7 (non-existent model) is aliased to existing model"""
+    from src.services.model_transformations import apply_model_alias
+
+    # z-ai/glm-4.7 doesn't exist, should map to z-ai/glm-4-flash
+    test_cases = [
+        ("z-ai/glm-4.7", "z-ai/glm-4-flash"),
+        ("z-ai/glm-4-7", "z-ai/glm-4-flash"),
+        ("z-ai/glm4.7", "z-ai/glm-4-flash"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = apply_model_alias(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
 def test_openrouter_colon_suffix_variants():
     """Test that OpenRouter models with colon suffixes are correctly detected"""
     test_cases = [
