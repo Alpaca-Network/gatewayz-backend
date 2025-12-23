@@ -58,16 +58,20 @@ def with_retry(
 
                     # Check if this is a retryable error
                     error_str = str(e).lower()
+                    error_type = type(e).__name__.lower()
                     is_retryable = any(
-                        keyword in error_str
+                        keyword in error_str or keyword in error_type
                         for keyword in [
                             "server disconnected",
                             "connection",
                             "timeout",
                             "network",
                             "remote protocol error",
+                            "localprotocolerror",
                             "broken pipe",
                             "connection reset",
+                            "recv_data",
+                            "connectionstate.closed",
                         ]
                     )
 
@@ -146,16 +150,20 @@ def with_async_retry(
 
                     # Check if this is a retryable error
                     error_str = str(e).lower()
+                    error_type = type(e).__name__.lower()
                     is_retryable = any(
-                        keyword in error_str
+                        keyword in error_str or keyword in error_type
                         for keyword in [
                             "server disconnected",
                             "connection",
                             "timeout",
                             "network",
                             "remote protocol error",
+                            "localprotocolerror",
                             "broken pipe",
                             "connection reset",
+                            "recv_data",
+                            "connectionstate.closed",
                         ]
                     )
 

@@ -5,13 +5,79 @@ Tracks all credit additions and deductions with full audit trail
 """
 
 import logging
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeVar
+
+from httpx import ConnectError, LocalProtocolError, ReadTimeout, RemoteProtocolError
 
 from src.config.supabase_config import get_supabase_client
 from src.utils.sentry_context import capture_database_error
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _execute_with_connection_retry(
+    operation: Callable[[], T],
+    operation_name: str,
+    max_retries: int = 3,
+    initial_delay: float = 0.1,
+) -> T:
+    """
+    Execute a Supabase operation with retry logic for transient connection errors.
+
+    Handles HTTP/2 connection pool race conditions, server disconnects, and other
+    transient network issues that can occur when reusing connections in high-concurrency
+    scenarios, especially in background tasks after HTTP responses are sent.
+
+    This specifically handles LocalProtocolError which occurs when a background task
+    tries to use a shared HTTP/2 connection that was closed by another request.
+
+    Args:
+        operation: The operation to execute
+        operation_name: Name of the operation for logging
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds before first retry (default: 0.1)
+
+    Returns:
+        The result of the operation
+
+    Raises:
+        The last exception encountered if all retries fail
+    """
+    last_exception = None
+    delay = initial_delay
+
+    for attempt in range(max_retries + 1):
+        try:
+            return operation()
+        except (RemoteProtocolError, LocalProtocolError, ConnectError, ReadTimeout) as e:
+            last_exception = e
+            error_type = type(e).__name__
+
+            if attempt < max_retries:
+                logger.warning(
+                    f"{operation_name} failed with {error_type}: {e}. "
+                    f"Retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})"
+                )
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                logger.error(
+                    f"{operation_name} failed after {max_retries} retries with {error_type}: {e}"
+                )
+        except Exception as e:
+            # For non-transient errors, fail immediately
+            logger.error(f"{operation_name} failed with non-retryable error: {e}")
+            raise
+
+    # If we get here, all retries failed
+    if last_exception:
+        raise last_exception
+    raise RuntimeError(f"{operation_name} failed without exception details")
 
 
 # Transaction Types
@@ -40,7 +106,11 @@ def log_credit_transaction(
     created_by: str | None = None,
 ) -> dict[str, Any] | None:
     """
-    Log a credit transaction to the audit trail
+    Log a credit transaction to the audit trail.
+
+    This function uses retry logic with exponential backoff to handle transient
+    connection errors that may occur when called from background tasks after
+    HTTP responses are sent (HTTP/2 connection pool race conditions).
 
     Args:
         user_id: User ID
@@ -72,7 +142,16 @@ def log_credit_transaction(
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        result = client.table("credit_transactions").insert(transaction_data).execute()
+        # Use retry logic to handle HTTP/2 connection pool race conditions
+        # This is especially important for background tasks that run after
+        # the HTTP response has been sent
+        def insert_transaction():
+            return client.table("credit_transactions").insert(transaction_data).execute()
+
+        result = _execute_with_connection_retry(
+            insert_transaction,
+            f"log_credit_transaction(user={user_id}, type={transaction_type})"
+        )
 
         if not result.data:
             logger.error("Failed to log credit transaction - no data returned")

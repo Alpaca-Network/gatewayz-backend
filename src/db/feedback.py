@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
-from httpx import ConnectError, ReadTimeout, RemoteProtocolError
+from httpx import ConnectError, LocalProtocolError, ReadTimeout, RemoteProtocolError
 
 from src.config.supabase_config import get_supabase_client
 from src.utils.retry import with_retry
@@ -36,7 +36,7 @@ def _execute_with_connection_retry(
     for attempt in range(max_retries + 1):
         try:
             return operation()
-        except (RemoteProtocolError, ConnectError, ReadTimeout) as e:
+        except (RemoteProtocolError, LocalProtocolError, ConnectError, ReadTimeout) as e:
             last_exception = e
             error_type = type(e).__name__
 
