@@ -598,6 +598,21 @@ async def anthropic_messages(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_vercel_ai_gateway_response, resp_raw)
+                elif attempt_provider == "fal":
+                    # FAL models are for image/video generation, not chat/messages
+                    # Return a clear error message directing users to the correct endpoint
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                "and is not available through the messages endpoint. "
+                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                "type": "invalid_request_error",
+                                "code": "model_not_supported_for_chat",
+                            }
+                        },
+                    )
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
