@@ -286,6 +286,159 @@ def cleanup_supabase_client():
         logger.warning(f"Error during Supabase client cleanup: {e}")
 
 
+def reset_supabase_client():
+    """
+    Reset the Supabase client by closing the existing connection and clearing the cache.
+
+    This is useful when HTTP/2 connection pool errors occur (e.g., LocalProtocolError)
+    due to server-side connection resets or stale connections. The next call to
+    get_supabase_client() will create a fresh client with a new connection pool.
+
+    Returns:
+        bool: True if reset was performed, False if no client was cached
+    """
+    global _supabase_client, _last_error, _last_error_time
+
+    try:
+        if _supabase_client is not None:
+            # Try to close the httpx client gracefully
+            try:
+                if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+                    session = _supabase_client.postgrest.session
+                    if hasattr(session, 'close'):
+                        session.close()
+            except Exception as close_error:
+                logger.debug(f"Error closing httpx client during reset: {close_error}")
+
+            _supabase_client = None
+            # Clear any cached errors so we can retry immediately
+            _last_error = None
+            _last_error_time = 0
+            logger.info("🔄 Supabase client reset - next request will create fresh connection")
+            return True
+        return False
+    except Exception as e:
+        logger.warning(f"Error during Supabase client reset: {e}")
+        # Force clear the client anyway
+        _supabase_client = None
+        _last_error = None
+        _last_error_time = 0
+        return True
+
+
+def is_http2_protocol_error(error: Exception) -> bool:
+    """
+    Check if an exception is an HTTP/2 protocol error that requires connection reset.
+
+    These errors typically occur when:
+    - Server-side connection reset
+    - HTTP/2 stream state corruption
+    - Stale keepalive connections
+
+    Args:
+        error: The exception to check
+
+    Returns:
+        bool: True if this is an HTTP/2 protocol error requiring reset
+    """
+    error_str = str(error).lower()
+    error_type = type(error).__name__
+
+    # Check error type name for protocol errors
+    if "protocolerror" in error_type.lower():
+        return True
+
+    # Check for httpx/httpcore HTTP/2 specific protocol errors
+    # These patterns are specific to HTTP/2 state machine errors
+    http2_error_indicators = [
+        "streaminputs.send_headers",
+        "streaminputs.recv_data",
+        "connectioninputs.recv_data",
+        "connectionstate.closed",
+        "in state 5",  # HTTP/2 stream closed state (more specific)
+        "in state connectionstate",  # HTTP/2 connection state errors
+        "stream closed",
+        "connection reset by peer",
+        "goaway",
+        "h2_error",
+        "http2 error",
+    ]
+
+    # Check error message for HTTP/2 specific patterns
+    for indicator in http2_error_indicators:
+        if indicator in error_str:
+            return True
+
+    # Check for httpcore/httpx specific protocol error messages
+    # These typically contain both "invalid input" AND a state reference
+    if "invalid input" in error_str and ("state" in error_str or "inputs" in error_str):
+        return True
+
+    # Check for connection closed errors that are HTTP/2 specific
+    if "connection closed" in error_str and ("http2" in error_str or "h2" in error_str):
+        return True
+
+    return False
+
+
+def execute_with_retry(operation, max_retries: int = 2, operation_name: str = "database operation"):
+    """
+    Execute a database operation with automatic retry on HTTP/2 protocol errors.
+
+    When an HTTP/2 protocol error occurs (e.g., LocalProtocolError due to stale
+    connections), this function will reset the Supabase client and retry the
+    operation with a fresh connection.
+
+    Args:
+        operation: A callable that performs the database operation.
+                   It should accept a Supabase client as its first argument.
+        max_retries: Maximum number of retry attempts (default: 2)
+        operation_name: Name of the operation for logging purposes
+
+    Returns:
+        The result of the operation
+
+    Raises:
+        Exception: If all retry attempts fail
+
+    Example:
+        def insert_activity(client):
+            return client.table("activity_log").insert(data).execute()
+
+        result = execute_with_retry(insert_activity, operation_name="log_activity")
+    """
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            client = get_supabase_client()
+            return operation(client)
+        except Exception as e:
+            last_error = e
+
+            if is_http2_protocol_error(e):
+                if attempt < max_retries:
+                    logger.warning(
+                        f"HTTP/2 protocol error in {operation_name} (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                        f"Resetting client and retrying..."
+                    )
+                    reset_supabase_client()
+                    # Small delay to allow connection cleanup
+                    time.sleep(0.1)
+                    continue
+                else:
+                    logger.error(
+                        f"HTTP/2 protocol error in {operation_name} after {max_retries + 1} attempts: {e}"
+                    )
+                    raise
+            else:
+                # Not an HTTP/2 error, don't retry
+                raise
+
+    # Should not reach here, but just in case
+    raise last_error if last_error else RuntimeError(f"{operation_name} failed with no error captured")
+
+
 class _LazySupabaseClient:
     """
     Lazy proxy for the Supabase client.

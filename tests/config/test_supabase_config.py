@@ -560,3 +560,144 @@ class TestTestConnection:
 
                     # create_client should only be called once
                     assert mock_create_client.call_count == 1
+
+
+class TestIsHttp2ProtocolError:
+    """Test HTTP/2 protocol error detection"""
+
+    def test_detects_localprotocolerror_type(self):
+        """Test detection of LocalProtocolError by type name"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        class LocalProtocolError(Exception):
+            pass
+
+        error = LocalProtocolError("Invalid input StreamInputs.SEND_HEADERS in state 5")
+        assert is_http2_protocol_error(error) is True
+
+    def test_detects_remoteprotocolerror_type(self):
+        """Test detection of RemoteProtocolError by type name"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        class RemoteProtocolError(Exception):
+            pass
+
+        error = RemoteProtocolError("Connection reset")
+        assert is_http2_protocol_error(error) is True
+
+    def test_detects_send_headers_error(self):
+        """Test detection of SEND_HEADERS error message"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        error = Exception("Invalid input StreamInputs.SEND_HEADERS in state 5")
+        assert is_http2_protocol_error(error) is True
+
+    def test_detects_recv_data_error(self):
+        """Test detection of RECV_DATA error message"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        error = Exception("Invalid input ConnectionInputs.RECV_DATA in state ConnectionState.CLOSED")
+        assert is_http2_protocol_error(error) is True
+
+    def test_detects_connection_closed_error(self):
+        """Test detection of connection closed error with HTTP/2 context"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        # HTTP/2 specific connection closed error
+        error = Exception("HTTP2 connection closed by peer")
+        assert is_http2_protocol_error(error) is True
+
+        # H2 specific connection closed
+        error = Exception("h2 connection closed unexpectedly")
+        assert is_http2_protocol_error(error) is True
+
+        # Stream closed error
+        error = Exception("Stream closed prematurely")
+        assert is_http2_protocol_error(error) is True
+
+    def test_detects_goaway_error(self):
+        """Test detection of GOAWAY frame error"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        error = Exception("Received GOAWAY frame from server")
+        assert is_http2_protocol_error(error) is True
+
+    def test_returns_false_for_unrelated_error(self):
+        """Test that unrelated errors are not detected as HTTP/2 errors"""
+        from src.config.supabase_config import is_http2_protocol_error
+
+        error = Exception("Database connection timeout")
+        assert is_http2_protocol_error(error) is False
+
+        error = ValueError("Invalid input format")
+        assert is_http2_protocol_error(error) is False
+
+
+class TestResetSupabaseClient:
+    """Test the reset_supabase_client function"""
+
+    def test_reset_clears_cached_client(self):
+        """Test that reset clears the cached client"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Set up a mock cached client
+        mock_client = create_mock_supabase_client_with_connection()
+        supabase_config_mod._supabase_client = mock_client
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
+
+        # Reset
+        result = supabase_config_mod.reset_supabase_client()
+
+        assert result is True
+        assert supabase_config_mod._supabase_client is None
+        assert supabase_config_mod._last_error is None
+
+    def test_reset_returns_false_when_no_client(self):
+        """Test that reset returns False when no client is cached"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Ensure no client is cached
+        supabase_config_mod._supabase_client = None
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
+
+        result = supabase_config_mod.reset_supabase_client()
+
+        assert result is False
+
+    def test_reset_clears_cached_error(self):
+        """Test that reset clears any cached error"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Set up a mock cached client with an error state
+        mock_client = create_mock_supabase_client_with_connection()
+        supabase_config_mod._supabase_client = mock_client
+        supabase_config_mod._last_error = RuntimeError("Test error")
+        supabase_config_mod._last_error_time = 12345
+
+        # Reset
+        result = supabase_config_mod.reset_supabase_client()
+
+        assert result is True
+        assert supabase_config_mod._supabase_client is None
+        assert supabase_config_mod._last_error is None
+        assert supabase_config_mod._last_error_time == 0
+
+    def test_reset_closes_httpx_session(self):
+        """Test that reset closes the httpx session if present"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Set up a mock cached client with an httpx session
+        mock_session = Mock()
+        mock_client = create_mock_supabase_client_with_connection()
+        mock_client.postgrest.session = mock_session
+        supabase_config_mod._supabase_client = mock_client
+        supabase_config_mod._last_error = None
+        supabase_config_mod._last_error_time = 0
+
+        # Reset
+        result = supabase_config_mod.reset_supabase_client()
+
+        assert result is True
+        mock_session.close.assert_called_once()

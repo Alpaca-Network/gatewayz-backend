@@ -6,13 +6,21 @@ including response times, success rates, and health status.
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 
 from postgrest.exceptions import APIError
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import (
+    get_supabase_client,
+    is_http2_protocol_error,
+    reset_supabase_client,
+)
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of retries for HTTP/2 protocol errors
+MAX_RETRIES = 2
 
 
 def record_model_call(
@@ -50,135 +58,148 @@ def record_model_call(
     # Use provider as gateway if gateway not explicitly provided
     effective_gateway = gateway if gateway else provider
 
-    try:
-        supabase = get_supabase_client()
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            supabase = get_supabase_client()
 
-        # First, try to get the existing record for calculating new averages
-        existing = (
-            supabase.table("model_health_tracking")
-            .select("*")
-            .eq("provider", provider)
-            .eq("model", model)
-            .execute()
-        )
-    except APIError as e:
-        # Table doesn't exist (likely in test environment or migration not run)
-        if "PGRST205" in str(e) or "Could not find the table" in str(e):
-            logger.debug(
-                f"model_health_tracking table not found - skipping health tracking "
-                f"for {provider}/{model}. Run migrations to enable health tracking."
+            # First, try to get the existing record for calculating new averages
+            existing = (
+                supabase.table("model_health_tracking")
+                .select("*")
+                .eq("provider", provider)
+                .eq("model", model)
+                .execute()
             )
-            return {}
-        # Re-raise other API errors
-        raise
-    except Exception as e:
-        logger.warning(f"Failed to record model health for {provider}/{model}: {e}")
-        return {}
 
-    try:
-        # Prepare upsert data - always include provider and model for the upsert
-        if existing.data and len(existing.data) > 0:
-            # Calculate updated values based on existing record
-            record = existing.data[0]
-            new_call_count = record["call_count"] + 1
-            new_success_count = record["success_count"] + (1 if status == "success" else 0)
-            new_error_count = record["error_count"] + (1 if status != "success" else 0)
+            # Prepare upsert data - always include provider and model for the upsert
+            if existing.data and len(existing.data) > 0:
+                # Calculate updated values based on existing record
+                record = existing.data[0]
+                new_call_count = record["call_count"] + 1
+                new_success_count = record["success_count"] + (1 if status == "success" else 0)
+                new_error_count = record["error_count"] + (1 if status != "success" else 0)
 
-            # Calculate new average response time
-            if record["average_response_time_ms"] is not None:
-                new_avg = (
-                    (record["average_response_time_ms"] * record["call_count"]) + response_time_ms
-                ) / new_call_count
+                # Calculate new average response time
+                if record["average_response_time_ms"] is not None:
+                    new_avg = (
+                        (record["average_response_time_ms"] * record["call_count"]) + response_time_ms
+                    ) / new_call_count
+                else:
+                    new_avg = response_time_ms
+
+                upsert_data = {
+                    "provider": provider,
+                    "model": model,
+                    "gateway": effective_gateway,
+                    "last_response_time_ms": response_time_ms,
+                    "last_status": status,
+                    "last_called_at": datetime.now(timezone.utc).isoformat(),
+                    "call_count": new_call_count,
+                    "success_count": new_success_count,
+                    "error_count": new_error_count,
+                    "average_response_time_ms": new_avg,
+                }
+
+                if error_message:
+                    upsert_data["last_error_message"] = error_message
+
+                if input_tokens is not None:
+                    upsert_data["input_tokens"] = input_tokens
+                if output_tokens is not None:
+                    upsert_data["output_tokens"] = output_tokens
+                if total_tokens is not None:
+                    upsert_data["total_tokens"] = total_tokens
             else:
-                new_avg = response_time_ms
+                # New record with initial values
+                upsert_data = {
+                    "provider": provider,
+                    "model": model,
+                    "gateway": effective_gateway,
+                    "last_response_time_ms": response_time_ms,
+                    "last_status": status,
+                    "last_called_at": datetime.now(timezone.utc).isoformat(),
+                    "call_count": 1,
+                    "success_count": 1 if status == "success" else 0,
+                    "error_count": 1 if status != "success" else 0,
+                    "average_response_time_ms": response_time_ms,
+                }
 
-            upsert_data = {
-                "provider": provider,
-                "model": model,
-                "gateway": effective_gateway,
-                "last_response_time_ms": response_time_ms,
-                "last_status": status,
-                "last_called_at": datetime.now(timezone.utc).isoformat(),
-                "call_count": new_call_count,
-                "success_count": new_success_count,
-                "error_count": new_error_count,
-                "average_response_time_ms": new_avg,
-            }
+                if error_message:
+                    upsert_data["last_error_message"] = error_message
 
-            if error_message:
-                upsert_data["last_error_message"] = error_message
+                if input_tokens is not None:
+                    upsert_data["input_tokens"] = input_tokens
+                if output_tokens is not None:
+                    upsert_data["output_tokens"] = output_tokens
+                if total_tokens is not None:
+                    upsert_data["total_tokens"] = total_tokens
 
-            if input_tokens is not None:
-                upsert_data["input_tokens"] = input_tokens
-            if output_tokens is not None:
-                upsert_data["output_tokens"] = output_tokens
-            if total_tokens is not None:
-                upsert_data["total_tokens"] = total_tokens
-        else:
-            # New record with initial values
-            upsert_data = {
-                "provider": provider,
-                "model": model,
-                "gateway": effective_gateway,
-                "last_response_time_ms": response_time_ms,
-                "last_status": status,
-                "last_called_at": datetime.now(timezone.utc).isoformat(),
-                "call_count": 1,
-                "success_count": 1 if status == "success" else 0,
-                "error_count": 1 if status != "success" else 0,
-                "average_response_time_ms": response_time_ms,
-            }
-
-            if error_message:
-                upsert_data["last_error_message"] = error_message
-
-            if input_tokens is not None:
-                upsert_data["input_tokens"] = input_tokens
-            if output_tokens is not None:
-                upsert_data["output_tokens"] = output_tokens
-            if total_tokens is not None:
-                upsert_data["total_tokens"] = total_tokens
-
-        # Use atomic upsert to prevent race conditions
-        # on_conflict specifies the primary key columns for conflict resolution
-        result = (
-            supabase.table("model_health_tracking")
-            .upsert(upsert_data, on_conflict="provider,model")
-            .execute()
-        )
-
-        return result.data[0] if result.data else {}
-
-    except APIError as e:
-        # Table doesn't exist or other API error
-        error_str = str(e)
-        if "PGRST205" in error_str or "Could not find the table" in error_str:
-            logger.debug(
-                f"model_health_tracking table not found during update - skipping health tracking "
-                f"for {provider}/{model}"
+            # Use atomic upsert to prevent race conditions
+            # on_conflict specifies the primary key columns for conflict resolution
+            result = (
+                supabase.table("model_health_tracking")
+                .upsert(upsert_data, on_conflict="provider,model")
+                .execute()
             )
-            return {}
-        # Handle duplicate key by logging a warning instead of failing
-        # This can happen if two requests race to insert the same record
-        if "23505" in error_str or "duplicate key" in error_str.lower():
-            logger.warning(
-                f"Race condition detected for health metric {provider}/{model}, "
-                "record was already created by another request"
-            )
-            return {}
-        # Re-raise other API errors
-        raise
-    except Exception as e:
-        error_str = str(e)
-        # Handle duplicate key errors that might come through as generic exceptions
-        if "23505" in error_str or "duplicate key" in error_str.lower():
-            logger.warning(
-                f"Race condition detected for health metric {provider}/{model}, "
-                "record was already created by another request"
-            )
-            return {}
-        logger.warning(f"Failed to update model health for {provider}/{model}: {e}")
-        return {}
+
+            return result.data[0] if result.data else {}
+
+        except APIError as e:
+            # Table doesn't exist (likely in test environment or migration not run)
+            error_str = str(e)
+            if "PGRST205" in error_str or "Could not find the table" in error_str:
+                logger.debug(
+                    f"model_health_tracking table not found - skipping health tracking "
+                    f"for {provider}/{model}. Run migrations to enable health tracking."
+                )
+                return {}
+            # Handle duplicate key by logging a warning instead of failing
+            # This can happen if two requests race to insert the same record
+            if "23505" in error_str or "duplicate key" in error_str.lower():
+                logger.warning(
+                    f"Race condition detected for health metric {provider}/{model}, "
+                    "record was already created by another request"
+                )
+                return {}
+            # Re-raise other API errors
+            raise
+
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+
+            # Handle duplicate key errors that might come through as generic exceptions
+            if "23505" in error_str or "duplicate key" in error_str.lower():
+                logger.warning(
+                    f"Race condition detected for health metric {provider}/{model}, "
+                    "record was already created by another request"
+                )
+                return {}
+
+            # Check if this is an HTTP/2 protocol error that we can retry
+            if is_http2_protocol_error(e):
+                if attempt < MAX_RETRIES:
+                    logger.warning(
+                        f"HTTP/2 protocol error recording model health for {provider}/{model} "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}. Resetting client and retrying..."
+                    )
+                    reset_supabase_client()
+                    time.sleep(0.1)  # Small delay to allow connection cleanup
+                    continue
+                else:
+                    logger.warning(
+                        f"HTTP/2 protocol error persists for {provider}/{model} after {MAX_RETRIES + 1} attempts: {e}"
+                    )
+                    return {}
+            else:
+                logger.warning(f"Failed to record model health for {provider}/{model}: {e}")
+                return {}
+
+    # Should not reach here, but return empty dict if we do
+    if last_error:
+        logger.warning(f"Failed to record model health for {provider}/{model}: {last_error}")
+    return {}
 
 
 def get_model_health(provider: str, model: str) -> dict | None:
@@ -333,6 +354,7 @@ def get_model_health_stats() -> dict:
                 "total_success": 0,
                 "total_errors": 0,
                 "average_response_time": 0,
+                "success_rate": 0,
             }
 
         total_calls = sum(r["call_count"] for r in result.data)

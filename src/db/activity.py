@@ -4,12 +4,20 @@ Handles logging and retrieval of user API activity
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import (
+    get_supabase_client,
+    is_http2_protocol_error,
+    reset_supabase_client,
+)
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of retries for HTTP/2 protocol errors
+MAX_RETRIES = 2
 
 
 def log_activity(
@@ -40,42 +48,70 @@ def log_activity(
     Returns:
         Created activity record or None on error
     """
-    try:
-        client = get_supabase_client()
+    # Ensure user_id is an integer (define outside try block for error logging)
+    user_id_int = int(user_id) if not isinstance(user_id, int) else user_id
 
-        # Ensure user_id is an integer
-        user_id_int = int(user_id) if not isinstance(user_id, int) else user_id
+    activity_data = {
+        "user_id": user_id_int,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "model": model,
+        "provider": provider,
+        "tokens": tokens,
+        "cost": cost,
+        "speed": speed,
+        "finish_reason": finish_reason,
+        "app": app,
+        "metadata": metadata or {},
+    }
 
-        activity_data = {
-            "user_id": user_id_int,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "model": model,
-            "provider": provider,
-            "tokens": tokens,
-            "cost": cost,
-            "speed": speed,
-            "finish_reason": finish_reason,
-            "app": app,
-            "metadata": metadata or {},
-        }
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            client = get_supabase_client()
+            result = client.table("activity_log").insert(activity_data).execute()
 
-        result = client.table("activity_log").insert(activity_data).execute()
+            if result.data:
+                logger.info(f"Activity logged for user {user_id_int}: {model} ({tokens} tokens)")
+                return result.data[0]
+            else:
+                logger.error(
+                    f"Failed to log activity: insert returned no data. User: {user_id_int}, Model: {model}, Result: {result}"
+                )
+                return None
 
-        if result.data:
-            logger.info(f"Activity logged for user {user_id_int}: {model} ({tokens} tokens)")
-            return result.data[0]
-        else:
-            logger.error(
-                f"Failed to log activity: insert returned no data. User: {user_id_int}, Model: {model}, Result: {result}"
-            )
+        except Exception as e:
+            last_error = e
+
+            # Check if this is an HTTP/2 protocol error that we can retry
+            if is_http2_protocol_error(e):
+                if attempt < MAX_RETRIES:
+                    logger.warning(
+                        f"HTTP/2 protocol error logging activity for user {user_id_int}, model {model} "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}. Resetting client and retrying..."
+                    )
+                    reset_supabase_client()
+                    time.sleep(0.1)  # Small delay to allow connection cleanup
+                    continue
+                else:
+                    logger.error(
+                        f"HTTP/2 protocol error persists for user {user_id_int}, model {model} "
+                        f"after {MAX_RETRIES + 1} attempts: {e}"
+                    )
+            else:
+                # Not an HTTP/2 error, log and return
+                logger.error(
+                    f"Failed to log activity for user {user_id_int}, model {model}: {e}", exc_info=True
+                )
+
+            # Don't raise - activity logging should not break the main flow
             return None
 
-    except Exception as e:
+    # Should not reach here, but return None if we do
+    if last_error:
         logger.error(
-            f"Failed to log activity for user {user_id_int}, model {model}: {e}", exc_info=True
+            f"Failed to log activity for user {user_id_int}, model {model}: {last_error}", exc_info=True
         )
-        # Don't raise - activity logging should not break the main flow
-        return None
+    return None
 
 
 def get_user_activity_stats(
