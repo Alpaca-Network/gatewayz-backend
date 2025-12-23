@@ -15,8 +15,7 @@ Comprehensive check of Sentry and Railway logs for backend errors in the last 24
 ### Sentry Errors (Last 24 Hours)
 - **Status**: ⚠️ API Access Issue
 - **Attempted**: Direct API query using SENTRY_ACCESS_TOKEN
-- **Issue**: Sentry API returning "Invalid token header. No credentials provided" despite token being set
-- **Token Format**: `sntryu_036c8633df127...` (visible but not accepted by API)
+- **Issue**: Sentry API returning "Invalid token header. No credentials provided" despite token being configured
 - **Note**: Token authentication method may need review (possible API version or format issue)
 - **Alternative**: Relied on Railway logs, recent commit analysis, and PR review
 
