@@ -47,6 +47,33 @@ def _extract_error_details(e: Exception, model: str, kwargs: dict) -> dict:
 router = APIRouter()
 
 
+# OpenRouter provider settings to override account-level data policy restrictions
+# This allows access to all model endpoints regardless of their data training policies
+OPENROUTER_PROVIDER_SETTINGS = {
+    "data_collection": "allow",  # Allow endpoints that may use data for training
+}
+
+
+def _merge_extra_body(kwargs: dict) -> dict:
+    """Merge OpenRouter provider settings into extra_body parameter.
+
+    This ensures all OpenRouter requests include the data_collection: allow setting
+    to override account-level data policy restrictions that could block certain models.
+    """
+    existing_extra_body = kwargs.pop("extra_body", None) or {}
+
+    # Merge provider settings with any existing provider config
+    existing_provider = existing_extra_body.get("provider", {})
+    merged_provider = {**OPENROUTER_PROVIDER_SETTINGS, **existing_provider}
+
+    merged_extra_body = {
+        **existing_extra_body,
+        "provider": merged_provider,
+    }
+
+    return {**kwargs, "extra_body": merged_extra_body}
+
+
 def get_openrouter_client():
     """Get OpenRouter client with connection pooling for better performance"""
     try:
@@ -65,7 +92,9 @@ def make_openrouter_request_openai(messages, model, **kwargs):
     """Make request to OpenRouter using OpenAI client"""
     try:
         client = get_openrouter_client()
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+        # Merge provider settings to allow access to all model endpoints
+        merged_kwargs = _merge_extra_body(kwargs)
+        response = client.chat.completions.create(model=model, messages=messages, **merged_kwargs)
         return response
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors (helps diagnose openrouter/auto issues)
@@ -139,8 +168,10 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to OpenRouter using OpenAI client"""
     try:
         client = get_openrouter_client()
+        # Merge provider settings to allow access to all model endpoints
+        merged_kwargs = _merge_extra_body(kwargs)
         stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
+            model=model, messages=messages, stream=True, **merged_kwargs
         )
         return stream
     except BadRequestError as e:
@@ -187,7 +218,7 @@ def get_openrouter_async_client() -> AsyncOpenAI:
             api_key=Config.OPENROUTER_API_KEY,
             default_headers={
                 "HTTP-Referer": Config.OPENROUTER_SITE_URL,
-                "X-TitleSection": Config.OPENROUTER_SITE_NAME,
+                "X-Title": Config.OPENROUTER_SITE_NAME,
             },
         )
     except Exception as e:
@@ -208,8 +239,10 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
     """
     try:
         client = get_openrouter_async_client()
+        # Merge provider settings to allow access to all model endpoints
+        merged_kwargs = _merge_extra_body(kwargs)
         stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
+            model=model, messages=messages, stream=True, **merged_kwargs
         )
         return stream
     except BadRequestError as e:
