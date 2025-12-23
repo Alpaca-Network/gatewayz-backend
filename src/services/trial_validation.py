@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.utils.db_retry import with_db_retry
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ def _parse_trial_end_utc(s: str) -> datetime:
     return dt
 
 
+@with_db_retry("validate trial access")
 def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
     """Internal function: Validate trial access from database (no caching)"""
     try:
@@ -228,6 +230,7 @@ def validate_trial_access(api_key: str) -> dict[str, Any]:
     return result
 
 
+@with_db_retry("track trial usage")
 def track_trial_usage(api_key: str, tokens_used: int, requests_used: int = 1) -> bool:
     """Track trial usage - simplified version"""
     try:

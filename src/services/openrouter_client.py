@@ -2,12 +2,27 @@ import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
-from openai import AsyncOpenAI, BadRequestError, APIStatusError
+from openai import AsyncOpenAI, BadRequestError, NotFoundError, APIStatusError
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_openrouter_pooled_client, get_pooled_async_client
 from src.utils.sentry_context import capture_provider_error
+
+
+# Known OpenRouter error patterns and user-friendly messages
+OPENROUTER_ERROR_ENHANCEMENTS = {
+    "No endpoints found matching your data policy": (
+        "This model is not available with your current OpenRouter data policy settings. "
+        "Please configure your privacy settings at https://openrouter.ai/settings/privacy "
+        "to allow 'Paid model training' or try a different model."
+    ),
+    "is not a valid model ID": (
+        "The requested model is not available on OpenRouter. "
+        "The model may have been deprecated or the model ID is incorrect. "
+        "Please check the available models at https://openrouter.ai/models"
+    ),
+}
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -43,6 +58,27 @@ def _extract_error_details(e: Exception, model: str, kwargs: dict) -> dict:
     }
 
     return error_details
+
+
+def _enhance_error_message(e: Exception, model: str) -> str:
+    """Enhance OpenRouter error messages with user-friendly explanations.
+
+    Args:
+        e: The original exception
+        model: The model that was requested
+
+    Returns:
+        Enhanced error message with actionable guidance
+    """
+    error_str = str(e)
+
+    # Check for known error patterns and provide enhanced messages
+    for pattern, enhanced_message in OPENROUTER_ERROR_ENHANCEMENTS.items():
+        if pattern in error_str:
+            return f"OpenRouter error for model '{model}': {enhanced_message}"
+
+    # Default: return original error with model context
+    return f"OpenRouter request failed for model '{model}': {error_str}"
 
 router = APIRouter()
 
@@ -83,6 +119,24 @@ def make_openrouter_request_openai(messages, model, **kwargs):
             extra_context=error_details
         )
         raise
+    except NotFoundError as e:
+        # Handle 404 errors with enhanced user-friendly messages
+        error_details = _extract_error_details(e, model, kwargs)
+        enhanced_message = _enhance_error_message(e, model)
+        logger.error(f"OpenRouter request failed: {enhanced_message}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions',
+            extra_context=error_details
+        )
+        # Re-raise with enhanced message
+        raise NotFoundError(
+            enhanced_message,
+            response=e.response,
+            body=e.body
+        ) from e
     except Exception as e:
         logger.error(f"OpenRouter request failed: {e}")
         capture_provider_error(
@@ -159,6 +213,23 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
             extra_context=error_details
         )
         raise
+    except NotFoundError as e:
+        # Handle 404 errors with enhanced user-friendly messages
+        error_details = _extract_error_details(e, model, kwargs)
+        enhanced_message = _enhance_error_message(e, model)
+        logger.error(f"OpenRouter streaming request failed: {enhanced_message}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions (stream)',
+            extra_context=error_details
+        )
+        raise NotFoundError(
+            enhanced_message,
+            response=e.response,
+            body=e.body
+        ) from e
     except Exception as e:
         logger.error(f"OpenRouter streaming request failed: {e}")
         capture_provider_error(
@@ -228,6 +299,23 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
             extra_context=error_details
         )
         raise
+    except NotFoundError as e:
+        # Handle 404 errors with enhanced user-friendly messages
+        error_details = _extract_error_details(e, model, kwargs)
+        enhanced_message = _enhance_error_message(e, model)
+        logger.error(f"OpenRouter async streaming request failed: {enhanced_message}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions (async stream)',
+            extra_context=error_details
+        )
+        raise NotFoundError(
+            enhanced_message,
+            response=e.response,
+            body=e.body
+        ) from e
     except Exception as e:
         logger.error(f"OpenRouter async streaming request failed: {e}")
         capture_provider_error(

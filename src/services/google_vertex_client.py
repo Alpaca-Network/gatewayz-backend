@@ -517,6 +517,7 @@ def _make_google_vertex_request_rest(
         )
 
         timeout_seconds = kwargs.get("vertex_timeout") or Config.GOOGLE_VERTEX_TIMEOUT
+        max_retries = 2  # Retry once for transient errors (timeouts, 5xx)
 
         def _execute_request(force_refresh_token: bool = False) -> httpx.Response:
             access_token = _get_google_vertex_access_token(force_refresh=force_refresh_token)
@@ -528,7 +529,43 @@ def _make_google_vertex_request_rest(
             with httpx.Client(timeout=client_timeout) as client:
                 return client.post(url, headers=headers, json=request_body)
 
-        response = _execute_request()
+        # Execute with retry for transient errors (timeouts, 5xx errors)
+        response = None
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = _execute_request(force_refresh_token=(attempt > 0))
+                # Retry on 5xx server errors
+                if response.status_code >= 500 and attempt < max_retries:
+                    logger.warning(
+                        "Vertex REST call returned %s (attempt %d/%d). Retrying...",
+                        response.status_code, attempt + 1, max_retries + 1
+                    )
+                    continue
+                break
+            except httpx.TimeoutException as timeout_error:
+                last_error = timeout_error
+                if attempt < max_retries:
+                    logger.warning(
+                        "Vertex REST call timed out (attempt %d/%d): %s. Retrying...",
+                        attempt + 1, max_retries + 1, timeout_error
+                    )
+                    continue
+                # Final attempt failed with timeout
+                logger.error(
+                    "Vertex REST call timed out after %d attempts: %s",
+                    max_retries + 1, timeout_error
+                )
+                raise ValueError(
+                    f"Vertex REST API request timed out after {max_retries + 1} attempts. "
+                    f"The model may be experiencing high load. Please try again later."
+                ) from timeout_error
+
+        if response is None:
+            if last_error:
+                raise ValueError(f"Vertex REST API request failed: {last_error}") from last_error
+            raise ValueError("Vertex REST API request failed unexpectedly")
+
         if response.status_code == 401:
             logger.warning("Vertex REST call returned 401. Refreshing token and retrying once.")
             response = _execute_request(force_refresh_token=True)

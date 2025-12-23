@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.utils.db_retry import with_db_retry
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ def get_plan_id_by_tier(tier: str) -> int | None:
         return None
 
 
+@with_db_retry("get user plan")
 def get_user_plan(user_id: int) -> dict[str, Any] | None:
     """Get current active plan for user (robust: never silently falls back to trial)"""
     try:
@@ -239,6 +241,7 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
         raise RuntimeError(f"Failed to assign plan: {e}") from e
 
 
+@with_db_retry("check plan entitlements")
 def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[str, Any]:
     """Check if user's current plan allows certain usage"""
     try:
@@ -399,6 +402,7 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
         }
 
 
+@with_db_retry("get usage within plan limits")
 def _get_user_usage_within_plan_limits_uncached(user_id: int) -> dict[str, Any]:
     """Internal function: Get user usage from database (no caching)"""
     try:
