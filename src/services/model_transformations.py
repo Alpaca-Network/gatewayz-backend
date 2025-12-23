@@ -125,10 +125,12 @@ def apply_model_alias(model_id: str | None) -> str | None:
     return model_id
 
 # Gemini model name constants to reduce duplication
+# NOTE: The dated preview model versions (e.g., gemini-2.5-pro-preview-09-2025) were retired
+# from Vertex AI and return 404 errors. We now map generic "preview" aliases to stable GA versions.
 GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
-GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite-preview-09-2025"
-GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
-GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
+GEMINI_2_5_FLASH_LITE_PREVIEW = "gemini-2.5-flash-lite"  # Stable GA version (dated preview retired)
+GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash"  # Stable GA version (dated preview retired)
+GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro"  # Stable GA version (dated preview retired)
 GEMINI_2_0_FLASH = "gemini-2.0-flash"
 GEMINI_2_0_PRO = "gemini-2.0-pro"
 GEMINI_1_5_PRO = "gemini-1.5-pro"
@@ -522,8 +524,8 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
             "google/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
             "@google/models/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
-            # Preview version (only if explicitly requested)
-            "gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+            # Preview versions (dated 09-2025 versions retired, fall back to stable GA)
+            "gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,  # Falls back to stable
             "google/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
             "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
             "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
@@ -532,9 +534,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
             "google/gemini-2.5-flash": "gemini-2.5-flash",
             "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
-            # Preview version (only if explicitly requested)
-            "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
+            # Preview versions (dated 09-2025 versions retired, fall back to stable GA)
+            "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,  # Falls back to stable
+            "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,  # Falls back to stable
             "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
             # Image-specific models (GA version only - no preview version exists)
@@ -545,11 +547,11 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
             "google/gemini-2.5-pro": "gemini-2.5-pro",
             "@google/models/gemini-2.5-pro": "gemini-2.5-pro",
-            # Preview version (only if explicitly requested)
-            "gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+            # Preview versions (dated 09-2025 versions retired, fall back to stable GA)
+            "gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,  # Falls back to stable
             "google/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
             "@google/models/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
-            "gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
+            "gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,  # Falls back to stable
             "google/gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
             "gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
             "google/gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",

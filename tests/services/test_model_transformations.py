@@ -68,13 +68,18 @@ def test_detect_provider_from_model_id_existing_providers():
 
 @patch.dict('os.environ', {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
 def test_detect_provider_google_vertex_models():
-    """Test that Google Vertex AI models are correctly detected when credentials are available"""
+    """Test that Google Vertex AI models are correctly detected when credentials are available
+
+    Note: gemini-1.5 models are retired from Vertex AI (April-September 2025) and
+    are not included in this test. They should be routed to OpenRouter instead.
+    """
     test_cases = [
         ("gemini-2.5-flash", "google-vertex"),
         ("gemini-2.0-flash", "google-vertex"),
-        ("gemini-1.5-pro", "google-vertex"),
+        ("gemini-2.5-pro", "google-vertex"),
         ("google/gemini-2.5-flash", "google-vertex"),
         ("google/gemini-2.0-flash", "google-vertex"),
+        ("google/gemini-2.5-pro-preview", "google-vertex"),  # Preview alias - falls back to stable
         ("@google/models/gemini-2.5-flash", "google-vertex"),  # Key test case - should NOT be portkey
         ("@google/models/gemini-2.0-flash", "google-vertex"),
     ]

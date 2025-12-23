@@ -149,19 +149,25 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 When using Google Vertex AI, the following Gemini models are supported:
 
-- `google/gemini-2.5-flash-lite-preview-09-2025`
-- `google/gemini-2.5-flash-preview-09-2025`
-- `google/gemini-2.5-pro-preview-09-2025`
+**Recommended (Stable GA):**
+- `google/gemini-2.5-pro` - Latest Pro model
+- `google/gemini-2.5-flash` - Latest Flash model (fast, cost-effective)
+- `google/gemini-2.5-flash-lite` - Lightweight Flash variant
 - `google/gemini-2.0-flash`
 - `google/gemini-2.0-flash-001`
 - `google/gemini-2.0-pro`
-- `google/gemini-1.5-pro`
-- `google/gemini-1.5-flash`
 - `google/gemini-1.0-pro`
 
+**Preview Aliases (map to stable versions):**
+- `google/gemini-2.5-pro-preview` → uses `gemini-2.5-pro`
+- `google/gemini-2.5-flash-preview` → uses `gemini-2.5-flash`
+
+**Note:** Dated preview versions (e.g., `gemini-2.5-pro-preview-09-2025`) have been retired from Vertex AI. These aliases now fall back to the stable GA versions.
+
 You can also use the shorter versions without the `google/` prefix:
+- `gemini-2.5-pro`
+- `gemini-2.5-flash`
 - `gemini-2.0-flash`
-- `gemini-1.5-pro`
 - etc.
 
 ## Troubleshooting

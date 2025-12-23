@@ -437,10 +437,12 @@ class TestGoogleVertexModelIntegration:
         """Test that gemini models are properly detected when credentials are available"""
         from src.services.model_transformations import detect_provider_from_model_id
 
+        # Note: gemini-1.5 models are retired from Vertex AI (April-September 2025)
         models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "google/gemini-1.5-flash",
+            "google/gemini-2.5-flash",
         ]
 
         for model in models:
@@ -479,12 +481,11 @@ class TestFetchModelsFromGoogleVertex:
         model_ids = [m["id"] for m in models]
 
         # Check for expected Gemini models
+        # Note: gemini-1.5 models are retired from Vertex AI (April-September 2025)
         expected_models = [
             "gemini-2.5-flash",
             "gemini-2.5-pro",
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
         ]
 
         for expected in expected_models:
