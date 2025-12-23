@@ -942,3 +942,73 @@ def test_onerouter_network_error_handling(
 
     # Network errors should result in 503 Service Unavailable
     assert r.status_code == 503
+
+
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+def test_fal_model_rejected_in_chat_completions(
+    mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider, client, auth_headers
+):
+    """Test that FAL models (image/video generation only) are rejected with a clear error in chat completions"""
+    # FAL models should be rejected immediately when detected
+    mock_detect_provider.return_value = "fal"
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+
+    payload = {
+        "model": "fal-ai/veo3.1",
+        "messages": [{"role": "user", "content": "Generate a video of a cat"}],
+    }
+
+    rate_mgr = _RateLimitMgr(True, True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+    # FAL models should be rejected with 400 Bad Request
+    assert r.status_code == 400, f"Expected 400, got {r.status_code}: {r.text}"
+    data = r.json()
+    assert "FAL image/video generation model" in data["detail"]
+    assert "/v1/images/generations" in data["detail"]
+    assert "fal-ai/veo3.1" in data["detail"]
+
+
+@patch('src.services.model_transformations.detect_provider_from_model_id')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+def test_fal_model_rejected_various_models(
+    mock_get_user, mock_enforce_limits, mock_trial,
+    mock_detect_provider, client, auth_headers
+):
+    """Test that various FAL model IDs are rejected with a clear error"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+
+    # Test various FAL model IDs
+    fal_models = [
+        "fal-ai/stable-diffusion-v15",
+        "fal-ai/flux-pro/v1.1-ultra",
+        "fal-ai/sora-2/text-to-video",
+        "minimax/video-01",
+    ]
+
+    for model in fal_models:
+        mock_detect_provider.return_value = "fal"
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        rate_mgr = _RateLimitMgr(True, True)
+        with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+            r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
+
+        assert r.status_code == 400, f"Expected 400 for model {model}, got {r.status_code}: {r.text}"
+        data = r.json()
+        assert "FAL image/video generation model" in data["detail"], f"Error message missing for {model}"
