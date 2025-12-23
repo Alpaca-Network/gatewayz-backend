@@ -373,6 +373,7 @@ def create_app() -> FastAPI:
 
     # Define non-v1 routes (loaded directly on app without prefix)
     non_v1_routes_to_load = [
+        ("api_models", "API Models Detail"),  # /api/models/detail endpoint for frontend
         ("health", "Health Check"),
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
