@@ -321,15 +321,40 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
             logger.info(f"Transformed '{model_id}' to '{native}' for {provider} (fuzzy match)")
             return native
 
-    # Special handling for Fireworks - try to construct the path
+    # Special handling for Fireworks - only construct paths for known, supported model patterns
+    # IMPORTANT: Only construct paths for models with explicit mappings or well-known patterns
+    # Do NOT blindly construct paths for unknown models as this leads to 404 errors
     if provider_lower == "fireworks" and "/" in model_id:
-        # For unknown models, try constructing the Fireworks path
         org, model_name = model_id.split("/", 1)
-        # Convert common patterns
-        model_name_fixed = model_name.replace(".", "p")  # v3.1 -> v3p1
-        constructed = f"accounts/fireworks/models/{model_name_fixed}"
-        logger.warning(f"No mapping for '{model_id}', constructed: '{constructed}'")
-        return constructed
+        model_name_lower = model_name.lower()
+
+        # Only construct paths for known model patterns that exist on Fireworks
+        # Check for valid deepseek patterns (v3, v3.1, r1 variants only - NOT experimental versions)
+        known_deepseek_patterns = ["deepseek-v3", "deepseek-v3.1", "deepseek-v3p1", "deepseek-r1"]
+        # Check for valid llama patterns
+        known_llama_patterns = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.1-8b", "llama-4-scout", "llama-4-maverick"]
+        # Check for valid qwen patterns
+        known_qwen_patterns = ["qwen-2.5-32b", "qwen-3-235b", "qwen-3-30b"]
+
+        is_known_model = False
+        for pattern in known_deepseek_patterns + known_llama_patterns + known_qwen_patterns:
+            if pattern in model_name_lower:
+                is_known_model = True
+                break
+
+        if is_known_model:
+            # Convert common patterns for known models
+            model_name_fixed = model_name.replace(".", "p")  # v3.1 -> v3p1
+            constructed = f"accounts/fireworks/models/{model_name_fixed}"
+            logger.warning(f"No mapping for '{model_id}', constructed: '{constructed}'")
+            return constructed
+        else:
+            # For unknown models, do NOT construct a path - return original and let provider handle error
+            logger.warning(
+                f"Unknown Fireworks model '{model_id}' - no mapping found and model pattern not recognized. "
+                f"Returning original ID; provider may return 404."
+            )
+            return model_id
 
     # If no transformation needed or found, return original
     logger.debug(f"No transformation for '{model_id}' with provider {provider}")
@@ -348,11 +373,17 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-ai/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-ai/deepseek-v3.2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-ai/deepseek-v3p2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-ai/deepseek-v3.2-speciale": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             # Alternative "deepseek/" org prefix (common user input format)
             "deepseek/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3.2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3p2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3.2-speciale": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             # Llama models
             "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -367,6 +398,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-v3.2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-v3p2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-v3.2-speciale": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             "llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",

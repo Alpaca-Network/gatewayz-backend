@@ -94,9 +94,17 @@ class TestFireworksTransformations:
         result = transform_model_id(model, "fireworks")
         assert result == model.lower()
 
-    def test_transform_unknown_model_constructs_path(self):
-        """Test unknown model gets constructed path"""
+    def test_transform_unknown_model_returns_original(self):
+        """Test unknown model returns original ID (does not construct invalid paths)"""
+        # Unknown models should NOT be transformed to avoid 404 errors
+        # Instead, return the original model ID and let the provider give a proper error
         result = transform_model_id("org/unknown-model", "fireworks")
+        assert result == "org/unknown-model"
+
+    def test_transform_known_pattern_constructs_path(self):
+        """Test known model patterns get constructed path"""
+        # Known patterns like llama-3.3-70b should still construct valid paths
+        result = transform_model_id("custom-org/llama-3.3-70b-custom", "fireworks")
         assert result.startswith("accounts/fireworks/models/")
 
     def test_transform_deepseek_r1(self):
