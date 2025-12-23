@@ -352,11 +352,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-ai/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-ai/deepseek-v3-0324": "accounts/fireworks/models/deepseek-v3-0324",
             "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             # Alternative "deepseek/" org prefix (common user input format)
             "deepseek/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3-0324": "accounts/fireworks/models/deepseek-v3-0324",
             "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             # Llama models
             "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -371,6 +373,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-v3-0324": "accounts/fireworks/models/deepseek-v3-0324",
             "deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
             "llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
