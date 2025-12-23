@@ -652,10 +652,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "glm-4.6-fp8": "zai-org/GLM-4.6",
             "glm-4.6": "zai-org/GLM-4.6",
 
-            # Moonshot AI Kimi models (thinking/reasoning)
-            "moonshotai/kimi-k2-thinking": "moonshotai/Kimi-K2-Thinking",
-            "kimi-k2-thinking": "moonshotai/Kimi-K2-Thinking",
-            "kimi-k2": "moonshotai/Kimi-K2-Thinking",
+            # Note: Moonshot AI Kimi models are NOT available on Near AI
+            # The Kimi-K2-Thinking model was incorrectly listed here but Near AI returns
+            # "Model not found" for it. Users should use OpenRouter or Fireworks for Kimi models.
         },
         "alpaca-network": {
             # Alpaca Network uses Anyscale infrastructure with DeepSeek models

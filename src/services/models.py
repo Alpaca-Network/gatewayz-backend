@@ -1957,14 +1957,9 @@ def fetch_models_from_near():
                 "outputCostPerToken": {"amount": 2.0, "scale": -6},  # $2.00 per million tokens
                 "metadata": {"contextLength": 200000},
             },
-            {
-                "id": "moonshotai/Kimi-K2-Thinking",
-                "modelId": "moonshotai/Kimi-K2-Thinking",
-                "owned_by": "Moonshot AI",
-                "inputCostPerToken": {"amount": 0.6, "scale": -6},  # $0.60 per million tokens
-                "outputCostPerToken": {"amount": 2.4, "scale": -6},  # $2.40 per million tokens
-                "metadata": {"contextLength": 128000},
-            },
+            # Note: Moonshot AI Kimi-K2 models are NOT available on Near AI
+            # The API returns "Model not found" for moonshotai/Kimi-K2-Thinking
+            # Users should use OpenRouter or Fireworks for Kimi models
         ]
 
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
