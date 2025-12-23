@@ -400,6 +400,7 @@ def create_app() -> FastAPI:
         ("rate_limits", "Rate Limiting"),
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
+        ("memory", "User Memory"),
         ("ranking", "Model Ranking"),
         ("activity", "Activity Tracking"),
         ("coupons", "Coupon Management"),

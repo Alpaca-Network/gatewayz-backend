@@ -20,6 +20,7 @@ import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
+from src.services.memory_service import memory_service, extract_memories_background
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
@@ -901,6 +902,36 @@ async def _process_stream_completion_background(
                     exc_info=True,
                 )
 
+        # Extract memories from conversation (background, non-blocking)
+        # Only extract if there's meaningful conversation (1+ message exchange)
+        if session_id and len(messages) >= 1:
+            try:
+                # Get recent messages for extraction (user + assistant)
+                recent_messages = []
+                for m in messages[-10:]:  # Last 10 messages
+                    if m.get("role") in ("user", "assistant"):
+                        recent_messages.append({
+                            "role": m.get("role"),
+                            "content": m.get("content", ""),
+                        })
+
+                # Add the assistant response
+                if accumulated_content:
+                    recent_messages.append({
+                        "role": "assistant",
+                        "content": accumulated_content,
+                    })
+
+                if recent_messages:
+                    await extract_memories_background(
+                        user_id=user["id"],
+                        session_id=session_id,
+                        messages=recent_messages,
+                    )
+            except Exception as e:
+                # Don't let memory extraction failures affect anything
+                logger.debug(f"Memory extraction skipped: {e}")
+
         # Capture health metrics (passive monitoring)
         try:
             await capture_model_health(
@@ -1371,6 +1402,39 @@ async def chat_completions(
                 )
         elif session_id and is_anonymous:
             logger.debug("Ignoring session_id for anonymous request")
+
+        # === 2.1.1) Inject cross-session memory context (only for authenticated users) ===
+        if not is_anonymous:
+            try:
+                # Get relevant memories for this user
+                memories = await memory_service.get_relevant_memories(
+                    user_id=user["id"],
+                    limit=10,
+                )
+
+                if memories:
+                    # Format memories as system context
+                    memory_context = memory_service.format_memories_for_context(memories)
+                    if memory_context:
+                        # Inject as system message at the start
+                        memory_system_message = {
+                            "role": "system",
+                            "content": memory_context,
+                        }
+                        messages = [memory_system_message] + messages
+
+                        logger.info(
+                            "Injected %d memories as context for user %s",
+                            len(memories),
+                            sanitize_for_logging(str(user["id"])),
+                        )
+            except Exception as e:
+                # Don't fail the request if memory fetch fails
+                logger.warning(
+                    "Failed to fetch memory context for user %s: %s",
+                    sanitize_for_logging(str(user["id"])),
+                    sanitize_for_logging(str(e)),
+                )
 
         # === 2.2) Plan limit pre-check with estimated tokens (only for authenticated users) ===
         estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
