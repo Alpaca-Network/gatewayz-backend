@@ -36,15 +36,16 @@ class TestModelAliasResolution:
         assert apply_model_alias("gpt5.1") == "openai/gpt-5.1"
 
     def test_apply_model_alias_xai_deprecated(self):
-        """Test XAI deprecated model aliases"""
-        assert apply_model_alias("grok-beta") == "grok-3"
-        assert apply_model_alias("xai/grok-beta") == "xai/grok-3"
-        assert apply_model_alias("grok-vision-beta") == "grok-3"
+        """Test XAI deprecated model aliases - all map to canonical x-ai/grok-3"""
+        # grok-beta was deprecated 2025-09-15, maps to x-ai/grok-3 (with canonical org prefix)
+        assert apply_model_alias("grok-beta") == "x-ai/grok-3"
+        assert apply_model_alias("xai/grok-beta") == "x-ai/grok-3"
+        assert apply_model_alias("grok-vision-beta") == "x-ai/grok-3"
 
     def test_apply_model_alias_case_insensitive(self):
         """Test that alias lookup is case insensitive"""
         assert apply_model_alias("GPT-5-1") == "openai/gpt-5.1"
-        assert apply_model_alias("GROK-BETA") == "grok-3"
+        assert apply_model_alias("GROK-BETA") == "x-ai/grok-3"
 
     def test_apply_model_alias_no_match(self):
         """Test non-aliased models pass through"""

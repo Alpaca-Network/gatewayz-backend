@@ -69,10 +69,10 @@ def test_detect_provider_from_model_id_existing_providers():
 @patch.dict('os.environ', {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
 def test_detect_provider_google_vertex_models():
     """Test that Google Vertex AI models are correctly detected when credentials are available"""
+    # Note: gemini-1.5-pro was removed as it's retired on Vertex AI (April-September 2025)
     test_cases = [
         ("gemini-2.5-flash", "google-vertex"),
         ("gemini-2.0-flash", "google-vertex"),
-        ("gemini-1.5-pro", "google-vertex"),
         ("google/gemini-2.5-flash", "google-vertex"),
         ("google/gemini-2.0-flash", "google-vertex"),
         ("@google/models/gemini-2.5-flash", "google-vertex"),  # Key test case - should NOT be portkey
@@ -258,3 +258,105 @@ def test_onerouter_model_id_mapping_exists():
     assert len(mapping) > 0
     assert "onerouter/claude-3-5-sonnet" in mapping
     assert "gpt-4" in mapping
+
+
+# ============================================================================
+# DeepSeek V3.2 Model Tests (Fix for 404 NotFoundError)
+# ============================================================================
+
+def test_deepseek_v32_speciale_alias():
+    """Test that deepseek-v3.2-speciale variants are properly aliased"""
+    from src.services.model_transformations import apply_model_alias
+
+    test_cases = [
+        ("deepseek-v3.2-speciale", "deepseek/deepseek-v3.2"),
+        ("deepseek/deepseek-v3.2-speciale", "deepseek/deepseek-v3.2"),
+        ("deepseek-ai/deepseek-v3.2-speciale", "deepseek/deepseek-v3.2"),
+        ("deepseek-v3.2-exp", "deepseek/deepseek-v3.2"),
+        ("deepseek-v3.2-experimental", "deepseek/deepseek-v3.2"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = apply_model_alias(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_deepseek_v32_detect_provider_routes_to_chutes():
+    """Test that DeepSeek V3.2 models are routed to Chutes (has DeepSeek-V3.2-Exp)"""
+    test_cases = [
+        ("deepseek/deepseek-v3.2", "chutes"),
+        ("deepseek-ai/deepseek-v3.2", "chutes"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_deepseek_v32_transform_for_chutes():
+    """Test that DeepSeek V3.2 is correctly transformed for Chutes provider"""
+    test_cases = [
+        ("deepseek/deepseek-v3.2", "deepseek-ai/DeepSeek-V3.2-Exp"),
+        ("deepseek-ai/deepseek-v3.2", "deepseek-ai/DeepSeek-V3.2-Exp"),
+        ("deepseek-v3.2", "deepseek-ai/DeepSeek-V3.2-Exp"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "chutes")
+        # Result is lowercased, so compare case-insensitively
+        assert result.lower() == expected.lower(), f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_deepseek_v32_transform_for_fireworks_fallback():
+    """Test that DeepSeek V3.2 falls back to v3p1 on Fireworks (Fireworks doesn't have v3.2)"""
+    test_cases = [
+        ("deepseek/deepseek-v3.2", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek-ai/deepseek-v3.2", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek-v3.2", "accounts/fireworks/models/deepseek-v3p1"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "fireworks")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_deepseek_v32_transform_for_openrouter():
+    """Test that DeepSeek V3.2 is correctly transformed for OpenRouter"""
+    test_cases = [
+        ("deepseek/deepseek-v3.2", "deepseek/deepseek-chat"),
+        ("deepseek-ai/deepseek-v3.2", "deepseek/deepseek-chat"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "openrouter")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_deepseek_unknown_variant_fallback_on_fireworks():
+    """Test that unknown DeepSeek variants use sensible fallbacks on Fireworks"""
+    # This tests the improved fallback logic that prevents constructing invalid model IDs
+    test_cases = [
+        ("deepseek/deepseek-v3.99-unknown", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek-ai/deepseek-v4-future", "accounts/fireworks/models/deepseek-v3p1"),
+        # R1 variants should fall back to R1
+        ("deepseek/deepseek-r1-custom", "accounts/fireworks/models/deepseek-r1-0528"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "fireworks")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_deepseek_standard_models_unchanged():
+    """Test that standard DeepSeek models still work correctly"""
+    # Ensure our changes don't break existing behavior
+    test_cases = [
+        ("deepseek/deepseek-v3", "fireworks", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek-ai/deepseek-v3.1", "fireworks", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek/deepseek-r1", "fireworks", "accounts/fireworks/models/deepseek-r1-0528"),
+        ("deepseek-ai/deepseek-v3", "openrouter", "deepseek/deepseek-chat"),
+    ]
+
+    for model_id, provider, expected in test_cases:
+        result = transform_model_id(model_id, provider)
+        assert result == expected, f"Expected '{expected}' for {model_id}@{provider}, got {result}"

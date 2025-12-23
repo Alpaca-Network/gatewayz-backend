@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - handled gracefully below
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "cerebras",
+    "chutes",  # Chutes has DeepSeek V3.2-Exp and other experimental models
     "huggingface",
     "featherless",
     "vercel-ai-gateway",

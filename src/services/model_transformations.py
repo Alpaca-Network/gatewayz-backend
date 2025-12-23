@@ -69,6 +69,16 @@ MODEL_ID_ALIASES = {
     "deepseek-r1": "deepseek/deepseek-r1",
     "r1": "deepseek/deepseek-r1",
     "deepseek-v3.2": "deepseek/deepseek-v3.2",
+    # DeepSeek V3.2 experimental/special variants - map to the canonical v3.2 model
+    "deepseek-v3.2-speciale": "deepseek/deepseek-v3.2",
+    "deepseek-v3.2-exp": "deepseek/deepseek-v3.2",
+    "deepseek-v3.2-experimental": "deepseek/deepseek-v3.2",
+    "deepseek/deepseek-v3.2-speciale": "deepseek/deepseek-v3.2",
+    "deepseek/deepseek-v3.2-exp": "deepseek/deepseek-v3.2",
+    "deepseek/deepseek-v3.2-experimental": "deepseek/deepseek-v3.2",
+    "deepseek-ai/deepseek-v3.2-speciale": "deepseek/deepseek-v3.2",
+    "deepseek-ai/deepseek-v3.2-exp": "deepseek/deepseek-v3.2",
+    "deepseek-ai/deepseek-v3.2-experimental": "deepseek/deepseek-v3.2",
     # Meta Llama 4 series
     "llama-4-scout": "meta-llama/llama-4-scout",
     "llama-4-maverick": "meta-llama/llama-4-maverick",
@@ -323,8 +333,28 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
 
     # Special handling for Fireworks - try to construct the path
     if provider_lower == "fireworks" and "/" in model_id:
-        # For unknown models, try constructing the Fireworks path
         org, model_name = model_id.split("/", 1)
+        model_name_lower = model_name.lower()
+
+        # For DeepSeek models with unknown variants, map to known working models
+        # rather than constructing potentially invalid model IDs
+        if org.lower() in ("deepseek-ai", "deepseek") and "deepseek" in model_name_lower:
+            # Check for specific known version patterns and map accordingly
+            if "r1" in model_name_lower:
+                fallback = "accounts/fireworks/models/deepseek-r1-0528"
+                logger.warning(
+                    f"No mapping for DeepSeek variant '{model_id}', using fallback: '{fallback}'"
+                )
+                return fallback
+            else:
+                # Default to v3p1 for any v3.x or unknown variant
+                fallback = "accounts/fireworks/models/deepseek-v3p1"
+                logger.warning(
+                    f"No mapping for DeepSeek variant '{model_id}', using fallback: '{fallback}'"
+                )
+                return fallback
+
+        # For other unknown models, try constructing the Fireworks path
         # Convert common patterns
         model_name_fixed = model_name.replace(".", "p")  # v3.1 -> v3p1
         constructed = f"accounts/fireworks/models/{model_name_fixed}"
@@ -354,6 +384,10 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
             "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
+            # DeepSeek V3.2 variants - Fireworks doesn't have v3.2, map to closest: v3p1
+            "deepseek-ai/deepseek-v3.2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek/deepseek-v3.2": "accounts/fireworks/models/deepseek-v3p1",
+            "deepseek-v3.2": "accounts/fireworks/models/deepseek-v3p1",
             # Llama models
             "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
             "meta-llama/llama-3.3-70b-instruct": "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -404,6 +438,10 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
+            # DeepSeek V3.2 models - map to deepseek-chat (latest available)
+            "deepseek-ai/deepseek-v3.2": "deepseek/deepseek-chat",
+            "deepseek/deepseek-v3.2": "deepseek/deepseek-chat",
+            "deepseek-v3.2": "deepseek/deepseek-chat",
             # Cerebras models explicitly routed through OpenRouter
             # (for users who request provider="openrouter" explicitly or failover scenarios)
             "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
@@ -483,6 +521,15 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Chutes uses org/model format directly
             # Most models pass through as-is from their catalog
             # Keep the exact format from the catalog for proper routing
+            # DeepSeek V3.2 models - Chutes has DeepSeek-V3.2-Exp
+            "deepseek-ai/deepseek-v3.2": "deepseek-ai/DeepSeek-V3.2-Exp",
+            "deepseek/deepseek-v3.2": "deepseek-ai/DeepSeek-V3.2-Exp",
+            "deepseek-v3.2": "deepseek-ai/DeepSeek-V3.2-Exp",
+            "deepseek-v3.2-exp": "deepseek-ai/DeepSeek-V3.2-Exp",
+            # DeepSeek R1 and V3 models
+            "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+            "deepseek/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+            "deepseek-r1": "deepseek-ai/DeepSeek-R1",
         },
         "groq": {
             # Groq models use simple names without org prefix
@@ -1212,13 +1259,13 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
     # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
         "cerebras",  # Check Cerebras first for cerebras/ prefix models
+        "chutes",  # Check Chutes before Fireworks for models like DeepSeek V3.2-Exp
         "fireworks",
         "openrouter",
         "featherless",
         "together",
         "huggingface",
         "hug",
-        "chutes",
         "google-vertex",
         "vercel-ai-gateway",
         "helicone",
@@ -1298,9 +1345,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
                 return "cerebras"
             return "alibaba-cloud"
 
-        # DeepSeek models are primarily on Fireworks in this system
+        # DeepSeek models routing
         # Support both "deepseek-ai/" and "deepseek/" org prefixes
         if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
+            # Route DeepSeek V3.2 models to Chutes (has DeepSeek-V3.2-Exp)
+            # since Fireworks doesn't have V3.2 available
+            if "v3.2" in model_name.lower() or "v3p2" in model_name.lower():
+                logger.info(f"Routing DeepSeek V3.2 model '{model_id}' to chutes")
+                return "chutes"
+            # Route other DeepSeek models to Fireworks
             return "fireworks"
 
         # OpenAI models go to OpenRouter
