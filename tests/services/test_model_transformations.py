@@ -258,3 +258,84 @@ def test_onerouter_model_id_mapping_exists():
     assert len(mapping) > 0
     assert "onerouter/claude-3-5-sonnet" in mapping
     assert "gpt-4" in mapping
+
+
+# ============================================================================
+# DeepSeek V3.2 Routing Tests (Issue: NotFoundError on /v1/responses)
+# ============================================================================
+
+def test_detect_provider_deepseek_v32_routes_to_chutes():
+    """Test that DeepSeek v3.2 models are routed to Chutes, not Fireworks.
+
+    Fireworks does not support DeepSeek v3.2 variants, so these models should
+    be routed to Chutes where they are available as DeepSeek-V3.2-Exp.
+    """
+    test_cases = [
+        ("deepseek/deepseek-v3.2", "chutes"),
+        ("deepseek/deepseek-v3.2-speciale", "chutes"),  # Unknown variant
+        ("deepseek-ai/deepseek-v3.2-exp", "chutes"),
+        ("deepseek/deepseek-v3.2-exp", "chutes"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_detect_provider_deepseek_v3_v31_routes_to_fireworks():
+    """Test that DeepSeek v3 and v3.1 models still route to Fireworks."""
+    test_cases = [
+        ("deepseek/deepseek-v3", "fireworks"),
+        ("deepseek/deepseek-v3.1", "fireworks"),
+        ("deepseek-ai/deepseek-v3", "fireworks"),
+        ("deepseek-ai/deepseek-r1", "fireworks"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_deepseek_v32_for_chutes():
+    """Test that DeepSeek v3.2 models are correctly transformed for Chutes."""
+    test_cases = [
+        ("deepseek/deepseek-v3.2", "deepseek-ai/DeepSeek-V3.2-Exp"),
+        ("deepseek-ai/deepseek-v3.2-exp", "deepseek-ai/DeepSeek-V3.2-Exp"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "chutes")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_transform_deepseek_v32_for_fireworks_does_not_construct_invalid_id():
+    """Test that DeepSeek v3.2 models are NOT blindly transformed to invalid Fireworks IDs.
+
+    This is the specific fix for the NotFoundError on /v1/responses.
+    Previously, the fallback logic would construct 'accounts/fireworks/models/deepseek-v3p2-speciale'
+    which resulted in a 404 error from Fireworks.
+    """
+    test_cases = [
+        # v3.2 models should NOT be transformed to accounts/fireworks/models/deepseek-v3p2-*
+        ("deepseek/deepseek-v3.2-speciale", "deepseek/deepseek-v3.2-speciale"),  # Pass through
+        ("deepseek-ai/deepseek-v3.2-exp", "deepseek-ai/deepseek-v3.2-exp"),  # Pass through (after alias)
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "fireworks")
+        # The key assertion: result should NOT start with 'accounts/fireworks/models/deepseek-v3p2'
+        assert not result.startswith("accounts/fireworks/models/deepseek-v3p2"), \
+            f"Model '{model_id}' should NOT be transformed to an invalid Fireworks v3.2 path, got: {result}"
+
+
+def test_transform_deepseek_v3_v31_for_fireworks_still_works():
+    """Test that DeepSeek v3/v3.1 models are still correctly transformed for Fireworks."""
+    test_cases = [
+        ("deepseek/deepseek-v3", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek/deepseek-v3.1", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek-ai/deepseek-v3", "accounts/fireworks/models/deepseek-v3p1"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "fireworks")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"

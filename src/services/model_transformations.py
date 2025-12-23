@@ -16,6 +16,11 @@ MODEL_PROVIDER_OVERRIDES = {
     "zai-org/glm-4.6-fp8": "near",
     # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
     # No override needed - let natural provider detection route to Cerebras
+    # DeepSeek V3.2 series - only available on Chutes, not Fireworks
+    "deepseek-ai/deepseek-v3.2-exp": "chutes",
+    "deepseek/deepseek-v3.2-exp": "chutes",
+    "deepseek/deepseek-v3.2": "chutes",
+    "deepseek-ai/deepseek-v3.2": "chutes",
 }
 
 # Canonical aliases for commonly mistyped or reformatted model IDs.
@@ -68,7 +73,10 @@ MODEL_ID_ALIASES = {
     # DeepSeek R1 and V3 series - newest variants
     "deepseek-r1": "deepseek/deepseek-r1",
     "r1": "deepseek/deepseek-r1",
-    "deepseek-v3.2": "deepseek/deepseek-v3.2",
+    # DeepSeek V3.2 series - only available on Chutes as V3.2-Exp
+    "deepseek-v3.2": "deepseek-ai/deepseek-v3.2-exp",
+    "deepseek/deepseek-v3.2": "deepseek-ai/deepseek-v3.2-exp",
+    "deepseek-ai/deepseek-v3.2": "deepseek-ai/deepseek-v3.2-exp",
     # Meta Llama 4 series
     "llama-4-scout": "meta-llama/llama-4-scout",
     "llama-4-maverick": "meta-llama/llama-4-maverick",
@@ -321,15 +329,69 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
             logger.info(f"Transformed '{model_id}' to '{native}' for {provider} (fuzzy match)")
             return native
 
-    # Special handling for Fireworks - try to construct the path
+    # Special handling for Fireworks - try to construct the path ONLY for known patterns
+    # that are likely to exist on Fireworks. Unknown model variants should NOT be
+    # blindly constructed as this leads to 404 errors.
     if provider_lower == "fireworks" and "/" in model_id:
-        # For unknown models, try constructing the Fireworks path
         org, model_name = model_id.split("/", 1)
-        # Convert common patterns
-        model_name_fixed = model_name.replace(".", "p")  # v3.1 -> v3p1
-        constructed = f"accounts/fireworks/models/{model_name_fixed}"
-        logger.warning(f"No mapping for '{model_id}', constructed: '{constructed}'")
-        return constructed
+        model_name_lower = model_name.lower()
+
+        # Models that should NOT be constructed for Fireworks (they exist on other providers only)
+        FIREWORKS_EXCLUDE_PATTERNS = [
+            "v3.2",  # DeepSeek v3.2 is only on Chutes
+            "v3p2",  # DeepSeek v3.2 alternative format
+            "-speciale",  # Unknown speciale variants
+            "-terminus",  # Terminus variants
+            "-turbo",  # Turbo variants (some not on Fireworks)
+        ]
+
+        # Check for exclusion patterns first
+        is_excluded = any(
+            pattern in model_name_lower for pattern in FIREWORKS_EXCLUDE_PATTERNS
+        )
+
+        if is_excluded:
+            # This model variant is not on Fireworks - don't construct invalid IDs
+            logger.warning(
+                f"Model '{model_id}' matches an exclusion pattern and is not available on Fireworks. "
+                f"Not constructing a speculative Fireworks path."
+            )
+            return model_id
+
+        # Only construct Fireworks paths for known, supported model families
+        # Fireworks supports: deepseek-v3, deepseek-v3.1, deepseek-r1, llama-*, qwen-*
+        KNOWN_FIREWORKS_PATTERNS = [
+            "deepseek-v3",  # deepseek-v3 and deepseek-v3.1 (maps to v3p1)
+            "deepseek-r1",  # deepseek-r1 models
+            "llama-v3",  # Llama 3.x models
+            "llama-3",  # Llama 3.x models (alternative format)
+            "llama-4",  # Llama 4 models
+            "qwen2",  # Qwen 2.x models
+            "qwen3",  # Qwen 3 models
+            "kimi-k2",  # Moonshot Kimi models
+            "glm-4",  # GLM models
+            "gpt-oss",  # GPT-OSS models
+        ]
+
+        # Check if the model matches a known Fireworks pattern
+        is_known_pattern = any(
+            pattern in model_name_lower for pattern in KNOWN_FIREWORKS_PATTERNS
+        )
+
+        if is_known_pattern:
+            # Convert common patterns
+            model_name_fixed = model_name.replace(".", "p")  # v3.1 -> v3p1
+            constructed = f"accounts/fireworks/models/{model_name_fixed}"
+            logger.warning(f"No mapping for '{model_id}', constructed: '{constructed}'")
+            return constructed
+        else:
+            # Unknown model variant - don't construct invalid IDs
+            # Return the original model_id to let provider failover handle it
+            logger.warning(
+                f"Unknown model '{model_id}' has no Fireworks mapping and doesn't match "
+                f"known patterns. Not constructing a speculative Fireworks path."
+            )
+            return model_id
 
     # If no transformation needed or found, return original
     logger.debug(f"No transformation for '{model_id}' with provider {provider}")
@@ -483,6 +545,20 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Chutes uses org/model format directly
             # Most models pass through as-is from their catalog
             # Keep the exact format from the catalog for proper routing
+            #
+            # DeepSeek V3.2 series - only available on Chutes
+            "deepseek-ai/deepseek-v3.2-exp": "deepseek-ai/DeepSeek-V3.2-Exp",
+            "deepseek/deepseek-v3.2-exp": "deepseek-ai/DeepSeek-V3.2-Exp",
+            "deepseek-v3.2-exp": "deepseek-ai/DeepSeek-V3.2-Exp",
+            "deepseek-v3.2": "deepseek-ai/DeepSeek-V3.2-Exp",
+            # DeepSeek V3.1 series
+            "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+            "deepseek/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+            "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+            # DeepSeek V3 base
+            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            "deepseek/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            "deepseek-v3": "deepseek-ai/DeepSeek-V3",
         },
         "groq": {
             # Groq models use simple names without org prefix
@@ -1298,9 +1374,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
                 return "cerebras"
             return "alibaba-cloud"
 
-        # DeepSeek models are primarily on Fireworks in this system
+        # DeepSeek models - route to appropriate provider based on version
         # Support both "deepseek-ai/" and "deepseek/" org prefixes
         if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
+            model_name_lower = model_name.lower()
+            # V3.2 series is only available on Chutes
+            if "v3.2" in model_name_lower or "v3p2" in model_name_lower:
+                logger.info(f"Routing DeepSeek v3.2 model '{model_id}' to chutes")
+                return "chutes"
+            # Other DeepSeek models (v3, v3.1, r1) are on Fireworks
             return "fireworks"
 
         # OpenAI models go to OpenRouter
