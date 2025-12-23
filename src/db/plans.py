@@ -18,6 +18,11 @@ DEFAULT_TRIAL_FEATURES = ["basic_models"]
 _usage_cache: dict[str, dict[str, Any]] = {}
 _usage_cache_ttl = 10  # 10 seconds TTL - short to minimize over-usage window
 
+# PERF: In-memory cache for user plan data to prevent concurrent calls
+# that can trigger Cloudflare rate limiting (400 Bad Request with HTML response)
+_user_plan_cache: dict[str, dict[str, Any]] = {}
+_user_plan_cache_ttl = 30  # 30 seconds TTL - user plans change infrequently
+
 
 def clear_usage_cache(user_id: int | None = None) -> None:
     """Clear usage cache (for testing or explicit invalidation)"""
@@ -32,6 +37,19 @@ def clear_usage_cache(user_id: int | None = None) -> None:
         logger.info("Cleared entire usage cache")
 
 
+def clear_user_plan_cache(user_id: int | None = None) -> None:
+    """Clear user plan cache (for testing or explicit invalidation)"""
+    global _user_plan_cache
+    if user_id:
+        cache_key = f"user_plan:{user_id}"
+        if cache_key in _user_plan_cache:
+            del _user_plan_cache[cache_key]
+            logger.debug(f"Cleared user plan cache for user {user_id}")
+    else:
+        _user_plan_cache.clear()
+        logger.info("Cleared entire user plan cache")
+
+
 def get_usage_cache_stats() -> dict[str, Any]:
     """Get cache statistics for monitoring"""
     return {
@@ -40,10 +58,24 @@ def get_usage_cache_stats() -> dict[str, Any]:
     }
 
 
+def get_user_plan_cache_stats() -> dict[str, Any]:
+    """Get user plan cache statistics for monitoring"""
+    return {
+        "cached_users": len(_user_plan_cache),
+        "ttl_seconds": _user_plan_cache_ttl,
+    }
+
+
 def invalidate_usage_cache(user_id: int) -> None:
     """Invalidate cache for a specific user (e.g., after usage recorded)"""
     clear_usage_cache(user_id)
     logger.debug(f"Invalidated usage cache for user {user_id}")
+
+
+def invalidate_user_plan_cache(user_id: int) -> None:
+    """Invalidate user plan cache for a specific user (e.g., after plan change)"""
+    clear_user_plan_cache(user_id)
+    logger.debug(f"Invalidated user plan cache for user {user_id}")
 
 
 def get_all_plans() -> list[dict[str, Any]]:
@@ -126,8 +158,8 @@ def get_plan_id_by_tier(tier: str) -> int | None:
         return None
 
 
-def get_user_plan(user_id: int) -> dict[str, Any] | None:
-    """Get current active plan for user (robust: never silently falls back to trial)"""
+def _get_user_plan_uncached(user_id: int) -> dict[str, Any] | None:
+    """Internal function: Get user plan from database (no caching)"""
     try:
         client = get_supabase_client()
 
@@ -197,6 +229,42 @@ def get_user_plan(user_id: int) -> dict[str, Any] | None:
         return None
 
 
+def get_user_plan(user_id: int) -> dict[str, Any] | None:
+    """Get current active plan for user with caching.
+
+    Caching prevents concurrent Supabase calls that can trigger Cloudflare
+    rate limiting (400 Bad Request with HTML response instead of JSON).
+    """
+    cache_key = f"user_plan:{user_id}"
+
+    # PERF: Check cache first to avoid database queries and rate limiting
+    if cache_key in _user_plan_cache:
+        entry = _user_plan_cache[cache_key]
+        cache_time = entry["timestamp"]
+        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=_user_plan_cache_ttl):
+            logger.debug(
+                f"User plan cache hit for user {user_id} "
+                f"(age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)"
+            )
+            return entry["data"]
+        else:
+            # Cache expired, remove it
+            del _user_plan_cache[cache_key]
+            logger.debug(f"User plan cache expired for user {user_id}")
+
+    # Cache miss - fetch from database
+    logger.debug(f"User plan cache miss for user {user_id} - fetching from database")
+    result = _get_user_plan_uncached(user_id)
+
+    # Cache the result (even if None, to avoid repeated DB queries for users without plans)
+    _user_plan_cache[cache_key] = {
+        "data": result,
+        "timestamp": datetime.now(timezone.utc),
+    }
+
+    return result
+
+
 def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bool:
     """Assign a plan to a user"""
     try:
@@ -231,6 +299,9 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
         client.table("users").update(
             {"subscription_status": "active", "updated_at": datetime.now(timezone.utc).isoformat()}
         ).eq("id", user_id).execute()
+
+        # Invalidate user plan cache since we just changed the plan
+        invalidate_user_plan_cache(user_id)
 
         return True
 
@@ -275,6 +346,8 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
                     client.table("users").update({"subscription_status": "expired"}).eq(
                         "id", user_id
                     ).execute()
+                    # Invalidate cache since plan status changed
+                    invalidate_user_plan_cache(user_id)
                     return {
                         "has_plan": False,
                         "plan_expired": True,
@@ -352,6 +425,8 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
                 client.table("users").update({"subscription_status": "expired"}).eq(
                     "id", user_id
                 ).execute()
+                # Invalidate cache since plan status changed
+                invalidate_user_plan_cache(user_id)
                 return {
                     "has_plan": False,
                     "plan_expired": True,
