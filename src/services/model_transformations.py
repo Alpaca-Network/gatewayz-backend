@@ -321,15 +321,18 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
             logger.info(f"Transformed '{model_id}' to '{native}' for {provider} (fuzzy match)")
             return native
 
-    # Special handling for Fireworks - try to construct the path
+    # Special handling for Fireworks - do NOT naively construct paths for unknown models
+    # Previously this code would construct model IDs like "accounts/fireworks/models/{model_name}"
+    # for any unknown model, which caused 404 errors when the model didn't actually exist on Fireworks.
+    # Instead, we now log a warning and return the original model ID, letting the API call fail
+    # with a proper "model not found" error that can trigger failover to other providers.
     if provider_lower == "fireworks" and "/" in model_id:
-        # For unknown models, try constructing the Fireworks path
-        org, model_name = model_id.split("/", 1)
-        # Convert common patterns
-        model_name_fixed = model_name.replace(".", "p")  # v3.1 -> v3p1
-        constructed = f"accounts/fireworks/models/{model_name_fixed}"
-        logger.warning(f"No mapping for '{model_id}', constructed: '{constructed}'")
-        return constructed
+        logger.warning(
+            f"No Fireworks mapping for '{model_id}'. Model will be passed through as-is. "
+            f"If this model doesn't exist on Fireworks, the request will fail and may trigger failover."
+        )
+        # Return the original model_id (lowercase) - do not construct a potentially invalid path
+        return model_id
 
     # If no transformation needed or found, return original
     logger.debug(f"No transformation for '{model_id}' with provider {provider}")

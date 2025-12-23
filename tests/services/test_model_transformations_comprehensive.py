@@ -94,10 +94,41 @@ class TestFireworksTransformations:
         result = transform_model_id(model, "fireworks")
         assert result == model.lower()
 
-    def test_transform_unknown_model_constructs_path(self):
-        """Test unknown model gets constructed path"""
+    def test_transform_unknown_model_passes_through(self):
+        """Test unknown model passes through without constructing invalid path.
+
+        This is a fix for the issue where naive construction of Fireworks paths
+        for unknown models caused 404 errors (e.g., "deepseek/deepseek-v3.2-speciale"
+        being transformed to invalid "accounts/fireworks/models/deepseek-v3p2-speciale").
+        Now unknown models pass through as-is and will fail with proper errors.
+        """
         result = transform_model_id("org/unknown-model", "fireworks")
-        assert result.startswith("accounts/fireworks/models/")
+        # Should NOT construct an invalid Fireworks path
+        assert not result.startswith("accounts/fireworks/models/")
+        # Should pass through the original model ID (lowercased)
+        assert result == "org/unknown-model"
+
+    def test_transform_unknown_deepseek_variant_passes_through(self):
+        """Test that unsupported DeepSeek variants pass through without naive construction.
+
+        This specifically tests the fix for the sentry issue where
+        'deepseek/deepseek-v3.2-speciale' was naively transformed to
+        'accounts/fireworks/models/deepseek-v3p2-speciale' which doesn't exist.
+        """
+        result = transform_model_id("deepseek/deepseek-v3.2-speciale", "fireworks")
+        # Should NOT construct the invalid path
+        assert result != "accounts/fireworks/models/deepseek-v3p2-speciale"
+        # Should pass through as-is (lowercased)
+        assert result == "deepseek/deepseek-v3.2-speciale"
+
+    def test_transform_known_fireworks_model_still_works(self):
+        """Verify that known Fireworks models are still properly transformed."""
+        # Known model should still get the proper Fireworks path
+        result = transform_model_id("deepseek/deepseek-v3", "fireworks")
+        assert result == "accounts/fireworks/models/deepseek-v3p1"
+
+        result = transform_model_id("deepseek-ai/deepseek-v3.1", "fireworks")
+        assert result == "accounts/fireworks/models/deepseek-v3p1"
 
     def test_transform_deepseek_r1(self):
         """Test DeepSeek-R1 transformation"""
