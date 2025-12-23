@@ -638,7 +638,7 @@ def deduct_credits(
         # CRITICAL FIX: Bypass cache and fetch fresh balance from database
         # This prevents race conditions from stale cached balance data
         with track_database_query(table="users", operation="select"):
-            user_lookup = client.table("users").select("id, credits").eq("key", api_key).execute()
+            user_lookup = client.table("users").select("id, credits").eq("api_key", api_key).execute()
 
         if not user_lookup.data:
             raise ValueError(f"User with API key not found")
