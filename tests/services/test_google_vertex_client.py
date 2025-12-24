@@ -68,6 +68,20 @@ class TestTransformGoogleVertexModelId:
         result = transform_google_vertex_model_id(model_id)
         assert result == "gemini-2.0-flash"
 
+    def test_transform_google_prefix(self):
+        """Test that google/ prefix is stripped from model IDs"""
+        # This is the case that caused the 404 error - model IDs coming from
+        # the routing layer with the provider prefix need to be stripped
+        test_cases = [
+            ("google/gemini-2.0-flash", "gemini-2.0-flash"),
+            ("google/gemini-3-pro-preview", "gemini-3-pro-preview"),
+            ("google/gemini-1.5-pro", "gemini-1.5-pro"),
+            ("google/gemini-2.5-flash-lite", "gemini-2.5-flash-lite"),
+        ]
+        for model_id, expected in test_cases:
+            result = transform_google_vertex_model_id(model_id)
+            assert result == expected, f"Expected {expected} for {model_id}, got {result}"
+
     def test_transform_various_models(self):
         """Test transforming various model IDs"""
         models = [
@@ -672,6 +686,52 @@ class TestModelLocationRouting:
         request_url = client_factory.payloads[0]["url"]
         assert "us-central1-aiplatform.googleapis.com" in request_url, f"URL should use regional endpoint: {request_url}"
         assert "locations/us-central1/" in request_url, f"URL should use regional location: {request_url}"
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_rest_request_strips_google_prefix_from_model_id(self, monkeypatch):
+        """Ensure google/ prefix is stripped from model ID to prevent 404 errors.
+
+        This tests the fix for the issue where model IDs like 'google/gemini-3-pro-preview'
+        were not having their prefix stripped, resulting in malformed URLs like:
+        publishers/google/models/google/gemini-3-pro-preview
+        """
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Response from prefixed model"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        # Use model ID with google/ prefix (as it comes from the routing layer)
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="google/gemini-3-pro-preview"
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Response from prefixed model"
+
+        # Verify the URL does NOT contain a duplicated google/ prefix
+        assert client_factory.calls == 1
+        request_url = client_factory.payloads[0]["url"]
+
+        # The URL should have publishers/google/models/gemini-3-pro-preview
+        # NOT publishers/google/models/google/gemini-3-pro-preview
+        assert "models/gemini-3-pro-preview" in request_url, f"URL should have stripped model name: {request_url}"
+        assert "models/google/gemini-3-pro-preview" not in request_url, f"URL should NOT have duplicated google/ prefix: {request_url}"
 
     @patch("src.services.google_vertex_client.initialize_vertex_ai")
     @patch("src.services.google_vertex_client._ensure_vertex_imports")
