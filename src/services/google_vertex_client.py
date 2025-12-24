@@ -47,6 +47,11 @@ _TEMP_CREDENTIALS_FILE: str | None = None
 _TEMP_CREDENTIALS_LOCK = threading.Lock()
 _DEFAULT_TRANSPORT = "rest"
 
+# Vertex AI maxOutputTokens valid range
+# See: https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini
+VERTEX_MIN_OUTPUT_TOKENS = 16
+VERTEX_MAX_OUTPUT_TOKENS = 65536
+
 
 def _ensure_vertex_imports():
     """Ensure Vertex AI SDK is imported. Raises ImportError if SDK not available."""
@@ -362,12 +367,11 @@ def _make_google_vertex_request_sdk(
         try:
             generation_config = {}
             if max_tokens is not None:
-                # Google Vertex AI requires max_output_tokens to be at least 16
-                # Validate and adjust if necessary to prevent 400 errors
-                adjusted_max_tokens = max(16, max_tokens)
+                # Validate and clamp to Vertex AI's valid range to prevent 400 errors
+                adjusted_max_tokens = max(VERTEX_MIN_OUTPUT_TOKENS, min(max_tokens, VERTEX_MAX_OUTPUT_TOKENS))
                 if adjusted_max_tokens != max_tokens:
                     logger.warning(
-                        f"max_tokens={max_tokens} is below minimum (16). "
+                        f"max_tokens={max_tokens} is outside valid range ({VERTEX_MIN_OUTPUT_TOKENS}-{VERTEX_MAX_OUTPUT_TOKENS}). "
                         f"Adjusting to {adjusted_max_tokens} for Google Vertex AI compatibility."
                     )
                 generation_config["max_output_tokens"] = adjusted_max_tokens
@@ -478,12 +482,11 @@ def _make_google_vertex_request_rest(
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
-            # Google Vertex AI requires maxOutputTokens to be at least 16
-            # Validate and adjust if necessary to prevent 400 errors
-            adjusted_max_tokens = max(16, max_tokens)
+            # Validate and clamp to Vertex AI's valid range to prevent 400 errors
+            adjusted_max_tokens = max(VERTEX_MIN_OUTPUT_TOKENS, min(max_tokens, VERTEX_MAX_OUTPUT_TOKENS))
             if adjusted_max_tokens != max_tokens:
                 logger.warning(
-                    f"max_tokens={max_tokens} is below minimum (16). "
+                    f"max_tokens={max_tokens} is outside valid range ({VERTEX_MIN_OUTPUT_TOKENS}-{VERTEX_MAX_OUTPUT_TOKENS}). "
                     f"Adjusting to {adjusted_max_tokens} for Google Vertex AI compatibility."
                 )
             generation_config["maxOutputTokens"] = adjusted_max_tokens
