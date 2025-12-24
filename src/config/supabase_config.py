@@ -92,7 +92,7 @@ def get_supabase_client() -> Client:
                 "apikey": Config.SUPABASE_KEY,
                 "Authorization": f"Bearer {Config.SUPABASE_KEY}",
             },
-            timeout=httpx.Timeout(45.0, connect=10.0),  # Increased from 30s to 45s for complex queries
+            timeout=httpx.Timeout(10.0, connect=5.0),  # Reduced for faster startup; complex queries handled by request-level timeout
             limits=httpx.Limits(
                 max_connections=max_conn,
                 max_keepalive_connections=keepalive_conn,
@@ -105,8 +105,8 @@ def get_supabase_client() -> Client:
             supabase_url=Config.SUPABASE_URL,
             supabase_key=Config.SUPABASE_KEY,
             options=ClientOptions(
-                postgrest_client_timeout=45,  # 45 second timeout (increased for complex queries)
-                storage_client_timeout=45,  # Consistent with httpx timeout
+                postgrest_client_timeout=10,  # 10 second timeout for startup; individual requests can override
+                storage_client_timeout=30,  # Storage operations may need longer
                 schema="public",
                 headers={"X-Client-Info": "gatewayz-backend/1.0"},
             ),
