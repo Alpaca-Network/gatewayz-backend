@@ -84,8 +84,16 @@ class StatsigService:
             # Initialize Statsig with server secret key
             self.statsig = Statsig(self.server_secret_key, options)
 
-            # Wait for initialization to complete
-            self.statsig.initialize().wait()
+            # Wait for initialization to complete with a timeout
+            # Use a 5 second timeout to prevent blocking startup if Statsig is slow
+            try:
+                self.statsig.initialize().wait(timeout=5)
+            except Exception as timeout_e:
+                logger.warning(f"⚠️  Statsig initialization timed out after 5s: {timeout_e}")
+                logger.warning("   Continuing with Statsig in degraded mode - will retry on first use")
+                # Mark as initialized but not enabled to prevent retries during startup
+                self._initialized = True
+                return
 
             self.enabled = True
             self._initialized = True
