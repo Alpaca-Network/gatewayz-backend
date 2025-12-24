@@ -707,5 +707,123 @@ class TestModelLocationRouting:
         mock_init_vertex.assert_called_once_with(location="global")
 
 
+class TestMaxOutputTokensValidation:
+    """Tests for maxOutputTokens validation and clamping."""
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_max_tokens_capped_at_65536(self, monkeypatch):
+        """Test that max_tokens > 65536 is clamped to 65536 for Vertex AI."""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Response"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        # Request with max_tokens=100000 (greater than max 65536)
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-2.5-flash",
+            max_tokens=100000,  # Should be clamped to 65536
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Response"
+
+        # Verify the maxOutputTokens was clamped to 65536
+        request_body = client_factory.payloads[0]["json"]
+        assert "generationConfig" in request_body
+        assert request_body["generationConfig"]["maxOutputTokens"] == 65536
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_max_tokens_minimum_is_16(self, monkeypatch):
+        """Test that max_tokens < 16 is raised to 16 for Vertex AI."""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Response"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        # Request with max_tokens=5 (less than min 16)
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-2.5-flash",
+            max_tokens=5,  # Should be raised to 16
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Response"
+
+        # Verify the maxOutputTokens was raised to 16
+        request_body = client_factory.payloads[0]["json"]
+        assert "generationConfig" in request_body
+        assert request_body["generationConfig"]["maxOutputTokens"] == 16
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_valid_max_tokens_unchanged(self, monkeypatch):
+        """Test that valid max_tokens values are not modified."""
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Response"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        # Request with valid max_tokens=4096
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-2.5-flash",
+            max_tokens=4096,  # Should remain unchanged
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Response"
+
+        # Verify the maxOutputTokens was not modified
+        request_body = client_factory.payloads[0]["json"]
+        assert "generationConfig" in request_body
+        assert request_body["generationConfig"]["maxOutputTokens"] == 4096
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
