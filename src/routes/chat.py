@@ -48,6 +48,11 @@ from src.services.stream_normalizer import (
     create_done_sse,
 )
 from src.utils.sentry_context import capture_payment_error, capture_provider_error
+from src.services.format_transformers import (
+    transform_request_if_needed,
+    transform_response_if_needed,
+    RequestFormat,
+)
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -586,6 +591,7 @@ async def stream_generator(
     is_anonymous=False,
     is_async_stream=False,  # PERF: Flag to indicate if stream is async
     request_received_at=None,  # Wall-clock timestamp when request was received
+    original_format=None,  # Original request format (for potential response transformation)
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -607,6 +613,15 @@ async def stream_generator(
 
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
+
+    # TODO: Implement Anthropic streaming format transformation
+    # For now, streaming always returns OpenAI format (SSE with delta chunks)
+    # Anthropic format would use different event types (content_block_delta, message_stop, etc.)
+    if original_format == "anthropic":
+        logger.warning(
+            "Anthropic format streaming not yet fully implemented - returning OpenAI SSE format. "
+            "Non-streaming Anthropic requests work correctly."
+        )
 
     try:
         # Track streaming duration if tracker is provided
@@ -829,6 +844,18 @@ async def chat_completions(
 
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
+
+    # === Format Detection & Transformation ===
+    # Detect if request is in Anthropic Messages format and transform to OpenAI format
+    request_dict = req.model_dump() if hasattr(req, 'model_dump') else req.dict()
+    transformed_request, original_format = transform_request_if_needed(request_dict)
+
+    if original_format == RequestFormat.ANTHROPIC:
+        logger.info(
+            f"[{request_id}] Detected Anthropic Messages API format, transforming to OpenAI format"
+        )
+        # Update req with transformed request
+        req = ProxyRequest(**transformed_request)
 
     try:
         # === 1) User + plan/trial prechecks (REFACTORED: using shared helpers) ===
@@ -1054,6 +1081,7 @@ async def chat_completions(
                             is_anonymous,
                             is_async_stream=is_async_stream,
                             request_received_at=request_received_at,
+                            original_format=original_format,  # Pass format for potential transformation
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -1266,7 +1294,7 @@ async def chat_completions(
                 total_tokens=total_tokens,
                 elapsed_ms=int(elapsed * 1000),
                 is_trial=is_trial,
-                _to_thread=_to_thread,
+                _to_thread_func=_to_thread,
             )
         else:
             # For anonymous users, still calculate cost for metrics
@@ -1458,7 +1486,10 @@ async def chat_completions(
         headers["X-Server-Received-At"] = str(request_received_at)
         headers["X-Server-Responded-At"] = str(server_responded_at)
 
-        return JSONResponse(content=processed, headers=headers)
+        # Transform response back to original format if needed
+        response_content = transform_response_if_needed(processed, original_format)
+
+        return JSONResponse(content=response_content, headers=headers)
 
     except HTTPException:
         raise
@@ -2121,7 +2152,7 @@ async def unified_responses(
             total_tokens=total_tokens,
             elapsed_ms=int(elapsed * 1000),
             is_trial=is_trial,
-            _to_thread=_to_thread,
+            _to_thread_func=_to_thread,
         )
 
         # Record Prometheus metrics and passive health monitoring
