@@ -201,31 +201,41 @@ class LokiLogHandler(logging.Handler):
 
         Ensures all queued logs are sent before shutting down:
         1. Signal worker to begin shutdown (it will drain remaining queue items)
-        2. Wait for worker thread to exit
+        2. Wait for worker thread to exit (with timeout to prevent hanging)
         3. Mark handler as closed to prevent new session creation
         4. Close HTTP session (with lock to prevent races)
+
+        Note: The 5-second timeout is a safety limit to prevent hanging during
+        shutdown. Since Loki logging is best-effort, some log loss is acceptable
+        if the queue cannot be drained in time. The worker thread (being a daemon)
+        will be terminated when the process exits anyway.
         """
         # Signal worker to stop accepting new items and drain queue
         # Note: _closed is NOT set yet so worker can still send remaining items
         self._shutdown.set()
 
         # Wait for worker thread to finish draining and exit (with timeout)
+        # The timeout prevents hanging during shutdown if Loki is slow/unreachable
         if self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5.0)
 
-        # Now mark as closed to prevent any new session creation
-        self._closed.set()
+        # Only mark as closed and clean up session if worker has actually exited
+        # If timeout expired but worker is still running, leave resources available
+        # so it can continue draining. The daemon thread will be killed on process
+        # exit anyway, and resources will be garbage collected.
+        if not self._worker_thread.is_alive():
+            # Worker has exited - safe to clean up
+            self._closed.set()
 
-        # Close HTTP session with lock to prevent race with _get_session
-        with self._session_lock:
-            if self._session:
-                try:
-                    self._session.close()
-                except Exception:
-                    # Ignore session close errors to avoid shutdown failures.
-                    # The session will be garbage collected anyway.
-                    pass
-                self._session = None
+            with self._session_lock:
+                if self._session:
+                    try:
+                        self._session.close()
+                    except Exception:
+                        # Ignore session close errors to avoid shutdown failures.
+                        # The session will be garbage collected anyway.
+                        pass
+                    self._session = None
 
         super().close()
 
