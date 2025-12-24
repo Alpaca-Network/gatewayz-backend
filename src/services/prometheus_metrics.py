@@ -219,6 +219,12 @@ provider_response_time = get_or_create_metric(Histogram,
     buckets=(0.1, 0.5, 1, 2.5, 5, 10),
 )
 
+gatewayz_provider_health_score = get_or_create_metric(Gauge,
+    "gatewayz_provider_health_score",
+    "Composite provider health score (0-1) based on availability, error rate, and latency",
+    ["provider"],
+)
+
 # ==================== Authentication & API Key Metrics ====================
 api_key_usage = get_or_create_metric(Counter,
     "api_key_usage_total",

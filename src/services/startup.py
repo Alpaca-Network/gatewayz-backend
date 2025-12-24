@@ -173,6 +173,15 @@ async def lifespan(app):
         logger.info("   Main API reads health data from Redis cache")
         logger.info("✅ Passive health monitoring active (from real API calls in chat.py/messages.py)")
 
+        # Start provider health tracker (populates Prometheus metrics for Grafana dashboards)
+        # This lightweight service aggregates model_health_monitor data and updates provider metrics
+        try:
+            from src.services.provider_health_tracker import provider_health_tracker
+            await provider_health_tracker.start()
+            logger.info("✅ Provider health tracker started (updates Prometheus metrics every 30s)")
+        except Exception as e:
+            logger.warning(f"Provider health tracker initialization warning: {e}")
+
         # Initialize connection pools (they're lazy-loaded, but log readiness)
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
@@ -257,6 +266,14 @@ async def lifespan(app):
             logger.info("Autonomous error monitoring stopped")
         except Exception as e:
             logger.warning(f"Error monitoring shutdown warning: {e}")
+
+        # Stop provider health tracker
+        try:
+            from src.services.provider_health_tracker import provider_health_tracker
+            await provider_health_tracker.stop()
+            logger.info("Provider health tracker stopped")
+        except Exception as e:
+            logger.warning(f"Provider health tracker shutdown warning: {e}")
 
         # Health monitoring is handled by the dedicated health-service container
         # No health monitor shutdown needed in main API
