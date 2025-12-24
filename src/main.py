@@ -273,6 +273,44 @@ def create_app() -> FastAPI:
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
 
+    # ==================== Fallback Health Endpoint ====================
+    # This endpoint is defined directly in main.py to ensure it ALWAYS exists,
+    # even if the health route fails to load. This is critical for Railway deployments.
+    @app.get("/health", tags=["health"], include_in_schema=False)
+    async def fallback_health_check():
+        """
+        Fallback health check endpoint - ALWAYS responds if app is running.
+
+        This endpoint is a safety net for Railway healthchecks. If the health route
+        fails to load, this fallback ensures the healthcheck endpoint still responds.
+        Returns HTTP 200 to indicate the app is alive, even in degraded mode.
+        """
+        from datetime import datetime, timezone
+
+        try:
+            from src.config.supabase_config import get_initialization_status
+            db_status = get_initialization_status()
+        except Exception as e:
+            logger.warning(f"Could not get DB status in fallback health check: {e}")
+            db_status = {"initialized": False, "has_error": True}
+
+        response = {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if db_status.get("has_error"):
+            response["database"] = "unavailable"
+            response["mode"] = "degraded"
+        elif db_status.get("initialized"):
+            response["database"] = "connected"
+        else:
+            response["database"] = "not_initialized"
+
+        return response
+
+    logger.info("  [OK] Fallback health check endpoint at /health")
+
     # Add structured metrics endpoint (parses Prometheus metrics)
     @app.get("/api/metrics/parsed", tags=["monitoring"], include_in_schema=False)
     async def get_parsed_metrics():
