@@ -241,12 +241,6 @@ def create_app() -> FastAPI:
     app.add_middleware(StagingSecurityMiddleware)
     logger.info("  🔒 Staging security middleware enabled")
 
-    # Add deprecation middleware to warn users about legacy endpoints
-    from src.middleware.deprecation import DeprecationMiddleware
-
-    app.add_middleware(DeprecationMiddleware)
-    logger.info("  ⚠️  Deprecation middleware enabled (legacy endpoint warnings)")
-
     # Security
     HTTPBearer()
 
@@ -375,9 +369,7 @@ def create_app() -> FastAPI:
     # These routes are mounted under /v1 prefix via v1_router
     # IMPORTANT: unified_chat must be first, then chat & messages for backward compatibility
     v1_routes_to_load = [
-        ("unified_chat", "Unified Chat API"),  # NEW: Single endpoint for all chat formats
-        ("chat", "Chat Completions"),
-        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
+        ("unified_chat", "Unified Chat API"),  # Single endpoint for all chat formats
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
@@ -392,7 +384,6 @@ def create_app() -> FastAPI:
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
-        ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
