@@ -682,6 +682,19 @@ LOG_LEVEL=DEBUG
    - Configure appropriate limits per plan
    - Monitor and adjust based on usage patterns
 
+## 🔐 Privy Authentication Configuration
+
+If using Privy for frontend authentication (OAuth with Google, GitHub, etc.), you must configure allowed origins in the Privy Dashboard.
+
+**Common Error:** If users see "Must specify origin" when attempting OAuth login, the frontend domain is not whitelisted in Privy.
+
+**Quick Fix:**
+1. Go to [Privy Dashboard](https://dashboard.privy.io)
+2. Navigate to Settings → Allowed Origins
+3. Add your frontend domain (e.g., `https://beta.gatewayz.ai`)
+
+See [Privy Configuration Guide](PRIVY_CONFIGURATION.md) for detailed instructions.
+
 ## 🎓 Next Steps
 
 After successful setup:

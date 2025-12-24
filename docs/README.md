@@ -130,6 +130,7 @@ Comprehensive documentation is available in the `docs/` directory:
 ### API Documentation
 - **[API Reference](api.md)** - Complete API endpoint documentation
 - **[Authentication](privy-authentication.md)** - API key authentication and Privy integration
+- **[Privy Configuration](PRIVY_CONFIGURATION.md)** - Privy OAuth configuration and allowed origins setup
 - **[Chat Completions](CHAT_HISTORY_INTEGRATION.md)** - Chat completions with history management
 - **[Responses API](RESPONSES_API.md)** - Unified response API documentation
 - **[Image Generation](api.md#image-generation)** - AI image generation endpoints

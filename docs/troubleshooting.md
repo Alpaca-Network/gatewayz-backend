@@ -123,6 +123,52 @@ Failed to fetch models from OpenRouter
 
 ### Authentication Issues
 
+#### Privy OAuth "Must specify origin" Error
+**Symptoms:**
+- Users cannot log in via OAuth (Google, GitHub, etc.)
+- Error message: "Must specify origin"
+- FetchError: `[POST] "https://auth.privy.io/api/v1/oauth/init": 403`
+- Error occurs when clicking OAuth login buttons on the frontend
+
+**Root Cause:**
+The frontend's domain is not configured in the Privy Dashboard's allowed origins list. Privy validates the `Origin` header of OAuth requests against a whitelist.
+
+**Solutions:**
+1. **Add Origin to Privy Dashboard**
+   - Go to [Privy Dashboard](https://dashboard.privy.io)
+   - Select your application
+   - Navigate to Settings → Allowed Origins (or Client Settings)
+   - Add the frontend domain (e.g., `https://beta.gatewayz.ai`)
+   - Save changes and wait a few minutes for propagation
+
+2. **Required Origins:**
+   ```
+   Production:
+   - https://gatewayz.ai
+   - https://www.gatewayz.ai
+   - https://beta.gatewayz.ai
+
+   Staging:
+   - https://staging.gatewayz.ai
+
+   Development:
+   - http://localhost:3000
+   - http://localhost:3001
+   ```
+
+3. **Verify Configuration**
+   - Clear browser cache and cookies
+   - Try in an incognito/private window
+   - Check browser developer console for detailed errors
+
+**See Also:** [Privy Configuration Guide](PRIVY_CONFIGURATION.md)
+
+**Error Messages:**
+```
+Error: Must specify origin
+FetchError: [POST] "https://auth.privy.io/api/v1/oauth/init": 403
+```
+
 #### Invalid API Key Errors
 **Symptoms:**
 - 401 Unauthorized errors
