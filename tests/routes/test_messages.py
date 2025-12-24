@@ -877,3 +877,475 @@ class TestMessagesEndpointFailover:
         assert response.status_code == 200
         data = response.json()
         assert data['content'][0]['text'] == 'Hello! How can I help you today?'
+
+
+# ============================================================
+# TEST CLASS: Anthropic Transformer - New Features
+# ============================================================
+
+class TestAnthropicTransformerNewFeatures:
+    """Test new Anthropic API features added for Claude API alignment"""
+
+    def test_transform_system_as_array(self):
+        """Test transformation with system as array of content blocks"""
+        messages = [{'role': 'user', 'content': 'Hello'}]
+        system = [
+            {'type': 'text', 'text': 'You are a helpful assistant.'},
+            {'type': 'text', 'text': 'Be concise in your responses.'}
+        ]
+
+        openai_messages, params = transform_anthropic_to_openai(
+            messages=messages,
+            system=system,
+            max_tokens=100
+        )
+
+        # System should be combined into single message
+        assert len(openai_messages) == 2
+        assert openai_messages[0]['role'] == 'system'
+        assert 'You are a helpful assistant.' in openai_messages[0]['content']
+        assert 'Be concise in your responses.' in openai_messages[0]['content']
+
+    def test_transform_document_content_block(self):
+        """Test transformation of document content blocks"""
+        messages = [{
+            'role': 'user',
+            'content': [
+                {'type': 'text', 'text': 'Summarize this document:'},
+                {
+                    'type': 'document',
+                    'source': {'type': 'text', 'data': 'This is the document content.'},
+                    'title': 'My Document',
+                    'context': 'A sample document'
+                }
+            ]
+        }]
+
+        openai_messages, _ = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100
+        )
+
+        content = openai_messages[0]['content']
+        assert isinstance(content, list)
+        # Document should be converted to text
+        doc_block = [b for b in content if 'Document' in b.get('text', '')]
+        assert len(doc_block) > 0
+        assert 'My Document' in doc_block[0]['text']
+
+    def test_transform_tool_result_content_block(self):
+        """Test transformation of tool_result content blocks"""
+        messages = [{
+            'role': 'user',
+            'content': [
+                {
+                    'type': 'tool_result',
+                    'tool_use_id': 'toolu_123',
+                    'content': 'The weather in San Francisco is 72°F and sunny.'
+                }
+            ]
+        }]
+
+        openai_messages, _ = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100
+        )
+
+        content = openai_messages[0]['content']
+        # Tool result should be converted to text
+        assert 'toolu_123' in content
+        assert '72°F' in content
+
+    def test_transform_tool_choice_types(self):
+        """Test transformation of different tool_choice types"""
+        messages = [{'role': 'user', 'content': 'Hello'}]
+
+        # Test auto
+        _, params = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100,
+            tool_choice={'type': 'auto'}
+        )
+        assert params.get('tool_choice') == 'auto'
+
+        # Test any -> required
+        _, params = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100,
+            tool_choice={'type': 'any'}
+        )
+        assert params.get('tool_choice') == 'required'
+
+        # Test none
+        _, params = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100,
+            tool_choice={'type': 'none'}
+        )
+        assert params.get('tool_choice') == 'none'
+
+        # Test specific tool
+        _, params = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100,
+            tool_choice={'type': 'tool', 'name': 'get_weather'}
+        )
+        assert params.get('tool_choice') == {
+            'type': 'function',
+            'function': {'name': 'get_weather'}
+        }
+
+    def test_transform_tools_to_openai_format(self):
+        """Test transformation of Anthropic tool definitions to OpenAI format"""
+        messages = [{'role': 'user', 'content': 'Hello'}]
+        tools = [
+            {
+                'name': 'get_weather',
+                'description': 'Get weather for a location',
+                'input_schema': {
+                    'type': 'object',
+                    'properties': {
+                        'location': {'type': 'string'}
+                    },
+                    'required': ['location']
+                }
+            }
+        ]
+
+        _, params = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100,
+            tools=tools
+        )
+
+        assert 'tools' in params
+        assert len(params['tools']) == 1
+        assert params['tools'][0]['type'] == 'function'
+        assert params['tools'][0]['function']['name'] == 'get_weather'
+        assert params['tools'][0]['function']['description'] == 'Get weather for a location'
+        assert 'parameters' in params['tools'][0]['function']
+
+    def test_transform_assistant_tool_use_message(self):
+        """Test transformation of assistant messages with tool_use blocks"""
+        messages = [
+            {'role': 'user', 'content': 'What is the weather?'},
+            {
+                'role': 'assistant',
+                'content': [
+                    {
+                        'type': 'tool_use',
+                        'id': 'toolu_123',
+                        'name': 'get_weather',
+                        'input': {'location': 'San Francisco'}
+                    }
+                ]
+            }
+        ]
+
+        openai_messages, _ = transform_anthropic_to_openai(
+            messages=messages,
+            max_tokens=100
+        )
+
+        # Assistant message should have tool_calls
+        assistant_msg = openai_messages[1]
+        assert assistant_msg['role'] == 'assistant'
+        assert 'tool_calls' in assistant_msg
+        assert len(assistant_msg['tool_calls']) == 1
+        assert assistant_msg['tool_calls'][0]['id'] == 'toolu_123'
+        assert assistant_msg['tool_calls'][0]['function']['name'] == 'get_weather'
+
+    def test_transform_openai_to_anthropic_with_stop_sequence(self):
+        """Test response transformation detecting stop sequences"""
+        openai_response = {
+            'id': 'chatcmpl-123',
+            'choices': [{
+                'message': {'content': 'Hello STOP'},
+                'finish_reason': 'stop'
+            }],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5}
+        }
+
+        anthropic_response = transform_openai_to_anthropic(
+            openai_response,
+            model='claude-sonnet-4-5-20250929',
+            stop_sequences=['STOP', 'END']
+        )
+
+        assert anthropic_response['stop_reason'] == 'stop_sequence'
+        assert anthropic_response['stop_sequence'] == 'STOP'
+
+    def test_transform_openai_to_anthropic_with_thinking(self):
+        """Test response transformation with reasoning/thinking content"""
+        openai_response = {
+            'id': 'chatcmpl-123',
+            'choices': [{
+                'message': {
+                    'content': 'The answer is 42.',
+                    'reasoning_content': 'Let me think about this step by step...'
+                },
+                'finish_reason': 'stop'
+            }],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 15}
+        }
+
+        anthropic_response = transform_openai_to_anthropic(
+            openai_response,
+            model='claude-sonnet-4-5-20250929'
+        )
+
+        # Should have thinking block followed by text block
+        assert len(anthropic_response['content']) == 2
+        assert anthropic_response['content'][0]['type'] == 'thinking'
+        assert 'step by step' in anthropic_response['content'][0]['thinking']
+        assert anthropic_response['content'][1]['type'] == 'text'
+        assert anthropic_response['content'][1]['text'] == 'The answer is 42.'
+
+    def test_transform_openai_to_anthropic_refusal(self):
+        """Test response transformation mapping content_filter to refusal"""
+        openai_response = {
+            'id': 'chatcmpl-123',
+            'choices': [{
+                'message': {'content': 'I cannot help with that.'},
+                'finish_reason': 'content_filter'
+            }],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5}
+        }
+
+        anthropic_response = transform_openai_to_anthropic(
+            openai_response,
+            model='claude-sonnet-4-5-20250929'
+        )
+
+        assert anthropic_response['stop_reason'] == 'refusal'
+
+
+# ============================================================
+# TEST CLASS: MessagesRequest Schema Validation
+# ============================================================
+
+class TestMessagesRequestSchema:
+    """Test MessagesRequest schema validation"""
+
+    def test_valid_request_with_string_system(self):
+        """Test valid request with string system prompt"""
+        from src.schemas import MessagesRequest, AnthropicMessage
+
+        request = MessagesRequest(
+            model='claude-sonnet-4-5-20250929',
+            max_tokens=1024,
+            messages=[AnthropicMessage(role='user', content='Hello')],
+            system='You are helpful.'
+        )
+
+        assert request.system == 'You are helpful.'
+
+    def test_valid_request_with_array_system(self):
+        """Test valid request with array system prompt"""
+        from src.schemas import MessagesRequest, AnthropicMessage, SystemContentBlock
+
+        request = MessagesRequest(
+            model='claude-sonnet-4-5-20250929',
+            max_tokens=1024,
+            messages=[AnthropicMessage(role='user', content='Hello')],
+            system=[
+                SystemContentBlock(type='text', text='You are helpful.'),
+                SystemContentBlock(type='text', text='Be concise.')
+            ]
+        )
+
+        assert len(request.system) == 2
+        assert request.system[0].text == 'You are helpful.'
+
+    def test_valid_request_with_service_tier(self):
+        """Test valid request with service_tier parameter"""
+        from src.schemas import MessagesRequest, AnthropicMessage
+
+        request = MessagesRequest(
+            model='claude-sonnet-4-5-20250929',
+            max_tokens=1024,
+            messages=[AnthropicMessage(role='user', content='Hello')],
+            service_tier='auto'
+        )
+
+        assert request.service_tier == 'auto'
+
+        request2 = MessagesRequest(
+            model='claude-sonnet-4-5-20250929',
+            max_tokens=1024,
+            messages=[AnthropicMessage(role='user', content='Hello')],
+            service_tier='standard_only'
+        )
+
+        assert request2.service_tier == 'standard_only'
+
+    def test_valid_request_with_thinking_config(self):
+        """Test valid request with thinking configuration"""
+        from src.schemas import MessagesRequest, AnthropicMessage, ThinkingConfig
+
+        request = MessagesRequest(
+            model='claude-sonnet-4-5-20250929',
+            max_tokens=8192,
+            messages=[AnthropicMessage(role='user', content='Hello')],
+            thinking=ThinkingConfig(type='enabled', budget_tokens=2048)
+        )
+
+        assert request.thinking.type == 'enabled'
+        assert request.thinking.budget_tokens == 2048
+
+    def test_thinking_config_budget_validation(self):
+        """Test thinking budget_tokens validation (must be >= 1024)"""
+        from src.schemas import ThinkingConfig
+        import pytest
+
+        with pytest.raises(ValueError, match="at least 1024"):
+            ThinkingConfig(type='enabled', budget_tokens=500)
+
+    def test_temperature_validation(self):
+        """Test temperature must be between 0.0 and 1.0"""
+        from src.schemas import MessagesRequest, AnthropicMessage
+        import pytest
+
+        # Valid temperature
+        request = MessagesRequest(
+            model='claude-sonnet-4-5-20250929',
+            max_tokens=1024,
+            messages=[AnthropicMessage(role='user', content='Hello')],
+            temperature=0.7
+        )
+        assert request.temperature == 0.7
+
+        # Invalid temperature (too high)
+        with pytest.raises(ValueError, match="between 0.0 and 1.0"):
+            MessagesRequest(
+                model='claude-sonnet-4-5-20250929',
+                max_tokens=1024,
+                messages=[AnthropicMessage(role='user', content='Hello')],
+                temperature=1.5
+            )
+
+    def test_content_block_types(self):
+        """Test ContentBlock supports all required types"""
+        from src.schemas import ContentBlock
+
+        # Text block
+        text_block = ContentBlock(type='text', text='Hello')
+        assert text_block.type == 'text'
+        assert text_block.text == 'Hello'
+
+        # Image block
+        image_block = ContentBlock(
+            type='image',
+            source={'type': 'base64', 'data': 'abc123', 'media_type': 'image/png'}
+        )
+        assert image_block.type == 'image'
+        assert image_block.source['type'] == 'base64'
+
+        # Document block
+        doc_block = ContentBlock(
+            type='document',
+            source={'type': 'text', 'data': 'Document content'},
+            title='My Doc',
+            context='Additional context'
+        )
+        assert doc_block.type == 'document'
+        assert doc_block.title == 'My Doc'
+
+        # Tool use block
+        tool_use_block = ContentBlock(
+            type='tool_use',
+            id='toolu_123',
+            name='get_weather',
+            input={'location': 'SF'}
+        )
+        assert tool_use_block.type == 'tool_use'
+        assert tool_use_block.name == 'get_weather'
+
+        # Tool result block
+        tool_result_block = ContentBlock(
+            type='tool_result',
+            tool_use_id='toolu_123',
+            content='The weather is sunny.',
+            is_error=False
+        )
+        assert tool_result_block.type == 'tool_result'
+        assert tool_result_block.tool_use_id == 'toolu_123'
+
+    def test_tool_choice_models(self):
+        """Test tool choice model types"""
+        from src.schemas import ToolChoiceAuto, ToolChoiceAny, ToolChoiceNone, ToolChoiceTool
+
+        auto = ToolChoiceAuto()
+        assert auto.type == 'auto'
+
+        any_choice = ToolChoiceAny(disable_parallel_tool_use=True)
+        assert any_choice.type == 'any'
+        assert any_choice.disable_parallel_tool_use is True
+
+        none_choice = ToolChoiceNone()
+        assert none_choice.type == 'none'
+
+        tool = ToolChoiceTool(name='get_weather')
+        assert tool.type == 'tool'
+        assert tool.name == 'get_weather'
+
+
+# ============================================================
+# TEST CLASS: MessagesResponse Schema
+# ============================================================
+
+class TestMessagesResponseSchema:
+    """Test MessagesResponse schema"""
+
+    def test_response_schema_structure(self):
+        """Test MessagesResponse has correct structure"""
+        from src.schemas import MessagesResponse, UsageResponse, TextBlockResponse
+
+        response = MessagesResponse(
+            id='msg_123',
+            type='message',
+            role='assistant',
+            model='claude-sonnet-4-5-20250929',
+            content=[TextBlockResponse(type='text', text='Hello!')],
+            stop_reason='end_turn',
+            stop_sequence=None,
+            usage=UsageResponse(input_tokens=10, output_tokens=5)
+        )
+
+        assert response.id == 'msg_123'
+        assert response.type == 'message'
+        assert response.role == 'assistant'
+        assert response.stop_reason == 'end_turn'
+        assert response.usage.input_tokens == 10
+
+    def test_usage_response_with_cache_fields(self):
+        """Test UsageResponse with cache-related fields"""
+        from src.schemas import UsageResponse
+
+        usage = UsageResponse(
+            input_tokens=1000,
+            output_tokens=500,
+            cache_creation_input_tokens=200,
+            cache_read_input_tokens=800
+        )
+
+        assert usage.cache_creation_input_tokens == 200
+        assert usage.cache_read_input_tokens == 800
+
+    def test_stop_reason_values(self):
+        """Test all valid stop_reason values"""
+        from src.schemas import MessagesResponse, UsageResponse, TextBlockResponse
+
+        valid_stop_reasons = ['end_turn', 'max_tokens', 'stop_sequence', 'tool_use', 'pause_turn', 'refusal']
+
+        for reason in valid_stop_reasons:
+            response = MessagesResponse(
+                id='msg_123',
+                type='message',
+                role='assistant',
+                model='claude-sonnet-4-5-20250929',
+                content=[TextBlockResponse(type='text', text='Hello!')],
+                stop_reason=reason,
+                usage=UsageResponse(input_tokens=10, output_tokens=5)
+            )
+            assert response.stop_reason == reason

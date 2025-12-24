@@ -348,16 +348,39 @@ async def anthropic_messages(
 
         # === 2) Transform Anthropic format to OpenAI format ===
         messages_data = [msg.model_dump() for msg in req.messages]
+
+        # Handle system parameter (can be string or list of content blocks)
+        system_param = req.system
+        if isinstance(system_param, list):
+            # Convert SystemContentBlock list to list of dicts
+            system_param = [
+                block.model_dump() if hasattr(block, 'model_dump') else block
+                for block in system_param
+            ]
+
+        # Convert tools to dicts if they are ToolDefinition objects
+        tools_param = req.tools
+        if tools_param:
+            tools_param = [
+                tool.model_dump() if hasattr(tool, 'model_dump') else tool
+                for tool in tools_param
+            ]
+
+        # Convert tool_choice to dict if it's a model
+        tool_choice_param = req.tool_choice
+        if tool_choice_param and hasattr(tool_choice_param, 'model_dump'):
+            tool_choice_param = tool_choice_param.model_dump()
+
         openai_messages, openai_params = transform_anthropic_to_openai(
             messages=messages_data,
-            system=req.system,
+            system=system_param,
             max_tokens=req.max_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
             top_k=req.top_k,
             stop_sequences=req.stop_sequences,
-            tools=req.tools,
-            tool_choice=req.tool_choice,
+            tools=tools_param,
+            tool_choice=tool_choice_param,
         )
 
         # === 2.1) Inject conversation history if session_id provided ===
@@ -863,7 +886,9 @@ async def anthropic_messages(
             background_tasks.add_task(save_chat_history_task)
 
         # === 6) Transform response to Anthropic format ===
-        anthropic_response = transform_openai_to_anthropic(processed, model)
+        anthropic_response = transform_openai_to_anthropic(
+            processed, model, stop_sequences=req.stop_sequences
+        )
 
         # Add gateway usage metadata (Gatewayz-specific)
         anthropic_response["gateway_usage"] = {
