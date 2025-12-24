@@ -14,6 +14,28 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # DeepSeek models NOT available on Fireworks - route to OpenRouter instead
+    # Fireworks ONLY has: deepseek-v3p1 (V3/V3.1) and deepseek-r1-0528 (R1)
+    # All other DeepSeek models must go to OpenRouter
+    # V3.2 - not on Fireworks
+    "deepseek/deepseek-v3.2": "openrouter",
+    "deepseek-ai/deepseek-v3.2": "openrouter",
+    "deepseek-v3.2": "openrouter",
+    # V2/V2.5 - older versions, not on Fireworks
+    "deepseek/deepseek-v2": "openrouter",
+    "deepseek-ai/deepseek-v2": "openrouter",
+    "deepseek-v2": "openrouter",
+    "deepseek/deepseek-v2.5": "openrouter",
+    "deepseek-ai/deepseek-v2.5": "openrouter",
+    "deepseek-v2.5": "openrouter",
+    # DeepSeek Coder - not on Fireworks
+    "deepseek/deepseek-coder": "openrouter",
+    "deepseek-ai/deepseek-coder": "openrouter",
+    "deepseek-coder": "openrouter",
+    # DeepSeek Chat - the default chat model, on OpenRouter
+    "deepseek/deepseek-chat": "openrouter",
+    "deepseek-ai/deepseek-chat": "openrouter",
+    "deepseek-chat": "openrouter",
     # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
     # No override needed - let natural provider detection route to Cerebras
 }
@@ -408,6 +430,26 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
+            # DeepSeek models routed to OpenRouter (not available on Fireworks)
+            # V3.2 - not on Fireworks
+            "deepseek/deepseek-v3.2": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-v3.2": "deepseek/deepseek-chat",
+            "deepseek-v3.2": "deepseek/deepseek-chat",
+            # V2/V2.5 - older versions
+            "deepseek/deepseek-v2": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-v2": "deepseek/deepseek-chat",
+            "deepseek-v2": "deepseek/deepseek-chat",
+            "deepseek/deepseek-v2.5": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-v2.5": "deepseek/deepseek-chat",
+            "deepseek-v2.5": "deepseek/deepseek-chat",
+            # DeepSeek Coder
+            "deepseek/deepseek-coder": "deepseek/deepseek-coder",
+            "deepseek-ai/deepseek-coder": "deepseek/deepseek-coder",
+            "deepseek-coder": "deepseek/deepseek-coder",
+            # DeepSeek Chat (default chat model)
+            "deepseek/deepseek-chat": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat",
+            "deepseek-chat": "deepseek/deepseek-chat",
             # Cerebras models explicitly routed through OpenRouter
             # (for users who request provider="openrouter" explicitly or failover scenarios)
             "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
