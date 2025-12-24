@@ -6,13 +6,16 @@ while maintaining console logging for local development.
 
 Features:
 - Structured JSON logging with trace correlation
-- Automatic Loki push integration
+- Automatic Loki push integration (non-blocking async queue)
 - Environment-aware configuration
 - Trace ID injection for log-to-trace correlation
 """
 
+import atexit
 import logging
+import queue
 import sys
+import threading
 
 from src.config.config import Config
 
@@ -21,34 +24,107 @@ logger = logging.getLogger(__name__)
 
 class LokiLogHandler(logging.Handler):
     """
-    Custom log handler that sends logs to Grafana Loki.
+    Custom log handler that sends logs to Grafana Loki asynchronously.
 
-    This handler formats logs as JSON with trace context and pushes them
-    to Loki via HTTP API.
+    This handler uses a background thread and queue to send logs to Loki
+    without blocking the main application. This is critical for fast startup
+    and preventing healthcheck failures.
+
+    Features:
+    - Non-blocking: logs are queued and sent by background thread
+    - Batching: multiple logs can be sent in one request
+    - Graceful shutdown: flushes remaining logs on close
+    - Fault-tolerant: silently drops logs if queue is full
     """
 
-    def __init__(self, loki_url: str, tags: dict[str, str]):
+    def __init__(self, loki_url: str, tags: dict[str, str], max_queue_size: int = 10000):
         super().__init__()
         self.loki_url = loki_url
         self.tags = tags
         self._session = None
+        self._session_lock = threading.Lock()
+        self._queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
+        self._shutdown = threading.Event()
+        self._closed = threading.Event()
+        self._worker_thread = threading.Thread(target=self._worker, daemon=True)
+        self._worker_thread.start()
+
+        # Register cleanup on interpreter shutdown
+        atexit.register(self._atexit_flush)
 
     def _get_session(self):
-        """Lazy-load HTTP session for sending logs with connection limits."""
-        if self._session is None:
-            import httpx
+        """Lazy-load HTTP session for sending logs with connection limits.
 
-            # Create client with strict timeouts and connection limits to prevent resource exhaustion
-            # Set max_connections to prevent too many concurrent connections
-            # Set max_keepalive_connections to limit persistent connections
-            limits = httpx.Limits(max_connections=10, max_keepalive_connections=5)
-            timeout = httpx.Timeout(5.0, connect=2.0)
-            self._session = httpx.Client(timeout=timeout, limits=limits)
-        return self._session
+        Thread-safe: uses a lock to prevent race conditions during session creation.
+        Returns None if handler is closed to prevent resource leaks.
+        """
+        # Don't create new sessions after close() has been called
+        if self._closed.is_set():
+            return None
+
+        with self._session_lock:
+            # Double-check after acquiring lock
+            if self._closed.is_set():
+                return None
+            if self._session is None:
+                import httpx
+
+                # Create client with strict timeouts and connection limits to prevent resource exhaustion
+                # Set max_connections to prevent too many concurrent connections
+                # Set max_keepalive_connections to limit persistent connections
+                limits = httpx.Limits(max_connections=10, max_keepalive_connections=5)
+                timeout = httpx.Timeout(5.0, connect=2.0)
+                self._session = httpx.Client(timeout=timeout, limits=limits)
+            return self._session
+
+    def _worker(self) -> None:
+        """Background worker thread that sends logs to Loki.
+
+        The worker continues processing until both:
+        1. The shutdown event is set
+        2. The queue is empty (all remaining logs are flushed)
+        """
+        while True:
+            try:
+                # Wait for log entry with timeout to allow shutdown check
+                try:
+                    payload = self._queue.get(timeout=0.5)
+                except queue.Empty:
+                    # Queue is empty - check if we should exit
+                    if self._shutdown.is_set():
+                        break
+                    continue
+
+                # Send to Loki
+                self._send_to_loki(payload)
+                self._queue.task_done()
+
+            except Exception:
+                # Silently ignore errors to prevent worker thread crash.
+                # Loki logging is best-effort - losing some logs is acceptable
+                # to maintain application stability.
+                pass
+
+    def _send_to_loki(self, payload: dict) -> None:
+        """Send a payload to Loki."""
+        try:
+            session = self._get_session()
+            if session is None:
+                # Handler is closed, skip sending
+                return
+            response = session.post(self.loki_url, json=payload, timeout=5.0)
+            response.raise_for_status()
+        except Exception:
+            # Silently ignore Loki failures to prevent cascade errors.
+            # Loki logging is best-effort - network issues or Loki downtime
+            # should not affect application functionality.
+            pass
 
     def emit(self, record: logging.LogRecord) -> None:
         """
-        Send log record to Loki.
+        Queue log record for async sending to Loki.
+
+        This method is non-blocking - it queues the log and returns immediately.
 
         Args:
             record: LogRecord to send
@@ -59,7 +135,6 @@ class LokiLogHandler(logging.Handler):
 
             # Get trace context if available
             trace_id = getattr(record, "trace_id", None)
-            getattr(record, "span_id", None)
 
             # Build Loki labels
             labels = {**self.tags}
@@ -73,22 +148,74 @@ class LokiLogHandler(logging.Handler):
             timestamp_ns = str(int(record.created * 1_000_000_000))
             payload = {"streams": [{"stream": labels, "values": [[timestamp_ns, log_entry]]}]}
 
-            # Send to Loki with timeout to prevent hanging
-            session = self._get_session()
-            response = session.post(self.loki_url, json=payload, timeout=5.0)
-            response.raise_for_status()
+            # Non-blocking queue put - drop log if queue is full
+            try:
+                self._queue.put_nowait(payload)
+            except queue.Full:
+                # Queue is full, drop this log to prevent blocking
+                pass
 
         except Exception:
-            # Silently ignore Loki logging failures to prevent cascade errors
-            # Do NOT use handleError() as it can trigger recursive logging
-            # Do NOT log the error as it can create infinite loops
-            # Just continue - the log will be lost but the application won't crash
+            # Silently ignore errors to prevent cascade failures.
+            # Logging should never crash the application - drop the log
+            # rather than raise an exception.
             pass
 
+    def _atexit_flush(self) -> None:
+        """Flush remaining logs on interpreter shutdown."""
+        self.close()
+
+    def flush(self, timeout: float = 10.0) -> None:
+        """Flush all queued logs with timeout.
+
+        Blocks until all currently queued logs have been fully processed
+        (sent to Loki), or until timeout is reached.
+
+        Args:
+            timeout: Maximum seconds to wait for flush (default: 10.0)
+
+        Note: Uses queue.all_tasks_done condition with timeout since
+        Queue.join() doesn't support timeout directly.
+        """
+        # Use the queue's internal condition variable to wait for all tasks
+        # to complete (all task_done() calls made), with timeout support.
+        with self._queue.all_tasks_done:
+            while self._queue.unfinished_tasks:
+                if not self._queue.all_tasks_done.wait(timeout=timeout):
+                    # Timeout reached
+                    break
+
     def close(self) -> None:
-        """Close HTTP session."""
-        if self._session:
-            self._session.close()
+        """Gracefully shutdown the handler.
+
+        Ensures all queued logs are sent before shutting down:
+        1. Signal worker to begin shutdown (it will drain remaining queue items)
+        2. Wait for worker thread to exit
+        3. Mark handler as closed to prevent new session creation
+        4. Close HTTP session (with lock to prevent races)
+        """
+        # Signal worker to stop accepting new items and drain queue
+        # Note: _closed is NOT set yet so worker can still send remaining items
+        self._shutdown.set()
+
+        # Wait for worker thread to finish draining and exit (with timeout)
+        if self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=5.0)
+
+        # Now mark as closed to prevent any new session creation
+        self._closed.set()
+
+        # Close HTTP session with lock to prevent race with _get_session
+        with self._session_lock:
+            if self._session:
+                try:
+                    self._session.close()
+                except Exception:
+                    # Ignore session close errors to avoid shutdown failures.
+                    # The session will be garbage collected anyway.
+                    pass
+                self._session = None
+
         super().close()
 
 
