@@ -175,14 +175,25 @@ class LokiLogHandler(logging.Handler):
             timeout: Maximum seconds to wait for flush (default: 10.0)
 
         Note: Uses queue.all_tasks_done condition with timeout since
-        Queue.join() doesn't support timeout directly.
+        Queue.join() doesn't support timeout directly. We track a deadline
+        to ensure total wait time never exceeds the specified timeout,
+        even with spurious wakeups or new items being added during the wait.
         """
+        import time
+
+        # Calculate deadline to ensure total wait never exceeds timeout
+        deadline = time.monotonic() + timeout
+
         # Use the queue's internal condition variable to wait for all tasks
         # to complete (all task_done() calls made), with timeout support.
         with self._queue.all_tasks_done:
             while self._queue.unfinished_tasks:
-                if not self._queue.all_tasks_done.wait(timeout=timeout):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     # Timeout reached
+                    break
+                if not self._queue.all_tasks_done.wait(timeout=remaining):
+                    # Timeout reached (wait returned False)
                     break
 
     def close(self) -> None:
