@@ -153,6 +153,9 @@ from src.utils.logging_utils import mask_key
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Initialize provider import errors tracking (used at end of module)
+_provider_import_errors = {}
+
 # Log module initialization to help debug route loading
 logger.info("🔄 Chat module initialized - router created")
 logger.info(f"   Router type: {type(router)}")
