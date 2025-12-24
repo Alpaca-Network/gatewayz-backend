@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # DeepSeek V3.2 is NOT available on Fireworks, route to OpenRouter instead
+    # Fireworks only has deepseek-v3p1 (V3/V3.1) and deepseek-r1-0528 (R1)
+    "deepseek/deepseek-v3.2": "openrouter",
+    "deepseek-ai/deepseek-v3.2": "openrouter",
+    "deepseek-v3.2": "openrouter",
     # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
     # No override needed - let natural provider detection route to Cerebras
 }
@@ -408,6 +413,11 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Other models
             "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
             "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
+            # DeepSeek V3.2 - route to deepseek/deepseek-chat on OpenRouter
+            # Note: Fireworks does NOT have V3.2, only V3/V3.1 (deepseek-v3p1)
+            "deepseek/deepseek-v3.2": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-v3.2": "deepseek/deepseek-chat",
+            "deepseek-v3.2": "deepseek/deepseek-chat",
             # Cerebras models explicitly routed through OpenRouter
             # (for users who request provider="openrouter" explicitly or failover scenarios)
             "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
