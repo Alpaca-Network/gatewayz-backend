@@ -61,9 +61,29 @@ class EnhancedNotificationService:
         self._last_email_send_time = 0.0
         self._min_email_interval = 0.6  # seconds between email sends
 
+    def _is_valid_email_for_sending(self, email: str) -> bool:
+        """Check if email is valid for sending (not a Privy fallback placeholder)."""
+        if not email:
+            return False
+        # Reject Privy fallback emails that aren't real email addresses
+        if email.endswith("@privy.user"):
+            return False
+        # Basic email format check
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return False
+        return True
+
     def send_welcome_email(self, user_id: int, username: str, email: str, credits: int) -> bool:
         """Send welcome email to new users (API key not included for security)"""
         try:
+            # Skip sending for invalid/placeholder emails
+            if not self._is_valid_email_for_sending(email):
+                logger.info(
+                    f"Skipping welcome email for user {user_id}: "
+                    f"'{email}' is a placeholder email (e.g., Privy fallback)"
+                )
+                return True  # Return True to prevent retry loops
+
             logger.info(f"Enhanced notification service - sending welcome email to: {email}")
             logger.info(f"Resend API key available: {bool(self.resend_api_key)}")
             logger.info(f"From email: {self.from_email}")
@@ -402,6 +422,13 @@ The {self.app_name} Team
     ) -> bool:
         """Send email notification using Resend SDK (if available)"""
         try:
+            # Validate email before attempting to send
+            if not self._is_valid_email_for_sending(to_email):
+                logger.info(
+                    f"Skipping email to '{to_email}': invalid or placeholder email address"
+                )
+                return True  # Return True to avoid error logging for expected cases
+
             logger.info(f"Attempting to send email to: {to_email}")
             logger.info(f"Subject: {subject}")
             logger.info(f"Email client available: {self.email_client_available}")
