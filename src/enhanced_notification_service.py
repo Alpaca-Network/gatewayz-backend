@@ -421,9 +421,13 @@ The {self.app_name} Team
                 return False
             if "." not in domain:
                 return False
-            # Domain must have valid TLD (at least 2 chars after last dot)
+            # Domain must have valid TLD (at least 2 chars)
+            # Also ensure all domain parts are non-empty (reject ".com", "a..b.com", etc.)
             domain_parts = domain.split(".")
             if len(domain_parts[-1]) < 2:
+                return False
+            # Check all domain parts are non-empty (catches domains starting with dot)
+            if any(part == "" for part in domain_parts):
                 return False
             return True
         except ValueError:

@@ -569,6 +569,11 @@ class TestEmailValidation:
             "user+tag@example.org",
             "user@subdomain.example.com",
             "name@company.io",
+            # Test longer TLDs (museum=6 chars, aero=4 chars, travel=6 chars)
+            "curator@art.museum",
+            "pilot@flight.aero",
+            "agent@booking.travel",
+            "user@example.photography",
         ]
         for email in valid_emails:
             assert notification_service._is_valid_email(email) is True, f"Should accept: {email}"
@@ -600,7 +605,9 @@ class TestEmailValidation:
             "@nodomain.com",
             "user@",
             "user@domain",  # No TLD
-            "user@.com",
+            "user@.com",  # Domain starts with dot
+            "user@domain..com",  # Consecutive dots in domain
+            "user@a..b.com",  # Consecutive dots in subdomain
             None,
         ]
         for email in invalid_emails:
