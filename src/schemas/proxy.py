@@ -8,7 +8,7 @@ ALLOWED_CHAT_ROLES = {"system", "user", "assistant"}
 
 class Message(BaseModel):
     role: str
-    content: str
+    content: str | list[dict[str, Any]]  # String or multimodal content array (for images, audio, etc.)
 
     @field_validator("role")
     @classmethod
@@ -22,9 +22,21 @@ class Message(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def validate_content(cls, content: str) -> str:
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("Message content must be a non-empty string.")
+    def validate_content(cls, content: str | list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        if isinstance(content, str):
+            if not content.strip():
+                raise ValueError("Message content must be a non-empty string.")
+        elif isinstance(content, list):
+            if len(content) == 0:
+                raise ValueError("Message content array cannot be empty.")
+            # Validate that multimodal content has valid structure
+            for item in content:
+                if not isinstance(item, dict):
+                    raise ValueError("Each content item must be a dictionary.")
+                if "type" not in item:
+                    raise ValueError("Each content item must have a 'type' field.")
+        else:
+            raise ValueError("Message content must be a string or list of content objects.")
         return content
 
 
