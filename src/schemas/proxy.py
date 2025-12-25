@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Discriminator, Field, field_validator
+from pydantic import BaseModel, Discriminator, Field, field_validator, model_validator
 
 ALLOWED_CHAT_ROLES = {"system", "user", "assistant", "tool", "function"}
 
@@ -259,6 +259,19 @@ class ImageSource(BaseModel):
     class Config:
         extra = "allow"
 
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> "ImageSource":
+        """Validate that required fields are present based on type."""
+        if self.type == "base64":
+            if not self.data:
+                raise ValueError("'data' field is required when type is 'base64'")
+            if not self.media_type:
+                raise ValueError("'media_type' field is required when type is 'base64'")
+        elif self.type == "url":
+            if not self.url:
+                raise ValueError("'url' field is required when type is 'url'")
+        return self
+
 
 class DocumentSource(BaseModel):
     """Document source for document content blocks.
@@ -273,6 +286,23 @@ class DocumentSource(BaseModel):
 
     class Config:
         extra = "allow"
+
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> "DocumentSource":
+        """Validate that required fields are present based on type."""
+        if self.type == "base64":
+            if not self.data:
+                raise ValueError("'data' field is required when type is 'base64'")
+            if not self.media_type:
+                raise ValueError("'media_type' field is required when type is 'base64'")
+        elif self.type == "url":
+            if not self.url:
+                raise ValueError("'url' field is required when type is 'url'")
+        elif self.type == "text":
+            if not self.data:
+                raise ValueError("'data' field is required when type is 'text'")
+        # 'content' type has different structure, validated elsewhere
+        return self
 
 
 class CitationConfig(BaseModel):

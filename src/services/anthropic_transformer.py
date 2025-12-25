@@ -163,8 +163,17 @@ def _transform_content_block(block: dict[str, Any]) -> dict[str, Any] | list[dic
         return {"type": "text", "text": f"[Document: {title}]"}
 
     elif block_type == "tool_use":
-        # Tool use blocks are from assistant messages, pass through
-        return block
+        # Tool use blocks should only appear in assistant messages and are handled
+        # separately in transform_anthropic_to_openai. If we reach here, it means
+        # this is an unexpected tool_use block (e.g., in a user message), so convert
+        # it to a text representation for compatibility.
+        tool_name = block.get("name", "unknown_tool")
+        tool_input = block.get("input", {})
+        tool_id = block.get("id", "")
+        return {
+            "type": "text",
+            "text": f"[Tool Call: {tool_name}] (id: {tool_id}) Input: {json.dumps(tool_input)}",
+        }
 
     elif block_type == "tool_result":
         # Tool result blocks are from user messages
