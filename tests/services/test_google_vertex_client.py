@@ -825,5 +825,158 @@ class TestMaxOutputTokensValidation:
         assert request_body["generationConfig"]["maxOutputTokens"] == 4096
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
+class TestVertexTimeoutRetry:
+    """Tests for timeout retry logic"""
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_timeout_retry_success_on_second_attempt(self, monkeypatch):
+        """Test that timeout triggers retry and succeeds on second attempt."""
+        import httpx
+        from src.services.google_vertex_client import _make_google_vertex_request_rest
+
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        # First call times out, second succeeds
+        call_count = 0
+
+        class TimeoutThenSuccessClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, headers, json):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise httpx.ReadTimeout("Connection timed out")
+                # Second call succeeds
+                response = Mock()
+                response.status_code = 200
+                response.json.return_value = {
+                    "candidates": [
+                        {
+                            "content": {"parts": [{"text": "Success after retry"}]},
+                            "finishReason": "STOP",
+                        }
+                    ],
+                    "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+                }
+                return response
+
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", TimeoutThenSuccessClient)
+        monkeypatch.setattr("src.services.google_vertex_client.time.sleep", lambda x: None)
+
+        result = _make_google_vertex_request_rest(
+            messages=[{"role": "user", "content": "test"}],
+            model="gemini-2.5-flash",
+            max_tokens=100,
+        )
+
+        # Should succeed after retry
+        assert result["choices"][0]["message"]["content"] == "Success after retry"
+        assert call_count == 2  # One timeout, one success
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_timeout_exhausts_retries(self, monkeypatch):
+        """Test that timeout raises error after exhausting retries."""
+        import httpx
+        from src.services.google_vertex_client import _make_google_vertex_request_rest
+
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        call_count = 0
+
+        class AlwaysTimeoutClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, headers, json):
+                nonlocal call_count
+                call_count += 1
+                raise httpx.ReadTimeout("Connection timed out")
+
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", AlwaysTimeoutClient)
+        monkeypatch.setattr("src.services.google_vertex_client.time.sleep", lambda x: None)
+
+        # Should fail after max retries
+        with pytest.raises(ValueError, match="timed out after .* retries"):
+            _make_google_vertex_request_rest(
+                messages=[{"role": "user", "content": "test"}],
+                model="gemini-2.5-flash",
+                max_tokens=100,
+                vertex_max_retries=2,
+            )
+
+        # Should have attempted 3 times (initial + 2 retries)
+        assert call_count == 3
+
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_timeout_custom_retry_count(self, monkeypatch):
+        """Test that custom retry count is respected."""
+        import httpx
+        from src.services.google_vertex_client import _make_google_vertex_request_rest
+
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        call_count = 0
+
+        class AlwaysTimeoutClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, headers, json):
+                nonlocal call_count
+                call_count += 1
+                raise httpx.ReadTimeout("Connection timed out")
+
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", AlwaysTimeoutClient)
+        monkeypatch.setattr("src.services.google_vertex_client.time.sleep", lambda x: None)
+
+        # Test with 0 retries (should fail immediately)
+        with pytest.raises(ValueError, match="timed out after .* retries"):
+            _make_google_vertex_request_rest(
+                messages=[{"role": "user", "content": "test"}],
+                model="gemini-2.5-flash",
+                max_tokens=100,
+                vertex_max_retries=0,
+            )
+
+        # Should have attempted only once
+        assert call_count == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

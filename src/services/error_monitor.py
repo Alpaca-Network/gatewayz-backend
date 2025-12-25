@@ -156,8 +156,21 @@ class ErrorMonitor:
 
             return errors
 
+        except httpx.ReadTimeout as timeout_error:
+            logger.warning(
+                f"Loki query timed out after 10s. Consider reducing hours or limit. Error: {timeout_error}"
+            )
+            return []
+        except httpx.HTTPStatusError as http_error:
+            logger.error(
+                f"Loki query returned HTTP error {http_error.response.status_code}: {http_error}"
+            )
+            return []
+        except httpx.ConnectError as conn_error:
+            logger.error(f"Failed to connect to Loki at {self.loki_query_url}: {conn_error}")
+            return []
         except Exception as e:
-            logger.error(f"Error fetching from Loki: {e}")
+            logger.error(f"Error fetching from Loki: {e}", exc_info=True)
             return []
 
     def classify_error(self, error_data: dict[str, Any]) -> tuple[ErrorCategory, ErrorSeverity]:

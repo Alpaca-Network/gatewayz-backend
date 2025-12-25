@@ -555,6 +555,47 @@ def _make_google_vertex_request_rest(
 
         return _process_google_vertex_rest_response(response_data, model)
 
+    except httpx.ReadTimeout as timeout_error:
+        # Handle read timeouts separately with retry logic
+        logger.warning(
+            "Google Vertex REST API read timeout (timeout=%ss): %s",
+            timeout_seconds,
+            timeout_error,
+        )
+        # Check if this is a retry attempt
+        max_retries = kwargs.get("vertex_max_retries", 1)
+        retry_count = kwargs.get("_retry_count", 0)
+
+        if retry_count < max_retries:
+            retry_delay = min(2 ** retry_count, 10)  # Exponential backoff, max 10s
+            logger.info(
+                "Retrying Vertex REST request (attempt %d/%d) after %ds delay",
+                retry_count + 1,
+                max_retries,
+                retry_delay,
+            )
+            time.sleep(retry_delay)
+
+            # Retry with incremented counter
+            retry_kwargs = kwargs.copy()
+            retry_kwargs["_retry_count"] = retry_count + 1
+            return _make_google_vertex_request_rest(
+                messages=messages,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                **retry_kwargs,
+            )
+        else:
+            logger.error(
+                "Google Vertex REST API request timed out after %d retries (timeout=%ss)",
+                max_retries,
+                timeout_seconds,
+            )
+            raise ValueError(
+                f"Vertex REST API request timed out after {max_retries} retries: {timeout_error}"
+            ) from timeout_error
     except httpx.RequestError as request_error:
         logger.error("HTTP request to Vertex REST API failed: %s", request_error, exc_info=True)
         raise ValueError(f"Vertex REST API request failed: {request_error}") from request_error
