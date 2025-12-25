@@ -331,7 +331,7 @@ def transform_anthropic_to_openai(
                     # Handle tool_use blocks in assistant messages
                     if block_type == "tool_use" and role == "assistant":
                         tool_calls_list.append({
-                            "id": block.get("id", f"tool-{int(time.time())}"),
+                            "id": block.get("id", f"toolu_{int(time.time())}"),
                             "type": "function",
                             "function": {
                                 "name": block.get("name", ""),
@@ -438,9 +438,11 @@ def transform_openai_to_anthropic(
     }
     stop_reason = stop_reason_map.get(finish_reason, "end_turn")
 
-    # Check if stopped by a stop sequence (only for string content)
+    # Check if stopped by a stop sequence (only for string content and natural stop)
+    # Only check for stop sequences when the finish_reason was "stop" (end_turn)
+    # to avoid overriding more specific stop reasons like tool_use or max_tokens
     stop_sequence_triggered = None
-    if stop_sequences and isinstance(content, str) and content:
+    if stop_sequences and isinstance(content, str) and content and stop_reason == "end_turn":
         for seq in stop_sequences:
             if content.endswith(seq):
                 stop_reason = "stop_sequence"
@@ -500,10 +502,10 @@ def transform_openai_to_anthropic(
         "output_tokens": completion_tokens,
     }
 
-    # Add cache-related fields if present in the response
-    if usage.get("cache_creation_input_tokens"):
+    # Add cache-related fields if present in the response (use 'in' to include zero values)
+    if "cache_creation_input_tokens" in usage:
         usage_response["cache_creation_input_tokens"] = usage["cache_creation_input_tokens"]
-    if usage.get("cache_read_input_tokens"):
+    if "cache_read_input_tokens" in usage:
         usage_response["cache_read_input_tokens"] = usage["cache_read_input_tokens"]
 
     # Build Anthropic-style response
