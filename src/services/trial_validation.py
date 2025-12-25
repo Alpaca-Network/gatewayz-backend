@@ -257,13 +257,26 @@ def track_trial_usage(
         if model_id and prompt_tokens is not None and completion_tokens is not None:
             # Use accurate per-model pricing from the pricing service
             try:
-                from src.services.pricing import calculate_cost
+                from src.services.pricing import get_model_pricing
 
-                credit_cost = calculate_cost(model_id, prompt_tokens, completion_tokens)
-                logger.info(
-                    f"Trial usage: Using model-specific pricing for {model_id}: "
-                    f"{prompt_tokens} prompt + {completion_tokens} completion = ${credit_cost:.6f}"
-                )
+                pricing = get_model_pricing(model_id)
+
+                if pricing.get("found", False):
+                    # Model found in catalog - use per-1M-token pricing
+                    prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000_000
+                    completion_cost = (completion_tokens * pricing["completion"]) / 1_000_000
+                    credit_cost = prompt_cost + completion_cost
+                    logger.info(
+                        f"Trial usage: Using model-specific pricing for {model_id}: "
+                        f"{prompt_tokens} prompt + {completion_tokens} completion = ${credit_cost:.6f}"
+                    )
+                else:
+                    # Model not found in catalog - use flat rate to avoid near-zero charges
+                    credit_cost = tokens_used * 0.00002
+                    logger.info(
+                        f"Trial usage: Model {model_id} not in catalog, using flat rate: "
+                        f"{tokens_used} tokens = ${credit_cost:.6f}"
+                    )
             except Exception as e:
                 # Fallback to flat rate if pricing lookup fails
                 logger.warning(f"Failed to get model pricing for {model_id}, using flat rate: {e}")

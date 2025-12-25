@@ -278,13 +278,12 @@ def test_track_usage_with_model_specific_pricing(monkeypatch, mod):
     client = _FakeSupabase(rows)
     monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
 
-    # Mock the pricing calculation to return a specific cost
+    # Mock get_model_pricing to return pricing for a known model
     # Claude Opus: ~$15/1M input, ~$75/1M output
-    def mock_calculate_cost(model_id, prompt_tokens, completion_tokens):
-        # Simulated pricing: $15/1M prompt, $75/1M completion
-        return (prompt_tokens * 15 / 1_000_000) + (completion_tokens * 75 / 1_000_000)
+    def mock_get_model_pricing(model_id):
+        return {"prompt": 15.0, "completion": 75.0, "found": True}
 
-    monkeypatch.setattr("src.services.pricing.calculate_cost", mock_calculate_cost)
+    monkeypatch.setattr("src.services.pricing.get_model_pricing", mock_get_model_pricing)
 
     ok = mod.track_trial_usage(
         "sk-trial",
@@ -301,7 +300,7 @@ def test_track_usage_with_model_specific_pricing(monkeypatch, mod):
     assert updated["trial_used_tokens"] == 2000
     assert updated["trial_used_requests"] == 1
     # With model pricing: ~$0.09 (much more than flat rate of $0.04)
-    assert updated["trial_used_credits"] > 0.04  # Should be higher than flat rate
+    assert math.isclose(updated["trial_used_credits"], 0.09, rel_tol=1e-9)
 
 
 def test_track_usage_fallback_without_model_info(monkeypatch, mod):
@@ -330,6 +329,45 @@ def test_track_usage_fallback_without_model_info(monkeypatch, mod):
     assert updated["trial_used_tokens"] == 1000
     assert updated["trial_used_requests"] == 1
     assert math.isclose(updated["trial_used_credits"], 0.02, rel_tol=1e-9)
+
+
+def test_track_usage_unknown_model_uses_flat_rate(monkeypatch, mod):
+    """Test that unknown models (not in catalog) use flat rate instead of near-zero pricing"""
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "trial_used_tokens": 0,
+            "trial_used_requests": 0,
+            "trial_used_credits": 0.0,
+        }
+    }
+    client = _FakeSupabase(rows)
+    monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
+
+    # Mock get_model_pricing to return "not found" for unknown model
+    def mock_get_model_pricing(model_id):
+        # Model not in catalog - return default pricing with found=False
+        return {"prompt": 0.00002, "completion": 0.00002, "found": False}
+
+    monkeypatch.setattr("src.services.pricing.get_model_pricing", mock_get_model_pricing)
+
+    ok = mod.track_trial_usage(
+        "sk-trial",
+        tokens_used=2000,
+        requests_used=1,
+        model_id="unknown/model-xyz",
+        prompt_tokens=1000,
+        completion_tokens=1000,
+    )
+    assert ok is True
+
+    # Should use flat rate: 2000 * 0.00002 = 0.04
+    # NOT the near-zero pricing: (1000 * 0.00002 / 1M) + (1000 * 0.00002 / 1M) = 0.00000004
+    updated = rows["sk-trial"]
+    assert updated["trial_used_tokens"] == 2000
+    assert updated["trial_used_requests"] == 1
+    # Flat rate should be $0.04, not near-zero
+    assert math.isclose(updated["trial_used_credits"], 0.04, rel_tol=1e-9)
 
 
 # ----------------------------- tests: trial validation cache -----------------------------
