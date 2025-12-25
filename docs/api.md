@@ -310,20 +310,62 @@ Delete an API key.
 POST /v1/chat/completions
 ```
 
-OpenAI-compatible chat completions endpoint.
+OpenAI-compatible chat completions endpoint. This endpoint is fully compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create).
 
-**Request Body:**
+**Request Body Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `model` | string | Yes | - | ID of the model to use (e.g., `openai/gpt-4`, `anthropic/claude-3-opus`) |
+| `messages` | array | Yes | - | A list of messages comprising the conversation so far |
+| `max_tokens` | integer | No | 4096 | Maximum number of tokens to generate in the completion |
+| `temperature` | number | No | 1.0 | Sampling temperature (0-2). Higher = more random |
+| `top_p` | number | No | 1.0 | Nucleus sampling: consider tokens with top_p probability mass |
+| `n` | integer | No | 1 | Number of chat completion choices to generate |
+| `stop` | string/array | No | null | Up to 4 sequences where the API will stop generating |
+| `frequency_penalty` | number | No | 0.0 | Penalty for token frequency (-2.0 to 2.0) |
+| `presence_penalty` | number | No | 0.0 | Penalty for token presence (-2.0 to 2.0) |
+| `stream` | boolean | No | false | Enable streaming responses via SSE |
+| `stream_options` | object | No | null | Options for streaming (e.g., `include_usage`) |
+| `tools` | array | No | null | List of tools the model may call |
+| `tool_choice` | string/object | No | null | Controls tool selection: `none`, `auto`, `required`, or specific tool |
+| `parallel_tool_calls` | boolean | No | true | Enable parallel function calling |
+| `response_format` | object | No | null | Output format: `text`, `json_object`, or `json_schema` |
+| `logprobs` | boolean | No | null | Return log probabilities of output tokens |
+| `top_logprobs` | integer | No | null | Number of most likely tokens to return (0-20) |
+| `logit_bias` | object | No | null | Modify likelihood of specified tokens (-100 to 100) |
+| `seed` | integer | No | null | Seed for deterministic sampling |
+| `user` | string | No | null | Unique end-user identifier for abuse monitoring |
+| `service_tier` | string | No | null | Latency tier: `auto` or `default` |
+| `provider` | string | No | null | Gateway-specific: provider selection (`openrouter`, `featherless`, etc.) |
+
+**Message Object:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `role` | string | Yes | Message role: `system`, `user`, `assistant`, `tool`, or `function` |
+| `content` | string/array/null | Conditional | Message content. Can be null for assistant messages with tool_calls |
+| `name` | string | No | Optional name for function messages |
+| `tool_calls` | array | No | Tool calls from assistant (for assistant role) |
+| `tool_call_id` | string | No | ID of the tool call being responded to (for tool role) |
+
+**Example Request:**
 ```json
 {
   "model": "openai/gpt-4",
   "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
     {
       "role": "user",
       "content": "Hello, world!"
     }
   ],
   "max_tokens": 100,
-  "temperature": 0.7
+  "temperature": 0.7,
+  "stream": false
 }
 ```
 
@@ -337,6 +379,7 @@ OpenAI-compatible chat completions endpoint.
   "object": "chat.completion",
   "created": 1677652288,
   "model": "openai/gpt-4",
+  "system_fingerprint": "fp_abc123",
   "choices": [
     {
       "index": 0,
@@ -344,6 +387,7 @@ OpenAI-compatible chat completions endpoint.
         "role": "assistant",
         "content": "Hello! How can I help you today?"
       },
+      "logprobs": null,
       "finish_reason": "stop"
     }
   ],
@@ -352,6 +396,58 @@ OpenAI-compatible chat completions endpoint.
     "completion_tokens": 20,
     "total_tokens": 30
   }
+}
+```
+
+**Streaming Response:**
+
+When `stream: true`, responses are sent as Server-Sent Events (SSE):
+
+```
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"openai/gpt-4","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"openai/gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"openai/gpt-4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+**Tool Calling Example:**
+```json
+{
+  "model": "openai/gpt-4",
+  "messages": [
+    {"role": "user", "content": "What's the weather in Boston?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get the current weather in a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {"type": "string", "description": "City and state"}
+          },
+          "required": ["location"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}
+```
+
+**JSON Mode Example:**
+```json
+{
+  "model": "openai/gpt-4",
+  "messages": [
+    {"role": "user", "content": "Return a JSON object with name and age fields"}
+  ],
+  "response_format": {"type": "json_object"}
 }
 ```
 

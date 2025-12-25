@@ -310,12 +310,22 @@ def _handle_existing_user(
 # ISSUE FIX #6: Improved background task error handling with better logging
 
 
+def _is_valid_deliverable_email(email: str) -> bool:
+    """Check if email is valid and deliverable (not a fallback placeholder)."""
+    if not email or "@" not in email:
+        return False
+    # Skip fallback placeholder emails that cannot receive mail
+    if email.endswith("@privy.user"):
+        return False
+    return True
+
+
 def _send_welcome_email_background(user_id: str, username: str, email: str, credits: float):
     """Send welcome email in background for existing users"""
     try:
         logger.info(f"Background task: Sending welcome email to user {user_id}")
-        if not email or "@" not in email:
-            logger.warning(f"Background task: Invalid email '{email}' for user {user_id}, skipping")
+        if not _is_valid_deliverable_email(email):
+            logger.warning(f"Background task: Invalid or non-deliverable email '{email}' for user {user_id}, skipping")
             return
 
         success = notif_module.enhanced_notification_service.send_welcome_email_if_needed(
@@ -340,9 +350,9 @@ def _send_new_user_welcome_email_background(
     """Send welcome email in background for new users"""
     try:
         logger.info(f"Background task: Sending welcome email to new user {user_id}")
-        if not email or "@" not in email:
+        if not _is_valid_deliverable_email(email):
             logger.warning(
-                f"Background task: Invalid email '{email}' for new user {user_id}, skipping"
+                f"Background task: Invalid or non-deliverable email '{email}' for new user {user_id}, skipping"
             )
             return
 
