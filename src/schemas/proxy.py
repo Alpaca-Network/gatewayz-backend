@@ -1,7 +1,7 @@
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Discriminator, field_validator
 
 ALLOWED_CHAT_ROLES = {"system", "user", "assistant"}
 
@@ -171,6 +171,21 @@ class CitationConfig(BaseModel):
         extra = "allow"
 
 
+class ToolResultContentBlock(BaseModel):
+    """Content block within a tool_result (text or image).
+
+    Tool results can contain text or image content blocks.
+    See: https://platform.claude.com/docs/en/api/messages#tool-results
+    """
+
+    type: Literal["text", "image"]
+    text: str | None = None  # For type="text"
+    source: ImageSource | dict[str, Any] | None = None  # For type="image"
+
+    class Config:
+        extra = "allow"
+
+
 class ContentBlock(BaseModel):
     """Content block for Anthropic Messages API.
 
@@ -205,7 +220,7 @@ class ContentBlock(BaseModel):
 
     # Tool result block fields (from user)
     tool_use_id: str | None = None  # References the tool_use id
-    content: str | list[Any] | None = None  # Tool result content
+    content: str | list[ToolResultContentBlock] | None = None  # Tool result content (string or content blocks)
     is_error: bool | None = None  # Whether the tool call resulted in an error
 
     class Config:
@@ -302,6 +317,14 @@ class ToolChoiceTool(BaseModel):
         extra = "allow"
 
 
+# Discriminated union for tool_choice - Pydantic uses the 'type' field to determine which model to use
+# This ensures proper serialization/deserialization across different clients
+ToolChoice = Annotated[
+    Union[ToolChoiceAuto, ToolChoiceAny, ToolChoiceNone, ToolChoiceTool],
+    Discriminator("type"),
+]
+
+
 class ThinkingConfig(BaseModel):
     """Extended thinking configuration.
 
@@ -370,7 +393,7 @@ class MessagesRequest(BaseModel):
 
     # Tool use parameters
     tools: list[ToolDefinition | dict[str, Any]] | None = None  # Tool definitions
-    tool_choice: ToolChoiceAuto | ToolChoiceAny | ToolChoiceNone | ToolChoiceTool | dict[str, Any] | None = None
+    tool_choice: ToolChoice | dict[str, Any] | None = None  # Discriminated union by 'type' field
 
     # Extended thinking configuration
     thinking: ThinkingConfig | None = None

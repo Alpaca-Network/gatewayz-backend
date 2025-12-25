@@ -142,17 +142,22 @@ def _transform_content_block(block: dict[str, Any]) -> dict[str, Any] | list[dic
         source = block.get("source", {})
         title = block.get("title", "Document")
         context = block.get("context", "")
+        # Check if context has actual content (not just whitespace)
+        has_context = context and context.strip()
 
         if isinstance(source, dict):
             if source.get("type") == "text":
                 doc_content = source.get("data", "")
-                text = f"[Document: {title}]\n{context}\n{doc_content}" if context else f"[Document: {title}]\n{doc_content}"
+                if has_context:
+                    text = f"[Document: {title}]\n{context}\n{doc_content}"
+                else:
+                    text = f"[Document: {title}]\n{doc_content}"
                 return {"type": "text", "text": text}
             elif source.get("type") in ("base64", "url"):
                 # For binary documents, include metadata
                 media_type = source.get("media_type", "unknown")
                 text = f"[Document: {title} ({media_type})]"
-                if context:
+                if has_context:
                     text += f"\n{context}"
                 return {"type": "text", "text": text}
         return {"type": "text", "text": f"[Document: {title}]"}
@@ -433,9 +438,9 @@ def transform_openai_to_anthropic(
     }
     stop_reason = stop_reason_map.get(finish_reason, "end_turn")
 
-    # Check if stopped by a stop sequence
+    # Check if stopped by a stop sequence (only for string content)
     stop_sequence_triggered = None
-    if stop_sequences and content:
+    if stop_sequences and isinstance(content, str) and content:
         for seq in stop_sequences:
             if content.endswith(seq):
                 stop_reason = "stop_sequence"

@@ -125,11 +125,13 @@ from src.schemas.proxy import (  # Anthropic Messages API
     TextBlockResponse,
     ThinkingBlockResponse,
     ThinkingConfig,
+    ToolChoice,
     ToolChoiceAny,
     ToolChoiceAuto,
     ToolChoiceNone,
     ToolChoiceTool,
     ToolDefinition,
+    ToolResultContentBlock,
     ToolUseBlockResponse,
     UsageResponse,
 )
