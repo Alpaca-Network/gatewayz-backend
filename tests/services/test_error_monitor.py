@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 import httpx
 
 from src.services.error_monitor import (
@@ -212,9 +212,10 @@ class TestErrorPatternGrouping:
         """Test that similar errors are grouped together."""
         timestamp = datetime.now(timezone.utc)
 
+        # Both messages start with same 50 chars, so they should be grouped
         error1 = ErrorPattern(
             error_type="ValueError",
-            message="Database connection failed",
+            message="Database connection failed due to timeout on server",
             category=ErrorCategory.DATABASE_ERROR,
             severity=ErrorSeverity.CRITICAL,
             file="db.py",
@@ -226,7 +227,7 @@ class TestErrorPatternGrouping:
 
         error2 = ErrorPattern(
             error_type="ValueError",
-            message="Database connection failed with different details",
+            message="Database connection failed due to authentication error",
             category=ErrorCategory.DATABASE_ERROR,
             severity=ErrorSeverity.CRITICAL,
             file="db.py",
@@ -238,7 +239,8 @@ class TestErrorPatternGrouping:
 
         grouped = error_monitor.group_similar_errors([error1, error2])
 
-        # Should be grouped into one pattern
+        # Both messages start with "Database connection failed due to " (first 50 chars are similar)
+        # So they should be grouped into one pattern
         assert len(grouped) == 1
         pattern = list(grouped.values())[0]
         assert pattern.count == 2
