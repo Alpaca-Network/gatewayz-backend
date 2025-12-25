@@ -552,3 +552,95 @@ class TestNotificationIntegration:
         assert alert is not None
         assert alert.plan_name == 'Professional'
         assert alert.is_trial is False
+
+
+# ============================================================
+# TEST CLASS: Email Validation
+# ============================================================
+
+class TestEmailValidation:
+    """Test email address validation for notification service"""
+
+    def test_valid_email_addresses(self, notification_service):
+        """Test that valid email addresses pass validation"""
+        valid_emails = [
+            "user@example.com",
+            "user.name@example.com",
+            "user+tag@example.org",
+            "user@subdomain.example.com",
+            "name@company.io",
+            # Test longer TLDs (museum=6 chars, aero=4 chars, travel=6 chars)
+            "curator@art.museum",
+            "pilot@flight.aero",
+            "agent@booking.travel",
+            "user@example.photography",
+        ]
+        for email in valid_emails:
+            assert notification_service._is_valid_email(email) is True, f"Should accept: {email}"
+
+    def test_privy_placeholder_emails_rejected(self, notification_service):
+        """Test that Privy placeholder emails are rejected"""
+        invalid_emails = [
+            "did:privy:cmjlb0etq05rcjp0c87jw1kh2@privy.user",
+            "cmjlb0nv704q0l50d3kvw3pkj@privy.user",
+            "someuser@privy.user",
+        ]
+        for email in invalid_emails:
+            assert notification_service._is_valid_email(email) is False, f"Should reject: {email}"
+
+    def test_did_prefix_emails_rejected(self, notification_service):
+        """Test that DID-prefixed emails are rejected"""
+        invalid_emails = [
+            "did:privy:abc123@example.com",
+            "did:web:example.com@email.com",
+        ]
+        for email in invalid_emails:
+            assert notification_service._is_valid_email(email) is False, f"Should reject: {email}"
+
+    def test_malformed_emails_rejected(self, notification_service):
+        """Test that malformed emails are rejected"""
+        invalid_emails = [
+            "",
+            "not-an-email",
+            "@nodomain.com",
+            "user@",
+            "user@domain",  # No TLD
+            "user@.com",  # Domain starts with dot
+            "user@domain..com",  # Consecutive dots in domain
+            "user@a..b.com",  # Consecutive dots in subdomain
+            None,
+        ]
+        for email in invalid_emails:
+            if email is None:
+                # Handle None case specifically
+                assert notification_service._is_valid_email(email) is False
+            else:
+                assert notification_service._is_valid_email(email) is False, f"Should reject: {email}"
+
+    @patch('src.services.notification.resend')
+    def test_send_email_skips_invalid_addresses(self, mock_resend, notification_service):
+        """Test that send_email_notification skips invalid email addresses"""
+        # Try to send to a Privy placeholder address
+        result = notification_service.send_email_notification(
+            to_email="did:privy:abc123@privy.user",
+            subject="Test",
+            html_content="<p>Test</p>"
+        )
+
+        assert result is False
+        # Resend should NOT have been called
+        mock_resend.Emails.send.assert_not_called()
+
+    @patch('src.services.notification.resend')
+    def test_send_email_proceeds_for_valid_addresses(self, mock_resend, notification_service):
+        """Test that send_email_notification proceeds for valid email addresses"""
+        mock_resend.Emails.send.return_value = {"id": "test-email-id"}
+
+        result = notification_service.send_email_notification(
+            to_email="valid@example.com",
+            subject="Test",
+            html_content="<p>Test</p>"
+        )
+
+        assert result is True
+        mock_resend.Emails.send.assert_called_once()

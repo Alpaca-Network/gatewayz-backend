@@ -11,6 +11,7 @@ CREATE SEQUENCE IF NOT EXISTS "public"."rate_limit_configs_id_seq";
 
 -- Create rate_limit_configs table
 -- Stores per-API-key rate limit configurations
+-- NOTE: Defaults match original migration 20251105000000_add_missing_rate_limit_tables.sql
 CREATE TABLE IF NOT EXISTS "public"."rate_limit_configs" (
     "id" bigint NOT NULL DEFAULT nextval('rate_limit_configs_id_seq'::regclass),
     "api_key_id" bigint NOT NULL,
@@ -39,6 +40,10 @@ GRANT ALL ON "public"."rate_limit_configs" TO "service_role";
 
 -- Add RLS policies for security
 ALTER TABLE "public"."rate_limit_configs" ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Service role can manage rate limit configs" ON "public"."rate_limit_configs";
+DROP POLICY IF EXISTS "Users can read their own rate limit configs" ON "public"."rate_limit_configs";
 
 CREATE POLICY "Service role can manage rate limit configs" ON "public"."rate_limit_configs"
     FOR ALL
@@ -92,6 +97,10 @@ GRANT ALL ON "public"."api_key_audit_logs" TO "service_role";
 
 -- Add RLS policies for security
 ALTER TABLE "public"."api_key_audit_logs" ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Service role can manage audit logs" ON "public"."api_key_audit_logs";
+DROP POLICY IF EXISTS "Users can read their own audit logs" ON "public"."api_key_audit_logs";
 
 CREATE POLICY "Service role can manage audit logs" ON "public"."api_key_audit_logs"
     FOR ALL

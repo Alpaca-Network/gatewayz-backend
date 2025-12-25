@@ -265,6 +265,111 @@ def test_track_usage_handles_exception(monkeypatch, mod):
     assert ok is False
 
 
+def test_track_usage_with_model_specific_pricing(monkeypatch, mod):
+    """Test that track_trial_usage uses model-specific pricing when model info is provided"""
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "trial_used_tokens": 0,
+            "trial_used_requests": 0,
+            "trial_used_credits": 0.0,
+        }
+    }
+    client = _FakeSupabase(rows)
+    monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
+
+    # Mock get_model_pricing to return pricing for a known model
+    # Claude Opus: ~$15/1M input, ~$75/1M output
+    def mock_get_model_pricing(model_id):
+        return {"prompt": 15.0, "completion": 75.0, "found": True}
+
+    monkeypatch.setattr("src.services.pricing.get_model_pricing", mock_get_model_pricing)
+
+    ok = mod.track_trial_usage(
+        "sk-trial",
+        tokens_used=2000,  # Total tokens (used as fallback)
+        requests_used=1,
+        model_id="anthropic/claude-3-opus",
+        prompt_tokens=1000,
+        completion_tokens=1000,
+    )
+    assert ok is True
+
+    # Expected cost: (1000 * 15 / 1M) + (1000 * 75 / 1M) = 0.015 + 0.075 = 0.09
+    updated = rows["sk-trial"]
+    assert updated["trial_used_tokens"] == 2000
+    assert updated["trial_used_requests"] == 1
+    # With model pricing: ~$0.09 (much more than flat rate of $0.04)
+    assert math.isclose(updated["trial_used_credits"], 0.09, rel_tol=1e-9)
+
+
+def test_track_usage_fallback_without_model_info(monkeypatch, mod):
+    """Test that track_trial_usage falls back to flat rate when model info is not provided"""
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "trial_used_tokens": 0,
+            "trial_used_requests": 0,
+            "trial_used_credits": 0.0,
+        }
+    }
+    client = _FakeSupabase(rows)
+    monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
+
+    ok = mod.track_trial_usage(
+        "sk-trial",
+        tokens_used=1000,
+        requests_used=1,
+        # No model_id, prompt_tokens, completion_tokens provided
+    )
+    assert ok is True
+
+    # Expected cost: 1000 * 0.00002 = 0.02 (flat rate)
+    updated = rows["sk-trial"]
+    assert updated["trial_used_tokens"] == 1000
+    assert updated["trial_used_requests"] == 1
+    assert math.isclose(updated["trial_used_credits"], 0.02, rel_tol=1e-9)
+
+
+def test_track_usage_unknown_model_uses_flat_rate(monkeypatch, mod):
+    """Test that unknown models (not in catalog) use flat rate instead of near-zero pricing"""
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "trial_used_tokens": 0,
+            "trial_used_requests": 0,
+            "trial_used_credits": 0.0,
+        }
+    }
+    client = _FakeSupabase(rows)
+    monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
+
+    # Mock get_model_pricing to return "not found" for unknown model
+    def mock_get_model_pricing(model_id):
+        # Model not in catalog - return default pricing with found=False
+        return {"prompt": 0.00002, "completion": 0.00002, "found": False}
+
+    monkeypatch.setattr("src.services.pricing.get_model_pricing", mock_get_model_pricing)
+
+    ok = mod.track_trial_usage(
+        "sk-trial",
+        tokens_used=2000,
+        requests_used=1,
+        model_id="unknown/model-xyz",
+        prompt_tokens=1000,
+        completion_tokens=1000,
+    )
+    assert ok is True
+
+    # Should use flat rate: 2000 * 0.00002 = 0.04
+    # NOT the near-zero pricing: (1000 * 0.00002 / 1M) + (1000 * 0.00002 / 1M) = 0.00000004
+    updated = rows["sk-trial"]
+    assert updated["trial_used_tokens"] == 2000
+    assert updated["trial_used_requests"] == 1
+    # Flat rate should be $0.04, not near-zero
+    assert math.isclose(updated["trial_used_credits"], 0.04, rel_tol=1e-9)
+
+
 # ----------------------------- tests: trial validation cache -----------------------------
 
 def test_trial_cache_hit_skips_database(monkeypatch, mod):
