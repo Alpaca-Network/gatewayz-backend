@@ -67,6 +67,43 @@ class TestMessageSchema:
         with pytest.raises(ValidationError):
             Message(role="invalid_role", content="test")
 
+    def test_user_message_requires_content(self):
+        """Test that user messages must have content"""
+        with pytest.raises(ValidationError) as exc_info:
+            Message(role="user", content=None)
+        assert "'user' messages must have content" in str(exc_info.value)
+
+    def test_system_message_requires_content(self):
+        """Test that system messages must have content"""
+        with pytest.raises(ValidationError) as exc_info:
+            Message(role="system", content=None)
+        assert "'system' messages must have content" in str(exc_info.value)
+
+    def test_tool_message_requires_content(self):
+        """Test that tool messages must have content (the response)"""
+        with pytest.raises(ValidationError) as exc_info:
+            Message(role="tool", content=None, tool_call_id="call_123")
+        assert "'tool' messages must have content" in str(exc_info.value)
+
+    def test_function_message_requires_content(self):
+        """Test that function messages must have content"""
+        with pytest.raises(ValidationError) as exc_info:
+            Message(role="function", content=None, name="my_function")
+        assert "'function' messages must have content" in str(exc_info.value)
+
+    def test_assistant_message_allows_null_content_with_tool_calls(self):
+        """Test that assistant messages can have null content when tool_calls is present"""
+        tool_calls = [{"id": "call_123", "type": "function", "function": {"name": "test"}}]
+        msg = Message(role="assistant", content=None, tool_calls=tool_calls)
+        assert msg.content is None
+        assert msg.tool_calls == tool_calls
+
+    def test_assistant_message_requires_content_or_tool_calls(self):
+        """Test that assistant messages need either content or tool_calls"""
+        with pytest.raises(ValidationError) as exc_info:
+            Message(role="assistant", content=None)
+        assert "must have either content or tool_calls" in str(exc_info.value)
+
 
 class TestProxyRequestOpenAIAlignment:
     """Test ProxyRequest schema alignment with OpenAI Chat Completions API"""

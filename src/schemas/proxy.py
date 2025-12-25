@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ALLOWED_CHAT_ROLES = {"system", "user", "assistant", "tool", "function"}
 
@@ -30,6 +30,34 @@ class Message(BaseModel):
                 f"Supported roles are: {', '.join(sorted(ALLOWED_CHAT_ROLES))}."
             )
         return role
+
+    @model_validator(mode="after")
+    def validate_content_for_role(self) -> "Message":
+        """Validate that content is provided for roles that require it.
+
+        - user and system roles require content
+        - assistant role allows null content when tool_calls is present
+        - tool and function roles require content (the tool response)
+        """
+        role = self.role
+        content = self.content
+        tool_calls = self.tool_calls
+
+        # User and system messages must have content
+        if role in ("user", "system") and content is None:
+            raise ValueError(f"'{role}' messages must have content.")
+
+        # Tool/function responses must have content
+        if role in ("tool", "function") and content is None:
+            raise ValueError(f"'{role}' messages must have content (the tool response).")
+
+        # Assistant messages can have null content only if tool_calls is present
+        if role == "assistant" and content is None and not tool_calls:
+            raise ValueError(
+                "Assistant messages must have either content or tool_calls."
+            )
+
+        return self
 
 
 class StreamOptions(BaseModel):
