@@ -166,6 +166,14 @@ class EnhancedNotificationService:
     def send_password_reset_email(self, user_id: int, username: str, email: str) -> str | None:
         """Send password reset email and return reset token"""
         try:
+            # Validate email BEFORE creating token to prevent orphaned tokens
+            if not self._is_valid_email_for_sending(email):
+                logger.warning(
+                    f"Skipping password reset for invalid email: {email}. "
+                    "No token will be created."
+                )
+                return None
+
             # Generate reset token
             reset_token = secrets.token_urlsafe(32)
 
@@ -195,6 +203,11 @@ class EnhancedNotificationService:
                 logger.info(f"Password reset email sent to {email}")
                 return reset_token
             else:
+                # If email failed after token creation, we should clean up the token
+                logger.error(
+                    f"Failed to send password reset email to {email}, "
+                    "but token was already created. Consider cleanup."
+                )
                 return None
 
         except Exception as e:

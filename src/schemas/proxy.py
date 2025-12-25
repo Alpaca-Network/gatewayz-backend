@@ -35,26 +35,37 @@ class Message(BaseModel):
     def validate_content_for_role(self) -> "Message":
         """Validate that content is provided for roles that require it.
 
-        - user and system roles require content
+        - user and system roles require non-empty content
         - assistant role allows null content when tool_calls is present
-        - tool and function roles require content (the tool response)
+        - tool and function roles require non-empty content (the tool response)
         """
         role = self.role
         content = self.content
         tool_calls = self.tool_calls
 
-        # User and system messages must have content
-        if role in ("user", "system") and content is None:
-            raise ValueError(f"'{role}' messages must have content.")
+        # Helper to check if content is empty (None or empty string after stripping)
+        def is_empty_content(c: Any) -> bool:
+            if c is None:
+                return True
+            if isinstance(c, str):
+                return not c.strip()
+            # For list content (multimodal), check if empty
+            if isinstance(c, list):
+                return len(c) == 0
+            return False
 
-        # Tool/function responses must have content
-        if role in ("tool", "function") and content is None:
-            raise ValueError(f"'{role}' messages must have content (the tool response).")
+        # User and system messages must have non-empty content
+        if role in ("user", "system") and is_empty_content(content):
+            raise ValueError(f"'{role}' messages must have non-empty content.")
+
+        # Tool/function responses must have non-empty content
+        if role in ("tool", "function") and is_empty_content(content):
+            raise ValueError(f"'{role}' messages must have non-empty content (the tool response).")
 
         # Assistant messages can have null content only if tool_calls is present
-        if role == "assistant" and content is None and not tool_calls:
+        if role == "assistant" and is_empty_content(content) and not tool_calls:
             raise ValueError(
-                "Assistant messages must have either content or tool_calls."
+                "Assistant messages must have either non-empty content or tool_calls."
             )
 
         return self

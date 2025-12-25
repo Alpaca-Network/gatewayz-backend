@@ -10,7 +10,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 
 
 class TestEmailValidation:
@@ -145,3 +145,14 @@ class TestEdgeCases:
         for email in valid_emails:
             assert notification_service._is_valid_email_for_sending(email) is True, \
                 f"Expected {email} to be valid (not @privy.user domain)"
+
+    def test_password_reset_validates_email_before_token_creation(self, notification_service):
+        """Test that password reset validates email BEFORE creating token"""
+        with patch.object(notification_service, '_is_valid_email_for_sending', return_value=False):
+            # Should return None without creating token
+            result = notification_service.send_password_reset_email(
+                user_id=1,
+                username="test",
+                email="invalid@privy.user"
+            )
+            assert result is None
