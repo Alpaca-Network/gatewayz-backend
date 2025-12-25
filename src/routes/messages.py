@@ -698,7 +698,15 @@ async def anthropic_messages(
 
         if trial.get("is_trial") and not trial.get("is_expired"):
             try:
-                await _to_thread(track_trial_usage, api_key, total_tokens, 1)
+                await _to_thread(
+                    track_trial_usage,
+                    api_key,
+                    total_tokens,
+                    1,
+                    model_id=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
             except Exception as e:
                 logger.warning("Failed to track trial usage: %s", e)
 

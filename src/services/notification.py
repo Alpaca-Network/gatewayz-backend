@@ -307,11 +307,51 @@ class NotificationService:
             logger.error(f"Error checking subscription expiry alert: {e}")
             return None
 
+    def _is_valid_email(self, email: str) -> bool:
+        """
+        Check if an email address is valid and deliverable.
+        Rejects placeholder emails like Privy user IDs (did:privy:xxx@privy.user).
+        """
+        if not email or "@" not in email:
+            return False
+
+        # Reject Privy placeholder emails (did:privy:xxx@privy.user or xxx@privy.user)
+        if email.endswith("@privy.user"):
+            return False
+
+        # Reject emails with did: prefix (Privy decentralized identifiers)
+        if email.startswith("did:"):
+            return False
+
+        # Basic email format validation
+        # Must have: local-part@domain, domain must have at least one dot
+        try:
+            local_part, domain = email.rsplit("@", 1)
+            if not local_part or not domain:
+                return False
+            if "." not in domain:
+                return False
+            # Domain must have valid TLD (at least 2 chars after last dot)
+            domain_parts = domain.split(".")
+            if len(domain_parts[-1]) < 2:
+                return False
+            return True
+        except ValueError:
+            return False
+
     def send_email_notification(
         self, to_email: str, subject: str, html_content: str, text_content: str = None
     ) -> bool:
         """Send email notification using Resend SDK"""
         try:
+            # Validate email address before attempting to send
+            if not self._is_valid_email(to_email):
+                logger.warning(
+                    f"Skipping email to invalid/placeholder address: {to_email}. "
+                    "User may need to provide a real email address."
+                )
+                return False
+
             if not self.resend_api_key:
                 logger.warning("Resend API key not configured, skipping email notification")
                 return False

@@ -228,13 +228,53 @@ def validate_trial_access(api_key: str) -> dict[str, Any]:
     return result
 
 
-def track_trial_usage(api_key: str, tokens_used: int, requests_used: int = 1) -> bool:
-    """Track trial usage - simplified version"""
+def track_trial_usage(
+    api_key: str,
+    tokens_used: int,
+    requests_used: int = 1,
+    model_id: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+) -> bool:
+    """
+    Track trial usage with accurate model-based pricing.
+
+    Args:
+        api_key: The API key to track usage for
+        tokens_used: Total tokens used (fallback for credit calculation)
+        requests_used: Number of requests made (default 1)
+        model_id: The model ID used (for accurate pricing calculation)
+        prompt_tokens: Number of prompt tokens (for accurate pricing)
+        completion_tokens: Number of completion tokens (for accurate pricing)
+
+    Returns:
+        True if usage was tracked successfully, False otherwise
+    """
     try:
         client = get_supabase_client()
 
-        # Calculate credit cost (standard pricing: $20 for 1M tokens = $0.00002 per token)
-        credit_cost = tokens_used * 0.00002
+        # Calculate credit cost using model-specific pricing when available
+        if model_id and prompt_tokens is not None and completion_tokens is not None:
+            # Use accurate per-model pricing from the pricing service
+            try:
+                from src.services.pricing import calculate_cost
+
+                credit_cost = calculate_cost(model_id, prompt_tokens, completion_tokens)
+                logger.info(
+                    f"Trial usage: Using model-specific pricing for {model_id}: "
+                    f"{prompt_tokens} prompt + {completion_tokens} completion = ${credit_cost:.6f}"
+                )
+            except Exception as e:
+                # Fallback to flat rate if pricing lookup fails
+                logger.warning(f"Failed to get model pricing for {model_id}, using flat rate: {e}")
+                credit_cost = tokens_used * 0.00002
+        else:
+            # Fallback: standard pricing ($20 for 1M tokens = $0.00002 per token)
+            credit_cost = tokens_used * 0.00002
+            logger.info(
+                f"Trial usage: Using flat-rate pricing (no model info): "
+                f"{tokens_used} tokens = ${credit_cost:.6f}"
+            )
 
         logger.info(
             f"Tracking usage: {tokens_used} tokens, {requests_used} requests, ${credit_cost:.6f} credits"

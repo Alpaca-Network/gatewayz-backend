@@ -265,6 +265,73 @@ def test_track_usage_handles_exception(monkeypatch, mod):
     assert ok is False
 
 
+def test_track_usage_with_model_specific_pricing(monkeypatch, mod):
+    """Test that track_trial_usage uses model-specific pricing when model info is provided"""
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "trial_used_tokens": 0,
+            "trial_used_requests": 0,
+            "trial_used_credits": 0.0,
+        }
+    }
+    client = _FakeSupabase(rows)
+    monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
+
+    # Mock the pricing calculation to return a specific cost
+    # Claude Opus: ~$15/1M input, ~$75/1M output
+    def mock_calculate_cost(model_id, prompt_tokens, completion_tokens):
+        # Simulated pricing: $15/1M prompt, $75/1M completion
+        return (prompt_tokens * 15 / 1_000_000) + (completion_tokens * 75 / 1_000_000)
+
+    monkeypatch.setattr("src.services.pricing.calculate_cost", mock_calculate_cost)
+
+    ok = mod.track_trial_usage(
+        "sk-trial",
+        tokens_used=2000,  # Total tokens (used as fallback)
+        requests_used=1,
+        model_id="anthropic/claude-3-opus",
+        prompt_tokens=1000,
+        completion_tokens=1000,
+    )
+    assert ok is True
+
+    # Expected cost: (1000 * 15 / 1M) + (1000 * 75 / 1M) = 0.015 + 0.075 = 0.09
+    updated = rows["sk-trial"]
+    assert updated["trial_used_tokens"] == 2000
+    assert updated["trial_used_requests"] == 1
+    # With model pricing: ~$0.09 (much more than flat rate of $0.04)
+    assert updated["trial_used_credits"] > 0.04  # Should be higher than flat rate
+
+
+def test_track_usage_fallback_without_model_info(monkeypatch, mod):
+    """Test that track_trial_usage falls back to flat rate when model info is not provided"""
+    rows = {
+        "sk-trial": {
+            "api_key": "sk-trial",
+            "trial_used_tokens": 0,
+            "trial_used_requests": 0,
+            "trial_used_credits": 0.0,
+        }
+    }
+    client = _FakeSupabase(rows)
+    monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
+
+    ok = mod.track_trial_usage(
+        "sk-trial",
+        tokens_used=1000,
+        requests_used=1,
+        # No model_id, prompt_tokens, completion_tokens provided
+    )
+    assert ok is True
+
+    # Expected cost: 1000 * 0.00002 = 0.02 (flat rate)
+    updated = rows["sk-trial"]
+    assert updated["trial_used_tokens"] == 1000
+    assert updated["trial_used_requests"] == 1
+    assert math.isclose(updated["trial_used_credits"], 0.02, rel_tol=1e-9)
+
+
 # ----------------------------- tests: trial validation cache -----------------------------
 
 def test_trial_cache_hit_skips_database(monkeypatch, mod):

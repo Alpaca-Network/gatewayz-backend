@@ -724,10 +724,18 @@ async def _process_stream_completion_background(
                 logger.debug(f"Failed to capture health metric: {e}")
             return
 
-        # Track trial usage
+        # Track trial usage with model-specific pricing
         if trial.get("is_trial") and not trial.get("is_expired"):
             try:
-                await _to_thread(track_trial_usage, api_key, total_tokens, 1)
+                await _to_thread(
+                    track_trial_usage,
+                    api_key,
+                    total_tokens,
+                    1,
+                    model_id=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
             except Exception as e:
                 logger.warning("Failed to track trial usage: %s", e)
 
@@ -2025,7 +2033,15 @@ async def chat_completions(
 
             if trial.get("is_trial") and not trial.get("is_expired"):
                 try:
-                    await _to_thread(track_trial_usage, api_key, total_tokens, 1)
+                    await _to_thread(
+                        track_trial_usage,
+                        api_key,
+                        total_tokens,
+                        1,
+                        model_id=request_model,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                    )
                 except Exception as e:
                     logger.warning("Failed to track trial usage: %s", e)
 
@@ -3093,7 +3109,15 @@ async def unified_responses(
 
         if trial.get("is_trial") and not trial.get("is_expired"):
             try:
-                await _to_thread(track_trial_usage, api_key, total_tokens, 1)
+                await _to_thread(
+                    track_trial_usage,
+                    api_key,
+                    total_tokens,
+                    1,
+                    model_id=request_model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
             except Exception as e:
                 logger.warning("Failed to track trial usage: %s", e)
 
