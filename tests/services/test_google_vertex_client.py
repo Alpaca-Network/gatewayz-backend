@@ -517,6 +517,13 @@ class TestFetchModelsFromGoogleVertex:
         # Check source_gateway is set correctly
         assert model["source_gateway"] == "google-vertex"
 
+        # Check that slug and canonical_slug have google-vertex/ prefix
+        # This ensures Google Vertex models don't get deduplicated with other gateways
+        assert model["slug"].startswith("google-vertex/"), f"Expected slug to start with 'google-vertex/', got: {model['slug']}"
+        assert model["canonical_slug"].startswith("google-vertex/"), f"Expected canonical_slug to start with 'google-vertex/', got: {model['canonical_slug']}"
+        assert model["slug"] == f"google-vertex/{model['id']}"
+        assert model["canonical_slug"] == f"google-vertex/{model['id']}"
+
     def test_fetch_models_updates_cache(self):
         """Test that fetch_models_from_google_vertex updates the cache"""
         from src.cache import _google_vertex_models_cache
