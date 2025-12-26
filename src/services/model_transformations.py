@@ -36,6 +36,14 @@ MODEL_PROVIDER_OVERRIDES = {
     "deepseek/deepseek-chat": "openrouter",
     "deepseek-ai/deepseek-chat": "openrouter",
     "deepseek-chat": "openrouter",
+    # DeepSeek Chat V3 variants - non-standard names users sometimes request
+    # These should route to OpenRouter's deepseek-chat or be aliased to V3
+    "deepseek/deepseek-chat-v3-0324": "openrouter",
+    "deepseek-ai/deepseek-chat-v3-0324": "openrouter",
+    "deepseek-chat-v3-0324": "openrouter",
+    "deepseek/deepseek-chat-v3.1": "openrouter",
+    "deepseek-ai/deepseek-chat-v3.1": "openrouter",
+    "deepseek-chat-v3.1": "openrouter",
     # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
     # No override needed - let natural provider detection route to Cerebras
 }
@@ -450,6 +458,13 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek/deepseek-chat": "deepseek/deepseek-chat",
             "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat",
             "deepseek-chat": "deepseek/deepseek-chat",
+            # DeepSeek Chat V3 variants - non-standard names that should map to deepseek-chat
+            "deepseek/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+            "deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+            "deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+            "deepseek-chat-v3.1": "deepseek/deepseek-chat",
             # Cerebras models explicitly routed through OpenRouter
             # (for users who request provider="openrouter" explicitly or failover scenarios)
             "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",

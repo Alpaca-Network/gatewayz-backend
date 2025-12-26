@@ -46,7 +46,7 @@ LOW_LATENCY_MODELS: set[str] = {
     "google/gemini-2.0-flash-exp:free",
     "mistralai/ministral-3b-2512",  # 421ms
     # Fireworks fast models
-    "fireworks/accounts/fireworks/models/deepseek-v3-0324",  # 326ms
+    "fireworks/accounts/fireworks/models/deepseek-v3p1",  # 326ms (was v3-0324, corrected to actual model ID)
 }
 
 # Provider latency tiers based on production data (lower = faster)
@@ -446,7 +446,7 @@ def suggest_low_latency_alternative(model_id: str) -> str | None:
         "gpt-3.5": "groq/llama-3.1-8b-instant",
         "openai": "groq/llama-3.3-70b-versatile",
         # For reasoning models (slower by nature)
-        "deepseek-r1": "fireworks/accounts/fireworks/models/deepseek-v3-0324",
+        "deepseek-r1": "fireworks/accounts/fireworks/models/deepseek-r1-0528",
         "o1": "groq/llama-3.3-70b-versatile",
         "o3": "groq/llama-3.3-70b-versatile",
         # For general chat
