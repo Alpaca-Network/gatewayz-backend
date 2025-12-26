@@ -1187,10 +1187,15 @@ def fetch_models_from_google_vertex():
             input_modalities = model.modalities if model.modalities else ["text"]
             output_modalities = ["text"]  # Google models output text
 
+            # Use google-vertex/ prefix for slug and canonical_slug to avoid
+            # deduplication conflicts with other gateways (e.g., onerouter) that
+            # have models with the same base name. The id stays unchanged since
+            # it's used for actual API calls to Google Vertex AI.
+            prefixed_slug = f"google-vertex/{model.id}"
             normalized = {
                 "id": model.id,
-                "slug": model.id,
-                "canonical_slug": model.id,
+                "slug": prefixed_slug,
+                "canonical_slug": prefixed_slug,
                 "hugging_face_id": None,
                 "name": model.name,
                 "created": None,
