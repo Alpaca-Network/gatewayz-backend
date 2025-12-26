@@ -7,12 +7,12 @@ from postgrest import APIError
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
+from src.db.postgrest_schema import is_schema_cache_error, refresh_postgrest_schema_cache as refresh_schema
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_CACHE_ERROR_CODE = "PGRST204"
 ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
 
 
@@ -24,27 +24,8 @@ def _pct(used: int, limit: int | None) -> float | None:
 
 
 def _is_schema_cache_error(error: Exception) -> bool:
-    """Return True if Supabase/PostgREST reported a schema cache miss."""
-    return isinstance(error, APIError) and getattr(error, "code", None) == SCHEMA_CACHE_ERROR_CODE
-
-
-def refresh_postgrest_schema_cache(client) -> bool:
-    """Trigger PostgREST to reload its schema cache via RPC."""
-    try:
-        if not hasattr(client, "rpc"):
-            logger.debug(
-                "Supabase client does not expose rpc(); skipping schema cache refresh attempt"
-            )
-            return False
-        client.rpc("refresh_postgrest_schema_cache", {}).execute()
-        logger.info("Triggered PostgREST schema cache refresh after API key insert failure")
-        return True
-    except Exception as refresh_error:
-        logger.warning(
-            "Failed to refresh PostgREST schema cache: %s",
-            sanitize_for_logging(str(refresh_error)),
-        )
-        return False
+    """Return True if Supabase/PostgREST reported a schema cache miss (PGRST204 or PGRST205)."""
+    return is_schema_cache_error(error)
 
 
 def _insert_api_key_row(
@@ -76,7 +57,7 @@ def _handle_schema_cache_insert_error(
         sanitize_for_logging(str(original_error)),
     )
 
-    if refresh_postgrest_schema_cache(client):
+    if refresh_schema():
         try:
             return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=True)
         except APIError as retry_error:
