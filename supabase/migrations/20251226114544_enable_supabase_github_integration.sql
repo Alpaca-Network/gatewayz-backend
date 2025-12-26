@@ -10,23 +10,11 @@
 -- Add a comment to the public schema documenting the integration
 COMMENT ON SCHEMA public IS 'Gatewayz API - Production schema with GitHub-integrated migrations';
 
--- Create an index on api_keys for faster lookups if it doesn't exist
--- This is a no-op if the index already exists
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes
-        WHERE schemaname = 'public'
-        AND tablename = 'api_keys'
-        AND indexname = 'idx_api_keys_user_id_active'
-    ) THEN
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_api_keys_user_id_active
-        ON api_keys(user_id)
-        WHERE is_active = true;
-    END IF;
-EXCEPTION
-    WHEN duplicate_table THEN
-        NULL; -- Index already exists, ignore
-    WHEN undefined_table THEN
-        NULL; -- Table doesn't exist yet, ignore
-END $$;
+-- Create an index on api_keys_new for faster lookups if it doesn't exist
+-- Note: Using regular CREATE INDEX (not CONCURRENTLY) because:
+-- 1. CONCURRENTLY cannot run inside a transaction block
+-- 2. Supabase migrations run within transactions
+-- 3. IF NOT EXISTS handles the case where index already exists
+CREATE INDEX IF NOT EXISTS idx_api_keys_new_user_id_active
+ON api_keys_new(user_id)
+WHERE is_active = true;
