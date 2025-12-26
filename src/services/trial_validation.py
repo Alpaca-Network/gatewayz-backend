@@ -7,12 +7,52 @@ PERF: Includes in-memory caching to reduce database queries by ~95%
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
+# Maximum retries for connection errors (HTTP/2 connection state issues)
+MAX_CONNECTION_RETRIES = 2
+CONNECTION_RETRY_DELAY = 0.1  # 100ms delay between retries
+
+
+def _is_connection_error(error: Exception) -> bool:
+    """Check if an error is a recoverable HTTP/2 connection error.
+
+    HTTP/2 connections can be closed by the server but the client pool
+    may not know until the next request. These errors are recoverable
+    by retrying with a fresh connection.
+
+    Common errors:
+    - httpx.LocalProtocolError: Invalid input ConnectionInputs.RECV_HEADERS in state ConnectionState.CLOSED
+    - httpx.RemoteProtocolError: Server disconnected while receiving
+    - h2.exceptions.StreamClosedError: Stream was closed
+    """
+    error_str = str(error).lower()
+    error_type = type(error).__name__
+
+    # Check for specific HTTP/2 connection state errors
+    connection_error_patterns = [
+        "connectionstate.closed",
+        "connectionstate.idle",
+        "connectioninputs",
+        "streaminputs",
+        "localprotocolerror",
+        "remoteprotocolerror",
+        "streamclosederror",
+        "server disconnected",
+        "connection closed",
+    ]
+
+    return any(pattern in error_str for pattern in connection_error_patterns) or error_type in [
+        "LocalProtocolError",
+        "RemoteProtocolError",
+        "StreamClosedError",
+    ]
 
 # In-memory cache for trial validation results
 # Structure: {api_key: {"result": dict, "timestamp": datetime}}
@@ -66,7 +106,37 @@ def _parse_trial_end_utc(s: str) -> datetime:
 
 
 def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
-    """Internal function: Validate trial access from database (no caching)"""
+    """Internal function: Validate trial access from database (no caching)
+
+    Includes retry logic for HTTP/2 connection errors that can occur when
+    the server closes idle connections but the client pool isn't aware.
+    """
+    last_error = None
+
+    for attempt in range(MAX_CONNECTION_RETRIES + 1):
+        try:
+            return _validate_trial_access_query(api_key)
+        except Exception as e:
+            if _is_connection_error(e) and attempt < MAX_CONNECTION_RETRIES:
+                logger.warning(
+                    f"HTTP/2 connection error on trial validation attempt {attempt + 1}, "
+                    f"retrying in {CONNECTION_RETRY_DELAY}s: {type(e).__name__}: {e}"
+                )
+                last_error = e
+                time.sleep(CONNECTION_RETRY_DELAY)
+                continue
+            else:
+                # Non-recoverable error or max retries reached
+                raise
+
+    # Should not reach here, but handle just in case
+    if last_error:
+        raise last_error
+    return {"is_valid": False, "is_trial": False, "error": "Unknown error during trial validation"}
+
+
+def _validate_trial_access_query(api_key: str) -> dict[str, Any]:
+    """Execute the actual trial validation query."""
     try:
         client = get_supabase_client()
 
@@ -239,6 +309,8 @@ def track_trial_usage(
     """
     Track trial usage with accurate model-based pricing.
 
+    Includes retry logic for HTTP/2 connection errors.
+
     Args:
         api_key: The API key to track usage for
         tokens_used: Total tokens used (fallback for credit calculation)
@@ -250,6 +322,41 @@ def track_trial_usage(
     Returns:
         True if usage was tracked successfully, False otherwise
     """
+    last_error = None
+
+    for attempt in range(MAX_CONNECTION_RETRIES + 1):
+        try:
+            return _track_trial_usage_query(
+                api_key, tokens_used, requests_used, model_id, prompt_tokens, completion_tokens
+            )
+        except Exception as e:
+            if _is_connection_error(e) and attempt < MAX_CONNECTION_RETRIES:
+                logger.warning(
+                    f"HTTP/2 connection error on track_trial_usage attempt {attempt + 1}, "
+                    f"retrying in {CONNECTION_RETRY_DELAY}s: {type(e).__name__}: {e}"
+                )
+                last_error = e
+                time.sleep(CONNECTION_RETRY_DELAY)
+                continue
+            else:
+                logger.error(f"Error tracking trial usage: {e}")
+                return False
+
+    # Should not reach here, but log and return False
+    if last_error:
+        logger.error(f"Max retries exceeded for track_trial_usage: {last_error}")
+    return False
+
+
+def _track_trial_usage_query(
+    api_key: str,
+    tokens_used: int,
+    requests_used: int = 1,
+    model_id: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+) -> bool:
+    """Execute the actual trial usage tracking query."""
     try:
         client = get_supabase_client()
 
@@ -358,5 +465,5 @@ def track_trial_usage(
         return success
 
     except Exception as e:
-        logger.error(f"Error tracking trial usage: {e}")
-        return False
+        # Re-raise to let the outer retry logic handle connection errors
+        raise
