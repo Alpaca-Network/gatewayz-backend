@@ -616,48 +616,31 @@ class TestMessageContentValidation:
 
     def test_user_message_rejects_empty_string(self):
         """Test that user messages reject empty string content"""
-        from src.schemas.proxy import Message
-        import pytest
-
-        with pytest.raises(ValueError, match="must have non-empty content"):
+        with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="user", content="")
 
     def test_user_message_rejects_whitespace_only(self):
         """Test that user messages reject whitespace-only content"""
-        from src.schemas.proxy import Message
-        import pytest
-
-        with pytest.raises(ValueError, match="must have non-empty content"):
+        with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="user", content="   \n\t  ")
 
     def test_system_message_rejects_empty_string(self):
         """Test that system messages reject empty string content"""
-        from src.schemas.proxy import Message
-        import pytest
-
-        with pytest.raises(ValueError, match="must have non-empty content"):
+        with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="system", content="")
 
     def test_tool_message_rejects_empty_string(self):
         """Test that tool messages reject empty string content"""
-        from src.schemas.proxy import Message
-        import pytest
-
-        with pytest.raises(ValueError, match="must have non-empty content"):
+        with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="tool", content="", tool_call_id="123")
 
     def test_assistant_message_rejects_empty_without_tool_calls(self):
         """Test that assistant messages reject empty content without tool_calls"""
-        from src.schemas.proxy import Message
-        import pytest
-
-        with pytest.raises(ValueError, match="must have either non-empty content or tool_calls"):
+        with pytest.raises(ValidationError, match="must have either non-empty content or tool_calls"):
             Message(role="assistant", content="")
 
     def test_assistant_message_allows_null_with_tool_calls(self):
         """Test that assistant messages allow null content with tool_calls"""
-        from src.schemas.proxy import Message
-
         msg = Message(
             role="assistant",
             content=None,
@@ -668,16 +651,10 @@ class TestMessageContentValidation:
 
     def test_user_message_allows_non_empty_string(self):
         """Test that user messages accept valid non-empty content"""
-        from src.schemas.proxy import Message
-
         msg = Message(role="user", content="Hello world")
         assert msg.content == "Hello world"
 
     def test_multimodal_content_empty_list_rejected(self):
         """Test that empty list content is rejected for user messages"""
-        from src.schemas.proxy import Message
-        import pytest
-
-        with pytest.raises(ValueError, match="must have non-empty content"):
+        with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="user", content=[])
-
