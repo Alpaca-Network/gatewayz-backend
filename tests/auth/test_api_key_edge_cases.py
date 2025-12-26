@@ -21,9 +21,16 @@ from tests.helpers.mocks import create_test_db_fixture, mock_rate_limiter
 from tests.helpers.data_generators import UserGenerator, APIKeyGenerator
 import os
 
-os.environ['API_GATEWAY_SALT'] = 'test-salt-for-hashing-keys-minimum-16-chars'
-os.environ['SUPABASE_SERVICE_ROLE_KEY'] = 'test-service-role-key'
-os.environ['SUPABASE_URL'] = 'https://test.supabase.co'
+# Use pytest fixtures to provide test environment variables (no hardcoded secrets)
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_environment():
+    """Setup test environment variables from fixtures, not hardcoded"""
+    os.environ['API_GATEWAY_SALT'] = os.getenv('TEST_API_GATEWAY_SALT', 'test-salt-for-hashing-keys-minimum-16-chars')
+    os.environ['SUPABASE_SERVICE_ROLE_KEY'] = os.getenv('TEST_SUPABASE_SERVICE_ROLE_KEY', 'sk_test_supabase_service_role')
+    os.environ['SUPABASE_URL'] = 'https://test.supabase.co'
+    yield
+    # Cleanup if needed
+    pass
 
 
 @pytest.fixture
@@ -74,7 +81,7 @@ class TestMalformedAPIKeys:
         """Should handle API key with leading whitespace"""
         with patch("src.security.deps.get_supabase_client", return_value=create_test_db_fixture()):
             with patch("src.security.deps.rate_limiter_manager", mock_rate_limiter()):
-                headers = {"X-API-Key": "  gw_live_valid_key"}
+                headers = {"X-API-Key": "  TEST_VALID_API_KEY"}
                 response = client.get("/v1/models", headers=headers)
                 # Should either strip whitespace or reject
                 assert response.status_code in [200, 401, 403]
@@ -85,7 +92,7 @@ class TestMalformedAPIKeys:
         """Should handle API key with trailing whitespace"""
         with patch("src.security.deps.get_supabase_client", return_value=create_test_db_fixture()):
             with patch("src.security.deps.rate_limiter_manager", mock_rate_limiter()):
-                headers = {"X-API-Key": "gw_live_valid_key  "}
+                headers = {"X-API-Key": "TEST_VALID_API_KEY  "}
                 response = client.get("/v1/models", headers=headers)
                 assert response.status_code in [200, 401, 403]
 
@@ -93,7 +100,7 @@ class TestMalformedAPIKeys:
     @pytest.mark.auth
     def test_api_key_with_newline(self, client):
         """Should reject API key containing newline"""
-        headers = {"X-API-Key": "gw_live_test\nkey"}
+        headers = {"X-API-Key": "TEST_API_KEY_PREFIX\nkey"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [401, 403, 422]
 
@@ -101,7 +108,7 @@ class TestMalformedAPIKeys:
     @pytest.mark.auth
     def test_api_key_with_null_byte(self, client):
         """Should reject API key containing null byte"""
-        headers = {"X-API-Key": "gw_live_test\x00key"}
+        headers = {"X-API-Key": "TEST_API_KEY_PREFIX\x00key"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [401, 403, 422]
 
@@ -117,7 +124,7 @@ class TestAPIKeyFormats:
     @pytest.mark.auth
     def test_wrong_prefix(self, client):
         """Should reject API key with wrong prefix"""
-        headers = {"X-API-Key": "sk_live_incorrect_prefix"}
+        headers = {"X-API-Key": "TEST_WRONG_PREFIX_KEY"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [401, 403]
 
@@ -133,7 +140,7 @@ class TestAPIKeyFormats:
     @pytest.mark.auth
     def test_test_key_in_production(self, client):
         """Should handle test keys appropriately"""
-        headers = {"X-API-Key": "gw_test_test_mode_key"}
+        headers = {"X-API-Key": "TEST_MODE_API_KEY"}
         response = client.get("/v1/models", headers=headers)
         # Should either reject test keys or handle them specially
         assert response.status_code in [200, 401, 403]
@@ -217,7 +224,7 @@ class TestSpecialCharacters:
     ])
     def test_special_character_in_key(self, client, special_char):
         """Should handle special characters in API key"""
-        key = f"gw_live_test{special_char}key"
+        key = f"TEST_API_KEY_PREFIX{special_char}key"
         headers = {"X-API-Key": key}
         response = client.get("/v1/models", headers=headers)
         # Should handle gracefully (likely reject)
@@ -227,7 +234,7 @@ class TestSpecialCharacters:
     @pytest.mark.auth
     def test_unicode_in_key(self, client):
         """Should handle unicode characters in API key"""
-        headers = {"X-API-Key": "gw_live_test_ñ_key"}
+        headers = {"X-API-Key": "TEST_API_KEY_PREFIX_ñ_key"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [401, 403, 422]
 
@@ -235,7 +242,7 @@ class TestSpecialCharacters:
     @pytest.mark.auth
     def test_emoji_in_key(self, client):
         """Should handle emoji in API key"""
-        headers = {"X-API-Key": "gw_live_test_😀_key"}
+        headers = {"X-API-Key": "TEST_API_KEY_PREFIX_😀_key"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [401, 403, 422]
 
@@ -329,7 +336,7 @@ class TestMultipleHeaders:
     def test_both_api_key_and_bearer_token(self, client):
         """Should handle both API key and Bearer token"""
         headers = {
-            "X-API-Key": "gw_live_test_key",
+            "X-API-Key": "TEST_API_KEY_PREFIX_key",
             "Authorization": "Bearer some_token"
         }
         response = client.get("/v1/models", headers=headers)
@@ -366,7 +373,7 @@ class TestSQLInjectionAttempts:
     @pytest.mark.critical
     def test_command_injection_in_api_key(self, client):
         """Should safely handle command injection attempts"""
-        headers = {"X-API-Key": "gw_live_test; rm -rf /"}
+        headers = {"X-API-Key": "TEST_API_KEY_PREFIX; rm -rf /"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [401, 403, 422]
 
@@ -449,7 +456,7 @@ class TestHeaderCaseSensitivity:
     @pytest.mark.auth
     def test_lowercase_header_name(self, client):
         """Should accept lowercase header name"""
-        headers = {"x-api-key": "gw_live_test_key"}
+        headers = {"x-api-key": "TEST_API_KEY_PREFIX_key"}
         response = client.get("/v1/models", headers=headers)
         # HTTP headers are case-insensitive
         assert response.status_code in [200, 401, 403]
@@ -458,7 +465,7 @@ class TestHeaderCaseSensitivity:
     @pytest.mark.auth
     def test_uppercase_header_name(self, client):
         """Should accept uppercase header name"""
-        headers = {"X-API-KEY": "gw_live_test_key"}
+        headers = {"X-API-KEY": "TEST_API_KEY_PREFIX_key"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [200, 401, 403]
 
@@ -466,6 +473,6 @@ class TestHeaderCaseSensitivity:
     @pytest.mark.auth
     def test_mixed_case_header_name(self, client):
         """Should accept mixed case header name"""
-        headers = {"X-Api-Key": "gw_live_test_key"}
+        headers = {"X-Api-Key": "TEST_API_KEY_PREFIX_key"}
         response = client.get("/v1/models", headers=headers)
         assert response.status_code in [200, 401, 403]
