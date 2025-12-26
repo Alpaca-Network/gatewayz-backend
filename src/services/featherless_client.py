@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 
 from src.config import Config
@@ -7,6 +8,40 @@ from src.services.connection_pool import get_featherless_pooled_client
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_messages_for_featherless(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Sanitize messages before sending to Featherless API.
+
+    Featherless has strict validation and rejects messages with null tool_calls.
+    Error: 'messages.0.tool_calls': ['Expected array, received null']
+
+    This function:
+    - Removes tool_calls field if it's null (Featherless expects array or absent)
+    - Removes tool_call_id field if it's null
+    - Preserves all other message fields
+
+    Args:
+        messages: List of message dictionaries
+
+    Returns:
+        Sanitized list of messages safe for Featherless API
+    """
+    sanitized = []
+    for msg in messages:
+        # Create a copy to avoid mutating the original
+        clean_msg = {}
+        for key, value in msg.items():
+            # Skip null tool_calls - Featherless expects array or field to be absent
+            if key == "tool_calls" and value is None:
+                continue
+            # Skip null tool_call_id
+            if key == "tool_call_id" and value is None:
+                continue
+            clean_msg[key] = value
+        sanitized.append(clean_msg)
+    return sanitized
 
 
 def get_featherless_client():
@@ -35,7 +70,9 @@ def make_featherless_request_openai(messages, model, **kwargs):
     """
     try:
         client = get_featherless_client()
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+        # Sanitize messages to remove null tool_calls that Featherless rejects
+        sanitized_messages = _sanitize_messages_for_featherless(messages)
+        response = client.chat.completions.create(model=model, messages=sanitized_messages, **kwargs)
         return response
     except Exception as e:
         logger.error(f"Featherless request failed: {e}")
@@ -52,8 +89,10 @@ def make_featherless_request_openai_stream(messages, model, **kwargs):
     """
     try:
         client = get_featherless_client()
+        # Sanitize messages to remove null tool_calls that Featherless rejects
+        sanitized_messages = _sanitize_messages_for_featherless(messages)
         stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
+            model=model, messages=sanitized_messages, stream=True, **kwargs
         )
         return stream
     except Exception as e:
