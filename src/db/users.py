@@ -633,19 +633,40 @@ def deduct_credits(
     try:
         from src.db.credit_transactions import TransactionType, log_credit_transaction
 
-        user = get_user(api_key)
-        if not user:
-            raise ValueError(f"User with API key {api_key} not found")
+        client = get_supabase_client()
 
-        user_id = user["id"]
-        balance_before = user["credits"]
+        # CRITICAL FIX: Bypass cache and fetch fresh balance from database
+        # This prevents race conditions from stale cached balance data
+        # Use proper API key lookup to support both api_keys_new and legacy users.api_key
 
+        # First, try api_keys_new table (primary key store)
+        with track_database_query(table="api_keys_new", operation="select"):
+            key_result = client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
+
+        if key_result.data:
+            # Found in api_keys_new - get user data
+            user_id = key_result.data[0]["user_id"]
+            with track_database_query(table="users", operation="select"):
+                user_lookup = client.table("users").select("id, credits").eq("id", user_id).execute()
+        else:
+            # Fallback: try legacy users.api_key column
+            with track_database_query(table="users", operation="select"):
+                user_lookup = client.table("users").select("id, credits").eq("api_key", api_key).execute()
+
+        if not user_lookup.data:
+            raise ValueError(f"User with API key not found")
+
+        user_id = user_lookup.data[0]["id"]
+        balance_before = user_lookup.data[0]["credits"]
+
+        # Check sufficiency with fresh balance
         if balance_before < tokens:
             raise ValueError(f"Insufficient credits. Current: {balance_before}, Required: {tokens}")
 
         balance_after = balance_before - tokens
 
-        client = get_supabase_client()
+        # Use optimistic locking: update only if credits haven't changed since we read them
+        # This prevents race conditions where multiple requests deduct simultaneously
         with track_database_query(table="users", operation="update"):
             result = (
                 client.table("users")
@@ -653,11 +674,20 @@ def deduct_credits(
                     {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
                 )
                 .eq("id", user_id)
+                .eq("credits", balance_before)  # Optimistic lock: only update if balance unchanged
                 .execute()
             )
 
         if not result.data:
-            raise ValueError(f"Failed to update user balance for user {user_id}")
+            # Balance changed between our read and update (concurrent modification)
+            # Fetch current balance and fail with accurate error
+            with track_database_query(table="users", operation="select"):
+                current = client.table("users").select("credits").eq("id", user_id).execute()
+            current_balance = current.data[0]["credits"] if current.data else "unknown"
+            raise ValueError(
+                f"Failed to update user balance due to concurrent modification. "
+                f"Current balance: {current_balance}, Required: {tokens}. Please retry."
+            )
 
         # Log the transaction (negative amount for deduction)
         transaction_result = log_credit_transaction(

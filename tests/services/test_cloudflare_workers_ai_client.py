@@ -584,3 +584,54 @@ class TestFetchModelsFromCloudflareAPI:
             assert len(models) == 1
             # Should use default context length when value is invalid
             assert models[0]["context_length"] == 8192
+
+    @pytest.mark.asyncio
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")
+    @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_ACCOUNT_ID", "test_account")
+    async def test_fetch_models_with_non_dict_items_in_result(self):
+        """Test parsing models when result array contains non-dict items (lists, strings, etc.)"""
+        mock_response_data = {
+            "success": True,
+            "result": [
+                # Valid dict entry
+                {
+                    "name": "@cf/meta/llama-3.1-8b-instruct",
+                    "description": "Meta Llama 3.1 8B Instruct",
+                    "properties": [],
+                    "task": {"name": "Text Generation"},
+                },
+                # Invalid: list entry (should be skipped)
+                ["unexpected", "list", "data"],
+                # Invalid: string entry (should be skipped)
+                "unexpected string data",
+                # Another valid dict entry
+                {
+                    "name": "@cf/openai/gpt-oss-120b",
+                    "description": "GPT-OSS 120B",
+                    "properties": [],
+                    "task": {"name": "Text Generation"},
+                },
+                # Invalid: None (should be skipped)
+                None,
+                # Invalid: integer (should be skipped)
+                42,
+            ],
+        }
+
+        mock_response = Mock()
+        mock_response.json.return_value = mock_response_data
+        mock_response.raise_for_status = Mock()
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+
+            models = await fetch_models_from_cloudflare_api()
+
+            # Should only include the 2 valid dict entries
+            assert len(models) == 2
+            assert models[0]["id"] == "@cf/meta/llama-3.1-8b-instruct"
+            assert models[1]["id"] == "@cf/openai/gpt-oss-120b"

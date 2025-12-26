@@ -422,6 +422,8 @@ def create_app() -> FastAPI:
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
+        ("prometheus_endpoints", "Prometheus Endpoints"),  # Structured Prometheus metrics (/prometheus/metrics/*)
+        ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
@@ -637,16 +639,18 @@ def create_app() -> FastAPI:
             except Exception as db_e:
                 logger.warning(f"    Database initialization warning: {db_e}")
 
-            # Set default admin user
-            try:
-                from src.config.supabase_config import get_supabase_client
-                from src.db.roles import UserRole, update_user_role
+            # Set default admin user in background (don't block startup)
+            async def setup_admin_user_background():
+                try:
+                    from src.config.supabase_config import get_supabase_client
+                    from src.db.roles import UserRole, update_user_role
 
-                ADMIN_EMAIL = Config.ADMIN_EMAIL
+                    ADMIN_EMAIL = Config.ADMIN_EMAIL
 
-                if not ADMIN_EMAIL:
-                    logger.warning("    ADMIN_EMAIL not configured in environment variables")
-                else:
+                    if not ADMIN_EMAIL:
+                        logger.debug("ADMIN_EMAIL not configured - skipping admin setup")
+                        return
+
                     client = get_supabase_client()
                     result = (
                         client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
@@ -664,10 +668,12 @@ def create_app() -> FastAPI:
                             )
                             logger.info(f"   Set {ADMIN_EMAIL} as admin")
                         else:
-                            logger.info(f"  ℹ  {ADMIN_EMAIL} is already admin")
+                            logger.debug(f"{ADMIN_EMAIL} is already admin")
 
-            except Exception as admin_e:
-                logger.warning(f"    Admin setup warning: {admin_e}")
+                except Exception as admin_e:
+                    logger.warning(f"Admin setup warning: {admin_e}")
+
+            asyncio.create_task(setup_admin_user_background())
 
             # Initialize analytics services (Statsig, PostHog, and Braintrust)
             try:

@@ -61,9 +61,29 @@ class EnhancedNotificationService:
         self._last_email_send_time = 0.0
         self._min_email_interval = 0.6  # seconds between email sends
 
+    def _is_valid_email_for_sending(self, email: str) -> bool:
+        """Check if email is valid for sending (not a Privy fallback placeholder)."""
+        if not email:
+            return False
+        # Reject Privy fallback emails that aren't real email addresses
+        if email.endswith("@privy.user"):
+            return False
+        # Basic email format check
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return False
+        return True
+
     def send_welcome_email(self, user_id: int, username: str, email: str, credits: int) -> bool:
         """Send welcome email to new users (API key not included for security)"""
         try:
+            # Skip sending for invalid/placeholder emails
+            if not self._is_valid_email_for_sending(email):
+                logger.info(
+                    f"Skipping welcome email for user {user_id}: "
+                    f"'{email}' is a placeholder email (e.g., Privy fallback)"
+                )
+                return True  # Return True to prevent retry loops
+
             logger.info(f"Enhanced notification service - sending welcome email to: {email}")
             logger.info(f"Resend API key available: {bool(self.resend_api_key)}")
             logger.info(f"From email: {self.from_email}")
@@ -146,6 +166,14 @@ class EnhancedNotificationService:
     def send_password_reset_email(self, user_id: int, username: str, email: str) -> str | None:
         """Send password reset email and return reset token"""
         try:
+            # Validate email BEFORE creating token to prevent orphaned tokens
+            if not self._is_valid_email_for_sending(email):
+                logger.warning(
+                    f"Skipping password reset for invalid email: {email}. "
+                    "No token will be created."
+                )
+                return None
+
             # Generate reset token
             reset_token = secrets.token_urlsafe(32)
 
@@ -175,6 +203,11 @@ class EnhancedNotificationService:
                 logger.info(f"Password reset email sent to {email}")
                 return reset_token
             else:
+                # If email failed after token creation, we should clean up the token
+                logger.error(
+                    f"Failed to send password reset email to {email}, "
+                    "but token was already created. Consider cleanup."
+                )
                 return None
 
         except Exception as e:
@@ -397,15 +430,66 @@ The {self.app_name} Team
             # Update last send time
             self._last_email_send_time = time.time()
 
+    def _is_valid_email(self, email: str) -> bool:
+        """
+        Check if an email address is valid and deliverable.
+        Rejects placeholder emails like Privy user IDs (did:privy:xxx@privy.user).
+        """
+        if not email or "@" not in email:
+            return False
+
+        # Reject Privy placeholder emails (did:privy:xxx@privy.user or xxx@privy.user)
+        if email.endswith("@privy.user"):
+            return False
+
+        # Reject emails with did: prefix (Privy decentralized identifiers)
+        if email.startswith("did:"):
+            return False
+
+        # Basic email format validation
+        # Must have: local-part@domain, domain must have at least one dot
+        try:
+            local_part, domain = email.rsplit("@", 1)
+            if not local_part or not domain:
+                return False
+            if "." not in domain:
+                return False
+            # Domain must have valid TLD (at least 2 chars)
+            # Also ensure all domain parts are non-empty (reject ".com", "a..b.com", etc.)
+            domain_parts = domain.split(".")
+            if len(domain_parts[-1]) < 2:
+                return False
+            # Check all domain parts are non-empty (catches domains starting with dot)
+            if any(part == "" for part in domain_parts):
+                return False
+            return True
+        except ValueError:
+            return False
+
     def send_email_notification(
         self, to_email: str, subject: str, html_content: str, text_content: str = None
     ) -> bool:
         """Send email notification using Resend SDK (if available)"""
         try:
+            # Validate email before attempting to send
+            if not self._is_valid_email_for_sending(to_email):
+                logger.info(
+                    f"Skipping email to '{to_email}': invalid or placeholder email address"
+                )
+                return True  # Return True to avoid error logging for expected cases
+
             logger.info(f"Attempting to send email to: {to_email}")
             logger.info(f"Subject: {subject}")
             logger.info(f"Email client available: {self.email_client_available}")
             logger.info(f"From email: {self.from_email}")
+
+            # Validate email address before attempting to send
+            if not self._is_valid_email(to_email):
+                logger.warning(
+                    f"Skipping email to invalid/placeholder address: {to_email}. "
+                    "User may need to provide a real email address."
+                )
+                return False
 
             if not self.email_client_available:
                 logger.warning(

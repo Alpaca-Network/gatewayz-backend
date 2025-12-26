@@ -481,6 +481,14 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     break
 
                 for model in result:
+                    # Skip any items that are not dictionaries (API response format may vary)
+                    if not isinstance(model, dict):
+                        logger.warning(
+                            "Skipping non-dict model entry in Cloudflare API response: %r",
+                            type(model).__name__,
+                        )
+                        continue
+
                     # Convert Cloudflare model format to our standard format
                     model_id = model.get("name", "")
                     if not model_id:

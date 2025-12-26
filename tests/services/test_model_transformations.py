@@ -258,3 +258,93 @@ def test_onerouter_model_id_mapping_exists():
     assert len(mapping) > 0
     assert "onerouter/claude-3-5-sonnet" in mapping
     assert "gpt-4" in mapping
+
+
+# ============================================================================
+# Fireworks Fallback Behavior Tests
+# ============================================================================
+
+
+def test_fireworks_unknown_model_does_not_construct_invalid_id():
+    """Test that unknown models are NOT naively transformed into invalid Fireworks IDs.
+
+    Previously, an unknown model like 'deepseek/deepseek-v3.2-speciale' would be
+    naively transformed to 'accounts/fireworks/models/deepseek-v3p2-speciale',
+    which is not a valid Fireworks model ID.
+
+    The fix ensures that unknown models are passed through as-is (lowercase),
+    allowing Fireworks to return a proper "model not found" error.
+    """
+    from src.services.model_transformations import transform_model_id
+
+    # This model variant does not exist - it should NOT be transformed to a fake Fireworks ID
+    result = transform_model_id("deepseek/deepseek-v3.2-speciale", "fireworks")
+
+    # Should NOT construct invalid ID like "accounts/fireworks/models/deepseek-v3p2-speciale"
+    assert not result.startswith("accounts/fireworks/models/"), (
+        f"Unknown model should not be naively constructed to Fireworks format: {result}"
+    )
+
+    # Should pass through as lowercase
+    assert result == "deepseek/deepseek-v3.2-speciale", (
+        f"Unknown model should pass through as-is (lowercase): {result}"
+    )
+
+
+def test_fireworks_known_model_still_transforms():
+    """Test that known Fireworks models are still properly transformed."""
+    from src.services.model_transformations import transform_model_id
+
+    # Known models should still be transformed correctly
+    test_cases = [
+        ("deepseek-ai/deepseek-v3", "accounts/fireworks/models/deepseek-v3p1"),
+        ("deepseek/deepseek-v3.1", "accounts/fireworks/models/deepseek-v3p1"),
+        ("meta-llama/llama-3.3-70b", "accounts/fireworks/models/llama-v3p3-70b-instruct"),
+        ("deepseek-ai/deepseek-r1", "accounts/fireworks/models/deepseek-r1-0528"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = transform_model_id(model_id, "fireworks")
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_fireworks_unknown_model_without_slash_passthrough():
+    """Test that unknown models without org prefix pass through as-is."""
+    from src.services.model_transformations import transform_model_id
+
+    result = transform_model_id("some-unknown-model", "fireworks")
+    assert result == "some-unknown-model", f"Expected passthrough, got {result}"
+
+
+def test_fireworks_nonexistent_variant_passthrough():
+    """Test various nonexistent model variants pass through without naive construction."""
+    from src.services.model_transformations import transform_model_id
+
+    nonexistent_variants = [
+        "deepseek/deepseek-v4",
+        "deepseek/deepseek-r2-ultra",
+        "meta-llama/llama-5-100b",
+        "qwen/qwen-99b-super",
+        "fictional-org/fictional-model-v1.2.3",
+    ]
+
+    for model_id in nonexistent_variants:
+        result = transform_model_id(model_id, "fireworks")
+        # Should NOT start with the Fireworks prefix for unknown models
+        assert not result.startswith("accounts/fireworks/models/"), (
+            f"Unknown model '{model_id}' should not be naively constructed to Fireworks format: {result}"
+        )
+        # Should pass through as-is
+        assert result == model_id, f"Expected passthrough for '{model_id}', got {result}"
+
+
+def test_fireworks_fuzzy_match_still_works():
+    """Test that fuzzy matching still works for models with slight variations."""
+    from src.services.model_transformations import transform_model_id
+
+    # Test case-insensitive matching (should still work via normalize_model_name)
+    result = transform_model_id("DeepSeek-AI/DeepSeek-V3", "fireworks")
+    # Should match to known mapping via fuzzy matching
+    assert result == "accounts/fireworks/models/deepseek-v3p1", (
+        f"Fuzzy matching should still work for known models: {result}"
+    )
