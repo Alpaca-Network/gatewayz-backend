@@ -308,11 +308,19 @@ def create_api_key(
             client.table("rate_limit_configs").insert(rate_limit_config).execute()
 
         except Exception as rate_limit_error:
-            logger.warning(
-                "Failed to create rate limit config for API key %s: %s",
-                sanitize_for_logging(api_key[:20] + "..."),
-                sanitize_for_logging(str(rate_limit_error)),
-            )
+            error_str = str(rate_limit_error)
+            # Only log if it's NOT a missing table error (PGRST205)
+            # Missing tables are expected until migration is applied - don't pollute logs
+            if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                logger.warning(
+                    "Failed to create rate limit config for API key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(error_str),
+                )
+            else:
+                logger.debug(
+                    "rate_limit_configs table not found - skipping rate limit config creation (migration pending)"
+                )
 
         # Create audit log entry
         try:
@@ -333,11 +341,19 @@ def create_api_key(
                 }
             ).execute()
         except Exception as audit_error:
-            logger.warning(
-                "Failed to create audit log for API key %s: %s",
-                sanitize_for_logging(api_key[:20] + "..."),
-                sanitize_for_logging(str(audit_error)),
-            )
+            error_str = str(audit_error)
+            # Only log if it's NOT a missing table error (PGRST205)
+            # Missing tables are expected until migration is applied - don't pollute logs
+            if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                logger.warning(
+                    "Failed to create audit log for API key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(error_str),
+                )
+            else:
+                logger.debug(
+                    "api_key_audit_logs table not found - skipping audit log creation (migration pending)"
+                )
 
         return api_key, result.data[0]["id"]
 
@@ -459,11 +475,14 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                     "api_key_id", result.data[0]["id"]
                 ).execute()
             except Exception as e:
-                logger.warning(
-                    "Failed to delete rate limit configs for key %s: %s",
-                    sanitize_for_logging(api_key[:20] + "..."),
-                    sanitize_for_logging(str(e)),
-                )
+                error_str = str(e)
+                # Only log if it's NOT a missing table error
+                if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                    logger.warning(
+                        "Failed to delete rate limit configs for key %s: %s",
+                        sanitize_for_logging(api_key[:20] + "..."),
+                        sanitize_for_logging(error_str),
+                    )
 
             # Create audit log entry
             try:
@@ -481,10 +500,13 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                     }
                 ).execute()
             except Exception as e:
-                logger.warning(
-                    "Failed to create audit log for key deletion: %s",
-                    sanitize_for_logging(str(e)),
-                )
+                error_str = str(e)
+                # Only log if it's NOT a missing table error
+                if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                    logger.warning(
+                        "Failed to create audit log for key deletion: %s",
+                        sanitize_for_logging(error_str),
+                    )
 
             return True
         else:
@@ -775,9 +797,12 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                     }
                 ).eq("api_key_id", key_id).execute()
             except Exception as e:
-                logger.warning(
-                    "Failed to update rate limit config: %s", sanitize_for_logging(str(e))
-                )
+                error_str = str(e)
+                # Only log if it's NOT a missing table error
+                if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                    logger.warning(
+                        "Failed to update rate limit config: %s", sanitize_for_logging(error_str)
+                    )
 
         # Create audit log entry
         try:
@@ -796,9 +821,12 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                 }
             ).execute()
         except Exception as e:
-            logger.warning(
-                "Failed to create audit log for key update: %s", sanitize_for_logging(str(e))
-            )
+            error_str = str(e)
+            # Only log if it's NOT a missing table error
+            if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                logger.warning(
+                    "Failed to create audit log for key update: %s", sanitize_for_logging(error_str)
+                )
 
         return True
 

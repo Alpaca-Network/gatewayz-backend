@@ -113,9 +113,14 @@ def create_secure_api_key(
             client.table("rate_limit_configs").insert(rate_limit_config).execute()
 
         except Exception as rate_limit_error:
-            logger.warning(
-                f"Failed to create rate limit config for API key {key_id}: {rate_limit_error}"
-            )
+            error_str = str(rate_limit_error)
+            # Only log if it's NOT a missing table error
+            if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                logger.warning(
+                    f"Failed to create rate limit config for API key {key_id}: {rate_limit_error}"
+                )
+            else:
+                logger.debug("rate_limit_configs table not found - skipping (migration pending)")
 
         # Create audit log entry
         try:
@@ -138,7 +143,12 @@ def create_secure_api_key(
                 }
             ).execute()
         except Exception as audit_error:
-            logger.warning(f"Failed to create audit log for API key {key_id}: {audit_error}")
+            error_str = str(audit_error)
+            # Only log if it's NOT a missing table error
+            if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                logger.warning(f"Failed to create audit log for API key {key_id}: {audit_error}")
+            else:
+                logger.debug("api_key_audit_logs table not found - skipping (migration pending)")
 
         return api_key  # Return the plain text key to user
 
@@ -376,7 +386,12 @@ def rotate_api_key(key_id: int, user_id: int, new_key_name: str = None) -> str |
                 }
             ).execute()
         except Exception as audit_error:
-            logger.warning(f"Failed to create audit log for key rotation: {audit_error}")
+            error_str = str(audit_error)
+            # Only log if it's NOT a missing table error
+            if "PGRST205" not in error_str and "Could not find the table" not in error_str:
+                logger.warning(f"Failed to create audit log for key rotation: {audit_error}")
+            else:
+                logger.debug("api_key_audit_logs table not found - skipping (migration pending)")
 
         return new_api_key
 
