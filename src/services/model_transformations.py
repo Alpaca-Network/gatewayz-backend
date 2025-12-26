@@ -36,6 +36,17 @@ MODEL_PROVIDER_OVERRIDES = {
     "deepseek/deepseek-chat": "openrouter",
     "deepseek-ai/deepseek-chat": "openrouter",
     "deepseek-chat": "openrouter",
+    # DeepSeek Chat V3 variants - these are user-requested aliases that should route to OpenRouter
+    # since "deepseek-chat" is the canonical OpenRouter model name for DeepSeek's latest chat model
+    "deepseek/deepseek-chat-v3": "openrouter",
+    "deepseek/deepseek-chat-v3.1": "openrouter",
+    "deepseek/deepseek-chat-v3-0324": "openrouter",
+    "deepseek-ai/deepseek-chat-v3": "openrouter",
+    "deepseek-ai/deepseek-chat-v3.1": "openrouter",
+    "deepseek-ai/deepseek-chat-v3-0324": "openrouter",
+    "deepseek-chat-v3": "openrouter",
+    "deepseek-chat-v3.1": "openrouter",
+    "deepseek-chat-v3-0324": "openrouter",
     # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
     # No override needed - let natural provider detection route to Cerebras
 }
@@ -450,6 +461,16 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek/deepseek-chat": "deepseek/deepseek-chat",
             "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat",
             "deepseek-chat": "deepseek/deepseek-chat",
+            # DeepSeek Chat V3 variants - map to the canonical deepseek/deepseek-chat on OpenRouter
+            "deepseek/deepseek-chat-v3": "deepseek/deepseek-chat",
+            "deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+            "deepseek/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-chat-v3": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+            "deepseek-ai/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+            "deepseek-chat-v3": "deepseek/deepseek-chat",
+            "deepseek-chat-v3.1": "deepseek/deepseek-chat",
+            "deepseek-chat-v3-0324": "deepseek/deepseek-chat",
             # Cerebras models explicitly routed through OpenRouter
             # (for users who request provider="openrouter" explicitly or failover scenarios)
             "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
