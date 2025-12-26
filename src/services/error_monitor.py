@@ -157,7 +157,12 @@ class ErrorMonitor:
             return errors
 
         except Exception as e:
-            logger.error(f"Error fetching from Loki: {e}")
+            # Only log if error is meaningful (not empty or connection errors)
+            error_str = str(e).strip()
+            if error_str and error_str not in ("", "None"):
+                logger.error(f"Error fetching from Loki: {e}")
+            else:
+                logger.debug("Loki fetch returned empty/no response")
             return []
 
     def classify_error(self, error_data: dict[str, Any]) -> tuple[ErrorCategory, ErrorSeverity]:
