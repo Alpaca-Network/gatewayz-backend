@@ -748,6 +748,174 @@ def track_frontend_processing(endpoint: str, duration: float):
     frontend_processing_seconds.labels(endpoint=endpoint).observe(duration)
 
 
+# ==================== MISSING METRICS (PR #681 Implementation) ====================
+# These metrics were identified as missing from Grafana dashboards
+
+# Provider Health Score: Composite metric combining availability, error rate, and latency
+gatewayz_provider_health_score = get_or_create_metric(
+    Gauge,
+    "gatewayz_provider_health_score",
+    "Provider health score (0-1): (availability*0.4) + ((1-error_rate)*0.3) + (latency_score*0.3)",
+    ["provider"]
+)
+
+# Model Uptime: 24-hour uptime percentage for each model
+gatewayz_model_uptime_24h = get_or_create_metric(
+    Gauge,
+    "gatewayz_model_uptime_24h",
+    "Model uptime percentage over last 24 hours (0-1)",
+    ["model"]
+)
+
+# Cost by Provider: Total cost incurred by provider in USD
+gatewayz_cost_by_provider = get_or_create_metric(
+    Counter,
+    "gatewayz_cost_by_provider",
+    "Total cost by provider in USD",
+    ["provider"]
+)
+
+# Token Efficiency: Output tokens / Input tokens ratio
+gatewayz_token_efficiency = get_or_create_metric(
+    Gauge,
+    "gatewayz_token_efficiency",
+    "Token efficiency (output/input ratio)",
+    ["model"]
+)
+
+# Circuit Breaker State: Current state of circuit breaker for each provider
+gatewayz_circuit_breaker_state = get_or_create_metric(
+    Gauge,
+    "gatewayz_circuit_breaker_state",
+    "Circuit breaker state (1=in this state, 0=not): open, closed, half_open",
+    ["provider", "state"]
+)
+
+# Detected Anomalies: Count of detected anomalies by type
+gatewayz_detected_anomalies = get_or_create_metric(
+    Counter,
+    "gatewayz_detected_anomalies",
+    "Detected anomalies by type: latency_spike, error_surge, unusual_pattern",
+    ["type"]
+)
+
+# Provider response time in seconds (histogram for quantile calculation)
+provider_response_time_seconds = get_or_create_metric(
+    Histogram,
+    "provider_response_time_seconds",
+    "Provider response time in seconds (for p50, p95, p99 calculation)",
+    ["provider"],
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]
+)
+
+# Trial Active: Count of active trial users
+trial_active = get_or_create_metric(
+    Gauge,
+    "trial_active",
+    "Number of active trial users"
+)
+
+
+# ==================== HELPER FUNCTIONS FOR MISSING METRICS ====================
+
+def set_provider_health_score(provider: str, score: float):
+    """
+    Set provider health score (composite metric).
+
+    Args:
+        provider: Provider name (e.g., "openrouter")
+        score: Health score 0.0-1.0
+               Calculated as: (availability*0.4) + ((1-error_rate)*0.3) + (latency_score*0.3)
+    """
+    gatewayz_provider_health_score.labels(provider=provider).set(min(1.0, max(0.0, score)))
+
+
+def set_model_uptime_24h(model: str, uptime: float):
+    """
+    Set model 24-hour uptime percentage.
+
+    Args:
+        model: Model ID (e.g., "openrouter/openai/gpt-4")
+        uptime: Uptime percentage 0.0-1.0
+    """
+    gatewayz_model_uptime_24h.labels(model=model).set(min(1.0, max(0.0, uptime)))
+
+
+def increment_cost_by_provider(provider: str, cost_usd: float):
+    """
+    Track cost incurred by provider.
+
+    Args:
+        provider: Provider name
+        cost_usd: Cost in USD
+    """
+    gatewayz_cost_by_provider.labels(provider=provider).inc(cost_usd)
+
+
+def set_token_efficiency(model: str, efficiency: float):
+    """
+    Set token efficiency (output/input ratio).
+
+    Args:
+        model: Model ID
+        efficiency: Ratio of output tokens to input tokens
+    """
+    gatewayz_token_efficiency.labels(model=model).set(efficiency)
+
+
+def set_circuit_breaker_state(provider: str, state: str):
+    """
+    Set circuit breaker state for a provider.
+
+    Args:
+        provider: Provider name
+        state: Circuit breaker state ("open", "closed", or "half_open")
+    """
+    # Ensure state is valid
+    valid_states = ["open", "closed", "half_open"]
+    if state not in valid_states:
+        logger.warning(f"Invalid circuit breaker state: {state}")
+        return
+
+    # Set current state to 1, others to 0
+    for s in valid_states:
+        gatewayz_circuit_breaker_state.labels(provider=provider, state=s).set(1 if s == state else 0)
+
+
+def record_anomaly(anomaly_type: str):
+    """
+    Record detected anomaly.
+
+    Args:
+        anomaly_type: Type of anomaly
+                     - "latency_spike": Latency exceeds threshold by 3x
+                     - "error_surge": Error rate suddenly increases
+                     - "unusual_pattern": Unusual request pattern detected
+    """
+    gatewayz_detected_anomalies.labels(type=anomaly_type).inc()
+
+
+def record_provider_response_time(provider: str, response_time_seconds: float):
+    """
+    Record provider API response time.
+
+    Args:
+        provider: Provider name
+        response_time_seconds: Response time in seconds
+    """
+    provider_response_time_seconds.labels(provider=provider).observe(response_time_seconds)
+
+
+def set_trial_active_count(count: int):
+    """
+    Set number of active trial users.
+
+    Args:
+        count: Number of active trials
+    """
+    trial_active.set(count)
+
+
 def track_request_stage(stage: str, endpoint: str, duration: float):
     """Track duration of a specific request processing stage.
 
