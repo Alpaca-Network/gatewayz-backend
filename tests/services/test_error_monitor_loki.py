@@ -22,7 +22,7 @@ class TestLokiErrorLogging:
         mock_session = AsyncMock()
         monitor.session = mock_session
         monitor.loki_enabled = True
-        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/push"
+        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/query_range"
 
         # Simulate an empty error
         mock_session.get.side_effect = Exception("")
@@ -48,7 +48,7 @@ class TestLokiErrorLogging:
         mock_session = AsyncMock()
         monitor.session = mock_session
         monitor.loki_enabled = True
-        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/push"
+        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/query_range"
 
         # Simulate a "None" error
         mock_session.get.side_effect = Exception("None")
@@ -69,7 +69,7 @@ class TestLokiErrorLogging:
         mock_session = AsyncMock()
         monitor.session = mock_session
         monitor.loki_enabled = True
-        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/push"
+        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/query_range"
 
         # Simulate a real error
         real_error = Exception("Connection timeout to Loki server")
@@ -94,7 +94,7 @@ class TestLokiErrorLogging:
         mock_session = AsyncMock()
         monitor.session = mock_session
         monitor.loki_enabled = True
-        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/push"
+        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/query_range"
 
         # Mock successful response
         mock_response = MagicMock()
@@ -154,7 +154,7 @@ class TestLokiErrorLogging:
         mock_session = AsyncMock()
         monitor.session = mock_session
         monitor.loki_enabled = True
-        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/push"
+        monitor.loki_query_url = "http://loki.example.com/loki/api/v1/query_range"
 
         # Simulate a whitespace error
         mock_session.get.side_effect = Exception("   \n\t  ")

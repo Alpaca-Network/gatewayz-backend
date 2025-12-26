@@ -14,15 +14,17 @@ class TestAPIKeyGracefulDegradation:
 
     @pytest.mark.asyncio
     @patch("src.db.api_keys.get_supabase_client")
-    @patch("src.db.api_keys.generate_api_key")
-    @patch("src.db.api_keys.hash_api_key")
+    @patch("secrets.token_urlsafe")
+    @patch("src.utils.crypto.sha256_key_hash")
+    @patch("src.utils.crypto.encrypt_api_key")
     async def test_create_api_key_missing_rate_limit_configs_table(
-        self, mock_hash, mock_generate, mock_supabase
+        self, mock_encrypt, mock_hash, mock_token, mock_supabase
     ):
         """Test that API key creation succeeds even when rate_limit_configs table is missing."""
         # Mock the API key generation
-        mock_generate.return_value = "gw_test_key_123"
+        mock_token.return_value = "test_key_123"
         mock_hash.return_value = "hashed_key"
+        mock_encrypt.return_value = ("encrypted_key", 1)
 
         # Mock successful API key creation
         mock_client = MagicMock()
@@ -61,19 +63,21 @@ class TestAPIKeyGracefulDegradation:
         )
 
         # Verify API key was returned successfully
-        assert api_key == "gw_test_key_123"
+        assert api_key == "gw_test_key_123"  # prefix 'gw_' + mock token
         assert key_id == 1
 
     @pytest.mark.asyncio
     @patch("src.db.api_keys.get_supabase_client")
-    @patch("src.db.api_keys.generate_api_key")
-    @patch("src.db.api_keys.hash_api_key")
+    @patch("secrets.token_urlsafe")
+    @patch("src.utils.crypto.sha256_key_hash")
+    @patch("src.utils.crypto.encrypt_api_key")
     async def test_create_api_key_missing_audit_logs_table(
-        self, mock_hash, mock_generate, mock_supabase
+        self, mock_encrypt, mock_hash, mock_token, mock_supabase
     ):
         """Test that API key creation succeeds even when api_key_audit_logs table is missing."""
-        mock_generate.return_value = "gw_test_key_456"
+        mock_token.return_value = "test_key_456"
         mock_hash.return_value = "hashed_key"
+        mock_encrypt.return_value = ("encrypted_key", 1)
 
         mock_client = MagicMock()
         mock_supabase.return_value = mock_client
@@ -110,14 +114,16 @@ class TestAPIKeyGracefulDegradation:
 
     @pytest.mark.asyncio
     @patch("src.db.api_keys.get_supabase_client")
-    @patch("src.db.api_keys.generate_api_key")
-    @patch("src.db.api_keys.hash_api_key")
+    @patch("secrets.token_urlsafe")
+    @patch("src.utils.crypto.sha256_key_hash")
+    @patch("src.utils.crypto.encrypt_api_key")
     async def test_create_api_key_both_tables_missing(
-        self, mock_hash, mock_generate, mock_supabase
+        self, mock_encrypt, mock_hash, mock_token, mock_supabase
     ):
         """Test that API key creation succeeds even when BOTH auxiliary tables are missing."""
-        mock_generate.return_value = "gw_test_key_789"
+        mock_token.return_value = "test_key_789"
         mock_hash.return_value = "hashed_key"
+        mock_encrypt.return_value = ("encrypted_key", 1)
 
         mock_client = MagicMock()
         mock_supabase.return_value = mock_client
@@ -165,8 +171,8 @@ class TestAPIKeyGracefulDegradation:
             elif table_name == "api_key_audit_logs":
                 mock_table.insert.return_value.execute.side_effect = Exception("PGRST205")
             else:
-                # api_keys_new deletion succeeds
-                mock_table.delete.return_value.eq.return_value.execute.return_value = MagicMock(
+                # api_keys_new deletion succeeds (two .eq() calls for api_key and user_id)
+                mock_table.delete.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
                     data=[{"id": 1, "key_name": "Deleted Key", "environment_tag": "production"}]
                 )
             return mock_table
@@ -215,8 +221,8 @@ class TestAPIKeyGracefulDegradation:
 
         # Should succeed despite missing tables
         result = update_api_key(
+            api_key="gw_test_key",
             user_id=123,
-            key_id=1,
             updates={"key_name": "Updated Name", "max_requests": 2000}
         )
 
@@ -224,13 +230,15 @@ class TestAPIKeyGracefulDegradation:
 
     @pytest.mark.asyncio
     @patch("src.db.api_keys.get_supabase_client")
-    @patch("src.db.api_keys.generate_api_key")
-    @patch("src.db.api_keys.hash_api_key")
+    @patch("secrets.token_urlsafe")
+    @patch("src.utils.crypto.sha256_key_hash")
+    @patch("src.utils.crypto.encrypt_api_key")
     async def test_create_api_key_real_error_still_logged(
-        self, mock_hash, mock_generate, mock_supabase
+        self, mock_encrypt, mock_hash, mock_token, mock_supabase
     ):
         """Test that real errors (non-missing-table) are still logged properly."""
-        mock_generate.return_value = "gw_test_key_error"
+        mock_token.return_value = "test_key_error"
+        mock_encrypt.return_value = ("encrypted_key", 1)
         mock_hash.return_value = "hashed_key"
 
         mock_client = MagicMock()

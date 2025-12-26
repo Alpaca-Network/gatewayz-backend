@@ -9,7 +9,6 @@ Usage:
     python scripts/database/apply_missing_migration.py
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -25,8 +24,8 @@ def check_tables_exist(client) -> dict[str, bool]:
 
     for table_name in tables_to_check:
         try:
-            # Try to query the table (limit 0 to avoid fetching data)
-            client.table(table_name).select("id").limit(0).execute()
+            # Try to query the table (select count to check existence without depending on specific columns)
+            client.table(table_name).select("*", count="exact").limit(0).execute()
             results[table_name] = True
             print(f"✅ Table '{table_name}' exists")
         except Exception as e:
@@ -49,10 +48,7 @@ def apply_migration():
         print(f"❌ Migration file not found: {migration_file}")
         return False
 
-    print(f"📝 Reading migration file: {migration_file}")
-
-    with open(migration_file, 'r') as f:
-        migration_sql = f.read()
+    print(f"📝 Found migration file: {migration_file}")
 
     # Get Supabase client
     client = get_supabase_client()
@@ -80,7 +76,7 @@ def apply_migration():
     print("METHOD 1: Supabase CLI (Recommended)")
     print("  1. Install Supabase CLI: https://supabase.com/docs/guides/cli")
     print("  2. Link to your project: supabase link")
-    print(f"  3. Apply migration: supabase db push")
+    print(f"  3. Apply all pending migrations: supabase db push")
     print("")
     print("METHOD 2: Supabase Dashboard")
     print("  1. Go to: https://app.supabase.com/project/_/sql/new")

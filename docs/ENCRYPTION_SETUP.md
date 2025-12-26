@@ -55,7 +55,8 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 This will output a key like:
 ```
-dGhpc19pc19hX3NhbXBsZV9rZXlfZm9yX2RlbW9uc3RyYXRpb24=
+# Output will be something like (this is just format example):
+# AbCdEf1234567890+/=...<44-character-base64-string>
 ```
 
 ## Setting Up Encryption for Production
@@ -233,7 +234,7 @@ If you're enabling encryption for the first time on an existing deployment with 
 ## Support
 
 For issues or questions about encryption setup:
-- **GitHub Issues**: https://github.com/your-org/gatewayz-backend/issues
+- **GitHub Issues**: https://github.com/Alpaca-Network/gatewayz-backend/issues
 - **Documentation**: `/docs`
 - **Team Contact**: [Your support channel]
 
