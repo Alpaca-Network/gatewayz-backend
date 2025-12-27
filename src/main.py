@@ -547,27 +547,6 @@ def create_app() -> FastAPI:
     logger.info(f"   Total: {loaded_count + failed_count}")
 
     # ==================== Sentry Tunnel Router ====================
-    # ==================== Prometheus Metrics Endpoints ====================
-    # Explicitly load prometheus_endpoints to ensure /prometheus/metrics/* routes are available
-    try:
-        from src.routes.prometheus_endpoints import router as prometheus_router
-
-        app.include_router(prometheus_router)
-        logger.info("  [OK] Prometheus Endpoints (/prometheus/metrics/*)")
-        logger.info("       - /prometheus/metrics/all (all metrics)")
-        logger.info("       - /prometheus/metrics/summary (JSON summary)")
-        logger.info("       - /prometheus/metrics/system (HTTP metrics)")
-        logger.info("       - /prometheus/metrics/providers (provider health)")
-        logger.info("       - /prometheus/metrics/models (model performance)")
-        logger.info("       - /prometheus/metrics/business (cost & subscriptions)")
-        logger.info("       - /prometheus/metrics/performance (latency metrics)")
-        logger.info("       - /prometheus/metrics/docs (endpoint documentation)")
-    except ImportError as e:
-        logger.error(f"  [FAIL] Prometheus Endpoints router not loaded: {e}")
-        logger.error(f"         This is CRITICAL - /prometheus/metrics/* endpoints will be unavailable")
-    except Exception as e:
-        logger.error(f"  [FAIL] Unexpected error loading Prometheus Endpoints: {e}")
-
     # Load Sentry tunnel router separately (at root /monitoring path)
     try:
         from src.routes.monitoring import sentry_tunnel_router
