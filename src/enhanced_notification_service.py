@@ -68,6 +68,10 @@ class EnhancedNotificationService:
         # Reject Privy fallback emails that aren't real email addresses
         if email.endswith("@privy.user"):
             return False
+        # Reject new placeholder format used for database storage when no valid email exists
+        # These are RFC-valid but not deliverable (e.g., noemail+xxx@privy.placeholder)
+        if email.endswith("@privy.placeholder"):
+            return False
         # Basic email format check
         if "@" not in email or "." not in email.split("@")[-1]:
             return False
@@ -440,6 +444,11 @@ The {self.app_name} Team
 
         # Reject Privy placeholder emails (did:privy:xxx@privy.user or xxx@privy.user)
         if email.endswith("@privy.user"):
+            return False
+
+        # Reject new placeholder format used for database storage when no valid email exists
+        # These are RFC-valid but not deliverable (e.g., noemail+xxx@privy.placeholder)
+        if email.endswith("@privy.placeholder"):
             return False
 
         # Reject emails with did: prefix (Privy decentralized identifiers)
