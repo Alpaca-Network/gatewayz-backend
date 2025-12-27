@@ -556,7 +556,7 @@ async def _process_stream_completion_background(
         # Save chat completion request to database
         if request_id:
             try:
-                user_id_str = str(user.get("id")) if user and user.get("id") else None
+                user_id_int = user.get("id") if user and user.get("id") else None
                 await _to_thread(
                     save_chat_completion_request,
                     request_id=request_id,
@@ -566,7 +566,7 @@ async def _process_stream_completion_background(
                     processing_time_ms=int(elapsed * 1000),
                     status="completed",
                     error_message=None,
-                    user_id=user_id_str,
+                    user_id=user_id_int,
                     provider_name=provider,
                 )
             except Exception as e:

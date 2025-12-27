@@ -129,7 +129,7 @@ def save_chat_completion_request(
     processing_time_ms: int,
     status: str = "completed",
     error_message: Optional[str] = None,
-    user_id: Optional[str] = None,
+    user_id: Optional[int] = None,
     provider_name: Optional[str] = None,
     model_id: Optional[int] = None,
 ) -> Optional[dict[str, Any]]:
@@ -144,7 +144,7 @@ def save_chat_completion_request(
         processing_time_ms: Total time to process the request in milliseconds
         status: Status of the request (completed, failed, partial)
         error_message: Error message if the request failed
-        user_id: Optional user identifier for the request
+        user_id: Optional user identifier (integer) for the request
         provider_name: Optional provider name to help identify the model
         model_id: Optional model ID if already resolved (avoids lookup)
 
