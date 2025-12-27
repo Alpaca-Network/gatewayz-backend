@@ -811,10 +811,25 @@ def _build_vertex_content(messages: list) -> list:
                     # Vertex AI supports inline base64 or URLs
                     image_url = item.get("image_url", {}).get("url", "")
                     if image_url.startswith("data:"):
-                        # Base64 encoded image
-                        parts.append(
-                            {"inline_data": {"mime_type": "image/jpeg", "data": image_url}}
-                        )
+                        # Base64 encoded image - extract MIME type and raw base64 data
+                        # Format: data:image/jpeg;base64,<base64_data>
+                        # Vertex AI expects only the raw base64 data, not the data URI prefix
+                        try:
+                            # Parse the data URL to extract MIME type and base64 data
+                            # Expected format: data:<mime_type>;base64,<data>
+                            header, base64_data = image_url.split(",", 1)
+                            # Extract MIME type from header (e.g., "data:image/png;base64")
+                            mime_type = "image/jpeg"  # default
+                            if header.startswith("data:") and ";" in header:
+                                mime_part = header[5:].split(";")[0]  # Remove "data:" prefix
+                                if mime_part:
+                                    mime_type = mime_part
+                            parts.append(
+                                {"inline_data": {"mime_type": mime_type, "data": base64_data}}
+                            )
+                        except ValueError:
+                            # If parsing fails, log warning and skip this part
+                            logger.warning(f"Failed to parse base64 data URL: {image_url[:50]}...")
                     else:
                         # URL reference
                         parts.append(
