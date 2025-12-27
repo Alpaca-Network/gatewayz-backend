@@ -241,6 +241,12 @@ def create_app() -> FastAPI:
     app.add_middleware(StagingSecurityMiddleware)
     logger.info("  🔒 Staging security middleware enabled")
 
+    # Add deprecation middleware to warn users about legacy endpoints
+    from src.middleware.deprecation import DeprecationMiddleware
+
+    app.add_middleware(DeprecationMiddleware)
+    logger.info("  ⚠️  Deprecation middleware enabled (legacy endpoint warnings)")
+
     # Security
     HTTPBearer()
 
@@ -407,7 +413,9 @@ def create_app() -> FastAPI:
     # These routes are mounted under /v1 prefix via v1_router
     # IMPORTANT: unified_chat must be first, then chat & messages for backward compatibility
     v1_routes_to_load = [
-        ("unified_chat", "Unified Chat API"),  # Single endpoint for all chat formats
+        ("unified_chat", "Unified Chat API"),  # NEW: Single endpoint for all chat formats
+        ("chat", "Chat Completions"),
+        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
