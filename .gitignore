@@ -48,6 +48,9 @@ gatewayz/
 !FAILOVER_TESTING_GUIDE.md
 !LIVE_API_TESTING_GUIDE.md
 
+# Staging security credentials (contains sensitive token)
+STAGING_SECURITY_SETUP.md
+
 # Temp and output files
 tmp/
 temp*.json

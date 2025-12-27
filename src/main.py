@@ -235,6 +235,12 @@ def create_app() -> FastAPI:
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=10000)
     logger.info("  🗜  Selective GZip compression middleware enabled (threshold: 10KB, skips SSE)")
 
+    # Add staging security middleware (protects staging environment from unauthorized access)
+    from src.middleware.staging_security import StagingSecurityMiddleware
+
+    app.add_middleware(StagingSecurityMiddleware)
+    logger.info("  🔒 Staging security middleware enabled")
+
     # Security
     HTTPBearer()
 
@@ -266,6 +272,44 @@ def create_app() -> FastAPI:
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
+
+    # ==================== Fallback Health Endpoint ====================
+    # This endpoint is defined directly in main.py to ensure it ALWAYS exists,
+    # even if the health route fails to load. This is critical for Railway deployments.
+    @app.get("/health", tags=["health"], include_in_schema=False)
+    async def fallback_health_check():
+        """
+        Fallback health check endpoint - ALWAYS responds if app is running.
+
+        This endpoint is a safety net for Railway healthchecks. If the health route
+        fails to load, this fallback ensures the healthcheck endpoint still responds.
+        Returns HTTP 200 to indicate the app is alive, even in degraded mode.
+        """
+        from datetime import datetime, timezone
+
+        try:
+            from src.config.supabase_config import get_initialization_status
+            db_status = get_initialization_status()
+        except Exception as e:
+            logger.warning(f"Could not get DB status in fallback health check: {e}")
+            db_status = {"initialized": False, "has_error": True}
+
+        response = {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if db_status.get("has_error"):
+            response["database"] = "unavailable"
+            response["mode"] = "degraded"
+        elif db_status.get("initialized"):
+            response["database"] = "connected"
+        else:
+            response["database"] = "not_initialized"
+
+        return response
+
+    logger.info("  [OK] Fallback health check endpoint at /health")
 
     # Add structured metrics endpoint (parses Prometheus metrics)
     @app.get("/api/metrics/parsed", tags=["monitoring"], include_in_schema=False)
@@ -361,10 +405,9 @@ def create_app() -> FastAPI:
 
     # Define v1 routes (OpenAI-compatible API endpoints)
     # These routes are mounted under /v1 prefix via v1_router
-    # IMPORTANT: chat & messages must be before catalog to avoid /* being caught by /model/{provider}/{model}
+    # IMPORTANT: unified_chat must be first, then chat & messages for backward compatibility
     v1_routes_to_load = [
-        ("chat", "Chat Completions"),
-        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
+        ("unified_chat", "Unified Chat API"),  # Single endpoint for all chat formats
         ("images", "Image Generation"),  # Image generation endpoints
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
@@ -379,6 +422,7 @@ def create_app() -> FastAPI:
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
+        ("prometheus_endpoints", "Prometheus Endpoints"),  # Structured Prometheus metrics (/prometheus/metrics/*)
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations

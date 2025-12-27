@@ -1030,11 +1030,20 @@ async def provider_health():
     This is essential for debugging chat endpoint issues in Railway.
     """
     try:
-        from src.routes.chat import _provider_import_errors
+        # Try to import provider import errors from unified_chat (new route)
+        # Fall back to empty dict if unavailable
+        _provider_import_errors = {}
+        try:
+            from src.routes.unified_chat import _provider_import_errors as unified_import_errors
+            _provider_import_errors = unified_import_errors
+        except (ImportError, AttributeError):
+            # Unified chat route may not have import errors tracking
+            # or it may not exist, use empty dict
+            logger.debug("Could not import _provider_import_errors from unified_chat")
 
         # Count total providers and failed
         total_providers = 16  # Based on the code, there are 16 providers
-        failed_count = len(_provider_import_errors)
+        failed_count = len(_provider_import_errors) if _provider_import_errors else 0
         loaded_count = total_providers - failed_count
 
         logger.info(

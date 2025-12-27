@@ -1,6 +1,18 @@
-name: Auto Deploy to Railway
+name: Deploy to Railway Test Environment
 
 on:
+<<<<<<< HEAD
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "railway.json"
+      - "start.sh"
+      - ".github/workflows/deploy.yml"
+=======
   # Trigger after CI Pipeline completes successfully
   workflow_run:
     workflows: ["CI Pipeline"]
@@ -17,13 +29,14 @@ on:
         options:
           - production
           - staging
+>>>>>>> refs/remotes/origin/main
 
 env:
   RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
   RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
 
 jobs:
-  # Determine environment based on branch
+  # Setup: Always deploy to staging on main push
   setup-environment:
     name: Setup Deployment Environment
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -32,13 +45,17 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     outputs:
-      environment: ${{ steps.set-env.outputs.environment }}
-      railway_environment: ${{ steps.set-env.outputs.railway_environment }}
+      environment: staging
+      railway_environment: staging
 
     steps:
-      - name: Determine environment
-        id: set-env
+      - name: Deployment Info
         run: |
+<<<<<<< HEAD
+          echo "🚀 Deploying to STAGING environment"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+=======
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             ENV="${{ github.event.inputs.environment }}"
             case "$ENV" in
@@ -67,6 +84,7 @@ jobs:
               echo "railway_environment=staging" >> $GITHUB_OUTPUT
             fi
           fi
+>>>>>>> refs/remotes/origin/main
 
       - name: Log CI completion
         if: github.event_name == 'workflow_run'
@@ -76,14 +94,20 @@ jobs:
           echo "Commit: ${{ github.event.workflow_run.head_sha }}"
           echo "Proceeding with deployment..."
 
-  # Deploy to Railway
+  # Deploy to Railway Staging
   deploy-railway:
+<<<<<<< HEAD
+    name: Deploy to Railway Staging (Test Environment)
+    runs-on: ubuntu-latest
+    needs: [setup-environment, check-ci-status]
+=======
     name: Deploy to Railway (${{ needs.setup-environment.outputs.environment }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment]
+>>>>>>> refs/remotes/origin/main
     environment:
-      name: ${{ needs.setup-environment.outputs.environment }}
-      url: https://${{ secrets.RAILWAY_DOMAIN }}
+      name: staging
+      url: https://${{ secrets.RAILWAY_STAGING_DOMAIN }}
 
     steps:
       - name: Checkout code
@@ -102,17 +126,15 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: railway whoami
 
-      - name: Deploy to Railway
-        env:
-          RAILWAY_ENVIRONMENT: ${{ needs.setup-environment.outputs.railway_environment }}
+      - name: Deploy to Railway Staging
         run: |
-          echo "🚀 Deploying to Railway ($RAILWAY_ENVIRONMENT)..."
+          echo "🚀 Deploying to Railway STAGING environment..."
 
-          # Set Railway project and environment (with proper syntax)
+          # Set Railway project and environment
           railway project switch --id "$RAILWAY_PROJECT_ID" || {
             echo "⚠️ Failed to switch project, attempting deployment anyway..."
           }
-          railway environment switch --name "$RAILWAY_ENVIRONMENT" || {
+          railway environment switch --name staging || {
             echo "⚠️ Failed to switch environment, attempting deployment anyway..."
           }
 
@@ -130,18 +152,21 @@ jobs:
           sleep 60
           railway logs --follow --tail 50 || true
 
-      - name: Verify deployment
+      - name: Verify staging deployment
         run: |
-          echo "🔍 Verifying deployment..."
+          echo "🔍 Verifying staging deployment..."
           max_attempts=12
           attempt=1
 
           while [ $attempt -le $max_attempts ]; do
-            DOMAIN="${{ secrets.RAILWAY_DOMAIN }}"
+            DOMAIN="${{ secrets.RAILWAY_STAGING_DOMAIN }}"
             HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN/health || echo "000")
 
             if [ "$HEALTH_STATUS" == "200" ]; then
-              echo "✅ Deployment healthy! Service responding at https://$DOMAIN"
+              echo "✅ Staging deployment healthy! Service responding at https://$DOMAIN"
+              echo ""
+              echo "🧪 Test your changes at: https://$DOMAIN"
+              echo "📝 When ready, deploy to production manually from Railway dashboard"
               exit 0
             fi
 
@@ -181,20 +206,19 @@ jobs:
             // Find PR that was just merged
             for (const pr of pullRequests) {
               if (pr.merged_at && new Date(pr.merged_at) > new Date(Date.now() - 60000)) {
-                const environment = '${{ needs.setup-environment.outputs.environment }}';
-                const domain = '${{ secrets.RAILWAY_DOMAIN }}';
+                const domain = '${{ secrets.RAILWAY_STAGING_DOMAIN }}';
                 const deployStatus = '${{ needs.deploy-railway.result }}';
 
                 let message = '';
                 if (deployStatus === 'success') {
-                  message = `🚀 **Deployment Successful!**\n\n` +
-                    `Environment: **${environment}**\n` +
-                    `Domain: https://${domain}\n` +
+                  message = `🚀 **Deployed to Staging (Test Environment)**\n\n` +
+                    `Environment: **staging**\n` +
+                    `Test at: https://${domain}\n` +
                     `Commit: ${context.sha.substring(0, 7)}\n` +
-                    `Branch: ${context.ref_name}`;
+                    `Branch: ${context.ref_name}\n\n` +
+                    `🧪 Test your changes, then deploy to production manually from Railway dashboard.`;
                 } else {
-                  message = `⚠️ **Deployment Failed**\n\n` +
-                    `Environment: **${environment}**\n` +
+                  message = `⚠️ **Staging Deployment Failed**\n\n` +
                     `Status: ${deployStatus}\n` +
                     `Check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId})`;
                 }
@@ -211,22 +235,27 @@ jobs:
 
       - name: Deployment summary
         run: |
-          ENVIRONMENT="${{ needs.setup-environment.outputs.environment }}"
-          DOMAIN="${{ secrets.RAILWAY_DOMAIN }}"
+          DOMAIN="${{ secrets.RAILWAY_STAGING_DOMAIN }}"
           STATUS="${{ needs.deploy-railway.result }}"
 
-          echo "=== Deployment Summary ==="
-          echo "Environment: $ENVIRONMENT"
-          echo "Domain: https://$DOMAIN"
+          echo "=== Staging Deployment Summary ==="
+          echo "Environment: staging (test)"
+          echo "Test URL: https://$DOMAIN"
           echo "Status: $STATUS"
           echo "Branch: ${{ github.ref_name }}"
           echo "Commit: ${{ github.sha }}"
           echo ""
 
           if [ "$STATUS" == "success" ]; then
-            echo "✅ Deployment completed successfully!"
+            echo "✅ Staging deployment completed successfully!"
+            echo ""
+            echo "Next steps:"
+            echo "1. Test your changes at: https://$DOMAIN"
+            echo "2. When ready, deploy to production:"
+            echo "   - Via Railway Dashboard: https://railway.app/"
+            echo "   - Or via CLI: railway up --environment production"
           else
-            echo "⚠️ Deployment had issues. Check the logs above."
+            echo "⚠️ Staging deployment had issues. Check the logs above."
           fi
 
       - name: Trigger monitoring workflow

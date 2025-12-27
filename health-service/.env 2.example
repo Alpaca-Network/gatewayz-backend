@@ -1,0 +1,33 @@
+# Health Monitoring Service Environment Variables
+# Copy to .env and configure
+
+# Port (Railway will override with $PORT)
+PORT=8001
+
+# Health check interval in seconds (default: 300 = 5 minutes)
+HEALTH_CHECK_INTERVAL=300
+
+# Use intelligent (tiered) monitoring vs simple monitoring
+# Intelligent: Database-backed, tiered priority, distributed-safe
+# Simple: In-memory only, faster startup, single-instance
+USE_INTELLIGENT_MONITOR=true
+
+# Redis configuration (required for sharing health data with main API)
+REDIS_URL=redis://localhost:6379
+
+# Supabase configuration (for intelligent monitor and health data storage)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-supabase-anon-key
+
+# Provider API keys (for health checking models)
+# Only include keys for providers you want to health check
+OPENROUTER_API_KEY=
+PORTKEY_API_KEY=
+DEEPINFRA_API_KEY=
+TOGETHER_API_KEY=
+FIREWORKS_API_KEY=
+HUGGINGFACE_API_KEY=
+
+# Sentry (optional, for error tracking)
+SENTRY_DSN=
+SENTRY_ENVIRONMENT=production
