@@ -25,6 +25,41 @@ def get_featherless_client():
         raise
 
 
+def _sanitize_messages_for_featherless(messages: list[dict]) -> list[dict]:
+    """
+    Sanitize messages for Featherless API compatibility.
+
+    Featherless expects:
+    - tool_calls to be an array or omitted entirely (not null)
+    - Validation errors occur when tool_calls is null
+
+    Args:
+        messages: List of message dictionaries
+
+    Returns:
+        Sanitized list of messages
+    """
+    sanitized = []
+    for msg in messages:
+        clean_msg = msg.copy()
+
+        # Remove null tool_calls (Featherless rejects null, expects array or omitted)
+        if 'tool_calls' in clean_msg and clean_msg['tool_calls'] is None:
+            logger.debug(f"Removing null tool_calls from message")
+            del clean_msg['tool_calls']
+
+        # Ensure tool_calls is array if present
+        if 'tool_calls' in clean_msg and not isinstance(clean_msg['tool_calls'], list):
+            logger.warning(
+                f"Invalid tool_calls type: {type(clean_msg['tool_calls'])}, removing field"
+            )
+            del clean_msg['tool_calls']
+
+        sanitized.append(clean_msg)
+
+    return sanitized
+
+
 def make_featherless_request_openai(messages, model, **kwargs):
     """Make request to Featherless.ai using OpenAI client
 
@@ -34,8 +69,15 @@ def make_featherless_request_openai(messages, model, **kwargs):
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
     try:
+        # Sanitize messages before sending to Featherless
+        sanitized_messages = _sanitize_messages_for_featherless(messages)
+
         client = get_featherless_client()
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+        response = client.chat.completions.create(
+            model=model,
+            messages=sanitized_messages,
+            **kwargs
+        )
         return response
     except Exception as e:
         logger.error(f"Featherless request failed: {e}")
@@ -51,9 +93,15 @@ def make_featherless_request_openai_stream(messages, model, **kwargs):
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
     try:
+        # Sanitize messages before sending to Featherless
+        sanitized_messages = _sanitize_messages_for_featherless(messages)
+
         client = get_featherless_client()
         stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
+            model=model,
+            messages=sanitized_messages,
+            stream=True,
+            **kwargs
         )
         return stream
     except Exception as e:

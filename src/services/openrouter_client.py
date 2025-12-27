@@ -70,6 +70,34 @@ def make_openrouter_request_openai(messages, model, **kwargs):
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors (helps diagnose openrouter/auto issues)
         error_details = _extract_error_details(e, model, kwargs)
+        error_message = str(e)
+
+        # Check for invalid model ID error
+        if "is not a valid model ID" in error_message:
+            logger.warning(
+                f"User requested invalid OpenRouter model: model={model}, "
+                f"error={error_message}"
+            )
+            # Provide user-friendly error message
+            user_friendly_error = BadRequestError(
+                message=(
+                    f"The model '{model}' is not available on OpenRouter. "
+                    "Please check https://api.gatewayz.ai/v1/models for a list of available models, "
+                    "or verify the model ID at https://openrouter.ai/models"
+                ),
+                response=e.response,
+                body=e.body
+            )
+            capture_provider_error(
+                user_friendly_error,
+                provider='openrouter',
+                model=model,
+                endpoint='/chat/completions',
+                extra_context={**error_details, "error_type": "invalid_model_id"}
+            )
+            raise user_friendly_error from e
+
+        # Log other 400 errors with full details
         logger.error(
             f"OpenRouter request failed with 400 Bad Request: model={model}, "
             f"status={error_details.get('status_code')}, "
