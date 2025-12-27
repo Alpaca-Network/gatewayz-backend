@@ -1,7 +1,7 @@
 import types
 import uuid
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timedelta, timezone
 
 # ---- In-memory Supabase stub ------------------------------------------------
 
@@ -372,18 +372,22 @@ def test_admin_monitor_data(sb):
         {"id": 1, "credits": 10, "api_key": "a"},
         {"id": 2, "credits": 0, "api_key": "b"},
     ]).execute()
-    # usage
+    # activity_log (primary source for usage tracking)
     now = datetime.now(timezone.utc).isoformat()
     older = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-    sb.table("usage_records").insert([
-        {"api_key": "a", "model": "m1", "tokens_used": 100, "cost": 0.5, "timestamp": now},
-        {"api_key": "a", "model": "m1", "tokens_used": 50, "cost": 0.2, "timestamp": older},
-        {"api_key": "b", "model": "m2", "tokens_used": 10, "cost": 0.05, "timestamp": now},
+    sb.table("activity_log").insert([
+        {"user_id": 1, "model": "m1", "tokens": 100, "cost": 0.5, "timestamp": now},
+        {"user_id": 1, "model": "m1", "tokens": 50, "cost": 0.2, "timestamp": older},
+        {"user_id": 2, "model": "m2", "tokens": 10, "cost": 0.05, "timestamp": now},
     ]).execute()
 
     out = users.get_admin_monitor_data()
     assert out["total_users"] == 2
+    # total_requests is from activity_log count
     assert out["system_usage_metrics"]["total_requests"] == 3
+    # tokens_today only includes today's records (2 records: 100 + 10 = 110)
+    assert out["system_usage_metrics"]["tokens_today"] == 110
+    # total_tokens uses monthly data as proxy, which includes all 3 records in last 30 days
     assert out["system_usage_metrics"]["total_tokens"] == 160
 
 def test_update_and_get_user_profile(sb):
