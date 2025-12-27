@@ -51,15 +51,16 @@ def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -
         if provider_id:
             # Search with provider_id filter for more accurate matching
             # Try multiple fields: model_id, provider_model_id, model_name
-            # Use wildcards for "contains" matching (e.g., "gpt-4o-mini" matches "openai/gpt-4o-mini")
+            # Use prefix wildcard for "ends with" matching (e.g., "gpt-4o-mini" matches "openai/gpt-4o-mini")
+            # This prevents matching longer variants like "gpt-4o-mini-2024-07-18"
             result = (
                 client.table("models")
                 .select("id, model_id, provider_model_id, model_name")
                 .eq("provider_id", provider_id)
                 .or_(
-                    f"model_id.ilike.%{model_name}%,"
-                    f"provider_model_id.ilike.%{model_name}%,"
-                    f"model_name.ilike.%{model_name}%"
+                    f"model_id.ilike.%{model_name},"
+                    f"provider_model_id.ilike.%{model_name},"
+                    f"model_name.ilike.%{model_name}"
                 )
                 .execute()
             )
@@ -86,14 +87,14 @@ def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -
                 return result.data[0].get("id")
 
         # Step 3: Fallback to search without provider filter (less reliable)
-        # Use wildcards for "contains" matching
+        # Use prefix wildcard for "ends with" matching
         result = (
             client.table("models")
             .select("id, model_id, provider_model_id, model_name")
             .or_(
-                f"model_id.ilike.%{model_name}%,"
-                f"provider_model_id.ilike.%{model_name}%,"
-                f"model_name.ilike.%{model_name}%"
+                f"model_id.ilike.%{model_name},"
+                f"provider_model_id.ilike.%{model_name},"
+                f"model_name.ilike.%{model_name}"
             )
             .limit(1)
             .execute()
