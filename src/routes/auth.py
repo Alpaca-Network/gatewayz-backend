@@ -743,7 +743,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     email=user_email,
                     auth_method=auth_method_str,
                     privy_user_id=request.user.id,
-                    credits=10,  # Users start with $10 trial credits for 3 days
+                    credits=5,  # Users start with $5 trial credits ($1/day limit)
                 )
             except Exception as creation_error:
                 logger.warning(
@@ -797,7 +797,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 user_payload = {
                     "username": username,
                     "email": fallback_email,
-                    "credits": 10,
+                    "credits": 5,
                     "privy_user_id": request.user.id,
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
@@ -1152,7 +1152,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                 email=request.email,
                 auth_method=auth_method_str,
                 privy_user_id=None,  # No Privy for direct registration
-                credits=10,
+                credits=5,  # $5 trial credits ($1/day limit)
             )
         except Exception as creation_error:
             logger.warning(
@@ -1167,7 +1167,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
             fallback_payload = {
                 "username": request.username,
                 "email": request.email,
-                "credits": 10,
+                "credits": 5,
                 "privy_user_id": None,
                 "auth_method": (
                     request.auth_method.value
