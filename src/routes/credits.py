@@ -320,17 +320,20 @@ async def bulk_add_credits_endpoint(
         successful = 0
         failed = 0
 
+        # Deduplicate user IDs to prevent duplicate transactions and incorrect balance tracking
+        unique_user_ids = list(dict.fromkeys(request.user_ids))
+
         # Batch fetch: Get all users at once to reduce N+1 queries
         users_result = (
             client.table("users")
             .select("id, credits, username")
-            .in_("id", request.user_ids)
+            .in_("id", unique_user_ids)
             .execute()
         )
         users_by_id = {u["id"]: u for u in (users_result.data or [])}
 
-        # Process each user
-        for user_id in request.user_ids:
+        # Process each unique user
+        for user_id in unique_user_ids:
             try:
                 user = users_by_id.get(user_id)
 
@@ -400,13 +403,13 @@ async def bulk_add_credits_endpoint(
                 failed += 1
 
         logger.info(
-            f"Admin {admin_user.get('username')} bulk added {request.amount} credits to {successful}/{len(request.user_ids)} users"
+            f"Admin {admin_user.get('username')} bulk added {request.amount} credits to {successful}/{len(unique_user_ids)} users"
         )
 
         return BulkCreditResponse(
             status="success" if failed == 0 else "partial" if successful > 0 else "failed",
             message=f"Bulk credit addition completed: {successful} successful, {failed} failed",
-            total_users=len(request.user_ids),
+            total_users=len(unique_user_ids),
             successful=successful,
             failed=failed,
             amount_per_user=request.amount,

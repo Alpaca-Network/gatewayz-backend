@@ -27,6 +27,7 @@ from src.models.health_models import (
     SystemHealthResponse,
     UptimeMetricsResponse,
 )
+from src.config.supabase_config import get_initialization_status, supabase
 from src.security.deps import get_api_key
 from src.services.simple_health_cache import (
     simple_health_cache,
@@ -48,8 +49,6 @@ async def health_check():
     even if the database is unavailable (degraded mode). Check the response body
     for detailed status including database connectivity.
     """
-    from src.config.supabase_config import get_initialization_status
-
     # Get database initialization status
     db_status = get_initialization_status()
 
@@ -979,8 +978,6 @@ async def database_health():
     This is critical for startup diagnostics in Railway.
     """
     try:
-        from src.config.supabase_config import get_initialization_status, supabase
-
         logger.info("Checking database connectivity...")
 
         # Get initialization status
@@ -998,8 +995,6 @@ async def database_health():
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
-        from src.config.supabase_config import get_initialization_status
-
         logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
 
         # Capture to Sentry
@@ -1094,7 +1089,6 @@ async def get_all_health(
         cached_models = simple_health_cache.get_models_health() or []
 
         # Get database status
-        from src.config.supabase_config import get_initialization_status
         db_status = get_initialization_status()
 
         # Calculate summary stats
