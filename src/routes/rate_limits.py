@@ -1,7 +1,9 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from src.db.api_keys import get_api_key_by_id
 from src.db.rate_limits import (
@@ -11,6 +13,7 @@ from src.db.rate_limits import (
     get_rate_limit_usage_stats,
     get_system_rate_limit_stats,
     get_user_rate_limit_configs,
+    set_user_rate_limits,
     update_rate_limit_config,
 )
 from src.services.user_lookup_cache import get_user
@@ -285,3 +288,373 @@ async def get_rate_limit_alerts_endpoint(
     except Exception as e:
         logger.error(f"Error getting rate limit alerts: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+# =============================================================================
+# ADMIN RATE LIMIT MANAGEMENT ENDPOINTS
+# =============================================================================
+
+
+# Default rate limit configuration
+DEFAULT_RATE_LIMIT_CONFIG = {
+    "requests_per_minute": 60,
+    "requests_per_hour": 1000,
+    "requests_per_day": 10000,
+    "tokens_per_minute": 10000,
+    "tokens_per_hour": 100000,
+    "tokens_per_day": 1000000,
+    "burst_limit": 100,
+    "concurrency_limit": 50,
+}
+
+
+class RateLimitConfigRequest(BaseModel):
+    """Request to set rate limit configuration"""
+
+    requests_per_minute: int = Field(60, ge=0, description="Requests allowed per minute")
+    requests_per_hour: int = Field(1000, ge=0, description="Requests allowed per hour")
+    requests_per_day: int = Field(10000, ge=0, description="Requests allowed per day")
+    tokens_per_minute: int = Field(10000, ge=0, description="Tokens allowed per minute")
+    tokens_per_hour: int = Field(100000, ge=0, description="Tokens allowed per hour")
+    tokens_per_day: int = Field(1000000, ge=0, description="Tokens allowed per day")
+    burst_limit: int = Field(100, ge=0, description="Burst limit for sudden spikes")
+    concurrency_limit: int = Field(50, ge=0, description="Max concurrent requests")
+
+
+class AdminRateLimitUpdateRequest(BaseModel):
+    """Request to update rate limits for a user"""
+
+    api_key: str = Field(..., description="User's API key")
+    config: RateLimitConfigRequest = Field(..., description="Rate limit configuration")
+
+
+class BulkRateLimitUpdateRequest(BaseModel):
+    """Request to update rate limits for multiple users"""
+
+    api_keys: list[str] = Field(..., min_length=1, description="List of API keys to update")
+    config: RateLimitConfigRequest = Field(..., description="Rate limit configuration")
+
+
+@router.get("/admin/rate-limits/config", tags=["admin"])
+async def get_admin_rate_limit_config(
+    api_key: str | None = Query(None, description="Optional API key to get config for"),
+    admin_user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """
+    Get rate limit configuration.
+
+    If api_key is provided, returns config for that specific key.
+    Otherwise, returns the default system configuration.
+
+    **Query Parameters:**
+    - `api_key`: Optional specific API key to get config for
+
+    **Response:**
+    - Rate limit configuration
+    - Default values if no custom config exists
+    """
+    try:
+        if api_key:
+            # Get config for specific API key
+            config = get_rate_limit_config(api_key)
+            return {
+                "status": "success",
+                "api_key": api_key[:15] + "...",
+                "config": config or DEFAULT_RATE_LIMIT_CONFIG,
+                "is_default": config is None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        else:
+            # Return default configuration
+            return {
+                "status": "success",
+                "config": DEFAULT_RATE_LIMIT_CONFIG,
+                "description": "Default system rate limit configuration",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting rate limit config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get rate limit config") from e
+
+
+@router.post("/admin/rate-limits/config", tags=["admin"])
+async def set_admin_rate_limit_config(
+    request: AdminRateLimitUpdateRequest,
+    admin_user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """
+    Set rate limit configuration for a specific API key.
+
+    **Request:**
+    - `api_key`: Target API key
+    - `config`: Rate limit configuration object
+
+    **Response:**
+    - Updated configuration
+    - Success status
+    """
+    try:
+        config_dict = request.config.model_dump()
+
+        # Update rate limit configuration
+        success = update_rate_limit_config(request.api_key, config_dict)
+
+        if not success:
+            raise HTTPException(
+                status_code=500, detail="Failed to update rate limit configuration"
+            )
+
+        logger.info(
+            f"Admin {admin_user.get('username')} updated rate limits for key {request.api_key[:15]}..."
+        )
+
+        return {
+            "status": "success",
+            "message": "Rate limit configuration updated successfully",
+            "api_key": request.api_key[:15] + "...",
+            "config": config_dict,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting rate limit config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set rate limit config") from e
+
+
+@router.post("/admin/rate-limits/config/reset", tags=["admin"])
+async def reset_rate_limit_config(
+    api_key: str = Query(..., description="API key to reset config for"),
+    admin_user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """
+    Reset rate limit configuration to defaults for a specific API key.
+
+    **Query Parameters:**
+    - `api_key`: API key to reset configuration for
+
+    **Response:**
+    - Reset configuration (defaults)
+    - Success status
+    """
+    try:
+        # Reset to default configuration
+        success = update_rate_limit_config(api_key, DEFAULT_RATE_LIMIT_CONFIG)
+
+        if not success:
+            raise HTTPException(
+                status_code=500, detail="Failed to reset rate limit configuration"
+            )
+
+        logger.info(
+            f"Admin {admin_user.get('username')} reset rate limits to defaults for key {api_key[:15]}..."
+        )
+
+        return {
+            "status": "success",
+            "message": "Rate limit configuration reset to defaults",
+            "api_key": api_key[:15] + "...",
+            "config": DEFAULT_RATE_LIMIT_CONFIG,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting rate limit config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reset rate limit config") from e
+
+
+@router.put("/admin/rate-limits/update", tags=["admin"])
+async def update_admin_rate_limits(
+    request: AdminRateLimitUpdateRequest,
+    admin_user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """
+    Update rate limits for a user.
+
+    This endpoint updates the rate limit configuration for a specific API key.
+    It's an alias for POST /admin/rate-limits/config for dashboard compatibility.
+
+    **Request:**
+    - `api_key`: Target API key
+    - `config`: Rate limit configuration object
+
+    **Response:**
+    - Updated configuration
+    - Success status
+    """
+    try:
+        config_dict = request.config.model_dump()
+
+        # Use the set_user_rate_limits function
+        set_user_rate_limits(request.api_key, config_dict)
+
+        logger.info(
+            f"Admin {admin_user.get('username')} updated rate limits for key {request.api_key[:15]}..."
+        )
+
+        return {
+            "status": "success",
+            "message": "Rate limits updated successfully",
+            "api_key": request.api_key[:15] + "...",
+            "config": config_dict,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error updating rate limits: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update rate limits") from e
+
+
+@router.delete("/admin/rate-limits/delete", tags=["admin"])
+async def delete_rate_limits(
+    api_key: str = Query(..., description="API key to delete rate limits for"),
+    admin_user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """
+    Delete custom rate limits for a user (reset to defaults).
+
+    This endpoint removes custom rate limit configuration for a specific API key,
+    effectively resetting them to system defaults.
+
+    **Query Parameters:**
+    - `api_key`: API key to delete rate limits for
+
+    **Response:**
+    - Success status
+    - The key will use default rate limits going forward
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Try to delete from rate_limits table
+        try:
+            result = client.table("rate_limits").delete().eq("api_key", api_key).execute()
+            deleted_from_rate_limits = len(result.data) > 0 if result.data else False
+        except Exception as e:
+            logger.debug(f"Could not delete from rate_limits table: {e}")
+            deleted_from_rate_limits = False
+
+        # Try to reset rate_limit_config in api_keys_new table
+        try:
+            result = (
+                client.table("api_keys_new")
+                .update({
+                    "rate_limit_config": None,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("api_key", api_key)
+                .execute()
+            )
+            reset_in_api_keys = len(result.data) > 0 if result.data else False
+        except Exception as e:
+            logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
+            reset_in_api_keys = False
+
+        logger.info(
+            f"Admin {admin_user.get('username')} deleted rate limits for key {api_key[:15]}..."
+        )
+
+        return {
+            "status": "success",
+            "message": "Rate limits deleted successfully. Key will use default limits.",
+            "api_key": api_key[:15] + "...",
+            "deleted_from_rate_limits": deleted_from_rate_limits,
+            "reset_in_api_keys": reset_in_api_keys,
+            "default_config": DEFAULT_RATE_LIMIT_CONFIG,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error deleting rate limits: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete rate limits") from e
+
+
+@router.get("/admin/rate-limits/users", tags=["admin"])
+async def get_users_rate_limits(
+    limit: int = Query(50, ge=1, le=500, description="Maximum users to return"),
+    offset: int = Query(0, ge=0, description="Number of users to skip"),
+    user_id: int | None = Query(None, description="Filter by specific user ID"),
+    has_custom_config: bool | None = Query(None, description="Filter by custom config presence"),
+    admin_user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """
+    Get rate limits for all users.
+
+    This endpoint provides a list of users and their rate limit configurations.
+
+    **Query Parameters:**
+    - `limit`: Maximum users to return (1-500)
+    - `offset`: Number to skip for pagination
+    - `user_id`: Filter by specific user ID
+    - `has_custom_config`: Filter by custom config presence (true/false)
+
+    **Response:**
+    - List of users with their rate limit configurations
+    - Pagination info
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Build query for api_keys_new table
+        query = client.table("api_keys_new").select(
+            "id, api_key, key_name, user_id, rate_limit_config, environment_tag, created_at"
+        )
+
+        if user_id is not None:
+            query = query.eq("user_id", user_id)
+
+        # Execute query
+        result = query.range(offset, offset + limit - 1).execute()
+        api_keys = result.data or []
+
+        # Filter by custom config presence if specified
+        if has_custom_config is not None:
+            if has_custom_config:
+                api_keys = [k for k in api_keys if k.get("rate_limit_config")]
+            else:
+                api_keys = [k for k in api_keys if not k.get("rate_limit_config")]
+
+        # Format response
+        users_rate_limits = []
+        for key in api_keys:
+            config = key.get("rate_limit_config") or DEFAULT_RATE_LIMIT_CONFIG
+            users_rate_limits.append({
+                "key_id": key["id"],
+                "api_key": key["api_key"][:15] + "...",
+                "key_name": key.get("key_name"),
+                "user_id": key["user_id"],
+                "environment_tag": key.get("environment_tag"),
+                "has_custom_config": key.get("rate_limit_config") is not None,
+                "config": config,
+                "created_at": key.get("created_at"),
+            })
+
+        return {
+            "status": "success",
+            "total": len(users_rate_limits),
+            "users": users_rate_limits,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": len(api_keys) == limit,
+            },
+            "filters": {
+                "user_id": user_id,
+                "has_custom_config": has_custom_config,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting users rate limits: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get users rate limits") from e
