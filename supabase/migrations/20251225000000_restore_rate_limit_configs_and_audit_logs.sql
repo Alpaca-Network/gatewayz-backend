@@ -51,15 +51,8 @@ CREATE POLICY "Service role can manage rate limit configs" ON "public"."rate_lim
     USING (true)
     WITH CHECK (true);
 
-CREATE POLICY "Users can read their own rate limit configs" ON "public"."rate_limit_configs"
-    FOR SELECT
-    TO authenticated
-    USING (
-        api_key_id IN (
-            SELECT id FROM public.api_keys_new
-            WHERE user_id = (SELECT id FROM public.users WHERE auth_id = auth.uid())
-        )
-    );
+-- Note: Removed authenticated user policy as the app uses Privy authentication
+-- not Supabase auth. Access control is handled at the application level.
 
 -- ============================================
 -- API KEY AUDIT LOGS TABLE
@@ -108,7 +101,5 @@ CREATE POLICY "Service role can manage audit logs" ON "public"."api_key_audit_lo
     USING (true)
     WITH CHECK (true);
 
-CREATE POLICY "Users can read their own audit logs" ON "public"."api_key_audit_logs"
-    FOR SELECT
-    TO authenticated
-    USING (user_id = (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+-- Note: Removed authenticated user policy as the app uses Privy authentication
+-- not Supabase auth. Access control is handled at the application level.
