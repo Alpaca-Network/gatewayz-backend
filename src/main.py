@@ -394,6 +394,7 @@ def create_app() -> FastAPI:
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
+        ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),
         ("notifications", "Notifications"),
         ("plans", "Subscription Plans"),
