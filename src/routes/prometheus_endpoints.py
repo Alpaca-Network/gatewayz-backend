@@ -38,26 +38,24 @@ from src.services.prometheus_metrics import (
     fastapi_requests_in_progress,
     fastapi_exceptions_total,
     # Model inference metrics
-    model_inference_requests_total,
-    model_inference_duration_seconds,
-    tokens_used_total,
-    credits_used_total,
+    model_inference_requests,
+    model_inference_duration,
+    tokens_used,
+    credits_used,
     # Database metrics
-    database_queries_total,
-    database_query_duration_seconds,
+    database_query_count,
+    database_query_duration,
     # Cache metrics
-    cache_hits_total,
-    cache_misses_total,
+    cache_hits,
+    cache_misses,
     # Provider health metrics
     provider_availability,
     provider_error_rate,
-    provider_response_time_seconds,
-    gatewayz_provider_health_score,
+    provider_response_time,
     # Business metrics
     active_api_keys,
     active_connections,
     subscription_count,
-    trial_active,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,7 +104,7 @@ async def all_metrics():
     Returns:
         Prometheus text format metrics
     """
-    return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @router.get("/system", include_in_schema=True)
@@ -132,7 +130,7 @@ async def system_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/providers", include_in_schema=True)
@@ -159,7 +157,7 @@ async def provider_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/models", include_in_schema=True)
@@ -186,7 +184,7 @@ async def model_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/business", include_in_schema=True)
@@ -217,7 +215,7 @@ async def business_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/performance", include_in_schema=True)
@@ -244,7 +242,7 @@ async def performance_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/summary", include_in_schema=True)
