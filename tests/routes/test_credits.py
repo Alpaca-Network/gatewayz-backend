@@ -269,6 +269,43 @@ class TestCreditsBulkAdd:
         user_ids_in_results = {r['user_id'] for r in data['results']}
         assert user_ids_in_results == {2, 3}
 
+    @patch('src.routes.credits.get_supabase_client')
+    @patch('src.routes.credits.log_credit_transaction')
+    def test_bulk_add_deduplicates_user_ids(self, mock_log_transaction, mock_supabase, client, auth_headers):
+        """Duplicate user IDs are deduplicated to prevent incorrect balance tracking"""
+        app.dependency_overrides[require_admin] = mock_require_admin
+
+        mock_client = MagicMock()
+        mock_supabase.return_value = mock_client
+
+        # Mock batch user lookup - only one user since duplicates are removed
+        mock_client.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
+            {'id': 2, 'credits': 100.0, 'username': 'user1'},
+        ]
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+            {'id': 2, 'credits': 200.0}
+        ]
+        mock_log_transaction.return_value = {'id': 1}
+
+        # Send duplicate user IDs
+        response = client.post(
+            '/credits/bulk-add',
+            json={
+                'user_ids': [2, 2, 2],  # Same user ID repeated
+                'amount': 100.0,
+                'description': 'Bulk addition with duplicates'
+            },
+            headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # Should only process unique users
+        assert data['total_users'] == 1
+        assert data['successful'] == 1
+        assert data['total_credits_added'] == 100.0  # Only added once
+        assert len(data['results']) == 1
+
     def test_bulk_add_empty_list(self, client, auth_headers):
         """Reject empty user list"""
         app.dependency_overrides[require_admin] = mock_require_admin
