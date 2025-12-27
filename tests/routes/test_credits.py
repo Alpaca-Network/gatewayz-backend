@@ -230,16 +230,18 @@ class TestCreditsBulkAdd:
     @patch('src.routes.credits.get_supabase_client')
     @patch('src.routes.credits.log_credit_transaction')
     def test_bulk_add_credits_success(self, mock_log_transaction, mock_supabase, client, auth_headers):
-        """Successfully add credits to multiple users"""
+        """Successfully add credits to multiple users with different balances"""
         app.dependency_overrides[require_admin] = mock_require_admin
 
         mock_client = MagicMock()
         mock_supabase.return_value = mock_client
 
-        # Mock user lookups for each user
-        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
-            {'id': 2, 'credits': 100.0, 'username': 'user1'}
+        # Mock batch user lookup with different users (using .in_() query)
+        mock_client.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
+            {'id': 2, 'credits': 100.0, 'username': 'user1'},
+            {'id': 3, 'credits': 250.0, 'username': 'user2'},
         ]
+        # Mock update for each user
         mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
             {'id': 2, 'credits': 200.0}
         ]
@@ -258,7 +260,14 @@ class TestCreditsBulkAdd:
         assert response.status_code == 200
         data = response.json()
         assert data['total_users'] == 2
+        assert data['successful'] == 2
+        assert data['failed'] == 0
         assert data['amount_per_user'] == 100.0
+        assert data['total_credits_added'] == 200.0
+        # Verify both users are in results with correct data
+        assert len(data['results']) == 2
+        user_ids_in_results = {r['user_id'] for r in data['results']}
+        assert user_ids_in_results == {2, 3}
 
     def test_bulk_add_empty_list(self, client, auth_headers):
         """Reject empty user list"""
