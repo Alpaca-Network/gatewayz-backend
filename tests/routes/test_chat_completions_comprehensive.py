@@ -14,8 +14,9 @@ import json
 import os
 
 
-# Test API key (use environment variable if available, else use test key)
-TEST_API_KEY = os.getenv("TEST_API_KEY", "gw_live_wTfpLJ5VB28qMXpOAhr7Uw")
+# Test API key and model (must be provided via environment variables)
+# These should be set before running tests that require authentication
+TEST_API_KEY = os.getenv("TEST_API_KEY", "")  # Leave empty if not provided
 TEST_MODEL = os.getenv("TEST_MODEL", "gpt-3.5-turbo")
 
 
@@ -29,10 +30,15 @@ def client():
 
 @pytest.fixture
 def auth_headers():
-    """Create authorization headers."""
+    """Create authorization headers.
+
+    Note: Tests using this fixture will fail if TEST_API_KEY environment variable
+    is not set. Set it before running tests:
+    export TEST_API_KEY="your-actual-api-key"
+    """
     return {
         "accept": "application/json",
-        "Authorization": f"Bearer {TEST_API_KEY}",
+        "Authorization": f"Bearer {TEST_API_KEY}" if TEST_API_KEY else "Bearer invalid-key",
         "Content-Type": "application/json",
     }
 
