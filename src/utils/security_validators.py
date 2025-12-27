@@ -5,15 +5,75 @@ This module provides validation functions to prevent common security issues:
 - SSRF (Server-Side Request Forgery) attacks
 - Open redirect vulnerabilities
 - Webhook authenticity verification
+- Email address validation (RFC 5321/5322 compliance)
 """
 
 import hashlib
 import hmac
 import ipaddress
 import logging
+import re
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def is_valid_email(email: str) -> bool:
+    """Validate email address according to RFC 5321/5322 standards.
+    
+    This function checks if an email address is valid and follows the standard email format.
+    It uses a regex pattern that covers most common valid email addresses while rejecting
+    clearly invalid ones (like those with colons in the local part).
+    
+    Args:
+        email: Email address string to validate
+    
+    Returns:
+        True if email is valid, False otherwise
+    
+    Examples:
+        >>> is_valid_email("user@example.com")
+        True
+        >>> is_valid_email("did:privy:cmjk48www00vdl50dxh4s2pzd@privy.user")
+        False
+        >>> is_valid_email("test+tag@example.com")
+        True
+        >>> is_valid_email("invalid@")
+        False
+    """
+    if not email or not isinstance(email, str):
+        return False
+    
+    # RFC 5322 compliant email regex pattern
+    # This pattern matches most valid email addresses while being strict enough
+    # to reject invalid formats like those with colons or other special chars in local part
+    email_pattern = re.compile(
+        r'^[a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
+        r'(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$'
+    )
+    
+    # Basic checks
+    if '@' not in email:
+        return False
+    
+    # Split into local and domain parts
+    parts = email.rsplit('@', 1)
+    if len(parts) != 2:
+        return False
+    
+    local_part, domain_part = parts
+    
+    # Check length constraints (RFC 5321)
+    if len(local_part) > 64 or len(domain_part) > 255:
+        return False
+    
+    # Check for colons in local part (not allowed in standard email addresses)
+    # This specifically catches Privy IDs like "did:privy:xxx@privy.user"
+    if ':' in local_part:
+        return False
+    
+    # Use regex to validate overall format
+    return bool(email_pattern.match(email))
 
 
 def is_private_ip(ip: str) -> bool:
