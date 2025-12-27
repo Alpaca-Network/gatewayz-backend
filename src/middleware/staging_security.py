@@ -7,6 +7,7 @@ for all routes except health checks and documentation.
 Only applies when APP_ENV=staging.
 """
 
+import asyncio
 import logging
 import os
 import secrets
@@ -17,6 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette import status
 
 from src.config.config import Config
+from src.services.user_lookup_cache import get_user
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +28,14 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
     Security middleware for staging environment.
 
     Enforces admin-only access to staging environment:
-    - ALL routes except /health require ADMIN_API_KEY to access the backend
-    - This is a gateway layer - user routes still require valid user API keys after passing this check
-    - Uses ADMIN_API_KEY for verification (same as admin endpoints)
+    - ALL routes except /health require an admin user API key
+    - Validates that the provided API key belongs to a user with admin privileges
+    - Same API key is used for both staging access and endpoint authentication
 
     Usage:
-        # All endpoints require admin key to access in staging
+        # All endpoints require admin user API key to access staging
         curl https://staging.api.com/v1/chat/completions \\
-            -H "Authorization: Bearer <ADMIN_API_KEY>" \\
+            -H "Authorization: Bearer <ADMIN_USER_API_KEY>" \\
             -H "Content-Type: application/json" \\
             -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
     """
@@ -45,20 +47,13 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app):
         super().__init__(app)
-        self.admin_api_key = os.getenv("ADMIN_API_KEY")
 
         # Log security configuration on startup
         if Config.APP_ENV == "staging":
-            if self.admin_api_key:
-                logger.info(
-                    "🔒 Staging security enabled: Admin-only access "
-                    "(all routes require ADMIN_API_KEY except /health)"
-                )
-            else:
-                logger.warning(
-                    "⚠️  Staging security WARNING: ADMIN_API_KEY not set! "
-                    "Staging environment is currently open to everyone."
-                )
+            logger.info(
+                "🔒 Staging security enabled: Admin-only access "
+                "(all routes require admin user API key except /health)"
+            )
 
     async def dispatch(self, request: Request, call_next):
         """Process request and enforce admin-only staging security."""
@@ -71,34 +66,63 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.ALLOWED_PATHS:
             return await call_next(request)
 
-        # Require admin authentication for all other routes in staging
-        if not self.admin_api_key:
-            # No admin key configured - allow through (but log warning)
-            logger.warning(f"Staging access without admin key check: {request.url.path}")
-            return await call_next(request)
-
         # Extract Authorization header
         auth_header = request.headers.get("Authorization", "")
 
         if not auth_header.startswith("Bearer "):
             return self._access_denied_response("Missing or invalid Authorization header")
 
-        # Extract the token
-        provided_key = auth_header.replace("Bearer ", "").strip()
+        # Extract the API key
+        api_key = auth_header.replace("Bearer ", "").strip()
 
-        # Validate admin key using constant-time comparison
-        if not provided_key or not secrets.compare_digest(provided_key, self.admin_api_key):
-            logger.warning(
-                f"Staging access denied: Invalid admin key",
+        if not api_key:
+            return self._access_denied_response("Empty API key")
+
+        # Validate that the API key belongs to an admin user
+        try:
+            # Run get_user in a thread since it's a sync function
+            user = await asyncio.to_thread(get_user, api_key)
+
+            if not user:
+                logger.warning(
+                    "Staging access denied: Invalid API key",
+                    extra={
+                        "path": request.url.path,
+                        "ip": self._get_client_ip(request),
+                    },
+                )
+                return self._access_denied_response("Invalid API key")
+
+            # Check if user has admin privileges
+            is_admin = user.get("is_admin", False) or user.get("role") in ["admin", "superadmin"]
+
+            if not is_admin:
+                logger.warning(
+                    "Staging access denied: Non-admin user attempted access",
+                    extra={
+                        "user_id": user.get("id"),
+                        "role": user.get("role"),
+                        "path": request.url.path,
+                        "ip": self._get_client_ip(request),
+                    },
+                )
+                return self._access_denied_response("Admin privileges required")
+
+            # User is admin - allow request
+            logger.debug(
+                f"Admin user {user.get('id')} accessing staging: {request.url.path}"
+            )
+            return await call_next(request)
+
+        except Exception as e:
+            logger.error(
+                f"Error validating admin access: {e}",
                 extra={
                     "path": request.url.path,
                     "ip": self._get_client_ip(request),
                 },
             )
-            return self._access_denied_response("Invalid admin API key")
-
-        # Admin key valid - allow request
-        return await call_next(request)
+            return self._access_denied_response("Authentication error")
 
     def _get_client_ip(self, request: Request) -> str:
         """
@@ -122,8 +146,8 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={
                 "error": "Authentication Required",
-                "message": f"Staging environment requires admin authentication: {reason}",
-                "hint": "Use 'Authorization: Bearer <ADMIN_API_KEY>' header to access staging.",
+                "message": f"Staging environment requires admin user authentication: {reason}",
+                "hint": "Use 'Authorization: Bearer <ADMIN_USER_API_KEY>' header with an API key from a user with admin privileges.",
             },
             headers={
                 "WWW-Authenticate": "Bearer",
