@@ -956,6 +956,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
             logger.error(f"Error retrieving activity_log: {e}", exc_info=True)
             activity_logs_today = []
             activity_logs_month = []
+            total_activity_count = 0  # Reset count on error for consistency
 
         # Get usage records data as fallback (legacy table, may not be updated)
         # Get both today's and month's records for complete data
@@ -1035,11 +1036,18 @@ def get_admin_monitor_data() -> dict[str, Any]:
             day_usage.append(usage_record)
 
         # Add legacy usage_records for today that might not be in activity_log
-        activity_timestamps_today = {r.get("timestamp", "") for r in day_usage}
+        # Use record IDs for deduplication instead of timestamps, since multiple
+        # concurrent requests can legitimately share the same timestamp
+        activity_ids_today = {r.get("id") for r in activity_logs_today if r.get("id")}
         for legacy_record in usage_records_legacy_today:
-            legacy_timestamp = legacy_record.get("timestamp", "")
-            if legacy_timestamp and legacy_timestamp not in activity_timestamps_today:
+            legacy_id = legacy_record.get("id")
+            # Include legacy record if it has no ID or its ID isn't in activity_log
+            # (legacy records from usage_records table have different ID space)
+            if legacy_id is None or legacy_id not in activity_ids_today:
                 day_usage.append(legacy_record)
+
+        # Sort day_usage by timestamp descending to ensure correct order for recent activity
+        day_usage.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
 
         # Process MONTH's activity logs
         month_usage = []
@@ -1057,10 +1065,11 @@ def get_admin_monitor_data() -> dict[str, Any]:
             month_usage.append(usage_record)
 
         # Add legacy usage_records for month that might not be in activity_log
-        activity_timestamps_month = {r.get("timestamp", "") for r in month_usage}
+        # Use record IDs for deduplication instead of timestamps
+        activity_ids_month = {r.get("id") for r in activity_logs_month if r.get("id")}
         for legacy_record in usage_records_legacy_month:
-            legacy_timestamp = legacy_record.get("timestamp", "")
-            if legacy_timestamp and legacy_timestamp not in activity_timestamps_month:
+            legacy_id = legacy_record.get("id")
+            if legacy_id is None or legacy_id not in activity_ids_month:
                 month_usage.append(legacy_record)
 
         # Calculate totals with safe aggregation
