@@ -958,22 +958,37 @@ def get_admin_monitor_data() -> dict[str, Any]:
             activity_logs_month = []
 
         # Get usage records data as fallback (legacy table, may not be updated)
-        # Only get today's records to avoid hitting limits
+        # Get both today's and month's records for complete data
         usage_records_legacy_today = []
+        usage_records_legacy_month = []
         try:
+            # Get today's legacy records
             day_ago_iso = day_ago.isoformat()
-            usage_result = (
+            usage_today_result = (
                 client.table("usage_records")
                 .select("*")
                 .gte("timestamp", day_ago_iso)
                 .limit(10000)
                 .execute()
             )
-            usage_records_legacy_today = usage_result.data or []
+            usage_records_legacy_today = usage_today_result.data or []
             logger.debug(f"Retrieved {len(usage_records_legacy_today)} legacy usage_records for today")
+
+            # Get month's legacy records for complete monthly stats
+            month_ago_iso = month_ago.isoformat()
+            usage_month_result = (
+                client.table("usage_records")
+                .select("*")
+                .gte("timestamp", month_ago_iso)
+                .limit(50000)
+                .execute()
+            )
+            usage_records_legacy_month = usage_month_result.data or []
+            logger.debug(f"Retrieved {len(usage_records_legacy_month)} legacy usage_records for month")
         except Exception as e:
             logger.warning(f"Error retrieving usage_records (legacy): {e}")
             usage_records_legacy_today = []
+            usage_records_legacy_month = []
 
         # Create user_id -> api_key mapping for efficient lookup
         user_id_to_api_key = {}
@@ -1041,6 +1056,13 @@ def get_admin_monitor_data() -> dict[str, Any]:
             }
             month_usage.append(usage_record)
 
+        # Add legacy usage_records for month that might not be in activity_log
+        activity_timestamps_month = {r.get("timestamp", "") for r in month_usage}
+        for legacy_record in usage_records_legacy_month:
+            legacy_timestamp = legacy_record.get("timestamp", "")
+            if legacy_timestamp and legacy_timestamp not in activity_timestamps_month:
+                month_usage.append(legacy_record)
+
         # Calculate totals with safe aggregation
         def safe_sum(records, field):
             return sum(record.get(field, 0) or 0 for record in records)
@@ -1095,11 +1117,18 @@ def get_admin_monitor_data() -> dict[str, Any]:
             if model_counts:
                 most_used_model = max(model_counts.items(), key=lambda x: x[1])[0]
 
-        # Calculate last request time safely (from today's data)
+        # Calculate last request time safely (prefer today's data, fall back to month)
         last_request_time = None
         if day_usage:
             timestamps = [
                 record.get("timestamp", "") for record in day_usage if record.get("timestamp")
+            ]
+            if timestamps:
+                last_request_time = max(timestamps)
+        # Fall back to month_usage if no activity today
+        if last_request_time is None and month_usage:
+            timestamps = [
+                record.get("timestamp", "") for record in month_usage if record.get("timestamp")
             ]
             if timestamps:
                 last_request_time = max(timestamps)
