@@ -13,11 +13,20 @@ logger = logging.getLogger(__name__)
 
 def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -> Optional[int]:
     """
-    Get the model ID from the models table by model name and optional provider.
+    Get the model ID from the models table by model name and provider.
+
+    Lookup strategy when provider is specified (recommended):
+    1. First, find provider_id from provider name
+    2. Then search models with provider_id filter for better matching
+    3. Try matching: model_id, provider_model_id, model_name (all case-insensitive)
+
+    Lookup strategy when provider is not specified:
+    1. Search across all providers (less reliable)
+    2. Return first match
 
     Args:
-        model_name: The model name/identifier (e.g., "gpt-4", "claude-3-sonnet")
-        provider_name: Optional provider name to narrow down the search
+        model_name: The model name/identifier (e.g., "gpt-4", "gemini-2.0-flash-exp:free")
+        provider_name: Provider name (e.g., "openrouter", "openai") - strongly recommended
 
     Returns:
         The model ID if found, None otherwise
@@ -25,58 +34,79 @@ def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -
     try:
         client = get_supabase_client()
 
-        # Try exact match on model_id first
-        query = client.table("models").select("id").eq("model_id", model_name)
-
-        # Add provider filter if provided
+        # Step 1: If provider specified, lookup provider_id first (more reliable)
+        provider_id = None
         if provider_name:
-            # Join with providers table to filter by provider slug/name
-            query = (
-                client.table("models")
-                .select("id, providers!inner(slug, name)")
-                .eq("model_id", model_name)
+            provider_result = (
+                client.table("providers")
+                .select("id")
+                .or_(f"slug.ilike.{provider_name},name.ilike.{provider_name}")
+                .execute()
             )
-            # Filter by provider slug or name (case-insensitive)
-            result = query.execute()
+            if provider_result.data:
+                provider_id = provider_result.data[0].get("id")
+                logger.debug(f"Found provider_id={provider_id} for provider={provider_name}")
 
-            # Filter results manually to match provider
+        # Step 2: Search models with provider filter
+        if provider_id:
+            # Search with provider_id filter for more accurate matching
+            # Try multiple fields: model_id, provider_model_id, model_name
+            result = (
+                client.table("models")
+                .select("id, model_id, provider_model_id, model_name")
+                .eq("provider_id", provider_id)
+                .or_(
+                    f"model_id.ilike.{model_name},"
+                    f"provider_model_id.ilike.{model_name},"
+                    f"model_name.ilike.{model_name}"
+                )
+                .execute()
+            )
+
             if result.data:
+                # Prefer exact match, then case-insensitive match
                 for row in result.data:
-                    provider_data = row.get("providers", {})
                     if (
-                        provider_data.get("slug", "").lower() == provider_name.lower()
-                        or provider_data.get("name", "").lower() == provider_name.lower()
+                        row.get("model_id") == model_name
+                        or row.get("provider_model_id") == model_name
+                        or row.get("model_name") == model_name
                     ):
+                        logger.debug(
+                            f"Found model_id={row.get('id')} for model={model_name}, "
+                            f"provider={provider_name} (exact match)"
+                        )
                         return row.get("id")
-        else:
-            result = query.execute()
-            if result.data:
+
+                # Return first case-insensitive match
+                logger.debug(
+                    f"Found model_id={result.data[0].get('id')} for model={model_name}, "
+                    f"provider={provider_name} (fuzzy match)"
+                )
                 return result.data[0].get("id")
 
-        # If exact match fails, try matching on provider_model_id
-        if provider_name:
-            query = (
-                client.table("models")
-                .select("id, providers!inner(slug, name)")
-                .eq("provider_model_id", model_name)
+        # Step 3: Fallback to search without provider filter (less reliable)
+        result = (
+            client.table("models")
+            .select("id, model_id, provider_model_id, model_name")
+            .or_(
+                f"model_id.ilike.{model_name},"
+                f"provider_model_id.ilike.{model_name},"
+                f"model_name.ilike.{model_name}"
             )
-            result = query.execute()
+            .limit(1)
+            .execute()
+        )
 
-            if result.data:
-                for row in result.data:
-                    provider_data = row.get("providers", {})
-                    if (
-                        provider_data.get("slug", "").lower() == provider_name.lower()
-                        or provider_data.get("name", "").lower() == provider_name.lower()
-                    ):
-                        return row.get("id")
-        else:
-            result = client.table("models").select("id").eq("provider_model_id", model_name).execute()
-            if result.data:
-                return result.data[0].get("id")
+        if result.data:
+            logger.debug(
+                f"Found model_id={result.data[0].get('id')} for model={model_name} "
+                f"(no provider filter)"
+            )
+            return result.data[0].get("id")
 
         logger.warning(
-            f"Model not found in database: model_name={model_name}, provider={provider_name}"
+            f"Model not found in database: model_name={model_name}, provider={provider_name}, "
+            f"provider_id={provider_id}"
         )
         return None
 
@@ -98,6 +128,7 @@ def save_chat_completion_request(
     error_message: Optional[str] = None,
     user_id: Optional[str] = None,
     provider_name: Optional[str] = None,
+    model_id: Optional[int] = None,
 ) -> Optional[dict[str, Any]]:
     """
     Save a chat completion request to the database.
@@ -112,6 +143,7 @@ def save_chat_completion_request(
         error_message: Error message if the request failed
         user_id: Optional user identifier for the request
         provider_name: Optional provider name to help identify the model
+        model_id: Optional model ID if already resolved (avoids lookup)
 
     Returns:
         Created record or None on error
@@ -119,8 +151,9 @@ def save_chat_completion_request(
     try:
         client = get_supabase_client()
 
-        # Get the model ID from the models table
-        model_id = get_model_id_by_name(model_name, provider_name)
+        # Use provided model_id if available, otherwise lookup
+        if model_id is None:
+            model_id = get_model_id_by_name(model_name, provider_name)
 
         if model_id is None:
             logger.warning(
