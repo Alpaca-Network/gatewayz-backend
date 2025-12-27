@@ -26,16 +26,22 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
     Security middleware for staging environment.
 
     Enforces admin-only access to staging environment:
-    - All routes except health/docs require admin authentication
+    - ALL routes except /health require ADMIN_API_KEY to access the backend
+    - This is a gateway layer - user routes still require valid user API keys after passing this check
     - Uses ADMIN_API_KEY for verification (same as admin endpoints)
 
     Usage:
-        curl https://staging.api.com/admin/model-sync/all \\
-            -H "Authorization: Bearer <ADMIN_API_KEY>"
+        # All endpoints require admin key to access in staging
+        curl https://staging.api.com/v1/chat/completions \\
+            -H "Authorization: Bearer <ADMIN_API_KEY>" \\
+            -H "Content-Type: application/json" \\
+            -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
     """
 
-    # Paths that bypass admin authentication
-    ALLOWED_PATHS = {"/health", "/", "/ping", "/docs", "/redoc", "/openapi.json", "/metrics"}
+    # Paths that bypass admin authentication (only /health in staging)
+    ALLOWED_PATHS = {
+        "/health",
+    }
 
     def __init__(self, app):
         super().__init__(app)
@@ -44,7 +50,10 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
         # Log security configuration on startup
         if Config.APP_ENV == "staging":
             if self.admin_api_key:
-                logger.info("🔒 Staging security enabled: Admin-only access (all routes require ADMIN_API_KEY)")
+                logger.info(
+                    "🔒 Staging security enabled: Admin-only access "
+                    "(all routes require ADMIN_API_KEY except /health)"
+                )
             else:
                 logger.warning(
                     "⚠️  Staging security WARNING: ADMIN_API_KEY not set! "

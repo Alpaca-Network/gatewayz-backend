@@ -82,6 +82,9 @@ async def get_api_key(
     - IP allowlist
     - Domain restrictions
 
+    In local/development environment (APP_ENV=development), API key validation is bypassed
+    to allow open access for development.
+
     Args:
         credentials: HTTP Authorization credentials
         request: FastAPI request object
@@ -90,11 +93,20 @@ async def get_api_key(
             should silently fall back to anonymous access.
 
     Returns:
-        Validated API key string
+        Validated API key string (or dummy key in local environment)
 
     Raises:
         HTTPException: 401/403/429 depending on error type
     """
+    # Import Config here to avoid circular imports
+    from src.config import Config
+
+    # In local/development environment, bypass API key validation
+    if Config.IS_DEVELOPMENT:
+        # Return a dummy API key for local development
+        # This allows the endpoint to work without requiring actual API keys
+        return "local-dev-bypass-key"
+
     if not credentials:
         raise HTTPException(status_code=401, detail="Authorization header is required")
 
@@ -222,6 +234,9 @@ async def get_optional_api_key(
     Use for endpoints that work for both auth and non-auth users
     but need the raw API key string (not the user object).
 
+    In local/development environment (APP_ENV=development), returns None to allow
+    anonymous access without requiring API keys.
+
     Note: Invalid credentials are silently ignored (returning None) without
     logging security violations, since authentication is optional for these
     endpoints and invalid credentials should fall back to anonymous access.
@@ -231,8 +246,15 @@ async def get_optional_api_key(
         request: Request object
 
     Returns:
-        Validated API key string if authenticated, None otherwise
+        Validated API key string if authenticated, None otherwise (or None in local env)
     """
+    # Import Config here to avoid circular imports
+    from src.config import Config
+
+    # In local/development environment, always return None to allow anonymous access
+    if Config.IS_DEVELOPMENT:
+        return None
+
     if not credentials:
         return None
 
