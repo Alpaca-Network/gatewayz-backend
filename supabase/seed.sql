@@ -57,29 +57,29 @@ ON CONFLICT (name) DO UPDATE SET
 -- =============================================================================
 -- Create test users with various subscription states
 
-INSERT INTO users (username, email, credits, is_active, auth_method, subscription_status, role, welcome_email_sent, privy_user_id)
+INSERT INTO users (username, email, credits, is_active, auth_method, subscription_status, role, welcome_email_sent, privy_user_id, role_metadata)
 VALUES
     -- Admin user
-    ('admin_user', 'admin@test.example.com', 10000.00, true, 'email', 'active', 'admin', true, 'privy_admin_001'),
+    ('admin_user', 'admin@test.example.com', 10000.00, true, 'email', 'active', 'admin', true, 'privy_admin_001', '{"source": "seed"}'::jsonb),
 
     -- Developer users
-    ('dev_alice', 'alice@test.example.com', 500.00, true, 'github', 'active', 'developer', true, 'privy_dev_001'),
-    ('dev_bob', 'bob@test.example.com', 250.00, true, 'google', 'active', 'developer', true, 'privy_dev_002'),
+    ('dev_alice', 'alice@test.example.com', 500.00, true, 'github', 'active', 'developer', true, 'privy_dev_001', '{"source": "seed"}'::jsonb),
+    ('dev_bob', 'bob@test.example.com', 250.00, true, 'google', 'active', 'developer', true, 'privy_dev_002', '{"source": "seed"}'::jsonb),
 
     -- Active users with credits
-    ('user_charlie', 'charlie@test.example.com', 150.00, true, 'email', 'active', 'user', true, 'privy_user_001'),
-    ('user_diana', 'diana@test.example.com', 75.00, true, 'email', 'active', 'user', true, 'privy_user_002'),
-    ('user_eve', 'eve@test.example.com', 200.00, true, 'google', 'active', 'user', true, 'privy_user_003'),
+    ('user_charlie', 'charlie@test.example.com', 150.00, true, 'email', 'active', 'user', true, 'privy_user_001', '{"source": "seed"}'::jsonb),
+    ('user_diana', 'diana@test.example.com', 75.00, true, 'email', 'active', 'user', true, 'privy_user_002', '{"source": "seed"}'::jsonb),
+    ('user_eve', 'eve@test.example.com', 200.00, true, 'google', 'active', 'user', true, 'privy_user_003', '{"source": "seed"}'::jsonb),
 
     -- Trial users
-    ('trial_frank', 'frank@test.example.com', 25.00, true, 'email', 'trial', 'user', true, 'privy_trial_001'),
-    ('trial_grace', 'grace@test.example.com', 10.00, true, 'email', 'trial', 'user', true, 'privy_trial_002'),
+    ('trial_frank', 'frank@test.example.com', 25.00, true, 'email', 'trial', 'user', true, 'privy_trial_001', '{"source": "seed"}'::jsonb),
+    ('trial_grace', 'grace@test.example.com', 10.00, true, 'email', 'trial', 'user', true, 'privy_trial_002', '{"source": "seed"}'::jsonb),
 
     -- Low balance user
-    ('user_lowbal', 'lowbal@test.example.com', 0.50, true, 'email', 'active', 'user', true, 'privy_lowbal_001'),
+    ('user_lowbal', 'lowbal@test.example.com', 0.50, true, 'email', 'active', 'user', true, 'privy_lowbal_001', '{"source": "seed"}'::jsonb),
 
     -- Inactive/cancelled user
-    ('user_cancelled', 'cancelled@test.example.com', 0.00, false, 'email', 'cancelled', 'user', true, 'privy_cancelled_001')
+    ('user_cancelled', 'cancelled@test.example.com', 0.00, false, 'email', 'cancelled', 'user', true, 'privy_cancelled_001', '{"source": "seed"}'::jsonb)
 ON CONFLICT (email) DO NOTHING;
 
 -- Update trial expiration for trial users

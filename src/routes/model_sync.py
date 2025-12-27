@@ -1,15 +1,12 @@
 """
 API routes for model catalog synchronization
 Dynamically fetches and syncs models from provider APIs to database
-
-Admin authentication required for all endpoints.
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from src.security.deps import get_admin_key
 from src.services.model_catalog_sync import (
     sync_provider_models,
     sync_all_providers,
@@ -38,11 +35,9 @@ class ProviderListResponse(BaseModel):
 
 
 @router.get("/providers", response_model=ProviderListResponse)
-async def list_available_providers(_: str = Depends(get_admin_key)):
+async def list_available_providers():
     """
     Get list of providers that can be synced
-
-    Requires admin authentication.
 
     Returns list of all provider slugs that have fetch functions configured.
     """
@@ -56,13 +51,10 @@ async def list_available_providers(_: str = Depends(get_admin_key)):
 @router.post("/provider/{provider_slug}", response_model=SyncResponse)
 async def sync_single_provider(
     provider_slug: str,
-    dry_run: bool = Query(False, description="Fetch but don't write to database"),
-    _: str = Depends(get_admin_key)
+    dry_run: bool = Query(False, description="Fetch but don't write to database")
 ):
     """
     Sync models from a specific provider's API to database
-
-    Requires admin authentication.
 
     This endpoint:
     1. Ensures the provider exists in the database (creates if needed)
@@ -124,13 +116,10 @@ async def sync_all_provider_models(
         None,
         description="Specific providers to sync (comma-separated). If not provided, syncs all providers."
     ),
-    dry_run: bool = Query(False, description="Fetch but don't write to database"),
-    _: str = Depends(get_admin_key)
+    dry_run: bool = Query(False, description="Fetch but don't write to database")
 ):
     """
     Sync models from all providers (or specified list)
-
-    Requires admin authentication.
 
     This is a bulk operation that:
     1. Ensures all providers exist in the database
@@ -201,11 +190,9 @@ async def sync_all_provider_models(
 
 
 @router.get("/status", response_model=dict)
-async def get_sync_status(_: str = Depends(get_admin_key)):
+async def get_sync_status():
     """
     Get current sync status and statistics
-
-    Requires admin authentication.
 
     Returns information about:
     - Available providers
