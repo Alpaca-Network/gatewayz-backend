@@ -576,6 +576,20 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.error(f"  [FAIL] Unexpected error loading Prometheus Endpoints: {e}")
 
+    # ==================== Chat Metrics Endpoints ====================
+    # Load chat metrics router for tokens-per-second metrics
+    try:
+        from src.routes.chat_metrics import router as chat_metrics_router
+
+        app.include_router(chat_metrics_router)
+        logger.info("  [OK] Chat Metrics (/v1/chat/completions/metrics/*)")
+        logger.info("       - /v1/chat/completions/metrics/tokens-per-second/all (all time)")
+        logger.info("       - /v1/chat/completions/metrics/tokens-per-second (time-filtered)")
+    except ImportError as e:
+        logger.error(f"  [FAIL] Chat Metrics router not loaded: {e}")
+    except Exception as e:
+        logger.error(f"  [FAIL] Unexpected error loading Chat Metrics: {e}")
+
     # Load Sentry tunnel router separately (at root /monitoring path)
     try:
         from src.routes.monitoring import sentry_tunnel_router
