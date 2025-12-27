@@ -104,7 +104,7 @@ async def all_metrics():
     Returns:
         Prometheus text format metrics
     """
-    return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @router.get("/system", include_in_schema=True)
@@ -130,7 +130,7 @@ async def system_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/providers", include_in_schema=True)
@@ -157,7 +157,7 @@ async def provider_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/models", include_in_schema=True)
@@ -184,7 +184,7 @@ async def model_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/business", include_in_schema=True)
@@ -215,7 +215,7 @@ async def business_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/performance", include_in_schema=True)
@@ -242,7 +242,7 @@ async def performance_metrics():
     ]
 
     filtered = _filter_metrics_by_name(all_metrics, metric_names)
-    return Response(filtered, media_type="text/plain; charset=utf-8")
+    return Response(filtered, media_type="text/plain")
 
 
 @router.get("/summary", include_in_schema=True)

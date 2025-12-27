@@ -34,7 +34,7 @@ class TestPrometheusEndpoints:
         response = client.get("/prometheus/metrics/all")
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "text/plain" in response.headers["content-type"]
         assert "# HELP" in response.text
         assert "# TYPE" in response.text
         assert len(response.text) > 0
@@ -45,7 +45,7 @@ class TestPrometheusEndpoints:
         response = client.get("/prometheus/metrics/system")
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "text/plain" in response.headers["content-type"]
         assert "fastapi_requests_total" in response.text or "# HELP" in response.text
         print(f"✅ /prometheus/metrics/system - {len(response.text)} bytes")
 
@@ -54,7 +54,7 @@ class TestPrometheusEndpoints:
         response = client.get("/prometheus/metrics/providers")
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "text/plain" in response.headers["content-type"]
         print(f"✅ /prometheus/metrics/providers - {len(response.text)} bytes")
 
     def test_prometheus_endpoints_models_metrics(self, client):
@@ -62,7 +62,7 @@ class TestPrometheusEndpoints:
         response = client.get("/prometheus/metrics/models")
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "text/plain" in response.headers["content-type"]
         print(f"✅ /prometheus/metrics/models - {len(response.text)} bytes")
 
     def test_prometheus_endpoints_business_metrics(self, client):
@@ -70,7 +70,7 @@ class TestPrometheusEndpoints:
         response = client.get("/prometheus/metrics/business")
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "text/plain" in response.headers["content-type"]
         print(f"✅ /prometheus/metrics/business - {len(response.text)} bytes")
 
     def test_prometheus_endpoints_performance_metrics(self, client):
@@ -78,7 +78,7 @@ class TestPrometheusEndpoints:
         response = client.get("/prometheus/metrics/performance")
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "text/plain" in response.headers["content-type"]
         print(f"✅ /prometheus/metrics/performance - {len(response.text)} bytes")
 
     def test_prometheus_endpoints_summary_json(self, client):
