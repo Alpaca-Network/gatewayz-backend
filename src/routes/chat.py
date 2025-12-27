@@ -1454,20 +1454,19 @@ async def chat_completions(
         )
 
         # Save chat completion request to database - run as background task
-        if not is_anonymous:
-            user_id_str = str(user.get("id")) if user and user.get("id") else None
-            background_tasks.add_task(
-                save_chat_completion_request,
-                request_id=request_id,
-                model_name=model,
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-                processing_time_ms=int(elapsed * 1000),
-                status="completed",
-                error_message=None,
-                user_id=user_id_str,
-                provider_name=provider,
-            )
+        user_id_str = str(user.get("id")) if user and user.get("id") else None
+        background_tasks.add_task(
+            save_chat_completion_request,
+            request_id=request_id,
+            model_name=model,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            processing_time_ms=int(elapsed * 1000),
+            status="completed",
+            error_message=None,
+            user_id=user_id_str,
+            provider_name=provider,
+        )
 
         # Prepare headers including rate limit information
         headers = {}
