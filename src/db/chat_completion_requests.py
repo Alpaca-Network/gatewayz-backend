@@ -11,6 +11,39 @@ from src.config.supabase_config import get_supabase_client
 logger = logging.getLogger(__name__)
 
 
+def get_provider_id_by_name(provider_name: str) -> Optional[int]:
+    """
+    Get the provider ID from the providers table by provider name.
+
+    Args:
+        provider_name: The provider slug or name (e.g., "openrouter", "openai")
+
+    Returns:
+        The provider ID if found, None otherwise
+    """
+    try:
+        client = get_supabase_client()
+
+        # Try matching on slug first (case-insensitive)
+        result = client.table("providers").select("id").ilike("slug", provider_name).execute()
+
+        if result.data:
+            return result.data[0].get("id")
+
+        # Try matching on name (case-insensitive)
+        result = client.table("providers").select("id").ilike("name", provider_name).execute()
+
+        if result.data:
+            return result.data[0].get("id")
+
+        logger.debug(f"Provider not found in database: provider_name={provider_name}")
+        return None
+
+    except Exception as e:
+        logger.error(f"Failed to get provider ID for {provider_name}: {e}", exc_info=True)
+        return None
+
+
 def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -> Optional[int]:
     """
     Get the model ID from the models table by model name and optional provider.
@@ -119,13 +152,19 @@ def save_chat_completion_request(
     try:
         client = get_supabase_client()
 
+        # Try to get the provider ID from the providers table (optional)
+        provider_id = None
+        if provider_name:
+            provider_id = get_provider_id_by_name(provider_name)
+
         # Try to get the model ID from the models table (optional)
         model_id = get_model_id_by_name(model_name, provider_name)
 
-        if model_id is None:
+        if model_id is None or provider_id is None:
             logger.debug(
-                f"Model not found in database, saving request with model_name only: "
-                f"model_name={model_name}, provider={provider_name}"
+                f"Model or provider not found in database, saving with text fields: "
+                f"model_name={model_name}, provider={provider_name}, "
+                f"model_id={model_id}, provider_id={provider_id}"
             )
 
         # Prepare the data - always include model_name and provider_name as text
@@ -139,9 +178,11 @@ def save_chat_completion_request(
             "status": status,
         }
 
-        # Add model_id only if found (nullable foreign key)
+        # Add foreign keys only if found (nullable)
         if model_id is not None:
             request_data["model_id"] = model_id
+        if provider_id is not None:
+            request_data["provider_id"] = provider_id
 
         # Add optional fields if provided
         if error_message:
