@@ -119,25 +119,29 @@ def save_chat_completion_request(
     try:
         client = get_supabase_client()
 
-        # Get the model ID from the models table
+        # Try to get the model ID from the models table (optional)
         model_id = get_model_id_by_name(model_name, provider_name)
 
         if model_id is None:
-            logger.warning(
-                f"Skipping chat completion request save: model not found in database "
-                f"(model_name={model_name}, provider={provider_name})"
+            logger.debug(
+                f"Model not found in database, saving request with model_name only: "
+                f"model_name={model_name}, provider={provider_name}"
             )
-            return None
 
-        # Prepare the data
+        # Prepare the data - always include model_name and provider_name as text
         request_data = {
             "request_id": request_id,
-            "model_id": model_id,
+            "model_name": model_name,
+            "provider_name": provider_name,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "processing_time_ms": processing_time_ms,
             "status": status,
         }
+
+        # Add model_id only if found (nullable foreign key)
+        if model_id is not None:
+            request_data["model_id"] = model_id
 
         # Add optional fields if provided
         if error_message:
@@ -151,8 +155,8 @@ def save_chat_completion_request(
         if result.data:
             logger.debug(
                 f"Chat completion request saved: request_id={request_id}, "
-                f"model={model_name}, tokens={input_tokens}+{output_tokens}, "
-                f"time={processing_time_ms}ms"
+                f"model={model_name}, provider={provider_name}, "
+                f"tokens={input_tokens}+{output_tokens}, time={processing_time_ms}ms"
             )
             return result.data[0]
         else:
