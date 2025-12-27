@@ -889,7 +889,7 @@ async def chat_completions(
                 api_key,
                 tokens_used=0,
                 is_trial=trial.get("is_trial", False),
-                _to_thread=_to_thread
+                _to_thread_func=_to_thread
             )
 
         # Credit check (only for authenticated non-trial users)
@@ -1556,7 +1556,7 @@ async def unified_responses(
             api_key,
             tokens_used=0,
             is_trial=trial.get("is_trial", False),
-            _to_thread=_to_thread
+            _to_thread_func=_to_thread
         )
 
         # Credit check (only for non-trial users)
