@@ -55,7 +55,7 @@ def admin_user():
         'email': 'admin@gatewayz.ai',
         'username': 'admin',
         'credits': 1000.0,
-        'api_key': 'gw_admin_key_123',
+        'api_key': 'test_mock_key_for_testing_only',  # nosec - not a real key
         'is_active': True,
         'is_admin': True,
         'role': 'admin',
@@ -66,7 +66,7 @@ def admin_user():
 def auth_headers():
     """Authentication headers for admin"""
     return {
-        'Authorization': 'Bearer gw_admin_key_123',
+        'Authorization': 'Bearer test_mock_key_for_testing_only',  # nosec - not a real key
         'Content-Type': 'application/json'
     }
 

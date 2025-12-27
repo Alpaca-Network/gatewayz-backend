@@ -613,16 +613,20 @@ async def get_users_rate_limits(
         if user_id is not None:
             query = query.eq("user_id", user_id)
 
-        # Execute query
-        result = query.range(offset, offset + limit - 1).execute()
-        api_keys = result.data or []
-
-        # Filter by custom config presence if specified
+        # Apply has_custom_config filter at database level if possible
         if has_custom_config is not None:
             if has_custom_config:
-                api_keys = [k for k in api_keys if k.get("rate_limit_config")]
+                query = query.not_.is_("rate_limit_config", "null")
             else:
-                api_keys = [k for k in api_keys if not k.get("rate_limit_config")]
+                query = query.is_("rate_limit_config", "null")
+
+        # Execute query - fetch one extra to determine has_more
+        result = query.range(offset, offset + limit).execute()
+        api_keys = result.data or []
+
+        # Determine if there are more records and trim to limit
+        has_more = len(api_keys) > limit
+        api_keys = api_keys[:limit]
 
         # Format response
         users_rate_limits = []
@@ -646,7 +650,7 @@ async def get_users_rate_limits(
             "pagination": {
                 "limit": limit,
                 "offset": offset,
-                "has_more": len(api_keys) == limit,
+                "has_more": has_more,
             },
             "filters": {
                 "user_id": user_id,

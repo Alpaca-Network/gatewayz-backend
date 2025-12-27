@@ -19,7 +19,8 @@ from src.db.credit_transactions import (
     get_transaction_summary,
     log_credit_transaction,
 )
-from src.db.users import add_credits_to_user, get_user
+# Note: Database operations are performed directly via supabase client
+# to maintain consistency within transaction logging
 from src.security.deps import require_admin
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class CreditAdjustRequest(BaseModel):
 class BulkCreditAddRequest(BaseModel):
     """Request to add credits to multiple users"""
 
-    user_ids: list[int] = Field(..., min_length=1, description="List of user IDs")
+    user_ids: list[int] = Field(..., min_length=1, max_length=100, description="List of user IDs (max 100)")
     amount: float = Field(..., gt=0, description="Amount of credits to add to each user")
     description: str = Field(
         default="Bulk credit addition", description="Description for the transactions"
@@ -304,7 +305,7 @@ async def bulk_add_credits_endpoint(
     Only accessible by admin users.
 
     **Request:**
-    - `user_ids`: List of user IDs to add credits to
+    - `user_ids`: List of user IDs to add credits to (max 100)
     - `amount`: Amount of credits to add to each user
     - `description`: Optional description for the transactions
     - `metadata`: Optional additional metadata
@@ -319,12 +320,21 @@ async def bulk_add_credits_endpoint(
         successful = 0
         failed = 0
 
+        # Batch fetch: Get all users at once to reduce N+1 queries
+        users_result = (
+            client.table("users")
+            .select("id, credits, username")
+            .in_("id", request.user_ids)
+            .execute()
+        )
+        users_by_id = {u["id"]: u for u in (users_result.data or [])}
+
+        # Process each user
         for user_id in request.user_ids:
             try:
-                # Get user
-                user_result = client.table("users").select("id, credits, username").eq("id", user_id).execute()
+                user = users_by_id.get(user_id)
 
-                if not user_result.data:
+                if not user:
                     results.append({
                         "user_id": user_id,
                         "status": "failed",
@@ -333,7 +343,6 @@ async def bulk_add_credits_endpoint(
                     failed += 1
                     continue
 
-                user = user_result.data[0]
                 balance_before = float(user.get("credits", 0) or 0)
                 balance_after = balance_before + request.amount
 
@@ -539,7 +548,7 @@ async def get_credits_summary_endpoint(
                 "status": "success",
                 "user_id": user_id,
                 "user_info": user_info,
-                "current_balance": float(user_info.get("credits", 0)) if user_info else 0,
+                "current_balance": float(user_info.get("credits", 0) or 0) if user_info else 0,
                 "summary": summary,
                 "filters": {
                     "from_date": from_date,
@@ -671,9 +680,9 @@ async def get_credits_transactions_endpoint(
         if sort_order.lower() not in ("asc", "desc"):
             raise HTTPException(status_code=400, detail="sort_order must be 'asc' or 'desc'")
 
-        # Get transactions
+        # Get transactions - fetch one extra to determine has_more
         transactions = get_all_transactions(
-            limit=limit,
+            limit=limit + 1,
             offset=offset,
             user_id=user_id,
             transaction_type=transaction_type,
@@ -685,6 +694,11 @@ async def get_credits_transactions_endpoint(
             sort_by=sort_by,
             sort_order=sort_order,
         )
+
+        # Determine if there are more records
+        has_more = len(transactions) > limit
+        # Trim to requested limit
+        transactions = transactions[:limit]
 
         # Format transactions
         formatted_transactions = [
@@ -711,7 +725,7 @@ async def get_credits_transactions_endpoint(
                 "total": len(formatted_transactions),
                 "limit": limit,
                 "offset": offset,
-                "has_more": len(formatted_transactions) == limit,
+                "has_more": has_more,
             },
             "filters_applied": {
                 "user_id": user_id,

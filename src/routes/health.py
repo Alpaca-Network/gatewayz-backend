@@ -1186,7 +1186,6 @@ async def get_models_health_stats(
         unhealthy_models = 0
         total_response_time = 0.0
         response_time_count = 0
-        error_counts = {}
         provider_stats = {}
 
         for model in cached_models:

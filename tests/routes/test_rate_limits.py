@@ -27,7 +27,7 @@ os.environ['API_GATEWAY_SALT'] = 'test-salt-for-hashing-keys-minimum-16-chars'
 
 from src.routes.rate_limits import router, DEFAULT_RATE_LIMIT_CONFIG
 from src.main import app
-from src.security.deps import require_admin, get_api_key
+from src.security.deps import require_admin
 
 # Skip tests on Python 3.10 due to compatibility issues
 pytestmark = pytest.mark.skipif(
