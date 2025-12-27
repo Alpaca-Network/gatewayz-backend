@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # Featherless-only models - not available on OpenRouter
+    "c10x/longwriter-qwen2.5-7b-instruct": "featherless",
     # DeepSeek models NOT available on Fireworks - route to OpenRouter instead
     # Fireworks ONLY has: deepseek-v3p1 (V3/V3.1) and deepseek-r1-0528 (R1)
     # All other DeepSeek models must go to OpenRouter
