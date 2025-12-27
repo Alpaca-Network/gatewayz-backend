@@ -1036,14 +1036,23 @@ def get_admin_monitor_data() -> dict[str, Any]:
             day_usage.append(usage_record)
 
         # Add legacy usage_records for today that might not be in activity_log
-        # Use record IDs for deduplication instead of timestamps, since multiple
-        # concurrent requests can legitimately share the same timestamp
-        activity_ids_today = {r.get("id") for r in activity_logs_today if r.get("id")}
+        # Use composite key (user_id + timestamp + model) for deduplication since:
+        # 1. activity_log and usage_records have different ID spaces
+        # 2. Timestamps alone are not unique (concurrent requests can share timestamps)
+        # A composite key provides a reasonable approximation of uniqueness
+        def make_composite_key(record):
+            """Create a composite key from user_id/api_key, timestamp, and model."""
+            # activity_log uses user_id, usage_records uses api_key
+            user_key = record.get("user_id") or record.get("api_key") or ""
+            timestamp = record.get("timestamp") or ""
+            model = record.get("model") or ""
+            return f"{user_key}|{timestamp}|{model}"
+
+        activity_keys_today = {make_composite_key(r) for r in activity_logs_today}
         for legacy_record in usage_records_legacy_today:
-            legacy_id = legacy_record.get("id")
-            # Include legacy record if it has no ID or its ID isn't in activity_log
-            # (legacy records from usage_records table have different ID space)
-            if legacy_id is None or legacy_id not in activity_ids_today:
+            legacy_key = make_composite_key(legacy_record)
+            # Only include legacy record if it's not already represented in activity_log
+            if legacy_key not in activity_keys_today:
                 day_usage.append(legacy_record)
 
         # Sort day_usage by timestamp descending to ensure correct order for recent activity
@@ -1065,11 +1074,11 @@ def get_admin_monitor_data() -> dict[str, Any]:
             month_usage.append(usage_record)
 
         # Add legacy usage_records for month that might not be in activity_log
-        # Use record IDs for deduplication instead of timestamps
-        activity_ids_month = {r.get("id") for r in activity_logs_month if r.get("id")}
+        # Use composite key for deduplication (same approach as daily data)
+        activity_keys_month = {make_composite_key(r) for r in activity_logs_month}
         for legacy_record in usage_records_legacy_month:
-            legacy_id = legacy_record.get("id")
-            if legacy_id is None or legacy_id not in activity_ids_month:
+            legacy_key = make_composite_key(legacy_record)
+            if legacy_key not in activity_keys_month:
                 month_usage.append(legacy_record)
 
         # Calculate totals with safe aggregation
