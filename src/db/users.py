@@ -1125,11 +1125,15 @@ def get_admin_monitor_data() -> dict[str, Any]:
         ]
 
         # Calculate most used model safely (based on month's data)
+        # Exclude "auth" entries as they are authentication events, not model usage
         most_used_model = "No models used"
         if month_usage:
             model_counts = {}
             for record in month_usage:
                 model = record.get("model", "unknown")
+                # Skip auth events - they're not actual model usage
+                if model.lower() == "auth":
+                    continue
                 model_counts[model] = model_counts.get(model, 0) + 1
 
             if model_counts:
