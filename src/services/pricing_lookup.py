@@ -94,10 +94,23 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
         if not model_id:
             return model_data
 
-        # Skip if pricing already exists and is not None
+        # Skip if pricing already exists and has non-zero values
+        # (Zero pricing means no real pricing was set, so we should try to enrich)
         existing_pricing = model_data.get("pricing")
-        if existing_pricing and any(v for v in existing_pricing.values() if v is not None):
-            return model_data
+        if existing_pricing:
+            # Check if any pricing value is non-zero using numeric comparison
+            # This handles edge cases like scientific notation (1e-6) and various string formats
+            def is_non_zero(v) -> bool:
+                if v is None or v == "":
+                    return False
+                try:
+                    return float(v) != 0.0
+                except (ValueError, TypeError):
+                    return False
+
+            has_real_pricing = any(is_non_zero(v) for v in existing_pricing.values())
+            if has_real_pricing:
+                return model_data
 
         # Try to get manual pricing
         manual_pricing = get_model_pricing(gateway, model_id)
