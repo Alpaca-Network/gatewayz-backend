@@ -182,10 +182,10 @@ def create_enhanced_user(
     username: str,
     email: str,
     auth_method: str,
-    credits: int = 10,
+    credits: int = 5,
     privy_user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $10 credits"""
+    """Create a new user with automatic 3-day trial and $5 credits"""
     try:
         client = get_supabase_client()
 
@@ -196,7 +196,7 @@ def create_enhanced_user(
         user_data = {
             "username": username,
             "email": email,
-            "credits": credits,  # $10 trial credits
+            "credits": credits,  # $5 trial credits
             "is_active": True,
             "registration_date": trial_start.isoformat(),
             "auth_method": auth_method,
@@ -992,12 +992,31 @@ def get_admin_monitor_data() -> dict[str, Any]:
             usage_records_legacy_month = []
 
         # Create user_id -> api_key mapping for efficient lookup
+        # Only fetch mappings for users that appear in activity logs to avoid
+        # hitting row limits on systems with many users
+        active_user_ids = set()
+        for activity in activity_logs_today:
+            user_id = activity.get("user_id")
+            if user_id:
+                active_user_ids.add(user_id)
+        for activity in activity_logs_month:
+            user_id = activity.get("user_id")
+            if user_id:
+                active_user_ids.add(user_id)
+
+        # Create mappings for both directions:
+        # - user_id_to_api_key: for resolving api_key from activity_log user_ids
+        # - api_key_to_user_id: for deduplication with legacy usage_records that only have api_key
         user_id_to_api_key = {}
+        api_key_to_user_id = {}
+
+        # First, build mappings from already-fetched users data
         for user in users:
             user_id = user.get("id")
             api_key = user.get("api_key")
             if user_id and api_key:
                 user_id_to_api_key[user_id] = api_key
+                api_key_to_user_id[api_key] = user_id
 
         # Also check api_keys_new table for users who might not have api_key in users table
         try:
@@ -1013,6 +1032,8 @@ def get_admin_monitor_data() -> dict[str, Any]:
                     if user_id and api_key:
                         if user_id not in user_id_to_api_key or is_primary:
                             user_id_to_api_key[user_id] = api_key
+                        # Always add to reverse mapping (needed for deduplication)
+                        api_key_to_user_id[api_key] = user_id
         except Exception as e:
             logger.warning(f"Error retrieving api_keys_new for user mapping: {e}")
 
@@ -1041,9 +1062,21 @@ def get_admin_monitor_data() -> dict[str, Any]:
         # 2. Timestamps alone are not unique (concurrent requests can share timestamps)
         # A composite key provides a reasonable approximation of uniqueness
         def make_composite_key(record):
-            """Create a composite key from user_id/api_key, timestamp, and model."""
-            # activity_log uses user_id, usage_records uses api_key
-            user_key = record.get("user_id") or record.get("api_key") or ""
+            """Create a composite key from user_id, timestamp, and model.
+
+            Uses user_id as the consistent identifier across both activity_log and
+            usage_records tables. For legacy records that only have api_key,
+            we look up the corresponding user_id from the api_key_to_user_id mapping.
+            """
+            # Always prefer user_id for consistent deduplication
+            user_id = record.get("user_id")
+            if not user_id:
+                # Legacy records may only have api_key - look up user_id
+                api_key = record.get("api_key")
+                if api_key:
+                    user_id = api_key_to_user_id.get(api_key)
+            # Convert to string for consistent key format
+            user_key = str(user_id) if user_id else ""
             timestamp = record.get("timestamp") or ""
             model = record.get("model") or ""
             return f"{user_key}|{timestamp}|{model}"
@@ -1057,6 +1090,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
 
         # Sort day_usage by timestamp descending to ensure correct order for recent activity
         day_usage.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+
 
         # Process MONTH's activity logs
         month_usage = []

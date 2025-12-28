@@ -71,7 +71,7 @@ def sample_trial_data():
         'trial_days': 3,
         'max_tokens': 1000000,
         'max_requests': 1000,
-        'trial_credits': 10.0
+        'trial_credits': 5.0
     }
 
 
@@ -86,8 +86,8 @@ def sample_trial_status():
         'trial_used_requests': 500,
         'trial_max_tokens': 1000000,
         'trial_max_requests': 1000,
-        'trial_credits': 10.0,
-        'trial_used_credits': 5.0,
+        'trial_credits': 5.0,
+        'trial_used_credits': 2.5,
         'trial_converted': False,
         'subscription_status': 'trial',
         'subscription_plan': None,
@@ -95,7 +95,7 @@ def sample_trial_status():
         'trial_expired': False,
         'trial_remaining_tokens': 500000,
         'trial_remaining_requests': 500,
-        'trial_remaining_credits': 5.0
+        'trial_remaining_credits': 2.5
     }
 
 
@@ -158,7 +158,7 @@ class TestStartTrial:
             assert result.success is True
             assert result.trial_days == 3
             assert result.max_tokens == 1000000
-            assert result.trial_credits == 10.0
+            assert result.trial_credits == 5.0
             assert "successfully" in result.message.lower()
 
     @pytest.mark.asyncio
