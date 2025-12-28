@@ -144,22 +144,23 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
             # Check for exact match or suffix match
             # OpenRouter IDs are like "openai/gpt-4o", "anthropic/claude-3-opus-20240229"
             if or_id.endswith(f"/{base_model_id}") or or_id.endswith(f"/{model_id}"):
-                # Return normalized pricing
+                # Return normalized pricing (handle None values explicitly)
                 return {
-                    "prompt": str(or_pricing.get("prompt", "0")),
-                    "completion": str(or_pricing.get("completion", "0")),
-                    "request": str(or_pricing.get("request", "0")),
-                    "image": str(or_pricing.get("image", "0")),
+                    "prompt": str(or_pricing.get("prompt") or "0"),
+                    "completion": str(or_pricing.get("completion") or "0"),
+                    "request": str(or_pricing.get("request") or "0"),
+                    "image": str(or_pricing.get("image") or "0"),
                 }
 
             # Also check if the base model ID matches the end of OpenRouter ID
             or_base = or_id.split("/")[-1] if "/" in or_id else or_id
             if or_base == base_model_id:
+                # Return normalized pricing (handle None values explicitly)
                 return {
-                    "prompt": str(or_pricing.get("prompt", "0")),
-                    "completion": str(or_pricing.get("completion", "0")),
-                    "request": str(or_pricing.get("request", "0")),
-                    "image": str(or_pricing.get("image", "0")),
+                    "prompt": str(or_pricing.get("prompt") or "0"),
+                    "completion": str(or_pricing.get("completion") or "0"),
+                    "request": str(or_pricing.get("request") or "0"),
+                    "image": str(or_pricing.get("image") or "0"),
                 }
 
         return None
@@ -180,14 +181,14 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
     Returns:
         Enhanced model dictionary with pricing, or None if no pricing found for gateway providers
     """
+    model_id = model_data.get("id")
+    if not model_id:
+        return model_data
+
+    gateway_lower = gateway.lower()
+    is_gateway_provider = gateway_lower in GATEWAY_PROVIDERS
+
     try:
-        model_id = model_data.get("id")
-        if not model_id:
-            return model_data
-
-        gateway_lower = gateway.lower()
-        is_gateway_provider = gateway_lower in GATEWAY_PROVIDERS
-
         # Skip if pricing already exists and has non-zero values
         # (Zero pricing means no real pricing was set, so we should try to enrich)
         existing_pricing = model_data.get("pricing")
@@ -223,6 +224,13 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
                 logger.debug(f"Enriched {model_id} with cross-reference pricing from OpenRouter")
                 return model_data
 
+            # During catalog build, return the model with zero pricing instead of filtering
+            # This prevents models from disappearing during initial build. They'll get
+            # proper pricing during background refresh when cross-reference is available.
+            if _is_building_catalog():
+                logger.debug(f"Catalog building: keeping {model_id} with zero pricing")
+                return model_data
+
             # No pricing found for gateway provider - filter out this model
             logger.debug(f"No pricing found for gateway provider model {model_id}, filtering out")
             return None
@@ -231,6 +239,11 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
 
     except Exception as e:
         logger.error(f"Error enriching model with pricing: {e}")
+        # For gateway providers, still filter out if we couldn't determine pricing
+        # This prevents gateway models from appearing as free due to errors
+        if is_gateway_provider:
+            logger.debug(f"Filtering out gateway provider model {model_id} due to error")
+            return None
         return model_data
 
 
