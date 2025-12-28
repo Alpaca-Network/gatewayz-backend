@@ -425,6 +425,34 @@ class TestCrossReferencePricing:
                 result = _get_cross_reference_pricing("unknown-model-xyz")
                 assert result is None
 
+    @pytest.mark.integration
+    def test_cross_reference_pricing_handles_versioned_model_ids(self):
+        """Test that cross-reference matches versioned OpenRouter model IDs"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # OpenRouter uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
+        mock_openrouter_models = [
+            {
+                "id": "anthropic/claude-3-opus-20240229",
+                "pricing": {
+                    "prompt": "0.00001",
+                    "completion": "0.00003",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                # Should match "claude-3-opus" to "claude-3-opus-20240229"
+                result = _get_cross_reference_pricing("claude-3-opus")
+                assert result is not None
+                assert result["prompt"] == "0.00001"
+
 
 class TestEnrichModelWithPricingGatewayProviders:
     """Test enrich_model_with_pricing for gateway providers"""

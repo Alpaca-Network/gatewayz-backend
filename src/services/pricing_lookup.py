@@ -163,6 +163,16 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
                     "image": str(or_pricing.get("image") or "0"),
                 }
 
+            # Handle versioned model IDs (e.g., "claude-3-opus" matching "claude-3-opus-20240229")
+            # OpenRouter often uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
+            if or_base.startswith(base_model_id) or base_model_id.startswith(or_base):
+                return {
+                    "prompt": str(or_pricing.get("prompt") or "0"),
+                    "completion": str(or_pricing.get("completion") or "0"),
+                    "request": str(or_pricing.get("request") or "0"),
+                    "image": str(or_pricing.get("image") or "0"),
+                }
+
         return None
 
     except Exception as e:
