@@ -1,5 +1,5 @@
 """
-Models package for health monitoring and availability
+Models package for health monitoring, availability, and media generation
 """
 
 # Import new health models
@@ -22,6 +22,21 @@ from .health_models import (
 # Import existing models
 from .image_models import ImageData, ImageGenerationRequest, ImageGenerationResponse
 
+# Import ComfyUI models
+from .comfyui_models import (
+    ComfyUIExecutionRequest,
+    ComfyUIExecutionResponse,
+    ComfyUIHistoryItem,
+    ComfyUIOutput,
+    ComfyUIProgressUpdate,
+    ComfyUIServerStatus,
+    ComfyUIWorkflowTemplate,
+    ExecutionHistoryResponse,
+    ExecutionStatus,
+    WorkflowListResponse,
+    WorkflowType,
+)
+
 __all__ = [
     # Existing models
     "ImageGenerationRequest",
@@ -41,4 +56,16 @@ __all__ = [
     "ModelStatusResponse",
     "ProviderStatusResponse",
     "HealthDashboardResponse",
+    # ComfyUI models
+    "WorkflowType",
+    "ExecutionStatus",
+    "ComfyUIWorkflowTemplate",
+    "ComfyUIExecutionRequest",
+    "ComfyUIExecutionResponse",
+    "ComfyUIOutput",
+    "ComfyUIProgressUpdate",
+    "ComfyUIHistoryItem",
+    "ComfyUIServerStatus",
+    "WorkflowListResponse",
+    "ExecutionHistoryResponse",
 ]

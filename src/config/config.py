@@ -192,6 +192,10 @@ class Config:
     # Fal.ai Configuration
     FAL_API_KEY = os.environ.get("FAL_API_KEY")
 
+    # ComfyUI Configuration
+    COMFYUI_SERVER_URL = os.environ.get("COMFYUI_SERVER_URL")  # e.g., http://localhost:8188
+    COMFYUI_ENABLED = os.environ.get("COMFYUI_ENABLED", "true").lower() in {"1", "true", "yes"}
+
     # Anannas Configuration
     ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
 

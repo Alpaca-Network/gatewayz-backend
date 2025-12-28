@@ -410,6 +410,7 @@ def create_app() -> FastAPI:
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
         ("pricing_audit", "Pricing Audit Dashboard"),
         ("pricing_sync", "Pricing Sync Service"),
+        ("comfyui", "ComfyUI Playground"),  # ComfyUI workflow execution for image/video generation
     ]
 
     loaded_count = 0
