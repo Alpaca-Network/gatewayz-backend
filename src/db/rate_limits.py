@@ -509,16 +509,67 @@ def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
 
+        # First try with rate_limit_config column (may not exist in production)
+        try:
+            result = (
+                client.table("api_keys_new")
+                .select("api_key, key_name, rate_limit_config, environment_tag")
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            configs = []
+            for key in result.data or []:
+                config = key.get("rate_limit_config", {})
+                configs.append(
+                    {
+                        "api_key": key["api_key"],
+                        "key_name": key["key_name"],
+                        "environment_tag": key["environment_tag"],
+                        "rate_limit_config": config,
+                    }
+                )
+
+            return configs
+        except Exception as e:
+            # rate_limit_config column may not exist, try without it
+            if "rate_limit_config" in str(e):
+                logger.debug(f"rate_limit_config column not available: {e}")
+            else:
+                raise
+
+        # Fallback: query without rate_limit_config column
         result = (
             client.table("api_keys_new")
-            .select("api_key, key_name, rate_limit_config, environment_tag")
+            .select("id, api_key, key_name, environment_tag")
             .eq("user_id", user_id)
             .execute()
         )
 
         configs = []
         for key in result.data or []:
-            config = key.get("rate_limit_config", {})
+            # Try to get config from rate_limit_configs table
+            config = {}
+            try:
+                config_result = (
+                    client.table("rate_limit_configs")
+                    .select("*")
+                    .eq("api_key_id", key["id"])
+                    .execute()
+                )
+                if config_result.data:
+                    cfg = config_result.data[0]
+                    config = {
+                        "requests_per_minute": cfg.get("max_requests", 1000) // 60,
+                        "requests_per_hour": cfg.get("max_requests", 1000),
+                        "requests_per_day": cfg.get("max_requests", 1000) * 24,
+                        "tokens_per_minute": cfg.get("max_tokens", 1000000) // 60,
+                        "tokens_per_hour": cfg.get("max_tokens", 1000000),
+                        "tokens_per_day": cfg.get("max_tokens", 1000000) * 24,
+                    }
+            except Exception:
+                logger.debug(f"Could not get config from rate_limit_configs for key {key['id']}")
+
             configs.append(
                 {
                     "api_key": key["api_key"],
@@ -727,6 +778,14 @@ def get_rate_limit_alerts(
     """Get rate limit alerts with optional filtering"""
     try:
         client = get_supabase_client()
+
+        # Check if rate_limit_alerts table exists first
+        try:
+            client.table("rate_limit_alerts").select("id").limit(1).execute()
+        except Exception:
+            # Table doesn't exist, return empty list
+            logger.debug("rate_limit_alerts table not available, returning empty list")
+            return []
 
         query = (
             client.table("rate_limit_alerts")

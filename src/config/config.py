@@ -225,7 +225,9 @@ class Config:
     GOOGLE_VERTEX_ENDPOINT_ID = os.environ.get("GOOGLE_VERTEX_ENDPOINT_ID", "6072619212881264640")
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     GOOGLE_VERTEX_TRANSPORT = os.environ.get("GOOGLE_VERTEX_TRANSPORT", "rest").lower()
-    GOOGLE_VERTEX_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_TIMEOUT", "60"))
+    # Timeout for Google Vertex API calls. Default increased to 120s to accommodate
+    # larger models like gemini-2.5-pro which may take longer to process complex requests.
+    GOOGLE_VERTEX_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_TIMEOUT", "120"))
 
     # OpenRouter Analytics Cookie (for transaction analytics API)
     OPENROUTER_COOKIE = os.environ.get("OPENROUTER_COOKIE")
