@@ -453,6 +453,73 @@ class TestCrossReferencePricing:
                 assert result is not None
                 assert result["prompt"] == "0.00001"
 
+    @pytest.mark.integration
+    def test_cross_reference_pricing_does_not_match_different_model_variants(self):
+        """Test that cross-reference does NOT match different model variants incorrectly"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # gpt-4o-mini should NOT match gpt-4o (different model entirely)
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": "0.000005",
+                    "completion": "0.000015",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                # gpt-4o-mini should NOT match openai/gpt-4o
+                result = _get_cross_reference_pricing("gpt-4o-mini")
+                assert result is None
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_matches_correct_model_with_variants(self):
+        """Test that cross-reference matches the correct model when variants exist"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # Both gpt-4o and gpt-4o-mini should match their correct models
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": "0.000005",
+                    "completion": "0.000015",
+                },
+            },
+            {
+                "id": "openai/gpt-4o-mini",
+                "pricing": {
+                    "prompt": "0.0000001",
+                    "completion": "0.0000004",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                # gpt-4o should get gpt-4o pricing
+                result_4o = _get_cross_reference_pricing("gpt-4o")
+                assert result_4o is not None
+                assert result_4o["prompt"] == "0.000005"
+
+                # gpt-4o-mini should get gpt-4o-mini pricing
+                result_mini = _get_cross_reference_pricing("gpt-4o-mini")
+                assert result_mini is not None
+                assert result_mini["prompt"] == "0.0000001"
+
 
 class TestEnrichModelWithPricingGatewayProviders:
     """Test enrich_model_with_pricing for gateway providers"""

@@ -165,13 +165,28 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
 
             # Handle versioned model IDs (e.g., "claude-3-opus" matching "claude-3-opus-20240229")
             # OpenRouter often uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
-            if or_base.startswith(base_model_id) or base_model_id.startswith(or_base):
-                return {
-                    "prompt": str(or_pricing.get("prompt") or "0"),
-                    "completion": str(or_pricing.get("completion") or "0"),
-                    "request": str(or_pricing.get("request") or "0"),
-                    "image": str(or_pricing.get("image") or "0"),
-                }
+            # Note: We need to check that the suffix is a date version, not a different model variant
+            # e.g., "gpt-4o" should NOT match "gpt-4o-mini" but SHOULD match "gpt-4o-20240513"
+            if or_base.startswith(base_model_id):
+                suffix = or_base[len(base_model_id):]
+                # Only match if suffix is empty or looks like a date version (starts with '-' followed by digits)
+                if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
+                    return {
+                        "prompt": str(or_pricing.get("prompt") or "0"),
+                        "completion": str(or_pricing.get("completion") or "0"),
+                        "request": str(or_pricing.get("request") or "0"),
+                        "image": str(or_pricing.get("image") or "0"),
+                    }
+            # Also check reverse: base_model_id starts with or_base (for versioned queries)
+            if base_model_id.startswith(or_base):
+                suffix = base_model_id[len(or_base):]
+                if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
+                    return {
+                        "prompt": str(or_pricing.get("prompt") or "0"),
+                        "completion": str(or_pricing.get("completion") or "0"),
+                        "request": str(or_pricing.get("request") or "0"),
+                        "image": str(or_pricing.get("image") or "0"),
+                    }
 
         return None
 
