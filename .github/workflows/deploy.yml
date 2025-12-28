@@ -83,7 +83,6 @@ jobs:
     needs: [setup-environment]
     environment:
       name: ${{ needs.setup-environment.outputs.environment }}
-      url: https://${{ secrets.RAILWAY_DOMAIN }}
 
     steps:
       - name: Checkout code
