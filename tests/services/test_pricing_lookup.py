@@ -310,10 +310,14 @@ class TestGatewayProviders:
     """Test GATEWAY_PROVIDERS constant"""
 
     def test_gateway_providers_contains_expected_providers(self):
-        """Test that GATEWAY_PROVIDERS contains all expected gateway providers"""
+        """Test that GATEWAY_PROVIDERS contains all expected gateway providers
+
+        Note: AiHubMix is NOT a gateway provider because their API exposes pricing directly
+        """
         from src.services.pricing_lookup import GATEWAY_PROVIDERS
 
-        assert "aihubmix" in GATEWAY_PROVIDERS
+        # AiHubMix has direct pricing API, so it's not in GATEWAY_PROVIDERS
+        assert "aihubmix" not in GATEWAY_PROVIDERS
         assert "anannas" in GATEWAY_PROVIDERS
         assert "helicone" in GATEWAY_PROVIDERS
         assert "vercel-ai-gateway" in GATEWAY_PROVIDERS
@@ -538,7 +542,8 @@ class TestEnrichModelWithPricingGatewayProviders:
                 "src.services.pricing_lookup._get_cross_reference_pricing",
                 return_value=mock_cross_ref,
             ):
-                result = enrich_model_with_pricing(model_data, "aihubmix")
+                # Use anannas as gateway provider since aihubmix now has direct pricing API
+                result = enrich_model_with_pricing(model_data, "anannas")
                 assert result is not None
                 assert result["pricing"] == mock_cross_ref
                 assert result["pricing_source"] == "cross-reference"
@@ -623,7 +628,8 @@ class TestEnrichModelWithPricingGatewayProviders:
             with patch(
                 "src.services.pricing_lookup._get_cross_reference_pricing"
             ) as mock_cross:
-                result = enrich_model_with_pricing(model_data, "aihubmix")
+                # Use anannas as gateway provider since aihubmix now has direct pricing API
+                result = enrich_model_with_pricing(model_data, "anannas")
                 assert result is not None
                 assert result["pricing"]["prompt"] == "0.001"
                 mock_manual.assert_not_called()
@@ -637,7 +643,8 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
-            result = enrich_model_with_pricing(model_data, "aihubmix")
+            # Use anannas as gateway provider since aihubmix now has direct pricing API
+            result = enrich_model_with_pricing(model_data, "anannas")
             # Gateway provider should be filtered out on error
             assert result is None
 

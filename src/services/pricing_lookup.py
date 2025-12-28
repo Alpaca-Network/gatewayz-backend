@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 # Gateway providers that route to underlying providers (OpenAI, Anthropic, etc.)
 # These need cross-reference pricing from OpenRouter if no manual pricing exists
+# Note: AiHubMix is NOT included here because their API exposes pricing directly
 GATEWAY_PROVIDERS = {
-    "aihubmix",
     "anannas",
     "helicone",
     "vercel-ai-gateway",
