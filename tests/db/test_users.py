@@ -274,7 +274,7 @@ def test_create_enhanced_user_creates_trial_and_primary(sb):
         username="alice",
         email="alice@example.com",
         auth_method="password",
-        credits=10,
+        credits=5,
     )
     # user row created, then api_key updated to primary
     users_rows = sb.tables["users"]

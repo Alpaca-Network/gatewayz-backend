@@ -142,7 +142,7 @@ def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
 
         trial_max_tokens = key_data.get("trial_max_tokens", 100000)
         trial_max_requests = key_data.get("trial_max_requests", 1000)
-        trial_credits = key_data.get("trial_credits", 10.0)
+        trial_credits = key_data.get("trial_credits", 5.0)
 
         # Check if any limits are exceeded
         if trial_used_tokens >= trial_max_tokens:

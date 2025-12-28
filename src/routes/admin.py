@@ -50,7 +50,7 @@ async def create_api_key(request: UserRegistrationRequest):
             username=request.username,
             email=request.email,
             auth_method=request.auth_method,
-            credits=10,  # $10 worth of credits (500,000 tokens)
+            credits=5,  # $5 worth of credits (250,000 tokens)
         )
 
         # Send a welcome email with API key information
