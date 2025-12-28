@@ -116,3 +116,82 @@ def process_aihubmix_response(response):
     except Exception as e:
         logger.error(f"Failed to process AiHubMix response: {e}")
         raise
+
+
+def fetch_model_pricing_from_aihubmix(model_id: str):
+    """Fetch pricing information for a specific model from AiHubMix
+
+    AiHubMix routes requests to various providers (OpenAI, Anthropic, etc.)
+    This function attempts to determine the pricing by cross-referencing
+    with known provider pricing from OpenRouter's catalog.
+
+    Args:
+        model_id: Model identifier (e.g., "gpt-4o", "claude-3-sonnet")
+
+    Returns:
+        dict with 'prompt' and 'completion' pricing per 1M tokens, or None if not available
+    """
+    try:
+        from src.services.models import _is_building_catalog
+
+        # If we're building the catalog, return None to avoid circular dependency
+        if _is_building_catalog():
+            logger.debug(f"Skipping pricing fetch for {model_id} (catalog building in progress)")
+            return None
+
+        # AiHubMix doesn't expose a pricing API - use cross-reference with OpenRouter
+        return get_provider_pricing_for_aihubmix_model(model_id)
+
+    except Exception as e:
+        logger.error(f"Failed to fetch pricing for AiHubMix model {model_id}: {e}")
+        return None
+
+
+def get_provider_pricing_for_aihubmix_model(model_id: str):
+    """Get pricing for an AiHubMix model by looking up the underlying provider's pricing
+
+    AiHubMix routes models to providers like OpenAI, Anthropic, etc.
+    We can determine pricing by cross-referencing with OpenRouter's catalog.
+
+    Args:
+        model_id: Model identifier (e.g., "gpt-4o", "claude-3-sonnet")
+
+    Returns:
+        dict with 'prompt' and 'completion' pricing per 1M tokens
+    """
+    try:
+        from src.services.models import _is_building_catalog
+        from src.services.pricing import get_model_pricing
+
+        # If we're building the catalog, return None to avoid circular dependency
+        if _is_building_catalog():
+            logger.debug(
+                f"Skipping provider pricing lookup for {model_id} (catalog building in progress)"
+            )
+            return None
+
+        # Try the full model ID first
+        pricing = get_model_pricing(model_id)
+        if pricing and pricing.get("found"):
+            return {
+                "prompt": pricing.get("prompt", "0"),
+                "completion": pricing.get("completion", "0"),
+            }
+
+        # Try without the provider prefix
+        model_name_only = model_id.split("/")[-1] if "/" in model_id else model_id
+        pricing = get_model_pricing(model_name_only)
+        if pricing and pricing.get("found"):
+            return {
+                "prompt": pricing.get("prompt", "0"),
+                "completion": pricing.get("completion", "0"),
+            }
+
+        return None
+
+    except ImportError:
+        logger.debug("pricing module not available for cross-reference")
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to get provider pricing for {model_id}: {e}")
+        return None
