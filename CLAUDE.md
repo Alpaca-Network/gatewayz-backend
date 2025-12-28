@@ -4,16 +4,19 @@
 
 **Project**: Gatewayz Universal Inference API (v2.0.3)
 
-**Purpose**: A production-ready, enterprise-grade FastAPI application that provides a unified API gateway for accessing 100+ AI models from 15+ different providers (OpenRouter, Portkey, Featherless, Chutes, DeepInfra, Fireworks, Together, HuggingFace, Google Vertex AI, and more).
+**Purpose**: A production-ready, enterprise-grade FastAPI application that provides a unified API gateway for accessing 100+ AI models from 30+ different providers (OpenRouter, Portkey, Featherless, Chutes, DeepInfra, Fireworks, Together, HuggingFace, Google Vertex AI, Groq, Cerebras, Cloudflare Workers AI, and more).
 
 **Key Features**:
 - OpenAI-compatible API endpoints (drop-in replacement)
+- Anthropic Messages API compatibility (Claude models)
 - Multi-provider model aggregation and routing
 - Credit-based billing system with real-time tracking
 - Enterprise security (encrypted API keys, IP allowlists, audit logging)
 - Advanced features: chat history, image generation, free trials, subscriptions, referrals
-- Comprehensive analytics and monitoring
+- Comprehensive analytics and monitoring (Prometheus, Grafana, Sentry, Arize)
+- OpenTelemetry-based distributed tracing
 - Rate limiting and request prioritization
+- Intelligent health monitoring and provider failover
 - Multiple deployment options (Vercel, Railway, Docker)
 
 ---
@@ -24,15 +27,25 @@
 
 ```
 /root/repo/
-├── src/                           # Main application source (43,491 lines of Python)
+├── src/                           # Main application source (85,080 lines of Python)
 │   ├── main.py                   # FastAPI app factory and route initialization
-│   ├── config/                   # Configuration management (4 files)
+│   ├── config/                   # Configuration management (8 files)
 │   │   ├── config.py            # Environment-based configuration
 │   │   ├── db_config.py         # Database configuration
 │   │   ├── redis_config.py      # Redis caching configuration
-│   │   └── supabase_config.py   # Supabase client initialization
+│   │   ├── supabase_config.py   # Supabase client initialization
+│   │   ├── arize_config.py      # Arize AI observability configuration
+│   │   ├── logging_config.py    # Logging configuration (Loki integration)
+│   │   └── opentelemetry_config.py # OpenTelemetry tracing configuration
 │   │
-│   ├── db/                       # Database Access Layer (16 modules)
+│   ├── middleware/               # Middleware Layer (6 modules) - NEW
+│   │   ├── auto_sentry_middleware.py   # Sentry error tracking middleware
+│   │   ├── observability_middleware.py # Observability/tracing middleware
+│   │   ├── request_timeout_middleware.py # Request timeout handling
+│   │   ├── selective_gzip_middleware.py # Conditional compression
+│   │   └── trace_context_middleware.py  # Distributed tracing context
+│   │
+│   ├── db/                       # Database Access Layer (24 modules)
 │   │   ├── users.py             # User CRUD operations
 │   │   ├── api_keys.py          # API key management with encryption
 │   │   ├── chat_history.py      # Chat session management
@@ -47,9 +60,17 @@
 │   │   ├── ranking.py           # Model ranking data
 │   │   ├── credit_transactions.py # Credit transaction history
 │   │   ├── gateway_analytics.py # Gateway usage analytics
-│   │   └── ping.py              # Ping statistics
+│   │   ├── ping.py              # Ping statistics
+│   │   ├── failover_db.py       # Failover database operations
+│   │   ├── feedback.py          # User feedback storage
+│   │   ├── model_health.py      # Model health metrics
+│   │   ├── models_catalog_db.py # Model catalog database
+│   │   ├── postgrest_schema.py  # PostgREST schema definitions
+│   │   ├── providers_db.py      # Provider database operations
+│   │   ├── subscription_products.py # Subscription product management
+│   │   └── webhook_events.py    # Webhook event logging
 │   │
-│   ├── routes/                   # API Endpoint Handlers (29 modules)
+│   ├── routes/                   # API Endpoint Handlers (43 modules)
 │   │   ├── chat.py              # Chat completions (OpenAI-compatible)
 │   │   ├── messages.py          # Anthropic Messages API (Claude-compatible)
 │   │   ├── images.py            # Image generation endpoints
@@ -75,12 +96,27 @@
 │   │   ├── system.py            # System health & cache management
 │   │   ├── optimization_monitor.py # Connection pool & performance stats
 │   │   ├── root.py              # Root/welcome endpoint
-│   │   └── transaction_analytics.py # Transaction analytics
+│   │   ├── transaction_analytics.py # Transaction analytics
+│   │   ├── ranking.py           # Model ranking endpoints
+│   │   ├── ai_sdk.py            # AI SDK endpoints
+│   │   ├── alibaba_debug.py     # Alibaba debugging endpoints
+│   │   ├── credits.py           # Credit management endpoints
+│   │   ├── error_monitor.py     # Error monitoring endpoints
+│   │   ├── grafana_metrics.py   # Grafana metrics integration
+│   │   ├── instrumentation.py   # Instrumentation/tracing endpoints
+│   │   ├── metrics.py           # Prometheus metrics endpoints
+│   │   ├── model_health.py      # Model health status endpoints
+│   │   ├── model_sync.py        # Model synchronization endpoints
+│   │   ├── models_catalog_management.py # Catalog management endpoints
+│   │   ├── monitoring.py        # Monitoring endpoints
+│   │   ├── pricing_audit.py     # Pricing audit endpoints
+│   │   ├── pricing_sync.py      # Pricing synchronization endpoints
+│   │   ├── providers_management.py # Provider management endpoints
+│   │   └── status_page.py       # Status page endpoint
 │   │
-│   ├── services/                 # Business Logic Layer (52 modules)
-│   │   # Provider Clients (17 modules)
+│   ├── services/                 # Business Logic Layer (95 modules)
+│   │   # Provider Clients (30 modules)
 │   │   ├── openrouter_client.py  # OpenRouter API integration
-│   │   ├── portkey_client.py     # Portkey gateway integration
 │   │   ├── featherless_client.py # Featherless provider
 │   │   ├── chutes_client.py      # Chutes provider
 │   │   ├── deepinfra_client.py   # DeepInfra provider
@@ -96,20 +132,72 @@
 │   │   ├── modelz_client.py      # Modelz provider
 │   │   ├── aihubmix_client.py    # AiHubMix provider
 │   │   ├── vercel_ai_gateway_client.py # Vercel AI Gateway
+│   │   ├── ai_sdk_client.py      # AI SDK integration
+│   │   ├── akash_client.py       # Akash provider
+│   │   ├── alibaba_cloud_client.py # Alibaba Cloud provider
+│   │   ├── alpaca_network_client.py # Alpaca Network provider
+│   │   ├── cerebras_client.py    # Cerebras provider
+│   │   ├── clarifai_client.py    # Clarifai provider
+│   │   ├── cloudflare_workers_ai_client.py # Cloudflare Workers AI
+│   │   ├── groq_client.py        # Groq provider
+│   │   ├── helicone_client.py    # Helicone provider
+│   │   ├── morpheus_client.py    # Morpheus provider
+│   │   ├── nebius_client.py      # Nebius provider
+│   │   ├── novita_client.py      # Novita provider
+│   │   └── onerouter_client.py   # OneRouter provider
 │   │   │
-│   │   # Core Services (8 modules)
+│   │   # Core Services (12 modules)
 │   │   ├── models.py             # Model catalog management
 │   │   ├── providers.py          # Provider registry & caching
 │   │   ├── model_transformations.py # Model ID transformation/routing
 │   │   ├── model_availability.py # Model availability checking
 │   │   ├── model_health_monitor.py # Health monitoring
 │   │   ├── huggingface_models.py # HuggingFace model catalog
-│   │   ├── portkey_providers.py  # Portkey provider routing
+│   │   ├── huggingface_hub_service.py # HuggingFace Hub integration
 │   │   ├── image_generation_client.py # Image generation router
+│   │   ├── canonical_registry.py # Canonical model registry
+│   │   ├── multi_provider_registry.py # Multi-provider registry
+│   │   ├── provider_selector.py  # Provider selection logic
+│   │   └── model_catalog_sync.py # Model catalog synchronization
 │   │   │
-│   │   # Feature Services (10 modules)
+│   │   # Health Monitoring Services (7 modules)
+│   │   ├── autonomous_monitor.py # Autonomous health monitoring
+│   │   ├── gateway_health_service.py # Gateway health service
+│   │   ├── health_alerting.py    # Health alerting system
+│   │   ├── intelligent_health_monitor.py # Intelligent health monitoring
+│   │   ├── passive_health_monitor.py # Passive health monitoring
+│   │   ├── simple_health_cache.py # Simple health caching
+│   │   └── failover_service.py   # Provider failover service
+│   │   │
+│   │   # Caching Services (6 modules)
+│   │   ├── auth_cache.py         # Authentication caching
+│   │   ├── db_cache.py           # Database caching
+│   │   ├── model_catalog_cache.py # Model catalog caching
+│   │   ├── response_cache.py     # Response caching
+│   │   ├── user_lookup_cache.py  # User lookup caching
+│   │   └── connection_pool_monitor.py # Connection pool monitoring
+│   │   │
+│   │   # Pricing Services (5 modules)
 │   │   ├── pricing.py            # Pricing calculations
 │   │   ├── pricing_lookup.py     # Pricing data lookup
+│   │   ├── pricing_audit_service.py # Pricing audit service
+│   │   ├── pricing_provider_auditor.py # Provider pricing auditor
+│   │   └── pricing_sync_service.py # Pricing synchronization
+│   │   │
+│   │   # Observability Services (12 modules)
+│   │   ├── error_monitor.py      # Error monitoring service
+│   │   ├── grafana_metrics_service.py # Grafana metrics service
+│   │   ├── metrics_aggregator.py # Metrics aggregation
+│   │   ├── metrics_instrumentation.py # Metrics instrumentation
+│   │   ├── metrics_parser.py     # Metrics parsing
+│   │   ├── prometheus_exporter.py # Prometheus exporter
+│   │   ├── prometheus_metrics.py # Prometheus metrics
+│   │   ├── prometheus_pb2.py     # Prometheus protobuf
+│   │   ├── prometheus_remote_write.py # Prometheus remote write
+│   │   ├── redis_metrics.py      # Redis metrics
+│   │   └── tempo_otlp.py         # Tempo OpenTelemetry integration
+│   │   │
+│   │   # Feature Services (10 modules)
 │   │   ├── payments.py           # Payment processing service
 │   │   ├── trial_service.py      # Trial management
 │   │   ├── trial_validation.py   # Trial validation logic
@@ -117,22 +205,27 @@
 │   │   ├── rate_limiting.py      # Redis-based rate limiting
 │   │   ├── rate_limiting_fallback.py # Fallback rate limiting
 │   │   ├── roles.py              # Role management service
-│   │   ├── ping.py              # Ping statistics service
+│   │   ├── ping.py               # Ping statistics service
+│   │   ├── request_prioritization.py # Request prioritization
+│   │   └── provider_failover.py  # Provider failover logic
 │   │   │
-│   │   # Utility Services (7 modules)
+│   │   # Utility Services (13 modules)
 │   │   ├── notification.py       # Email notifications
 │   │   ├── professional_email_templates.py # Email templates
 │   │   ├── analytics.py          # Analytics service
 │   │   ├── statsig_service.py    # Statsig feature flags
 │   │   ├── posthog_service.py    # PostHog analytics
 │   │   ├── startup.py            # Application startup/lifespan
-│   │   ├── response_cache.py     # Response caching
 │   │   ├── connection_pool.py    # Connection pooling
-│   │   ├── request_prioritization.py # Request prioritization
-│   │   ├── provider_failover.py  # Provider failover logic
-│   │   └── anthropic_transformer.py # Message format transformation
+│   │   ├── anthropic_transformer.py # Message format transformation
+│   │   ├── background_tasks.py   # Background task management
+│   │   ├── bug_fix_generator.py  # Bug fix generation utility
+│   │   ├── query_timeout.py      # Query timeout handling
+│   │   ├── stream_normalizer.py  # Stream normalization
+│   │   ├── google_models_config.py # Google models configuration
+│   │   └── google_oauth2_jwt.py  # Google OAuth2 JWT handling
 │   │
-│   ├── schemas/                  # Pydantic Data Models (13 modules)
+│   ├── schemas/                  # Pydantic Data Models (15 modules)
 │   │   ├── chat.py              # Chat request/response schemas
 │   │   ├── auth.py              # Authentication schemas
 │   │   ├── api_keys.py          # API key schemas
@@ -145,35 +238,59 @@
 │   │   ├── notification.py      # Notification schemas
 │   │   ├── common.py            # Common/shared schemas
 │   │   ├── proxy.py             # Proxy request schemas
-│   │   └── activity.py          # Activity schemas
+│   │   ├── models_catalog.py    # Model catalog schemas
+│   │   └── providers.py         # Provider schemas
 │   │
-│   ├── security/                # Security & Auth Layer
+│   ├── security/                # Security & Auth Layer (3 modules)
 │   │   ├── security.py          # Encryption/hashing utilities (Fernet, HMAC)
 │   │   └── deps.py              # Security dependencies (get_api_key, etc)
 │   │
-│   ├── models/                  # Model Definition Files
+│   ├── models/                  # Model Definition Files (3 modules)
 │   │   ├── health_models.py     # Health check models
 │   │   └── image_models.py      # Image generation models
 │   │
-│   ├── utils/                   # Utility Modules
+│   ├── utils/                   # Utility Modules (15 modules)
 │   │   ├── validators.py        # Input validation
-│   │   └── security_validators.py # Security-specific validators
+│   │   ├── security_validators.py # Security-specific validators
+│   │   ├── auto_sentry.py       # Sentry integration utilities
+│   │   ├── braintrust_tracing.py # Braintrust tracing
+│   │   ├── crypto.py            # Cryptographic utilities
+│   │   ├── dependency_utils.py  # FastAPI dependency utilities
+│   │   ├── performance_tracker.py # Performance tracking
+│   │   ├── rate_limit_headers.py # Rate limit header utilities
+│   │   ├── release_tracking.py  # Release tracking
+│   │   ├── reset_welcome_emails.py # Email reset utility
+│   │   ├── retry.py             # Retry logic utilities
+│   │   ├── sentry_context.py    # Sentry context management
+│   │   ├── sentry_insights.py   # Sentry insights
+│   │   ├── token_estimator.py   # Token estimation utilities
+│   │   └── trial_utils.py       # Trial utility functions
 │   │
 │   ├── constants.py             # Application constants
 │   ├── models.py                # Legacy/global models
 │   ├── cache.py                 # Caching utilities
 │   ├── db_security.py           # Database security utilities
+│   ├── redis_config.py          # Root-level Redis config
+│   ├── backfill_legacy_keys.py  # Legacy key backfill script
 │   └── enhanced_notification_service.py # Enhanced notification service
 │
-├── tests/                        # Test Suite (107 test files)
+├── tests/                        # Test Suite (228 test files)
 │   ├── conftest.py             # Pytest configuration & fixtures
 │   ├── factories.py            # Test data factories
-│   ├── db/                     # Database tests (15 modules)
-│   ├── integration/            # Integration tests (25+ modules)
+│   ├── config/                 # Configuration tests
+│   ├── db/                     # Database tests
+│   ├── e2e/                    # End-to-end tests
 │   ├── health/                 # Health check tests
-│   └── ... (additional test modules)
+│   ├── integration/            # Integration tests
+│   ├── middleware/             # Middleware tests
+│   ├── routes/                 # Route tests
+│   ├── schemas/                # Schema tests
+│   ├── security/               # Security tests
+│   ├── services/               # Service tests
+│   ├── smoke/                  # Smoke tests
+│   └── utils/                  # Utility tests
 │
-├── docs/                        # Documentation (115 files)
+├── docs/                        # Documentation (121 files)
 │   ├── architecture.md         # System architecture
 │   ├── api.md                  # API reference
 │   ├── setup.md                # Setup instructions
@@ -185,7 +302,7 @@
 │
 ├── supabase/                    # Database Migrations
 │   ├── config.toml             # Supabase configuration
-│   └── migrations/             # SQL migrations (13 files)
+│   └── migrations/             # SQL migrations (36 files)
 │
 ├── scripts/                     # Utility Scripts
 │   ├── checks/                 # Pre-deployment checks
@@ -197,12 +314,15 @@
 │   └── index.py                # Vercel deployment handler
 │
 ├── .github/                     # CI/CD Configuration
-│   └── workflows/              # GitHub Actions workflows (7 files)
+│   └── workflows/              # GitHub Actions workflows (9 files)
 │
 ├── pyproject.toml              # Project metadata & tool configuration
 ├── requirements.txt            # Python dependencies (pinned versions)
+├── requirements-dev.txt        # Development dependencies
 ├── vercel.json                 # Vercel deployment config
 ├── railway.json                # Railway deployment config
+├── railway.toml                # Railway TOML configuration
+├── docker-compose.prometheus.yml # Prometheus Docker Compose
 ├── pytest.ini                  # Pytest configuration
 ├── README.md                   # Main documentation
 └── CLAUDE.md                   # This file - AI context
@@ -215,8 +335,9 @@
 ### Core Framework & Web Server
 - **FastAPI 0.104.1** - Modern, fast web framework with async support
 - **Uvicorn 0.24.0** - ASGI server for running FastAPI
-- **Python 3.10+** - Required Python version
-- **Prometheus Client 0.19.0** - Metrics exposure for observability
+- **Python 3.10+ to <3.13** - Required Python version
+- **Prometheus Client 0.21.0** - Metrics exposure for observability
+- **anyio >=3.7.1,<4.0.0** - Async compatibility layer
 
 ### Data Validation & Serialization
 - **Pydantic 2.12.2** with email validator - Type-safe data validation
@@ -225,33 +346,54 @@
 ### Database & Data Storage
 - **Supabase 2.12.0** - PostgreSQL with real-time capabilities via PostgREST API
 - **Redis 5.0.1** - In-memory cache for rate limiting and response caching
+- **psycopg[binary] 3.1.18** - PostgreSQL adapter
 
 ### External Service Integrations
 - **Stripe 13.0.1** - Payment processing and subscriptions
 - **Resend 0.8.0** - Transactional email delivery
 - **OpenAI 1.44.0** - OpenAI API client
-- **Portkey AI 2.0.0+** - Multi-provider gateway
 - **HTTPX 0.27.0** - Async HTTP client
 - **Requests 2.31.0** - Synchronous HTTP client
+- **Tenacity 8.2.3** - Retry logic for API calls
 
 ### Provider SDKs
 - **Cerebras Cloud SDK 1.0.0+** - Cerebras inference
 - **XAI SDK 0.1.0+** - X.AI provider integration
 - **Google Cloud AIplatform 1.38.0+** - Google Vertex AI
 - **Google Auth 2.0.0+** - Google authentication
+- **Clarifai 10.0.0+** - Clarifai provider SDK
+- **HuggingFace Hub 0.23.0+** - HuggingFace model hub integration
+- **Novita Client 0.5.0+** - Novita provider SDK
 - **PyJWT[crypto] 2.8.0** - JWT token handling
 
 ### Security & Cryptography
 - **Cryptography 41.0.7** - Fernet (AES-128) encryption and HMAC hashing
 - **Python-dotenv 1.0.0** - Environment variable management
 - **Email-validator 2.1.0** - Email format validation
+- **Sentry SDK[fastapi] 2.0.0+** - Error tracking and monitoring
 
 ### Analytics & Monitoring
 - **Statsig Python Core 0.10.2** - Feature flags and A/B testing
 - **PostHog 6.7.8** - Product analytics
-- **Prometheus Client 0.19.0** - Prometheus metrics export
-- **Braintrust** (optional) - ML/AI evaluation and monitoring
-- **OpenTelemetry** (optional, 5 packages) - Observability and distributed tracing
+- **Prometheus Client 0.21.0** - Prometheus metrics export
+- **Braintrust** - ML/AI evaluation and monitoring
+- **Arize OTEL 0.11.0+** - Arize AI observability platform
+- **OpenInference Instrumentation OpenAI 0.1.41+** - OpenAI instrumentation
+
+### OpenTelemetry Stack (Distributed Tracing)
+- **opentelemetry-api 1.28.0+** - Core tracing API
+- **opentelemetry-sdk 1.28.0+** - SDK implementation
+- **opentelemetry-instrumentation 0.49b0+** - Base instrumentation
+- **opentelemetry-instrumentation-fastapi 0.49b0+** - FastAPI auto-instrumentation
+- **opentelemetry-instrumentation-httpx 0.49b0+** - HTTPX auto-instrumentation
+- **opentelemetry-instrumentation-requests 0.49b0+** - Requests auto-instrumentation
+- **opentelemetry-exporter-otlp 1.28.0+** - OTLP exporter for traces
+
+### Logging & Observability
+- **python-json-logger 2.0.7+** - JSON structured logging
+- **python-logging-loki 0.3.1+** - Loki log aggregation
+- **python-snappy 0.7.0+** - Snappy compression for metrics
+- **protobuf 4.24.0+** - Protocol buffers for metrics
 
 ### Testing
 - **Pytest 7.4.3** - Testing framework
@@ -261,18 +403,20 @@
 - **Pytest-split 0.9.0+** - Test split and distribution
 - **Pytest-timeout 2.2.0** - Test timeout handling
 - **Pytest-mock 3.12.0** - Mocking utilities
+- **Playwright 1.40.0+** - Browser automation for E2E tests
 - **Flask-SQLAlchemy** - Database testing utilities
 
 ### Code Quality Tools
-- **Ruff** - Fast Python linter (configured for 100 char line length)
-- **Black** - Code formatter (100 char line length)
-- **isort** - Import organizer
-- **MyPy** - Type checking (optional)
+- **Ruff** - Fast Python linter (configured for 100 char line length, target Python 3.12)
+- **Black** - Code formatter (100 char line length, target Python 3.12)
+- **isort** - Import organizer (black profile)
+- **MyPy** - Type checking (Python 3.12 target)
 
 ### Deployment
 - **Vercel** - Serverless platform
 - **Railway** - Container hosting platform
 - **Docker** - Containerization
+- **Prometheus/Grafana** - Metrics and dashboards
 
 ---
 
@@ -297,15 +441,15 @@ The application follows a **layered, modular architecture** with clear separatio
 │ │  • Request logging, GZip compression                 │   │
 │ └──────────────────────────────────────────────────────┘   │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │  Routes Layer (src/routes/ - 28 modules)             │   │
+│ │  Routes Layer (src/routes/ - 43 modules)             │   │
 │ │  Handles HTTP endpoints and request parsing          │   │
 │ └──────────────────────────────────────────────────────┘   │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │  Services Layer (src/services/ - 48 modules)         │   │
+│ │  Services Layer (src/services/ - 95 modules)         │   │
 │ │  Business logic, provider routing, pricing, etc      │   │
 │ └──────────────────────────────────────────────────────┘   │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │  Data Access Layer (src/db/ - 16 modules)            │   │
+│ │  Data Access Layer (src/db/ - 24 modules)            │   │
 │ │  Database operations via Supabase PostgREST API      │   │
 │ └──────────────────────────────────────────────────────┘   │
 └────────────┬──────────────────────────┬──────────────────────┘
@@ -321,7 +465,9 @@ The application follows a **layered, modular architecture** with clear separatio
     │ • plans           │      │ • Together              │
     │ • chat_history    │      │ • HuggingFace           │
     │ • coupons         │      │ • Google Vertex         │
-    │ • (15+ tables)    │      │ • & 6+ more             │
+    │ • (20+ tables)    │      │ • Groq, Cerebras        │
+    │                   │      │ • Cloudflare Workers    │
+    │                   │      │ • & 20+ more            │
     └───────────────────┘      └─────────────────────────┘
 
                 Also connected:
@@ -401,19 +547,25 @@ The application follows a **layered, modular architecture** with clear separatio
 - `src/config/supabase_config.py` - Database client initialization
 - `src/config/config.py` - Environment configuration (30+ vars)
 - `src/config/redis_config.py` - Redis client setup
-- `supabase/migrations/` - Database schema (14 migration files)
+- `supabase/migrations/` - Database schema (36 migration files)
 
 ### Health & Monitoring
 - `src/routes/health.py` - Health check endpoints
 - `src/routes/system.py` - Cache management and system stats
 - `src/routes/optimization_monitor.py` - Performance metrics
 - `src/routes/audit.py` - Audit log queries
+- `src/routes/metrics.py` - Prometheus metrics endpoints
+- `src/routes/grafana_metrics.py` - Grafana integration
+- `src/routes/monitoring.py` - Monitoring endpoints
+- `src/routes/model_health.py` - Model health status
+- `src/services/intelligent_health_monitor.py` - Intelligent health monitoring
+- `src/services/autonomous_monitor.py` - Autonomous health checks
 
 ---
 
 ## Database Schema
 
-### Core Tables (15+)
+### Core Tables (20+)
 - **users** - User accounts and profiles
 - **api_keys** - Encrypted API keys with metadata
 - **payments** - Transaction records
@@ -429,9 +581,16 @@ The application follows a **layered, modular architecture** with clear separatio
 - **ranking** - Model rankings
 - **gateway_analytics** - Usage analytics
 - **ping** - Ping statistics
+- **feedback** - User feedback
+- **model_health** - Model health metrics
+- **models_catalog** - Model catalog data
+- **providers** - Provider configurations
+- **subscription_products** - Subscription product data
+- **webhook_events** - Webhook event logs
+- **failover** - Failover state data
 
 ### Database Migrations
-Located in `supabase/migrations/` with 14 migration files covering:
+Located in `supabase/migrations/` with 36 migration files covering:
 - Schema initialization
 - Table creation and modifications
 - Index optimization
@@ -460,10 +619,19 @@ Configured in `src/config/config.py`:
 
 ## Testing Strategy
 
-### Test Organization
+### Test Organization (228 test files across 13 directories)
 - **Unit Tests**: Fast, isolated tests without external dependencies
 - **Integration Tests**: Test database and service interactions
+- **E2E Tests**: End-to-end tests with Playwright browser automation
 - **Health Tests**: Verify health check endpoints
+- **Smoke Tests**: Quick verification of core functionality
+- **Middleware Tests**: Test middleware components
+- **Route Tests**: Test API route handlers
+- **Service Tests**: Test business logic services
+- **Schema Tests**: Test Pydantic schema validation
+- **Security Tests**: Test authentication and authorization
+- **Config Tests**: Test configuration loading
+- **Utility Tests**: Test utility functions
 
 ### Running Tests
 ```bash
@@ -478,6 +646,10 @@ pytest tests/integration/test_chat.py
 
 # Run in parallel
 pytest -n auto
+
+# Run specific test category
+pytest tests/e2e/  # End-to-end tests
+pytest tests/smoke/  # Smoke tests
 ```
 
 ### Pytest Configuration
@@ -599,18 +771,24 @@ pytest tests/integration/test_chat.py -v
 5. **Encryption at Rest**: Fernet encryption for sensitive data
 6. **Rate Limiting**: Redis-backed with fallback mechanism
 7. **Multi-Provider Strategy**: Abstract interface with specific implementations
+8. **Middleware Pipeline**: Layered middleware for cross-cutting concerns
+9. **Registry Pattern**: Canonical model registry for multi-provider routing
+10. **Health Check Pattern**: Intelligent, passive, and autonomous health monitors
 
 ---
 
 ## Performance & Scalability Features
 
-1. **Caching**: Redis for response caching and rate limiting
-2. **Connection Pooling**: Reuse database connections
+1. **Caching**: Redis for response caching and rate limiting (multiple cache layers)
+2. **Connection Pooling**: Reuse database connections with monitoring
 3. **Request Prioritization**: Priority queue for important requests
-4. **GZip Compression**: Automatic response compression
+4. **GZip Compression**: Selective response compression via middleware
 5. **Async I/O**: Non-blocking for high concurrency
 6. **Load Balancing**: Multi-provider routing for failover
-7. **Health Checks**: Continuous provider health monitoring
+7. **Health Checks**: Intelligent, passive, and autonomous provider health monitoring
+8. **Metrics Aggregation**: Prometheus metrics with Grafana dashboards
+9. **Distributed Tracing**: OpenTelemetry traces with Tempo integration
+10. **Query Timeout Handling**: Configurable timeouts for database operations
 
 ---
 
@@ -630,7 +808,13 @@ pytest tests/integration/test_chat.py -v
 ## Recent Updates & Current State
 
 ### Latest Changes
-- Multiple provider integrations (17 providers total)
+- Expanded to 30 provider integrations (up from 17)
+- OpenTelemetry-based distributed tracing
+- Prometheus/Grafana metrics integration
+- Sentry error tracking and monitoring
+- Arize AI observability platform integration
+- Loki log aggregation
+- Intelligent health monitoring systems
 - Advanced credit management system
 - Comprehensive audit logging
 - Feature flag integration (Statsig)
@@ -645,6 +829,7 @@ pytest tests/integration/test_chat.py -v
 - Provider API updates and integrations
 - Performance optimization
 - Bug fixes and security patches
+- Observability improvements
 
 ---
 
@@ -652,14 +837,19 @@ pytest tests/integration/test_chat.py -v
 
 | Component | Location | Count |
 |-----------|----------|-------|
-| Routes | `src/routes/` | 29 |
-| Services | `src/services/` | 52 |
-| Database Modules | `src/db/` | 16 |
-| Schemas | `src/schemas/` | 13 |
-| Test Files | `tests/` | 107 |
-| Migrations | `supabase/migrations/` | 13 |
-| Documentation | `docs/` | 115 |
-| **Total Python Code** | `src/` | **43,491 LOC** |
+| Routes | `src/routes/` | 43 |
+| Services | `src/services/` | 95 |
+| Database Modules | `src/db/` | 24 |
+| Schemas | `src/schemas/` | 15 |
+| Config Modules | `src/config/` | 8 |
+| Middleware | `src/middleware/` | 6 |
+| Utilities | `src/utils/` | 15 |
+| Test Files | `tests/` | 228 |
+| Test Directories | `tests/` | 13 |
+| Migrations | `supabase/migrations/` | 36 |
+| Documentation | `docs/` | 121 |
+| CI/CD Workflows | `.github/workflows/` | 9 |
+| **Total Python Code** | `src/` | **85,080 LOC** |
 
 ---
 
@@ -689,18 +879,20 @@ curl https://api.gatewayz.ai/health
 
 This codebase is a sophisticated, production-grade AI gateway system. When working on tasks:
 
-1. **Understand the Flow**: Requests go through routes → services → database
+1. **Understand the Flow**: Requests go through middleware → routes → services → database
 2. **Check Existing Patterns**: Many features follow established patterns (provider clients, service layers)
 3. **Security First**: Always encrypt sensitive data; add audit logs for sensitive operations
 4. **Database Migrations**: Any schema changes need SQL migrations in `supabase/migrations/`
-5. **Testing**: Add tests for new features (follow existing test structure)
+5. **Testing**: Add tests for new features (follow existing test structure in appropriate test directory)
 6. **Configuration**: Use environment variables via `src/config/config.py`
-7. **Multiple Providers**: When adding features, consider how they work across all 17 providers
+7. **Multiple Providers**: When adding features, consider how they work across all 30 providers
 8. **Rate Limiting**: Account for Redis availability with fallback mechanisms
 9. **Performance**: Use async/await; leverage caching; monitor connection pools
-10. **Documentation**: Update docs when adding major features
+10. **Observability**: Add appropriate metrics (Prometheus), traces (OpenTelemetry), and error tracking (Sentry)
+11. **Health Monitoring**: Consider health check impacts when adding new providers or services
+12. **Documentation**: Update docs when adding major features
 
 ---
 
-**Last Updated**: 2025-11-07
+**Last Updated**: 2025-12-28
 **Version**: 2.0.3
