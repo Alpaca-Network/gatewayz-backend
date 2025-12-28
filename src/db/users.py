@@ -997,7 +997,11 @@ def get_admin_monitor_data() -> dict[str, Any]:
             if user_id:
                 active_user_ids.add(user_id)
 
+        # Create mappings for both directions:
+        # - user_id_to_api_key: for resolving api_key from activity_log user_ids
+        # - api_key_to_user_id: for deduplication with legacy usage_records that only have api_key
         user_id_to_api_key = {}
+        api_key_to_user_id = {}
 
         # Fetch mappings only for active users (avoids 10,000 row limit issue)
         if active_user_ids:
@@ -1021,6 +1025,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
                             api_key = user.get("api_key")
                             if user_id and api_key:
                                 user_id_to_api_key[user_id] = api_key
+                                api_key_to_user_id[api_key] = user_id
             except Exception as e:
                 logger.warning(f"Error fetching user api_keys for active users: {e}")
 
@@ -1043,6 +1048,8 @@ def get_admin_monitor_data() -> dict[str, Any]:
                             if user_id and api_key:
                                 if user_id not in user_id_to_api_key or is_primary:
                                     user_id_to_api_key[user_id] = api_key
+                                # Always add to reverse mapping (needed for deduplication)
+                                api_key_to_user_id[api_key] = user_id
             except Exception as e:
                 logger.warning(f"Error retrieving api_keys_new for user mapping: {e}")
 
@@ -1073,9 +1080,21 @@ def get_admin_monitor_data() -> dict[str, Any]:
         # 2. Timestamps alone are not unique (concurrent requests can share timestamps)
         # A composite key provides a reasonable approximation of uniqueness
         def make_composite_key(record):
-            """Create a composite key from user_id/api_key, timestamp, and model."""
-            # activity_log uses user_id, usage_records uses api_key
-            user_key = record.get("user_id") or record.get("api_key") or ""
+            """Create a composite key from user_id, timestamp, and model.
+
+            Uses user_id as the consistent identifier across both activity_log and
+            usage_records tables. For legacy records that only have api_key,
+            we look up the corresponding user_id from the api_key_to_user_id mapping.
+            """
+            # Always prefer user_id for consistent deduplication
+            user_id = record.get("user_id")
+            if not user_id:
+                # Legacy records may only have api_key - look up user_id
+                api_key = record.get("api_key")
+                if api_key:
+                    user_id = api_key_to_user_id.get(api_key)
+            # Convert to string for consistent key format
+            user_key = str(user_id) if user_id else ""
             timestamp = record.get("timestamp") or ""
             model = record.get("model") or ""
             return f"{user_key}|{timestamp}|{model}"
