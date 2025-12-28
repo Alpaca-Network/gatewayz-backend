@@ -245,11 +245,11 @@ class TestGPT51DynamicPricing:
         assert gpt51["pricing"]["prompt"] == "1.25"
         assert gpt51["pricing"]["completion"] == "10.00"
 
-    def test_gpt51_pricing_sanitization(self):
-        """Test that negative pricing values are sanitized"""
+    def test_gpt51_pricing_sanitization_filters_dynamic(self):
+        """Test that negative pricing values return None (filter model)"""
         from src.services.models import sanitize_pricing
 
-        # Test that negative values are converted to "0"
+        # Test that negative values cause model to be filtered
         pricing = {
             "prompt": "-1",
             "completion": "10.00"
@@ -257,10 +257,10 @@ class TestGPT51DynamicPricing:
 
         sanitized = sanitize_pricing(pricing)
 
-        assert sanitized["prompt"] == "0"
-        assert sanitized["completion"] == "10.00"
+        # Models with dynamic pricing should be filtered out
+        assert sanitized is None
 
-    def test_gpt51_pricing_sanitization_all_negative(self):
+    def test_gpt51_pricing_sanitization_all_negative_filters(self):
         """Test sanitization when all pricing is dynamic (-1)"""
         from src.services.models import sanitize_pricing
 
@@ -271,8 +271,8 @@ class TestGPT51DynamicPricing:
 
         sanitized = sanitize_pricing(pricing)
 
-        assert sanitized["prompt"] == "0"
-        assert sanitized["completion"] == "0"
+        # Models with dynamic pricing should be filtered out
+        assert sanitized is None
 
 
 class TestGPT51Variants:

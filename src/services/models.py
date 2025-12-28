@@ -251,23 +251,26 @@ def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
     return None
 
 
-def sanitize_pricing(pricing: dict) -> dict:
+def sanitize_pricing(pricing: dict) -> dict | None:
     """
-    Sanitize pricing data by converting negative values to 0.
+    Sanitize pricing data by handling negative values.
 
     OpenRouter uses -1 to indicate dynamic pricing (e.g., for auto-routing models).
-    We convert these to 0 to avoid issues in cost calculations.
+    Since we can't determine the actual cost for dynamic pricing models, we return
+    None to indicate this model should be filtered out.
 
     Args:
         pricing: Pricing dictionary from API
 
     Returns:
-        Sanitized pricing dictionary
+        Sanitized pricing dictionary, or None if pricing is dynamic/indeterminate
     """
     if not pricing or not isinstance(pricing, dict):
         return pricing
 
     sanitized = pricing.copy()
+    has_dynamic_pricing = False
+
     for key in ["prompt", "completion", "request", "image", "web_search", "internal_reasoning"]:
         if key in sanitized:
             try:
@@ -276,15 +279,21 @@ def sanitize_pricing(pricing: dict) -> dict:
                     # Convert to float and check if negative
                     float_value = float(value)
                     if float_value < 0:
-                        sanitized[key] = "0"
+                        # Mark as dynamic pricing - we can't determine actual cost
+                        has_dynamic_pricing = True
                         logger.debug(
-                            "Converted negative pricing %s=%s to 0",
+                            "Found dynamic pricing %s=%s, model will be filtered",
                             sanitize_for_logging(key),
                             sanitize_for_logging(str(value)),
                         )
+                        break
             except (ValueError, TypeError):
                 # Keep the original value if conversion fails
                 pass
+
+    # If model has dynamic pricing, return None to filter it out
+    if has_dynamic_pricing:
+        return None
 
     return sanitized
 
@@ -912,13 +921,29 @@ def fetch_models_from_openrouter():
         response.raise_for_status()
 
         models_data = response.json()
-        models = models_data.get("data", [])
-        for model in models:
+        raw_models = models_data.get("data", [])
+
+        # Process and filter models
+        filtered_models = []
+        for model in raw_models:
             model.setdefault("source_gateway", "openrouter")
-            # Sanitize pricing to convert negative values (e.g., -1 for autorouter) to 0
+            # Sanitize pricing - returns None for models with dynamic pricing
             if "pricing" in model:
-                model["pricing"] = sanitize_pricing(model["pricing"])
-        _models_cache["data"] = models
+                sanitized_pricing = sanitize_pricing(model["pricing"])
+                if sanitized_pricing is None:
+                    # Filter out models with dynamic/indeterminate pricing
+                    logger.debug(
+                        "Filtering out model %s with dynamic pricing",
+                        sanitize_for_logging(model.get("id", "unknown")),
+                    )
+                    continue
+                model["pricing"] = sanitized_pricing
+            filtered_models.append(model)
+
+        logger.info(
+            f"Filtered {len(raw_models) - len(filtered_models)} models with dynamic pricing"
+        )
+        _models_cache["data"] = filtered_models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
 
         # Clear error state on successful fetch
