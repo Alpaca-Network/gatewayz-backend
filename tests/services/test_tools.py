@@ -7,10 +7,11 @@ Tests cover:
 - Text-to-Speech tool
 - Chatterbox TTS client
 - API routes
+- SSRF protection
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from src.services.tools import (
     AVAILABLE_TOOLS,
@@ -21,11 +22,11 @@ from src.services.tools import (
     get_tool_by_name,
     get_tool_definitions,
 )
-from src.services.tools.base import ToolFunction, ToolFunctionParameters
 from src.services.tools.text_to_speech import TextToSpeechTool
 from src.services.chatterbox_tts_client import (
     CHATTERBOX_MODELS,
     LANGUAGE_NAMES,
+    _is_safe_url,
     get_chatterbox_models,
     validate_chatterbox_model,
     validate_language,
@@ -190,7 +191,7 @@ class TestToolRegistry:
 
     @pytest.mark.asyncio
     async def test_execute_tool_success(self):
-        """Test executing a tool by name."""
+        """Test executing a tool by name with parameter validation."""
         with patch.object(TextToSpeechTool, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
                 success=True,
@@ -200,6 +201,7 @@ class TestToolRegistry:
             result = await execute_tool("text_to_speech", text="Hello world")
 
             assert result.success is True
+            assert result.result == {"audio_base64": "test_audio"}
             mock_execute.assert_called_once_with(text="Hello world")
 
     @pytest.mark.asyncio
@@ -312,6 +314,59 @@ class TestLanguageNames:
 
 
 # =============================================================================
+# SSRF PROTECTION TESTS
+# =============================================================================
+
+
+class TestSSRFProtection:
+    """Tests for SSRF protection in URL validation."""
+
+    def test_safe_public_urls(self):
+        """Test that public URLs are allowed."""
+        assert _is_safe_url("https://example.com/audio.wav") is True
+        assert _is_safe_url("https://storage.googleapis.com/bucket/file.wav") is True
+        assert _is_safe_url("http://cdn.example.org/voice.mp3") is True
+
+    def test_blocks_localhost(self):
+        """Test that localhost URLs are blocked."""
+        assert _is_safe_url("http://localhost/file") is False
+        assert _is_safe_url("http://localhost:8080/file") is False
+        assert _is_safe_url("http://127.0.0.1/file") is False
+        assert _is_safe_url("http://127.0.0.1:3000/file") is False
+
+    def test_blocks_private_ips(self):
+        """Test that private IP ranges are blocked."""
+        # 10.x.x.x
+        assert _is_safe_url("http://10.0.0.1/file") is False
+        assert _is_safe_url("http://10.255.255.255/file") is False
+        # 172.16.x.x - 172.31.x.x
+        assert _is_safe_url("http://172.16.0.1/file") is False
+        assert _is_safe_url("http://172.31.255.255/file") is False
+        # 192.168.x.x
+        assert _is_safe_url("http://192.168.1.1/file") is False
+        assert _is_safe_url("http://192.168.0.100/file") is False
+
+    def test_blocks_cloud_metadata(self):
+        """Test that cloud metadata URLs are blocked."""
+        # AWS metadata
+        assert _is_safe_url("http://169.254.169.254/latest/meta-data/") is False
+        # Link-local
+        assert _is_safe_url("http://169.254.1.1/") is False
+
+    def test_blocks_non_http_schemes(self):
+        """Test that non-HTTP schemes are blocked."""
+        assert _is_safe_url("file:///etc/passwd") is False
+        assert _is_safe_url("ftp://example.com/file") is False
+        assert _is_safe_url("gopher://example.com/") is False
+
+    def test_blocks_empty_or_invalid(self):
+        """Test that empty or invalid URLs are blocked."""
+        assert _is_safe_url("") is False
+        assert _is_safe_url("not-a-url") is False
+        assert _is_safe_url("://missing-scheme") is False
+
+
+# =============================================================================
 # TEXT-TO-SPEECH TOOL TESTS
 # =============================================================================
 
@@ -396,7 +451,7 @@ class TestTextToSpeechTool:
 
     @pytest.mark.asyncio
     async def test_execute_with_all_options(self):
-        """Test TTS execution with all options."""
+        """Test TTS execution with all options and parameter validation."""
         with patch("src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock) as mock_generate:
             mock_generate.return_value = {
                 "audio_url": None,
@@ -416,14 +471,15 @@ class TestTextToSpeechTool:
             )
 
             assert result.success is True
-            mock_generate.assert_called_once_with(
-                text="Bonjour le monde",
-                model="chatterbox-multilingual",
-                voice_reference_url="https://example.com/voice.wav",
-                language="fr",
-                exaggeration=1.5,
-                cfg_weight=0.7,
-            )
+            # Verify all parameters were passed correctly
+            mock_generate.assert_called_once()
+            call_kwargs = mock_generate.call_args.kwargs
+            assert call_kwargs["text"] == "Bonjour le monde"
+            assert call_kwargs["model"] == "chatterbox-multilingual"
+            assert call_kwargs["language"] == "fr"
+            assert call_kwargs["voice_reference_url"] == "https://example.com/voice.wav"
+            assert call_kwargs["exaggeration"] == 1.5
+            assert call_kwargs["cfg_weight"] == 0.7
 
 
 # =============================================================================
@@ -479,6 +535,28 @@ class TestGenerateSpeech:
                 language="invalid_lang"
             )
 
+    @pytest.mark.asyncio
+    async def test_ssrf_url_raises_error(self):
+        """Test that SSRF URLs are rejected."""
+        from src.services.chatterbox_tts_client import generate_speech
+
+        with pytest.raises(ValueError, match="Invalid voice reference URL"):
+            await generate_speech(
+                "Hello",
+                voice_reference_url="http://169.254.169.254/latest/meta-data/"
+            )
+
+    @pytest.mark.asyncio
+    async def test_localhost_url_raises_error(self):
+        """Test that localhost URLs are rejected."""
+        from src.services.chatterbox_tts_client import generate_speech
+
+        with pytest.raises(ValueError, match="Invalid voice reference URL"):
+            await generate_speech(
+                "Hello",
+                voice_reference_url="http://localhost:8080/audio.wav"
+            )
+
 
 # =============================================================================
 # API ROUTE TESTS
@@ -490,13 +568,18 @@ class TestToolsRoute:
 
     @pytest.fixture
     def client(self):
-        """Create test client."""
+        """Create test client with mocked auth."""
         from fastapi.testclient import TestClient
         from src.routes.tools import router
         from fastapi import FastAPI
 
         app = FastAPI()
         app.include_router(router)
+
+        # Override auth dependency for testing
+        from src.security.deps import get_api_key
+        app.dependency_overrides[get_api_key] = lambda: "test-api-key"
+
         return TestClient(app)
 
     def test_list_tools(self, client):
@@ -534,7 +617,7 @@ class TestToolsRoute:
         assert response.status_code == 404
 
     def test_execute_tool_success(self, client):
-        """Test executing a tool successfully."""
+        """Test executing a tool successfully with auth."""
         with patch.object(TextToSpeechTool, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
                 success=True,

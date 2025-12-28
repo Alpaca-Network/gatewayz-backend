@@ -12,11 +12,16 @@ Models available:
 Reference: https://github.com/resemble-ai/chatterbox
 """
 
+import asyncio
 import base64
 import io
+import ipaddress
 import logging
+import os
+import tempfile
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -27,6 +32,19 @@ logger = logging.getLogger(__name__)
 # Chatterbox configuration
 CHATTERBOX_TIMEOUT = 60.0  # seconds - TTS can take time for longer texts
 CHATTERBOX_MAX_TEXT_LENGTH = 5000  # characters
+
+# Blocked IP ranges for SSRF protection
+BLOCKED_IP_RANGES = [
+    ipaddress.ip_network("10.0.0.0/8"),       # Private
+    ipaddress.ip_network("172.16.0.0/12"),    # Private
+    ipaddress.ip_network("192.168.0.0/16"),   # Private
+    ipaddress.ip_network("127.0.0.0/8"),      # Loopback
+    ipaddress.ip_network("169.254.0.0/16"),   # Link-local / Cloud metadata
+    ipaddress.ip_network("0.0.0.0/8"),        # Current network
+    ipaddress.ip_network("::1/128"),          # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),         # IPv6 private
+    ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
+]
 
 # Supported models
 CHATTERBOX_MODELS = {
@@ -66,6 +84,53 @@ LANGUAGE_NAMES = {
     "ru": "Russian", "es": "Spanish", "th": "Thai", "tr": "Turkish",
     "uk": "Ukrainian", "vi": "Vietnamese",
 }
+
+
+def _is_safe_url(url: str) -> bool:
+    """Check if a URL is safe to fetch (SSRF protection).
+
+    Args:
+        url: URL to validate
+
+    Returns:
+        True if URL is safe, False if it points to internal/private resources
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Only allow http/https
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        # Check hostname
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        # Block localhost variants
+        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return False
+
+        # Try to resolve and check IP
+        try:
+            import socket
+            ip_str = socket.gethostbyname(hostname)
+            ip = ipaddress.ip_address(ip_str)
+
+            for blocked_range in BLOCKED_IP_RANGES:
+                if ip in blocked_range:
+                    logger.warning(f"Blocked SSRF attempt to {hostname} ({ip_str})")
+                    return False
+        except (socket.gaierror, ValueError):
+            # Can't resolve - could be internal DNS, block it
+            logger.warning(f"Could not resolve hostname: {hostname}")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"URL validation failed: {e}")
+        return False
 
 
 def get_chatterbox_models() -> list[dict[str, Any]]:
@@ -167,6 +232,12 @@ async def generate_speech(
             f"Supported: {CHATTERBOX_MODELS[model]['languages']}"
         )
 
+    # Validate voice reference URL for SSRF
+    if voice_reference_url and not _is_safe_url(voice_reference_url):
+        raise ValueError(
+            "Invalid voice reference URL: must be a public HTTP/HTTPS URL"
+        )
+
     # Check for API key (Resemble AI hosted API)
     resemble_api_key = getattr(Config, "RESEMBLE_API_KEY", None)
 
@@ -255,6 +326,78 @@ async def _generate_speech_api(
         raise RuntimeError(f"TTS generation failed: {str(e)}")
 
 
+def _run_tts_inference(
+    text: str,
+    model: str,
+    audio_prompt_path: str | None,
+    language: str,
+    exaggeration: float,
+    cfg_weight: float,
+) -> tuple[Any, int]:
+    """Run TTS inference synchronously (to be called in thread pool).
+
+    Args:
+        text: Text to synthesize
+        model: Model name
+        audio_prompt_path: Path to voice reference audio file
+        language: Language code
+        exaggeration: Exaggeration level
+        cfg_weight: CFG weight
+
+    Returns:
+        Tuple of (wav tensor, sample_rate)
+    """
+    import torch
+    import torchaudio
+
+    # Select device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Using device: {device} for Chatterbox TTS")
+
+    # Generate based on model type
+    if model == "chatterbox-turbo":
+        from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+        tts_model = ChatterboxTurboTTS.from_pretrained(device=device)
+        wav = tts_model.generate(text, audio_prompt_path=audio_prompt_path)
+
+    elif model == "chatterbox-multilingual":
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
+        tts_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        wav = tts_model.generate(
+            text,
+            language_id=language,
+            audio_prompt_path=audio_prompt_path,
+        )
+
+    else:  # chatterbox (original)
+        from chatterbox.tts import ChatterboxTTS
+
+        tts_model = ChatterboxTTS.from_pretrained(device=device)
+        wav = tts_model.generate(
+            text,
+            audio_prompt_path=audio_prompt_path,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+        )
+
+    sample_rate = tts_model.sr if hasattr(tts_model, "sr") else 24000
+
+    # Convert tensor to WAV bytes
+    audio_buffer = io.BytesIO()
+    torchaudio.save(audio_buffer, wav.cpu(), sample_rate, format="wav")
+    audio_buffer.seek(0)
+
+    # Encode as base64
+    audio_base64 = base64.b64encode(audio_buffer.read()).decode("utf-8")
+
+    # Calculate duration
+    audio_duration = wav.shape[-1] / sample_rate
+
+    return audio_base64, audio_duration, sample_rate
+
+
 async def _generate_speech_local(
     text: str,
     model: str,
@@ -267,6 +410,9 @@ async def _generate_speech_local(
 
     This uses the open-source chatterbox-tts Python package for local inference.
     Requires: pip install chatterbox-tts
+
+    Note: Blocking operations are offloaded to a thread pool to avoid blocking
+    the event loop.
     """
     try:
         import torch
@@ -277,71 +423,33 @@ async def _generate_speech_local(
             "Install with: pip install torch torchaudio"
         )
 
+    audio_prompt_path = None
+    start_time = time.time()
+
     try:
-        start_time = time.time()
-
-        # Select device
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Using device: {device} for Chatterbox TTS")
-
-        # Load voice reference if provided
-        audio_prompt_path = None
+        # Download voice reference if provided
         if voice_reference_url:
-            # Download voice reference audio
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=CHATTERBOX_TIMEOUT) as client:
                 response = await client.get(voice_reference_url)
                 response.raise_for_status()
 
                 # Save to temp file
-                import tempfile
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                     f.write(response.content)
                     audio_prompt_path = f.name
 
-        # Generate based on model type
-        if model == "chatterbox-turbo":
-            from chatterbox.tts_turbo import ChatterboxTurboTTS
-
-            tts_model = ChatterboxTurboTTS.from_pretrained(device=device)
-            wav = tts_model.generate(text, audio_prompt_path=audio_prompt_path)
-
-        elif model == "chatterbox-multilingual":
-            from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-
-            tts_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
-            wav = tts_model.generate(
-                text,
-                language_id=language,
-                audio_prompt_path=audio_prompt_path,
-            )
-
-        else:  # chatterbox (original)
-            from chatterbox.tts import ChatterboxTTS
-
-            tts_model = ChatterboxTTS.from_pretrained(device=device)
-            wav = tts_model.generate(
-                text,
-                audio_prompt_path=audio_prompt_path,
-                exaggeration=exaggeration,
-                cfg_weight=cfg_weight,
-            )
-
-        # Convert tensor to WAV bytes
-        sample_rate = tts_model.sr if hasattr(tts_model, "sr") else 24000
-        audio_buffer = io.BytesIO()
-        torchaudio.save(audio_buffer, wav.cpu(), sample_rate, format="wav")
-        audio_buffer.seek(0)
-
-        # Encode as base64
-        audio_base64 = base64.b64encode(audio_buffer.read()).decode("utf-8")
-
-        # Calculate duration
-        audio_duration = wav.shape[-1] / sample_rate
-
-        # Clean up temp file if used
-        if audio_prompt_path:
-            import os
-            os.unlink(audio_prompt_path)
+        # Run TTS inference in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        audio_base64, audio_duration, sample_rate = await loop.run_in_executor(
+            None,  # Use default thread pool
+            _run_tts_inference,
+            text,
+            model,
+            audio_prompt_path,
+            language,
+            exaggeration,
+            cfg_weight,
+        )
 
         generation_time = time.time() - start_time
         logger.info(
@@ -366,3 +474,10 @@ async def _generate_speech_local(
     except Exception as e:
         logger.error(f"Chatterbox TTS generation failed: {e}", exc_info=True)
         raise RuntimeError(f"TTS generation failed: {str(e)}")
+    finally:
+        # Always clean up temp file
+        if audio_prompt_path:
+            try:
+                os.unlink(audio_prompt_path)
+            except OSError as e:
+                logger.warning(f"Failed to clean up temp file {audio_prompt_path}: {e}")

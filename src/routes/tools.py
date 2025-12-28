@@ -4,17 +4,17 @@ Tools API routes for server-side tool execution.
 This module provides endpoints for:
 - Listing available tools
 - Getting tool definitions for chat completion requests
-- Direct tool execution
+- Direct tool execution (requires authentication)
 """
 
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.security.deps import get_api_key
 from src.services.tools import (
-    AVAILABLE_TOOLS,
     execute_tool,
     get_tool_by_name,
     get_tool_definitions,
@@ -45,6 +45,8 @@ class ToolExecuteResponse(BaseModel):
 async def list_tools():
     """List all available tools with their definitions.
 
+    This is a public endpoint for tool discovery.
+
     Returns:
         Dict with tools list and count
     """
@@ -60,7 +62,7 @@ async def get_definitions():
     """Get tool definitions formatted for chat completion requests.
 
     This endpoint returns tool definitions in the format expected by
-    OpenAI-compatible chat completion APIs.
+    OpenAI-compatible chat completion APIs. Public for integration purposes.
 
     Returns:
         List of tool definitions
@@ -94,19 +96,24 @@ async def get_tool_info(tool_name: str):
 
 
 @router.post("/execute")
-async def execute_tool_endpoint(request: ToolExecuteRequest) -> ToolExecuteResponse:
+async def execute_tool_endpoint(
+    request: ToolExecuteRequest,
+    api_key: str = Depends(get_api_key),
+) -> ToolExecuteResponse:
     """Execute a tool with given parameters.
 
     This endpoint allows direct tool execution outside of the chat flow.
-    Useful for testing or standalone tool usage.
+    Requires authentication via API key.
 
     Args:
         request: Tool name and parameters
+        api_key: User's API key (injected via dependency)
 
     Returns:
         Tool execution result
 
     Raises:
+        401: If not authenticated
         404: If tool not found
         500: If execution fails unexpectedly
     """
