@@ -506,7 +506,7 @@ def test_track_usage_invalidates_cache(monkeypatch, mod):
             "trial_used_credits": 0.0,
             "trial_max_tokens": 1000,
             "trial_max_requests": 100,
-            "trial_credits": 10.0,
+            "trial_credits": 5.0,
             "trial_end_date": "2100-12-31",
         }
     }

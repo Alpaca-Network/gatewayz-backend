@@ -155,7 +155,7 @@ class TrialService:
                     trial_used_requests=trial_data["trial_used_requests"],
                     trial_max_tokens=trial_data["trial_max_tokens"],
                     trial_max_requests=trial_data["trial_max_requests"],
-                    trial_credits=trial_data.get("trial_credits", 10.00),
+                    trial_credits=trial_data.get("trial_credits", 5.00),
                     trial_used_credits=trial_data.get("trial_used_credits", 0.00),
                     trial_converted=trial_data["trial_converted"],
                     subscription_status=SubscriptionStatus(trial_data["subscription_status"]),
@@ -164,7 +164,7 @@ class TrialService:
                     trial_expired=trial_data["trial_expired"],
                     trial_remaining_tokens=trial_data["trial_remaining_tokens"],
                     trial_remaining_requests=trial_data["trial_remaining_requests"],
-                    trial_remaining_credits=trial_data.get("trial_remaining_credits", 10.00),
+                    trial_remaining_credits=trial_data.get("trial_remaining_credits", 5.00),
                 )
 
                 return TrialStatusResponse(
