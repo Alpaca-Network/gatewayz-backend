@@ -2248,8 +2248,10 @@ def fetch_models_from_vercel_ai_gateway():
             logger.warning("No models returned from Vercel AI Gateway")
             return []
 
-        # Normalize models
-        normalized_models = [normalize_vercel_model(model) for model in response.data if model]
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_vercel_model(model) for model in response.data if model) if m
+        ]
 
         _vercel_ai_gateway_models_cache["data"] = normalized_models
         _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -3163,8 +3165,10 @@ def fetch_models_from_aihubmix():
             logger.warning("No models returned from AiHubMix")
             return []
 
-        # Normalize models
-        normalized_models = [normalize_aihubmix_model(model) for model in response.data if model]
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_aihubmix_model(model) for model in response.data if model) if m
+        ]
 
         _aihubmix_models_cache["data"] = normalized_models
         _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -3244,8 +3248,10 @@ def fetch_models_from_helicone():
             logger.warning("No models returned from Helicone AI Gateway")
             return []
 
-        # Normalize models
-        normalized_models = [normalize_helicone_model(model) for model in response.data if model]
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_helicone_model(model) for model in response.data if model) if m
+        ]
 
         _helicone_models_cache["data"] = normalized_models
         _helicone_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -3402,8 +3408,10 @@ def fetch_models_from_anannas():
             logger.warning("No models returned from Anannas")
             return []
 
-        # Normalize models
-        normalized_models = [normalize_anannas_model(model) for model in response.data if model]
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_anannas_model(model) for model in response.data if model) if m
+        ]
 
         _anannas_models_cache["data"] = normalized_models
         _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
