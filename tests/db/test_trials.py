@@ -223,7 +223,7 @@ class TestGetTrialStatus:
             'trial_end_date': '2024-01-15T00:00:00Z',
             'trial_credits': 5.0,
             'trial_used_credits': 2.5,
-            'trial_remaining_credits': 7.5
+            'trial_remaining_credits': 2.5  # 5.0 - 2.5 = 2.5
         }
         rpc_mock.execute.return_value = Mock(data=status_result)
 
@@ -232,7 +232,7 @@ class TestGetTrialStatus:
         assert result['is_trial'] is True
         assert result['trial_active'] is True
         assert result['trial_expired'] is False
-        assert result['trial_remaining_credits'] == 7.5
+        assert result['trial_remaining_credits'] == 2.5
 
     @patch('src.db.trials.get_supabase_client')
     def test_get_trial_status_expired(
