@@ -258,6 +258,7 @@ class TestShouldFailover:
     def test_failover_status_codes_constant(self):
         """Test FAILOVER_STATUS_CODES contains expected codes"""
         assert 401 in FAILOVER_STATUS_CODES
+        assert 402 in FAILOVER_STATUS_CODES  # Payment Required - failover when provider credits exhausted
         assert 403 in FAILOVER_STATUS_CODES
         assert 404 in FAILOVER_STATUS_CODES
         assert 502 in FAILOVER_STATUS_CODES
@@ -268,6 +269,11 @@ class TestShouldFailover:
         assert 400 not in FAILOVER_STATUS_CODES
         assert 429 not in FAILOVER_STATUS_CODES  # 429 should be returned to client
         assert 500 not in FAILOVER_STATUS_CODES
+
+    def test_should_failover_402(self):
+        """Test 402 Payment Required triggers failover (e.g., provider credits exhausted)"""
+        exc = HTTPException(status_code=402, detail="Insufficient credits")
+        assert should_failover(exc) is True
 
 
 # ============================================================
