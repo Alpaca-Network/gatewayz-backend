@@ -160,9 +160,7 @@ jobs:
     name: Test Schema (Local Supabase)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: validate-migrations
-
-    services:
-      # Note: Supabase local requires Docker, we'll use the CLI instead
+    # Note: Supabase local requires Docker, we'll use the CLI instead
 
     steps:
       - name: Checkout code
@@ -281,11 +279,16 @@ jobs:
           name: schema-snapshot
 
       - name: Compare schemas
-        if: ${{ secrets.PROD_SUPABASE_URL && secrets.PROD_SUPABASE_SERVICE_KEY }}
         env:
           SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.PROD_SUPABASE_SERVICE_KEY }}
         run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::notice::Skipping production comparison - secrets not configured"
+            echo "To enable, set PROD_SUPABASE_URL and PROD_SUPABASE_SERVICE_KEY secrets"
+            exit 0
+          fi
+
           echo "Comparing production schema against local schema snapshot..."
           # Generate production schema snapshot
           python scripts/database/validate_schema_sync.py --snapshot --snapshot-file prod_snapshot.json
@@ -299,12 +302,6 @@ jobs:
             # Don't fail on differences, just warn
             exit 0
           }
-
-      - name: Skip production comparison
-        if: ${{ !secrets.PROD_SUPABASE_URL || !secrets.PROD_SUPABASE_SERVICE_KEY }}
-        run: |
-          echo "::notice::Skipping production comparison - secrets not configured"
-          echo "To enable, set PROD_SUPABASE_URL and PROD_SUPABASE_SERVICE_KEY secrets"
 
   # Job 4: Post results to PR
   report:

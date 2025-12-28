@@ -136,6 +136,9 @@ def get_user_activity_stats(
                 "by_date": [],
                 "by_model": {},
                 "by_provider": {},
+                "avg_cost_per_request": 0.0,
+                "avg_cost_per_token": 0.0,
+                "avg_tokens_per_request": 0.0,
             }
 
         # Aggregate by date
@@ -194,6 +197,11 @@ def get_user_activity_stats(
             for item in by_date_list
         ]
 
+        # Calculate averages with proper precision for small values
+        avg_cost_per_request = total_cost / total_requests if total_requests > 0 else 0.0
+        avg_cost_per_token = total_cost / total_tokens if total_tokens > 0 else 0.0
+        avg_tokens_per_request = total_tokens / total_requests if total_requests > 0 else 0.0
+
         return {
             "total_requests": total_requests,
             "total_tokens": total_tokens,
@@ -203,6 +211,10 @@ def get_user_activity_stats(
             "by_date": by_date_list,
             "by_model": by_model,
             "by_provider": by_provider,
+            # Average metrics with high precision for small values
+            "avg_cost_per_request": avg_cost_per_request,
+            "avg_cost_per_token": avg_cost_per_token,
+            "avg_tokens_per_request": round(avg_tokens_per_request, 2),
         }
 
     except Exception as e:
@@ -216,6 +228,9 @@ def get_user_activity_stats(
             "by_date": [],
             "by_model": {},
             "by_provider": {},
+            "avg_cost_per_request": 0.0,
+            "avg_cost_per_token": 0.0,
+            "avg_tokens_per_request": 0.0,
             "error": str(e),
         }
 

@@ -900,12 +900,19 @@ def get_admin_monitor_data() -> dict[str, Any]:
         # Get ACCURATE total user count using count="exact" (server-side COUNT(*))
         # This avoids the 1000 row limit issue
         total_users = 0
+        users = []
         try:
+            # First get accurate count
             count_result = client.table("users").select("id", count="exact").execute()
             total_users = count_result.count or 0
             logger.info(f"Total users count (exact): {total_users}")
+
+            # Then get user data for credit calculations (limited to avoid memory issues)
+            users_result = client.table("users").select("id, credits, api_key").limit(10000).execute()
+            users = users_result.data or []
         except Exception as e:
-            logger.error("Error retrieving users count: %s", sanitize_for_logging(str(e)))
+            logger.error("Error retrieving users: %s", sanitize_for_logging(str(e)))
+            users = []
             total_users = 0
 
         # Get activity_log data for TODAY only (primary source - actively updated)
@@ -1003,57 +1010,32 @@ def get_admin_monitor_data() -> dict[str, Any]:
         user_id_to_api_key = {}
         api_key_to_user_id = {}
 
-        # Fetch mappings only for active users (avoids 10,000 row limit issue)
-        if active_user_ids:
-            active_user_ids_list = list(active_user_ids)
+        # First, build mappings from already-fetched users data
+        for user in users:
+            user_id = user.get("id")
+            api_key = user.get("api_key")
+            if user_id and api_key:
+                user_id_to_api_key[user_id] = api_key
+                api_key_to_user_id[api_key] = user_id
 
-            # Fetch from users table for active users only
-            try:
-                # Supabase .in_() has a limit, so process in batches if needed
-                batch_size = 500
-                for i in range(0, len(active_user_ids_list), batch_size):
-                    batch = active_user_ids_list[i : i + batch_size]
-                    users_batch_result = (
-                        client.table("users")
-                        .select("id, api_key")
-                        .in_("id", batch)
-                        .execute()
-                    )
-                    if users_batch_result.data:
-                        for user in users_batch_result.data:
-                            user_id = user.get("id")
-                            api_key = user.get("api_key")
-                            if user_id and api_key:
-                                user_id_to_api_key[user_id] = api_key
-                                api_key_to_user_id[api_key] = user_id
-            except Exception as e:
-                logger.warning(f"Error fetching user api_keys for active users: {e}")
-
-            # Also check api_keys_new table for users who might not have api_key in users table
-            try:
-                for i in range(0, len(active_user_ids_list), batch_size):
-                    batch = active_user_ids_list[i : i + batch_size]
-                    api_keys_result = (
-                        client.table("api_keys_new")
-                        .select("user_id, api_key, is_primary")
-                        .in_("user_id", batch)
-                        .execute()
-                    )
-                    if api_keys_result.data:
-                        for key_data in api_keys_result.data:
-                            user_id = key_data.get("user_id")
-                            api_key = key_data.get("api_key")
-                            is_primary = key_data.get("is_primary", False)
-                            # Prefer primary keys, but update if user_id not in mapping
-                            if user_id and api_key:
-                                if user_id not in user_id_to_api_key or is_primary:
-                                    user_id_to_api_key[user_id] = api_key
-                                # Always add to reverse mapping (needed for deduplication)
-                                api_key_to_user_id[api_key] = user_id
-            except Exception as e:
-                logger.warning(f"Error retrieving api_keys_new for user mapping: {e}")
-
-        logger.debug(f"Built user_id_to_api_key mapping for {len(user_id_to_api_key)} active users")
+        # Also check api_keys_new table for users who might not have api_key in users table
+        try:
+            api_keys_result = (
+                client.table("api_keys_new").select("user_id, api_key, is_primary").limit(10000).execute()
+            )
+            if api_keys_result.data:
+                for key_data in api_keys_result.data:
+                    user_id = key_data.get("user_id")
+                    api_key = key_data.get("api_key")
+                    is_primary = key_data.get("is_primary", False)
+                    # Prefer primary keys, but update if user_id not in mapping
+                    if user_id and api_key:
+                        if user_id not in user_id_to_api_key or is_primary:
+                            user_id_to_api_key[user_id] = api_key
+                        # Always add to reverse mapping (needed for deduplication)
+                        api_key_to_user_id[api_key] = user_id
+        except Exception as e:
+            logger.warning(f"Error retrieving api_keys_new for user mapping: {e}")
 
         # Convert activity_log to usage_records format for compatibility
         # activity_log has: user_id, model, provider, tokens, cost, timestamp, metadata
@@ -1108,6 +1090,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
 
         # Sort day_usage by timestamp descending to ensure correct order for recent activity
         day_usage.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+
 
         # Process MONTH's activity logs
         month_usage = []
@@ -1176,11 +1159,15 @@ def get_admin_monitor_data() -> dict[str, Any]:
         ]
 
         # Calculate most used model safely (based on month's data)
+        # Exclude "auth" entries as they are authentication events, not model usage
         most_used_model = "No models used"
         if month_usage:
             model_counts = {}
             for record in month_usage:
                 model = record.get("model", "unknown")
+                # Skip auth events - they're not actual model usage
+                if model.lower() == "auth":
+                    continue
                 model_counts[model] = model_counts.get(model, 0) + 1
 
             if model_counts:

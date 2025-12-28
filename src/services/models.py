@@ -2323,7 +2323,7 @@ def normalize_vercel_model(model) -> dict | None:
         "source_gateway": "vercel-ai-gateway",
     }
 
-    return normalized
+    return enrich_model_with_pricing(normalized, "vercel-ai-gateway")
 
 
 def get_vercel_model_pricing(model_id: str) -> dict:
@@ -3187,7 +3187,7 @@ def normalize_aihubmix_model(model) -> dict | None:
         return None
 
     try:
-        return {
+        normalized = {
             "id": model_id,
             "slug": f"aihubmix/{model_id}",
             "canonical_slug": f"aihubmix/{model_id}",
@@ -3217,6 +3217,7 @@ def normalize_aihubmix_model(model) -> dict | None:
             "model_logo_url": None,
             "source_gateway": "aihubmix",
         }
+        return enrich_model_with_pricing(normalized, "aihubmix")
     except Exception as e:
         logger.error("Failed to normalize AiHubMix model: %s", sanitize_for_logging(str(e)))
         return None
@@ -3327,7 +3328,7 @@ def normalize_helicone_model(model) -> dict | None:
         "source_gateway": "helicone",
     }
 
-    return normalized
+    return enrich_model_with_pricing(normalized, "helicone")
 
 
 def get_helicone_model_pricing(model_id: str) -> dict:
@@ -3425,7 +3426,7 @@ def normalize_anannas_model(model) -> dict | None:
         return None
 
     try:
-        return {
+        normalized = {
             "id": model_id,
             "slug": f"anannas/{model_id}",
             "canonical_slug": f"anannas/{model_id}",
@@ -3455,6 +3456,7 @@ def normalize_anannas_model(model) -> dict | None:
             "model_logo_url": None,
             "source_gateway": "anannas",
         }
+        return enrich_model_with_pricing(normalized, "anannas")
     except Exception as e:
         logger.error("Failed to normalize Anannas model: %s", sanitize_for_logging(str(e)))
         return None
@@ -3605,7 +3607,7 @@ def normalize_alibaba_model(model) -> dict | None:
         return None
 
     try:
-        return {
+        normalized = {
             "id": model_id,
             "slug": f"alibaba/{model_id}",
             "canonical_slug": f"alibaba/{model_id}",
@@ -3635,6 +3637,7 @@ def normalize_alibaba_model(model) -> dict | None:
             "model_logo_url": None,
             "source_gateway": "alibaba",
         }
+        return enrich_model_with_pricing(normalized, "alibaba-cloud")
     except Exception as e:
         logger.error("Failed to normalize Alibaba Cloud model: %s", sanitize_for_logging(str(e)))
         return None
