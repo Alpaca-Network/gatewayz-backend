@@ -7,8 +7,6 @@ from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from src.services.pricing_lookup import (
     enrich_model_with_pricing,
     get_model_pricing,
-    load_manual_pricing,
-    refresh_pricing_cache,
 )
 
 
@@ -129,6 +127,7 @@ class TestEnrichModelWithPricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
 
     def test_handles_none_pricing_values(self):
         """Models with None pricing values should be enriched"""
@@ -143,6 +142,7 @@ class TestEnrichModelWithPricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
 
     def test_handles_empty_string_pricing(self):
         """Models with empty string pricing values should be enriched"""
@@ -157,6 +157,7 @@ class TestEnrichModelWithPricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
 
     def test_handles_missing_model_id(self):
         """Models without id should be returned unchanged"""
@@ -213,6 +214,8 @@ class TestEnrichModelWithPricing:
 
             # Invalid values should be treated as "not non-zero" (i.e., zero)
             mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+            assert result["pricing_source"] == "manual"
 
 
 class TestGetModelPricing:
