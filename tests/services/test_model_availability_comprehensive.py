@@ -329,7 +329,9 @@ from datetime import datetime, timezone
         )
 
         assert service.is_model_available("gpt-4", "openrouter") is True
-        assert service.is_model_available("unknown", "openrouter") is False
+        # Unknown models return True (optimistic default) - they are assumed available
+        # until the circuit breaker detects actual failures
+        assert service.is_model_available("unknown", "openrouter") is True
 
     def test_is_model_available_with_open_circuit(self):
         """Test availability check with open circuit breaker"""

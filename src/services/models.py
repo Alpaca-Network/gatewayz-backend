@@ -3187,7 +3187,9 @@ def fetch_models_from_aihubmix():
         )
 
         if response.status_code != 200:
-            logger.warning(f"AiHubMix API returned status {response.status_code}")
+            error_msg = f"AiHubMix API returned status {response.status_code}"
+            logger.warning(error_msg)
+            set_gateway_error("aihubmix", error_msg)
             return []
 
         data = response.json()
@@ -3207,10 +3209,20 @@ def fetch_models_from_aihubmix():
         _aihubmix_models_cache["data"] = normalized_models
         _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
 
+        # Clear error state on success
+        clear_gateway_error("aihubmix")
+
         logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
         return _aihubmix_models_cache["data"]
+    except requests.exceptions.Timeout as e:
+        error_msg = f"AiHubMix API timeout: {sanitize_for_logging(str(e))}"
+        logger.error(error_msg)
+        set_gateway_error("aihubmix", error_msg)
+        return []
     except Exception as e:
-        logger.error("Failed to fetch models from AiHubMix: %s", sanitize_for_logging(str(e)))
+        error_msg = f"Failed to fetch models from AiHubMix: {sanitize_for_logging(str(e))}"
+        logger.error(error_msg)
+        set_gateway_error("aihubmix", error_msg)
         return []
 
 
