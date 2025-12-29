@@ -3236,8 +3236,9 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         output_price_per_1k = pricing_data.get("output", 0)
 
         # Convert from per 1K to per 1M tokens (multiply by 1000)
-        input_price_per_1m = float(input_price_per_1k) * 1000 if input_price_per_1k else 0
-        output_price_per_1m = float(output_price_per_1k) * 1000 if output_price_per_1k else 0
+        # Use round() to avoid floating point precision issues (e.g., 0.0003 * 1000 = 0.30000000000000004)
+        input_price_per_1m = round(float(input_price_per_1k) * 1000, 10) if input_price_per_1k else 0
+        output_price_per_1m = round(float(output_price_per_1k) * 1000, 10) if output_price_per_1k else 0
 
         # Filter out models with zero pricing (free models can drain credits)
         if input_price_per_1m == 0 and output_price_per_1m == 0:
