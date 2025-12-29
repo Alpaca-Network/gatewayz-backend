@@ -322,10 +322,15 @@ class TestSSRFProtection:
     """Tests for SSRF protection in URL validation."""
 
     def test_safe_public_urls(self):
-        """Test that public URLs are allowed."""
-        assert _is_safe_url("https://example.com/audio.wav") is True
-        assert _is_safe_url("https://storage.googleapis.com/bucket/file.wav") is True
-        assert _is_safe_url("http://cdn.example.org/voice.mp3") is True
+        """Test that public URLs are allowed.
+
+        We mock DNS resolution since test environments may not have network access.
+        """
+        # Mock DNS to return a safe public IP (8.8.8.8 - Google DNS)
+        with patch("socket.gethostbyname", return_value="8.8.8.8"):
+            assert _is_safe_url("https://example.com/audio.wav") is True
+            assert _is_safe_url("https://storage.googleapis.com/bucket/file.wav") is True
+            assert _is_safe_url("http://cdn.example.org/voice.mp3") is True
 
     def test_blocks_localhost(self):
         """Test that localhost URLs are blocked."""
@@ -425,16 +430,17 @@ class TestTextToSpeechTool:
 
     @pytest.mark.asyncio
     async def test_execute_validation_error(self):
-        """Test TTS execution with validation error."""
-        with patch("src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock) as mock_generate:
-            mock_generate.side_effect = ValueError("Text cannot be empty")
+        """Test TTS execution with validation error.
 
-            tool = TextToSpeechTool()
-            result = await tool.execute(text="")
+        When text is empty, the tool catches it early with a validation error
+        before calling generate_speech.
+        """
+        tool = TextToSpeechTool()
+        result = await tool.execute(text="")
 
-            assert result.success is False
-            assert "empty" in result.error.lower()
-            assert result.metadata.get("error_type") == "validation"
+        assert result.success is False
+        assert "required" in result.error.lower() or "empty" in result.error.lower()
+        assert result.metadata.get("error_type") == "validation"
 
     @pytest.mark.asyncio
     async def test_execute_runtime_error(self):
