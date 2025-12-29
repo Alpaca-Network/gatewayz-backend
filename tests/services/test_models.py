@@ -50,20 +50,19 @@ class TestSanitizePricing:
         assert result["completion"] == "0.002"
         assert result["request"] == "0.0001"
 
-    def test_sanitize_negative_values(self):
-        """Test that negative values are converted to 0"""
+    def test_sanitize_negative_values_returns_none(self):
+        """Test that negative values (dynamic pricing) return None to filter model"""
         pricing = {
             "prompt": "-1",
             "completion": "-0.5",
             "request": "0.001"
         }
         result = sanitize_pricing(pricing)
-        assert result["prompt"] == "0"
-        assert result["completion"] == "0"
-        assert result["request"] == "0.001"
+        # Models with dynamic pricing should be filtered out
+        assert result is None
 
-    def test_sanitize_mixed_values(self):
-        """Test with mix of positive, negative, and special fields"""
+    def test_sanitize_mixed_values_with_negative_returns_none(self):
+        """Test with mix of positive and negative values returns None"""
         pricing = {
             "prompt": "0.001",
             "completion": "-1",
@@ -72,23 +71,19 @@ class TestSanitizePricing:
             "internal_reasoning": "-2"
         }
         result = sanitize_pricing(pricing)
-        assert result["prompt"] == "0.001"
-        assert result["completion"] == "0"
-        assert result["image"] == "0"
-        assert result["web_search"] == "0.002"
-        assert result["internal_reasoning"] == "0"
+        # Any negative value should cause filtering
+        assert result is None
 
-    def test_sanitize_numeric_values(self):
-        """Test with numeric (not string) values"""
+    def test_sanitize_numeric_negative_values_returns_none(self):
+        """Test with numeric negative values returns None"""
         pricing = {
             "prompt": -1.0,
             "completion": 0.002,
             "request": -0.5
         }
         result = sanitize_pricing(pricing)
-        assert result["prompt"] == "0"
-        assert result["completion"] == 0.002
-        assert result["request"] == "0"
+        # Models with dynamic pricing should be filtered out
+        assert result is None
 
     def test_sanitize_invalid_values(self):
         """Test with invalid numeric values"""
@@ -113,15 +108,26 @@ class TestSanitizePricing:
         assert result["completion"] == 0
         assert result["request"] == "0.0"
 
-    def test_sanitize_preserves_other_fields(self):
-        """Test that non-pricing fields are preserved"""
+    def test_sanitize_with_negative_prompt_returns_none(self):
+        """Test that negative pricing in prompt returns None (filters model)"""
         pricing = {
             "prompt": "-1",
             "custom_field": "value",
             "another": 123
         }
         result = sanitize_pricing(pricing)
-        assert result["prompt"] == "0"
+        # Models with dynamic pricing should be filtered out
+        assert result is None
+
+    def test_sanitize_preserves_other_fields_with_valid_pricing(self):
+        """Test that non-pricing fields are preserved when pricing is valid"""
+        pricing = {
+            "prompt": "0.001",
+            "custom_field": "value",
+            "another": 123
+        }
+        result = sanitize_pricing(pricing)
+        assert result["prompt"] == "0.001"
         assert result["custom_field"] == "value"
         assert result["another"] == 123
 

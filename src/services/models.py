@@ -251,23 +251,26 @@ def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
     return None
 
 
-def sanitize_pricing(pricing: dict) -> dict:
+def sanitize_pricing(pricing: dict) -> dict | None:
     """
-    Sanitize pricing data by converting negative values to 0.
+    Sanitize pricing data by handling negative values.
 
     OpenRouter uses -1 to indicate dynamic pricing (e.g., for auto-routing models).
-    We convert these to 0 to avoid issues in cost calculations.
+    Since we can't determine the actual cost for dynamic pricing models, we return
+    None to indicate this model should be filtered out.
 
     Args:
         pricing: Pricing dictionary from API
 
     Returns:
-        Sanitized pricing dictionary
+        Sanitized pricing dictionary, or None if pricing is dynamic/indeterminate
     """
     if not pricing or not isinstance(pricing, dict):
         return pricing
 
     sanitized = pricing.copy()
+    has_dynamic_pricing = False
+
     for key in ["prompt", "completion", "request", "image", "web_search", "internal_reasoning"]:
         if key in sanitized:
             try:
@@ -276,15 +279,21 @@ def sanitize_pricing(pricing: dict) -> dict:
                     # Convert to float and check if negative
                     float_value = float(value)
                     if float_value < 0:
-                        sanitized[key] = "0"
+                        # Mark as dynamic pricing - we can't determine actual cost
+                        has_dynamic_pricing = True
                         logger.debug(
-                            "Converted negative pricing %s=%s to 0",
+                            "Found dynamic pricing %s=%s, model will be filtered",
                             sanitize_for_logging(key),
                             sanitize_for_logging(str(value)),
                         )
+                        break
             except (ValueError, TypeError):
                 # Keep the original value if conversion fails
                 pass
+
+    # If model has dynamic pricing, return None to filter it out
+    if has_dynamic_pricing:
+        return None
 
     return sanitized
 
@@ -912,13 +921,29 @@ def fetch_models_from_openrouter():
         response.raise_for_status()
 
         models_data = response.json()
-        models = models_data.get("data", [])
-        for model in models:
+        raw_models = models_data.get("data", [])
+
+        # Process and filter models
+        filtered_models = []
+        for model in raw_models:
             model.setdefault("source_gateway", "openrouter")
-            # Sanitize pricing to convert negative values (e.g., -1 for autorouter) to 0
+            # Sanitize pricing - returns None for models with dynamic pricing
             if "pricing" in model:
-                model["pricing"] = sanitize_pricing(model["pricing"])
-        _models_cache["data"] = models
+                sanitized_pricing = sanitize_pricing(model["pricing"])
+                if sanitized_pricing is None:
+                    # Filter out models with dynamic/indeterminate pricing
+                    logger.debug(
+                        "Filtering out model %s with dynamic pricing",
+                        sanitize_for_logging(model.get("id", "unknown")),
+                    )
+                    continue
+                model["pricing"] = sanitized_pricing
+            filtered_models.append(model)
+
+        logger.info(
+            f"Filtered {len(raw_models) - len(filtered_models)} models with dynamic pricing"
+        )
+        _models_cache["data"] = filtered_models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
 
         # Clear error state on successful fetch
@@ -3146,38 +3171,127 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
 
 
 def fetch_models_from_aihubmix():
-    """Fetch models from AiHubMix via OpenAI-compatible API
+    """Fetch models from AiHubMix via their public API
 
     AiHubMix provides access to models through a unified OpenAI-compatible endpoint.
+    The API at https://aihubmix.com/api/v1/models includes pricing information.
     """
     try:
-        # Check if API key is configured
-        if not Config.AIHUBMIX_API_KEY or not Config.AIHUBMIX_APP_CODE:
-            logger.warning("AiHubMix API key or APP-Code not configured - skipping model fetch")
+        import requests
+
+        # Fetch from AiHubMix public API which includes pricing
+        response = requests.get(
+            "https://aihubmix.com/api/v1/models",
+            timeout=30,
+            headers={"Accept": "application/json"},
+        )
+
+        if response.status_code != 200:
+            error_msg = f"AiHubMix API returned status {response.status_code}"
+            logger.warning(error_msg)
+            set_gateway_error("aihubmix", error_msg)
             return []
 
-        from src.services.aihubmix_client import get_aihubmix_client
+        data = response.json()
+        models_data = data.get("data", [])
 
-        client = get_aihubmix_client()
-        response = client.models.list()
-
-        if not response or not hasattr(response, "data"):
+        if not models_data:
             logger.warning("No models returned from AiHubMix")
             return []
 
-        # Normalize models and filter out None (models without pricing)
+        # Normalize models and filter out None (models without valid pricing)
         normalized_models = [
-            m for m in (normalize_aihubmix_model(model) for model in response.data if model) if m
+            m
+            for m in (normalize_aihubmix_model_with_pricing(model) for model in models_data if model)
+            if m
         ]
 
         _aihubmix_models_cache["data"] = normalized_models
         _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
 
+        # Clear error state on success
+        clear_gateway_error("aihubmix")
+
         logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
         return _aihubmix_models_cache["data"]
-    except Exception as e:
-        logger.error("Failed to fetch models from AiHubMix: %s", sanitize_for_logging(str(e)))
+    except requests.exceptions.Timeout as e:
+        error_msg = f"AiHubMix API timeout: {sanitize_for_logging(str(e))}"
+        logger.error(error_msg)
+        set_gateway_error("aihubmix", error_msg)
         return []
+    except Exception as e:
+        error_msg = f"Failed to fetch models from AiHubMix: {sanitize_for_logging(str(e))}"
+        logger.error(error_msg)
+        set_gateway_error("aihubmix", error_msg)
+        return []
+
+
+def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
+    """Normalize AiHubMix model with pricing data from their API
+
+    AiHubMix API returns pricing in USD per 1K tokens:
+    - input: cost per 1K input tokens
+    - output: cost per 1K output tokens
+
+    We convert to per 1M tokens format for consistency.
+    """
+    model_id = model.get("id")
+    if not model_id:
+        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
+        return None
+
+    try:
+        # Extract pricing from the API response
+        # AiHubMix returns pricing per 1K tokens, we need per 1M tokens
+        pricing_data = model.get("pricing", {})
+        input_price_per_1k = pricing_data.get("input", 0)
+        output_price_per_1k = pricing_data.get("output", 0)
+
+        # Convert from per 1K to per 1M tokens (multiply by 1000)
+        # Use round() to avoid floating point precision issues (e.g., 0.0003 * 1000 = 0.30000000000000004)
+        input_price_per_1m = round(float(input_price_per_1k) * 1000, 10) if input_price_per_1k else 0
+        output_price_per_1m = round(float(output_price_per_1k) * 1000, 10) if output_price_per_1k else 0
+
+        # Filter out models with zero pricing (free models can drain credits)
+        if input_price_per_1m == 0 and output_price_per_1m == 0:
+            logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
+            return None
+
+        normalized = {
+            "id": model_id,
+            "slug": f"aihubmix/{model_id}",
+            "canonical_slug": f"aihubmix/{model_id}",
+            "hugging_face_id": None,
+            "name": model.get("name", model_id),
+            "created": model.get("created_at"),
+            "description": model.get("description", "Model from AiHubMix"),
+            "context_length": model.get("context_length", 4096),
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": str(input_price_per_1m),
+                "completion": str(output_price_per_1m),
+                "request": "0",
+                "image": "0",
+            },
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "aihubmix",
+            "provider_site_url": "https://aihubmix.com",
+            "model_logo_url": None,
+            "source_gateway": "aihubmix",
+            "pricing_source": "aihubmix-api",
+        }
+        return normalized
+    except Exception as e:
+        logger.error("Failed to normalize AiHubMix model: %s", sanitize_for_logging(str(e)))
+        return None
 
 
 def normalize_aihubmix_model(model) -> dict | None:

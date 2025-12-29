@@ -96,11 +96,13 @@ async def check_model_availability(
         availability = availability_service.get_model_availability(model_id, gateway)
 
         if not availability:
+            # Unknown models are considered available (optimistic approach)
+            # This matches the service layer logic in is_model_available()
             return {
                 "model_id": model_id,
-                "available": False,
-                "status": "not_found",
-                "message": "Model not found or no availability data",
+                "available": True,
+                "status": "unknown",
+                "message": "Model not tracked yet, assumed available",
             }
 
         return {
