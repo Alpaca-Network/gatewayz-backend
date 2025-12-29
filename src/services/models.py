@@ -3294,6 +3294,73 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         return None
 
 
+def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
+    """Normalize AiHubMix model with pricing data from their API
+
+    AiHubMix API returns pricing in USD per 1K tokens:
+    - input: cost per 1K input tokens
+    - output: cost per 1K output tokens
+
+    We convert to per 1M tokens format for consistency.
+    """
+    model_id = model.get("id")
+    if not model_id:
+        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
+        return None
+
+    try:
+        # Extract pricing from the API response
+        # AiHubMix returns pricing per 1K tokens, we need per 1M tokens
+        pricing_data = model.get("pricing", {})
+        input_price_per_1k = pricing_data.get("input", 0)
+        output_price_per_1k = pricing_data.get("output", 0)
+
+        # Convert from per 1K to per 1M tokens (multiply by 1000)
+        input_price_per_1m = float(input_price_per_1k) * 1000 if input_price_per_1k else 0
+        output_price_per_1m = float(output_price_per_1k) * 1000 if output_price_per_1k else 0
+
+        # Filter out models with zero pricing (free models can drain credits)
+        if input_price_per_1m == 0 and output_price_per_1m == 0:
+            logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
+            return None
+
+        normalized = {
+            "id": model_id,
+            "slug": f"aihubmix/{model_id}",
+            "canonical_slug": f"aihubmix/{model_id}",
+            "hugging_face_id": None,
+            "name": model.get("name", model_id),
+            "created": model.get("created_at"),
+            "description": model.get("description", "Model from AiHubMix"),
+            "context_length": model.get("context_length", 4096),
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": str(input_price_per_1m),
+                "completion": str(output_price_per_1m),
+                "request": "0",
+                "image": "0",
+            },
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "aihubmix",
+            "provider_site_url": "https://aihubmix.com",
+            "model_logo_url": None,
+            "source_gateway": "aihubmix",
+            "pricing_source": "aihubmix-api",
+        }
+        return normalized
+    except Exception as e:
+        logger.error("Failed to normalize AiHubMix model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
 def normalize_aihubmix_model(model) -> dict | None:
     """Normalize AiHubMix model to catalog schema
 
