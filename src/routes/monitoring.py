@@ -24,6 +24,7 @@ Endpoints:
 - GET /api/monitoring/anomalies - Detected anomalies
 - GET /api/monitoring/trial-analytics - Trial funnel metrics
 - GET /api/monitoring/cost-analysis - Cost breakdown by provider
+- GET /api/monitoring/chat-requests/counts - Get request counts per model (lightweight)
 - GET /api/monitoring/chat-requests/models - Get all models with chat completion requests
 - GET /api/monitoring/chat-requests - Chat completion requests with flexible filtering
 
@@ -759,6 +760,98 @@ async def get_token_efficiency(provider: str, model: str, api_key: str | None = 
     except Exception as e:
         logger.error(f"Failed to get token efficiency: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get token efficiency: {str(e)}")
+
+
+@router.get("/chat-requests/counts")
+async def get_request_counts_by_model(api_key: str | None = Depends(get_optional_api_key)):
+    """
+    Get request counts for each model (lightweight endpoint).
+
+    Returns a simple count of how many requests each model has received.
+    This is a lighter alternative to /chat-requests/models when you only need counts.
+
+    Returns:
+    - List of models with request counts, sorted by count (descending)
+    - Each entry includes: model_id, model_name, provider name, request_count
+
+    Example:
+    - /api/monitoring/chat-requests/counts
+
+    Authentication: Optional. Provide API key for authenticated access.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Get all requests with model info
+        result = client.table("chat_completion_requests").select(
+            """
+            model_id,
+            models!inner(
+                id,
+                model_name,
+                model_id,
+                providers!inner(
+                    name,
+                    slug
+                )
+            )
+            """
+        ).execute()
+
+        if not result.data:
+            return {
+                "success": True,
+                "data": [],
+                "metadata": {
+                    "total_models": 0,
+                    "total_requests": 0,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            }
+
+        # Count requests per model
+        model_counts = {}
+        for record in result.data:
+            model_id = record.get("model_id")
+            if model_id is None:
+                continue
+
+            model_info = record.get("models", {})
+
+            if model_id not in model_counts:
+                model_counts[model_id] = {
+                    "model_id": model_id,
+                    "model_name": model_info.get("model_name"),
+                    "model_identifier": model_info.get("model_id"),
+                    "provider_name": model_info.get("providers", {}).get("name"),
+                    "provider_slug": model_info.get("providers", {}).get("slug"),
+                    "request_count": 0
+                }
+
+            model_counts[model_id]["request_count"] += 1
+
+        # Convert to list and sort by count
+        counts_list = list(model_counts.values())
+        counts_list.sort(key=lambda x: x["request_count"], reverse=True)
+
+        return {
+            "success": True,
+            "data": counts_list,
+            "metadata": {
+                "total_models": len(counts_list),
+                "total_requests": sum(m["request_count"] for m in counts_list),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get request counts by model: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get request counts: {str(e)}"
+        )
 
 
 @router.get("/chat-requests/models")
