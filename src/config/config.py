@@ -196,6 +196,9 @@ class Config:
     COMFYUI_SERVER_URL = os.environ.get("COMFYUI_SERVER_URL")  # e.g., http://localhost:8188
     COMFYUI_ENABLED = os.environ.get("COMFYUI_ENABLED", "true").lower() in {"1", "true", "yes"}
 
+    # Resemble AI / Chatterbox TTS Configuration
+    RESEMBLE_API_KEY = os.environ.get("RESEMBLE_API_KEY")
+
     # Anannas Configuration
     ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
 
