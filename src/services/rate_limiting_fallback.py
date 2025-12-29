@@ -144,8 +144,8 @@ class InMemoryRateLimiter:
             # All checks passed - increment counters
             self.request_windows[api_key].append(current_time)
             self.token_windows[api_key].append((current_time, tokens_used))
-            # Concurrency tracking disabled - don't increment
-            # self.concurrent_requests[api_key] += 1
+            # Increment concurrency counter (re-enabled to match limit enforcement)
+            self.concurrent_requests[api_key] += 1
 
             # Calculate remaining limits
             remaining_requests = max(
