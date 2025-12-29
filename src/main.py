@@ -235,6 +235,18 @@ def create_app() -> FastAPI:
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=10000)
     logger.info("  🗜  Selective GZip compression middleware enabled (threshold: 10KB, skips SSE)")
 
+    # Add staging security middleware (protects staging environment from unauthorized access)
+    from src.middleware.staging_security import StagingSecurityMiddleware
+
+    app.add_middleware(StagingSecurityMiddleware)
+    logger.info("  🔒 Staging security middleware enabled")
+
+    # Add deprecation middleware to warn users about legacy endpoints
+    from src.middleware.deprecation import DeprecationMiddleware
+
+    app.add_middleware(DeprecationMiddleware)
+    logger.info("  ⚠️  Deprecation middleware enabled (legacy endpoint warnings)")
+
     # Security
     HTTPBearer()
 
