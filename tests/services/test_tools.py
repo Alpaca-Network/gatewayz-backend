@@ -198,7 +198,7 @@ class TestToolRegistry:
                 result={"audio_base64": "test_audio"}
             )
 
-            result = await execute_tool("text_to_speech", text="Hello world")
+            result = await execute_tool("text_to_speech", {"text": "Hello world"})
 
             assert result.success is True
             assert result.result == {"audio_base64": "test_audio"}
@@ -556,6 +556,17 @@ class TestGenerateSpeech:
                 "Hello",
                 voice_reference_url="http://localhost:8080/audio.wav"
             )
+
+
+class TestVoiceReferenceFileSize:
+    """Tests for voice reference file size limits."""
+
+    def test_max_file_size_constant_defined(self):
+        """Test that max file size constant is defined."""
+        from src.services.chatterbox_tts_client import CHATTERBOX_MAX_VOICE_REF_SIZE
+
+        # Should be 10 MB
+        assert CHATTERBOX_MAX_VOICE_REF_SIZE == 10 * 1024 * 1024
 
 
 # =============================================================================

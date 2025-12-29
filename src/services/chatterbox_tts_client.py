@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Chatterbox configuration
 CHATTERBOX_TIMEOUT = 60.0  # seconds - TTS can take time for longer texts
 CHATTERBOX_MAX_TEXT_LENGTH = 5000  # characters
+CHATTERBOX_MAX_VOICE_REF_SIZE = 10 * 1024 * 1024  # 10 MB max for voice reference files
 
 # Blocked IP ranges for SSRF protection
 BLOCKED_IP_RANGES = [
@@ -464,13 +465,29 @@ async def _generate_speech_local(
             headers = {"Host": original_hostname}  # Preserve original Host header
 
             async with httpx.AsyncClient(timeout=CHATTERBOX_TIMEOUT) as client:
-                response = await client.get(safe_url, headers=headers)
-                response.raise_for_status()
+                # Use streaming to limit download size
+                async with client.stream("GET", safe_url, headers=headers) as response:
+                    response.raise_for_status()
 
-                # Save to temp file
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                    f.write(response.content)
-                    audio_prompt_path = f.name
+                    # Check Content-Length header if available
+                    content_length = response.headers.get("content-length")
+                    if content_length and int(content_length) > CHATTERBOX_MAX_VOICE_REF_SIZE:
+                        raise ValueError(
+                            f"Voice reference file too large: {int(content_length)} bytes "
+                            f"(max: {CHATTERBOX_MAX_VOICE_REF_SIZE} bytes)"
+                        )
+
+                    # Stream to temp file with size limit
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        total_size = 0
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            total_size += len(chunk)
+                            if total_size > CHATTERBOX_MAX_VOICE_REF_SIZE:
+                                raise ValueError(
+                                    f"Voice reference file too large (max: {CHATTERBOX_MAX_VOICE_REF_SIZE} bytes)"
+                                )
+                            f.write(chunk)
+                        audio_prompt_path = f.name
 
         # Run TTS inference in thread pool to avoid blocking event loop
         loop = asyncio.get_event_loop()

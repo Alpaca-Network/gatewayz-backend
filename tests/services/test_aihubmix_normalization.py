@@ -8,7 +8,6 @@ Tests cover:
 - Filtering of zero-priced models
 """
 
-import pytest
 from src.services.models import normalize_aihubmix_model_with_pricing
 
 
