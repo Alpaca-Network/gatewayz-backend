@@ -22,11 +22,8 @@ from src.config import Config
 from src.models.comfyui_models import (
     ComfyUIExecutionRequest,
     ComfyUIExecutionResponse,
-    ComfyUIOutput,
-    ComfyUIProgressUpdate,
     ComfyUIServerStatus,
     ExecutionStatus,
-    WorkflowType,
 )
 
 logger = logging.getLogger(__name__)
@@ -156,7 +153,10 @@ class ComfyUIClient:
         # Decode base64 image
         if image_data.startswith("data:"):
             # Remove data URL prefix
-            image_data = image_data.split(",", 1)[1]
+            parts = image_data.split(",", 1)
+            if len(parts) != 2:
+                raise ValueError("Invalid data URL format: missing comma separator")
+            image_data = parts[1]
 
         image_bytes = base64.b64decode(image_data)
 
@@ -528,7 +528,8 @@ class ComfyUIClient:
 
                 if status_data.get("status_str") == "error":
                     response.status = ExecutionStatus.FAILED
-                    response.error = status_data.get("messages", [{}])[0].get("message", "Unknown error")
+                    messages = status_data.get("messages", [])
+                    response.error = messages[0].get("message", "Unknown error") if messages else "Unknown error"
                     response.completed_at = datetime.now(timezone.utc)
                     response.execution_time_ms = int((time.monotonic() - start_time) * 1000)
                     return response

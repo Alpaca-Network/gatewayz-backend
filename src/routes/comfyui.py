@@ -16,18 +16,14 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
-from src.config import Config
 from src.db.api_keys import increment_api_key_usage
 from src.db.users import deduct_credits, get_user, record_usage
 from src.models.comfyui_models import (
     ComfyUIExecutionRequest,
     ComfyUIExecutionResponse,
-    ComfyUIHistoryItem,
-    ComfyUIProgressUpdate,
     ComfyUIServerStatus,
     ComfyUIWorkflowTemplate,
     ExecutionHistoryResponse,
@@ -109,7 +105,6 @@ async def get_workflow(workflow_id: str):
 @router.post("/execute", response_model=ComfyUIExecutionResponse)
 async def execute_workflow(
     request: ComfyUIExecutionRequest,
-    background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -139,8 +134,8 @@ async def execute_workflow(
 
         # Determine workflow to use
         workflow_json: dict[str, Any] | None = None
-        workflow_type = WorkflowType.CUSTOM
         credits_cost = 100  # Default cost
+        workflow_type: WorkflowType | None = None
 
         if request.workflow_id:
             # Use pre-defined template
@@ -263,8 +258,8 @@ async def execute_workflow_stream(
 
     # Determine workflow
     workflow_json: dict[str, Any] | None = None
-    workflow_type = WorkflowType.CUSTOM
     credits_cost = 100
+    workflow_type: WorkflowType | None = None
 
     if request.workflow_id:
         template = get_workflow_template(request.workflow_id)
@@ -278,6 +273,7 @@ async def execute_workflow_stream(
         credits_cost = template.credits_per_run
     elif request.workflow_json:
         workflow_json = request.workflow_json
+        workflow_type = WorkflowType.CUSTOM
     else:
         raise HTTPException(
             status_code=400,
@@ -320,6 +316,7 @@ async def execute_workflow_stream(
             prompt_id = await client.queue_prompt(workflow_json, request)
 
             # Stream progress updates
+            final_status = ExecutionStatus.RUNNING
             async for update in client.stream_progress(prompt_id):
                 yield {
                     "event": "progress",
@@ -334,13 +331,24 @@ async def execute_workflow_stream(
                 }
 
                 if update.status in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED]:
+                    final_status = update.status
                     break
 
             # Get final results
             history = await client.get_history(prompt_id)
             elapsed = time.monotonic() - start_time
 
-            if history:
+            # Only process outputs and charge credits if execution succeeded
+            if final_status == ExecutionStatus.FAILED:
+                yield {
+                    "event": "error",
+                    "data": json.dumps({
+                        "status": "failed",
+                        "error": "Workflow execution failed"
+                    })
+                }
+            elif history:
+                import base64
                 outputs = history.get("outputs", {})
                 output_list = []
 
@@ -351,7 +359,6 @@ async def execute_workflow_stream(
                         subfolder = img.get("subfolder", "")
 
                         try:
-                            import base64
                             image_bytes = await client.get_image(filename, subfolder)
                             b64_data = base64.b64encode(image_bytes).decode("utf-8")
                             output_list.append({

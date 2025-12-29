@@ -14,8 +14,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-import json
+from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timezone
 
 from src.services.comfyui_client import (
