@@ -683,7 +683,9 @@ def deduct_credits(
             # Fetch current balance and fail with accurate error
             with track_database_query(table="users", operation="select"):
                 current = client.table("users").select("credits").eq("id", user_id).execute()
-            current_balance = current.data[0]["credits"] if current.data else "unknown"
+            current_balance = (
+                current.data[0]["credits"] if current.data and len(current.data) > 0 else "unknown"
+            )
             raise ValueError(
                 f"Failed to update user balance due to concurrent modification. "
                 f"Current balance: {current_balance}, Required: {tokens}. Please retry."
