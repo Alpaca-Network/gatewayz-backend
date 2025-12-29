@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, patch
 from src.services.tools import (
     AVAILABLE_TOOLS,
     BaseTool,
-    ToolDefinition,
     ToolResult,
     execute_tool,
     get_tool_by_name,
