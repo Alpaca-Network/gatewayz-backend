@@ -117,28 +117,32 @@ class TextToSpeechTool(BaseTool):
             },
         }
 
-    async def execute(
-        self,
-        text: str,
-        model: str = "chatterbox-turbo",
-        language: str = "en",
-        voice_reference_url: str | None = None,
-        exaggeration: float = 1.0,
-        cfg_weight: float = 0.5,
-    ) -> ToolResult:
+    async def execute(self, **kwargs) -> ToolResult:
         """Execute the text-to-speech conversion.
 
         Args:
-            text: Text to convert to speech
-            model: TTS model to use
-            language: Language code for multilingual model
-            voice_reference_url: URL to audio file for voice cloning
-            exaggeration: Exaggeration level (0.0-2.0)
-            cfg_weight: CFG weight (0.0-1.0)
+            **kwargs: Tool parameters:
+                - text: Text to convert to speech (required)
+                - model: TTS model to use (default: chatterbox-turbo)
+                - language: Language code for multilingual model (default: en)
+                - voice_reference_url: URL to audio file for voice cloning
+                - exaggeration: Exaggeration level 0.0-2.0 (default: 1.0)
+                - cfg_weight: CFG weight 0.0-1.0 (default: 0.5)
 
         Returns:
             ToolResult with audio data or error
         """
+        # Extract parameters with defaults
+        text = kwargs.get("text")
+        model = kwargs.get("model", "chatterbox-turbo")
+        language = kwargs.get("language", "en")
+        voice_reference_url = kwargs.get("voice_reference_url")
+        exaggeration = kwargs.get("exaggeration", 1.0)
+        cfg_weight = kwargs.get("cfg_weight", 0.5)
+
+        if not text:
+            return self._error("text parameter is required", error_type="validation")
+
         try:
             logger.info(
                 f"Generating TTS: model={model}, language={language}, "

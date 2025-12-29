@@ -35,12 +35,12 @@ def get_tool_by_name(name: str) -> type[BaseTool] | None:
     return AVAILABLE_TOOLS.get(name)
 
 
-async def execute_tool(name: str, **kwargs) -> ToolResult:
+async def execute_tool(tool_name: str, parameters: dict | None = None) -> ToolResult:
     """Execute a tool by name with given parameters.
 
     Args:
-        name: The tool name
-        **kwargs: Tool parameters
+        tool_name: The tool name
+        parameters: Tool parameters as a dictionary
 
     Returns:
         ToolResult with execution result
@@ -48,12 +48,12 @@ async def execute_tool(name: str, **kwargs) -> ToolResult:
     Raises:
         ValueError: If tool not found
     """
-    tool_class = get_tool_by_name(name)
+    tool_class = get_tool_by_name(tool_name)
     if not tool_class:
-        raise ValueError(f"Tool '{name}' not found")
+        raise ValueError(f"Tool '{tool_name}' not found")
 
     tool = tool_class()
-    return await tool.execute(**kwargs)
+    return await tool.execute(**(parameters or {}))
 
 
 __all__ = [

@@ -86,6 +86,66 @@ LANGUAGE_NAMES = {
 }
 
 
+def _resolve_and_validate_url(url: str) -> tuple[bool, str | None]:
+    """Resolve URL and validate for SSRF protection.
+
+    This function resolves the hostname to an IP address and validates it,
+    then returns a modified URL that uses the IP directly to prevent DNS rebinding.
+
+    Args:
+        url: URL to validate
+
+    Returns:
+        Tuple of (is_safe, safe_url_or_none)
+        - (True, url_with_ip) if URL is safe
+        - (False, None) if URL is unsafe or invalid
+    """
+    import socket
+
+    try:
+        parsed = urlparse(url)
+
+        # Only allow http/https
+        if parsed.scheme not in ("http", "https"):
+            return False, None
+
+        # Check hostname
+        hostname = parsed.hostname
+        if not hostname:
+            return False, None
+
+        # Block localhost variants
+        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return False, None
+
+        # Resolve and check IP
+        try:
+            ip_str = socket.gethostbyname(hostname)
+            ip = ipaddress.ip_address(ip_str)
+
+            for blocked_range in BLOCKED_IP_RANGES:
+                if ip in blocked_range:
+                    logger.warning(f"Blocked SSRF attempt to {hostname} ({ip_str})")
+                    return False, None
+        except (socket.gaierror, ValueError):
+            # Can't resolve - could be internal DNS, block it
+            logger.warning(f"Could not resolve hostname: {hostname}")
+            return False, None
+
+        # Build URL with IP to prevent DNS rebinding
+        # Keep original Host header by using the IP in URL but hostname in headers
+        port = f":{parsed.port}" if parsed.port else ""
+        safe_url = f"{parsed.scheme}://{ip_str}{port}{parsed.path}"
+        if parsed.query:
+            safe_url += f"?{parsed.query}"
+
+        return True, (safe_url, hostname)
+
+    except Exception as e:
+        logger.warning(f"URL validation failed: {e}")
+        return False, None
+
+
 def _is_safe_url(url: str) -> bool:
     """Check if a URL is safe to fetch (SSRF protection).
 
@@ -95,42 +155,8 @@ def _is_safe_url(url: str) -> bool:
     Returns:
         True if URL is safe, False if it points to internal/private resources
     """
-    try:
-        parsed = urlparse(url)
-
-        # Only allow http/https
-        if parsed.scheme not in ("http", "https"):
-            return False
-
-        # Check hostname
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-
-        # Block localhost variants
-        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-            return False
-
-        # Try to resolve and check IP
-        try:
-            import socket
-            ip_str = socket.gethostbyname(hostname)
-            ip = ipaddress.ip_address(ip_str)
-
-            for blocked_range in BLOCKED_IP_RANGES:
-                if ip in blocked_range:
-                    logger.warning(f"Blocked SSRF attempt to {hostname} ({ip_str})")
-                    return False
-        except (socket.gaierror, ValueError):
-            # Can't resolve - could be internal DNS, block it
-            logger.warning(f"Could not resolve hostname: {hostname}")
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.warning(f"URL validation failed: {e}")
-        return False
+    is_safe, _ = _resolve_and_validate_url(url)
+    return is_safe
 
 
 def get_chatterbox_models() -> list[dict[str, Any]]:
@@ -429,8 +455,16 @@ async def _generate_speech_local(
     try:
         # Download voice reference if provided
         if voice_reference_url:
+            # Resolve URL to IP to prevent DNS rebinding attacks
+            is_safe, url_info = _resolve_and_validate_url(voice_reference_url)
+            if not is_safe or not url_info:
+                raise ValueError("Invalid voice reference URL")
+
+            safe_url, original_hostname = url_info
+            headers = {"Host": original_hostname}  # Preserve original Host header
+
             async with httpx.AsyncClient(timeout=CHATTERBOX_TIMEOUT) as client:
-                response = await client.get(voice_reference_url)
+                response = await client.get(safe_url, headers=headers)
                 response.raise_for_status()
 
                 # Save to temp file

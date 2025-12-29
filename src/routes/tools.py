@@ -123,7 +123,7 @@ async def execute_tool_endpoint(
 
     try:
         logger.info(f"Executing tool '{request.name}' with params: {list(request.parameters.keys())}")
-        result = await execute_tool(request.name, **request.parameters)
+        result = await execute_tool(request.name, request.parameters)
 
         return ToolExecuteResponse(
             success=result.success,
