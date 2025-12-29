@@ -18,7 +18,7 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
             # Get the API key record from api_keys_new
             key_record = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
-            if key_record.data:
+            if key_record.data and len(key_record.data) > 0:
                 # Get rate limit config for this key
                 rate_config = (
                     client.table("rate_limit_configs")
@@ -27,7 +27,7 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
                     .execute()
                 )
 
-                if rate_config.data:
+                if rate_config.data and len(rate_config.data) > 0:
                     config = rate_config.data[0]
                     return {
                         "requests_per_minute": config.get("max_requests", 1000)
@@ -45,7 +45,7 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
         # Fallback to old system (rate_limits table)
         result = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
 
-        if not result.data:
+        if not result.data or len(result.data) == 0:
             return None
 
         rate_limits = result.data[0]
@@ -86,7 +86,7 @@ def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> None:
 
         existing = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
 
-        if existing.data:
+        if existing.data and len(existing.data) > 0:
             client.table("rate_limits").update(rate_limit_data).eq("api_key", api_key).execute()
         else:
             client.table("rate_limits").insert(rate_limit_data).execute()
@@ -291,7 +291,7 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
                         .execute()
                     )
 
-                    if existing.data:
+                    if existing.data and len(existing.data) > 0:
                         # Update existing record
                         current = existing.data[0]
                         updated_data = {
@@ -383,7 +383,7 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
                 .execute()
             )
 
-            if result.data and result.data[0].get("rate_limit_config"):
+            if result.data and len(result.data) > 0 and result.data[0].get("rate_limit_config"):
                 return result.data[0]["rate_limit_config"]
         except Exception as e:
             # Column might not exist yet, log and continue
@@ -392,14 +392,14 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
         # Try to get from rate_limit_configs table if it exists
         try:
             key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-            if key_result.data:
+            if key_result.data and len(key_result.data) > 0:
                 config_result = (
                     client.table("rate_limit_configs")
                     .select("*")
                     .eq("api_key_id", key_result.data[0]["id"])
                     .execute()
                 )
-                if config_result.data:
+                if config_result.data and len(config_result.data) > 0:
                     config = config_result.data[0]
                     return {
                         "requests_per_minute": config.get("max_requests", 1000) // 60,
@@ -460,7 +460,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
         # Try to update in rate_limit_configs table if it exists
         try:
             key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-            if key_result.data:
+            if key_result.data and len(key_result.data) > 0:
                 api_key_id = key_result.data[0]["id"]
 
                 # Try to update existing config
@@ -471,7 +471,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                     .execute()
                 )
 
-                if existing.data:
+                if existing.data and len(existing.data) > 0:
                     client.table("rate_limit_configs").update(
                         {
                             "max_requests": config.get("requests_per_hour", 1000),

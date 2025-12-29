@@ -100,16 +100,15 @@ class InMemoryRateLimiter:
             # Clean up old entries
             await self._cleanup_old_entries(api_key, current_time)
 
-            # Check concurrency limit - TEMPORARILY DISABLED
-            # TODO: Re-enable after confirming router-side limiting works
-            # if self.concurrent_requests[api_key] >= config.concurrency_limit:
-            #     return RateLimitResult(
-            #         allowed=False,
-            #         reason="Concurrency limit exceeded",
-            #         retry_after=1,
-            #         remaining_requests=0,
-            #         remaining_tokens=0
-            #     )
+            # Check concurrency limit
+            if self.concurrent_requests[api_key] >= config.concurrency_limit:
+                return RateLimitResult(
+                    allowed=False,
+                    reason="Concurrency limit exceeded",
+                    retry_after=1,
+                    remaining_requests=0,
+                    remaining_tokens=0,
+                )
 
             # Check burst limit
             burst_allowed = await self._check_burst_limit(api_key, config, current_time)
@@ -145,8 +144,8 @@ class InMemoryRateLimiter:
             # All checks passed - increment counters
             self.request_windows[api_key].append(current_time)
             self.token_windows[api_key].append((current_time, tokens_used))
-            # Concurrency tracking disabled - don't increment
-            # self.concurrent_requests[api_key] += 1
+            # Increment concurrency counter (re-enabled to match limit enforcement)
+            self.concurrent_requests[api_key] += 1
 
             # Calculate remaining limits
             remaining_requests = max(

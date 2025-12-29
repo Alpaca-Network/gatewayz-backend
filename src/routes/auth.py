@@ -843,7 +843,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                                 .eq("id", partial_user["id"])
                                 .execute()
                             )
-                            if updated_result.data:
+                            if updated_result.data and len(updated_result.data) > 0:
                                 partial_user = updated_result.data[0]
                             else:
                                 partial_user.update(update_fields)
@@ -851,7 +851,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     else:
                         try:
                             user_insert = client.table("users").insert(user_payload).execute()
-                            if not user_insert.data:
+                            if not user_insert.data or len(user_insert.data) == 0:
                                 raise HTTPException(
                                     status_code=500, detail="Failed to create user account"
                                 ) from creation_error
@@ -880,7 +880,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                                         .limit(1)
                                         .execute()
                                     )
-                                if not existing_user.data:
+                                if not existing_user.data or len(existing_user.data) == 0:
                                     raise HTTPException(
                                         status_code=500,
                                         detail="Failed to fetch existing user after duplicate insert",
@@ -914,7 +914,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                             .limit(1)
                             .execute()
                         )
-                        if existing_key_result.data:
+                        if existing_key_result.data and len(existing_key_result.data) > 0:
                             api_key_value = existing_key_result.data[0]["api_key"]
                             logger.info(
                                 f"Reusing existing API key for fallback user {created_user['id']}"
@@ -1183,7 +1183,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
 
             try:
                 user_insert = client.table("users").insert(fallback_payload).execute()
-                if not user_insert.data:
+                if not user_insert.data or len(user_insert.data) == 0:
                     raise HTTPException(
                         status_code=500, detail="Failed to create user account"
                     ) from creation_error
@@ -1306,7 +1306,7 @@ async def request_password_reset(email: str):
             client.table("users").select("id", "username", "email").eq("email", email).execute()
         )
 
-        if not user_result.data:
+        if not user_result.data or len(user_result.data) == 0:
             # Don't reveal if email exists or not for security
             return {
                 "message": "If an account with that email exists, a password reset link has been sent."
@@ -1346,7 +1346,7 @@ async def reset_password(token: str):
             .execute()
         )
 
-        if not token_result.data:
+        if not token_result.data or len(token_result.data) == 0:
             raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
         token_data = token_result.data[0]
