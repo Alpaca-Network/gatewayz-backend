@@ -5,8 +5,9 @@ This test suite validates fixes for unsafe .data[0] access patterns where
 database queries could return empty lists [] causing IndexError.
 """
 
+import time
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from src.db import users, rate_limits
 
 
@@ -318,6 +319,96 @@ class TestRateLimitingConcurrencyReenabled:
         assert result["current"] == 3
         assert result["limit"] == 5
         assert result["remaining"] == 2
+
+    @pytest.mark.asyncio
+    @patch("src.services.rate_limiting.get_fallback_rate_limit_manager")
+    async def test_main_limiter_increments_concurrency_on_allowed_request(
+        self, mock_get_fallback
+    ):
+        """Test that SlidingWindowRateLimiter increments concurrency counter when request allowed"""
+        from src.services.rate_limiting import (
+            SlidingWindowRateLimiter,
+            RateLimitConfig,
+            RateLimitResult as FallbackResult,
+        )
+
+        # Setup mock fallback manager
+        mock_fallback = Mock()
+        mock_fallback.check_rate_limit = AsyncMock(
+            return_value=FallbackResult(
+                allowed=True,
+                remaining_requests=100,
+                remaining_tokens=10000,
+                reset_time=int(time.time()) + 60,
+                retry_after=None,
+                reason=None,
+            )
+        )
+        mock_get_fallback.return_value = mock_fallback
+
+        # Create limiter instance
+        limiter = SlidingWindowRateLimiter()
+        api_key = "test_key_increment"
+        config = RateLimitConfig(concurrency_limit=10)
+
+        # Verify counter starts at 0
+        assert limiter.concurrent_requests[api_key] == 0
+
+        # Make request (should be allowed)
+        result = await limiter.check_rate_limit(api_key, config, tokens_used=100)
+
+        # Verify request was allowed
+        assert result.allowed is True
+
+        # CRITICAL: Verify concurrency counter was incremented
+        assert (
+            limiter.concurrent_requests[api_key] == 1
+        ), "Concurrency counter should increment on allowed request"
+
+    @pytest.mark.asyncio
+    @patch("src.services.rate_limiting.get_fallback_rate_limit_manager")
+    async def test_main_limiter_does_not_increment_on_rejected_request(
+        self, mock_get_fallback
+    ):
+        """Test that concurrency counter is NOT incremented when request is rejected"""
+        from src.services.rate_limiting import (
+            SlidingWindowRateLimiter,
+            RateLimitConfig,
+            RateLimitResult as FallbackResult,
+        )
+
+        # Setup mock fallback manager
+        mock_fallback = Mock()
+        mock_fallback.check_rate_limit = AsyncMock(
+            return_value=FallbackResult(
+                allowed=False,  # Request rejected
+                remaining_requests=0,
+                remaining_tokens=0,
+                reset_time=int(time.time()) + 60,
+                retry_after=60,
+                reason="Rate limit exceeded",
+            )
+        )
+        mock_get_fallback.return_value = mock_fallback
+
+        # Create limiter instance
+        limiter = SlidingWindowRateLimiter()
+        api_key = "test_key_no_increment"
+        config = RateLimitConfig(concurrency_limit=10)
+
+        # Verify counter starts at 0
+        assert limiter.concurrent_requests[api_key] == 0
+
+        # Make request (should be rejected)
+        result = await limiter.check_rate_limit(api_key, config, tokens_used=100)
+
+        # Verify request was rejected
+        assert result.allowed is False
+
+        # CRITICAL: Verify concurrency counter was NOT incremented
+        assert (
+            limiter.concurrent_requests[api_key] == 0
+        ), "Concurrency counter should NOT increment on rejected request"
 
 
 if __name__ == "__main__":

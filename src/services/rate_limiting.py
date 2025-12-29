@@ -183,6 +183,11 @@ class SlidingWindowRateLimiter:
                 api_key=api_key, tokens_used=tokens_used
             )
 
+            # If request is allowed, increment concurrency counter
+            # This must be done BEFORE returning to ensure the counter is updated
+            if result.allowed:
+                await self.increment_concurrent_requests(api_key)
+
             # Convert fallback result to our format
             limit_result = RateLimitResult(
                 allowed=result.allowed,
