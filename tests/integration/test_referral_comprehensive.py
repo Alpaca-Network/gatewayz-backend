@@ -3,7 +3,7 @@ Comprehensive tests for the enhanced referral system including:
 - Referral tracking on signup
 - Notifications to referrer
 - Bonus application on first purchase
-- $10 trial credits for new users
+- $5 trial credits for new users
 """
 
 import pytest
@@ -219,12 +219,12 @@ class TestReferralBonusWithPendingRecord:
 
 
 class TestTrialCredits:
-    """Test that new users get $10 trial credits"""
+    """Test that new users get $5 trial credits"""
 
     @patch('src.db.users.get_supabase_client')
     @patch('src.db.users.create_api_key')
     def test_new_user_gets_trial_credits(self, mock_create_key, mock_client):
-        """Test new users receive $10 trial credits"""
+        """Test new users receive $5 trial credits"""
         from src.db.users import create_enhanced_user
 
         mock_supabase = Mock()
@@ -236,7 +236,7 @@ class TestTrialCredits:
             'id': 1,
             'username': 'testuser',
             'email': 'test@example.com',
-            'credits': 10,
+            'credits': 5,
             'subscription_status': 'trial',
             'api_key': 'gw_live_test123'
         }]
@@ -255,12 +255,12 @@ class TestTrialCredits:
             username='testuser',
             email='test@example.com',
             auth_method='email',
-            credits=10
+            credits=5
         )
 
         assert user_data is not None
-        assert user_data['credits'] == 10
-        print("[PASS] New users receive $10 trial credits")
+        assert user_data['credits'] == 5
+        print("[PASS] New users receive $5 trial credits")
 
 
 class TestEndToEndReferralFlow:

@@ -1,15 +1,34 @@
 name: Supabase Migrations
 
 on:
-  # Only validate on PRs - Supabase GitHub integration handles actual deployment
+  push:
+    branches:
+      - main
+      - staging
+    paths:
+      - "supabase/migrations/*.sql"
+      - ".github/workflows/supabase-migrations.yml"
   pull_request:
     branches:
       - main
       - staging
     paths:
       - "supabase/migrations/*.sql"
-  # Manual trigger for validation only
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to apply migrations to"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - production
+          - staging
+      dry_run:
+        description: "Dry run (validate only, don't apply)"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: supabase-migrations-${{ github.ref }}
@@ -163,13 +182,12 @@ jobs:
             ls -lh supabase/migrations/*.sql || echo "No migrations found"
           fi
 
-  # NOTE: Migrations are applied automatically by Supabase GitHub integration
-  # This job is disabled - validation only
+  # Apply migrations to Supabase
   apply-migrations:
     name: Apply Migrations (${{ needs.setup-environment.outputs.environment }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [setup-environment, validate-migrations]
-    if: false  # Disabled - Supabase handles deployment
+    if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
     environment:
       name: ${{ needs.setup-environment.outputs.environment }}
 

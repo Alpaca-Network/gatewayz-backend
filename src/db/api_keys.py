@@ -196,7 +196,7 @@ def create_api_key(
                 "trial_used_credits": 0.0,
                 "trial_max_tokens": 100000,
                 "trial_max_requests": 1000,
-                "trial_credits": 10.0,
+                "trial_credits": 5.0,
                 "trial_converted": False,
                 "subscription_status": "trial",
                 "subscription_plan": "free_trial",

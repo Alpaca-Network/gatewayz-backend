@@ -292,7 +292,7 @@ async def get_subscription_plans():
             "message": "Subscription plans retrieved successfully",
             "trial_info": {
                 "trial_days": 3,
-                "trial_credits": 10.0,
+                "trial_credits": 5.0,
                 "trial_tokens": 1000000,  # 1M tokens for trial
                 "trial_requests": 10000,  # 10K requests for trial
                 "trial_plan": "free",

@@ -45,10 +45,6 @@ class GrafanaMetricsService:
         self._last_supabase_check = 0
         self._supabase_check_interval = 60  # Check every 60 seconds
         self._synthetic_mode = False
-        self._last_observability_emit = 0.0
-        self._observability_emit_interval = int(
-            os.environ.get("SYNTHETIC_OBSERVABILITY_INTERVAL", 30)
-        )
 
     def _check_supabase_availability(self) -> bool:
         """
@@ -226,7 +222,6 @@ class GrafanaMetricsService:
             pass
 
         logger.debug("Synthetic metrics injected")
-        self._emit_synthetic_log_and_trace()
 
     def get_metrics_summary(self) -> dict[str, Any]:
         """
@@ -313,94 +308,6 @@ class GrafanaMetricsService:
             log_entry.update(extra)
 
         return log_entry
-
-    def _emit_synthetic_log_and_trace(self):
-        """
-        Emit synthetic Loki logs and Tempo traces to keep Grafana panels alive.
-        Only runs when synthetic mode is active to avoid polluting real data.
-        """
-        if not self.is_synthetic_mode():
-            return
-
-        if not (Config.LOKI_ENABLED or Config.TEMPO_ENABLED):
-            return
-
-        current_time = time.time()
-        if (current_time - self._last_observability_emit) < self._observability_emit_interval:
-            return
-
-        self._last_observability_emit = current_time
-
-        heartbeat_extra = {
-            "source": "synthetic-fallback",
-            "environment": ENVIRONMENT,
-            "service": SERVICE_NAME,
-            "mode": "synthetic",
-        }
-
-        # Emit INFO/WARNING/ERROR logs to cover dashboard panels
-        info_log = self.get_structured_log_entry(
-            level="INFO",
-            message="Synthetic observability heartbeat",
-            endpoint="/metrics",
-            method="GET",
-            status_code=200,
-            duration_ms=random.randint(10, 80),
-            extra=heartbeat_extra | {"category": "heartbeat"},
-        )
-        logger.info(info_log["message"], extra={"extra": info_log})
-
-        warn_log = self.get_structured_log_entry(
-            level="WARNING",
-            message="Synthetic latency alert",
-            endpoint="/v1/chat/completions",
-            method="POST",
-            status_code=200,
-            duration_ms=random.randint(400, 900),
-            extra=heartbeat_extra | {"category": "latency", "observed_latency_ms": random.randint(400, 900)},
-        )
-        logger.warning(warn_log["message"], extra={"extra": warn_log})
-
-        error_log = self.get_structured_log_entry(
-            level="ERROR",
-            message="Synthetic provider error",
-            endpoint="/v1/chat/completions",
-            method="POST",
-            status_code=502,
-            duration_ms=random.randint(100, 300),
-            extra=heartbeat_extra
-            | {
-                "category": "provider",
-                "provider": random.choice(["openai", "anthropic", "google"]),
-                "error_code": "SYNTHETIC_PROVIDER_TIMEOUT",
-            },
-        )
-        logger.error(error_log["message"], extra={"extra": error_log})
-
-        if not Config.TEMPO_ENABLED:
-            return
-
-        try:
-            from src.config.opentelemetry_config import OpenTelemetryConfig
-
-            tracer = OpenTelemetryConfig.get_tracer(__name__)
-            if not tracer:
-                return
-
-            with tracer.start_as_current_span("synthetic_observability_trace") as span:
-                span.set_attribute("app.name", APP_NAME)
-                span.set_attribute("service.name", SERVICE_NAME)
-                span.set_attribute("synthetic", True)
-                span.set_attribute("environment", ENVIRONMENT)
-                span.add_event(
-                    "synthetic_metrics_injected",
-                    {
-                        "request_count": random.randint(10, 100),
-                        "error_fraction": random.random() / 10,
-                    },
-                )
-        except Exception as exc:  # noqa: BLE001 - best effort synthetic tracing
-            logger.debug(f"Failed to emit synthetic trace: {exc}")
 
 
 # Singleton instance

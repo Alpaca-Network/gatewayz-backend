@@ -27,7 +27,7 @@ A production-ready, enterprise-grade FastAPI application that provides a unified
 - 💳 **Credit Management** - Flexible token-based billing with automatic deduction
 - 🛡️ **Enterprise Security** - Encrypted API key storage, IP allowlists, domain restrictions
 - 📊 **Rate Limiting** - Per-user and per-key rate limiting with Redis support
-- 🎁 **Free Trials** - 3-day free trials with $10 credits for new users
+- 🎁 **Free Trials** - 3-day free trials with $5 credits for new users
 - 💰 **Subscription Plans** - Flexible subscription management with Stripe integration
 - 💬 **Chat History** - Persistent chat session management with automatic history injection
 - 🎨 **Image Generation** - AI-powered image generation capabilities

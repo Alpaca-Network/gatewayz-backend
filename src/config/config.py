@@ -192,6 +192,9 @@ class Config:
     # Fal.ai Configuration
     FAL_API_KEY = os.environ.get("FAL_API_KEY")
 
+    # Resemble AI / Chatterbox TTS Configuration
+    RESEMBLE_API_KEY = os.environ.get("RESEMBLE_API_KEY")
+
     # Anannas Configuration
     ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
 

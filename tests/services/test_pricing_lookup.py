@@ -4,6 +4,10 @@ Comprehensive tests for Pricing Lookup service
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
+from src.services.pricing_lookup import (
+    enrich_model_with_pricing,
+    get_model_pricing,
+)
 
 
 class TestPricingLookup:
@@ -18,3 +22,706 @@ class TestPricingLookup:
         """Test module exports"""
         from src.services import pricing_lookup
         assert hasattr(pricing_lookup, '__name__')
+
+
+class TestEnrichModelWithPricing:
+    """Test enrich_model_with_pricing function"""
+
+    def test_enriches_model_with_zero_pricing(self):
+        """Models with zero pricing should be enriched with manual pricing"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once_with("test-gateway", "test-model")
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+            assert result["pricing_source"] == "manual"
+
+    def test_skips_enrichment_for_non_zero_pricing(self):
+        """Models with non-zero pricing should not be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0.001", "completion": "0.002"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_not_called()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+            assert "pricing_source" not in result
+
+    def test_handles_scientific_notation_pricing(self):
+        """Models with scientific notation pricing should not be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "1e-6", "completion": "2e-6"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_not_called()
+            assert result["pricing"] == {"prompt": "1e-6", "completion": "2e-6"}
+
+    def test_handles_float_zero_pricing(self):
+        """Models with float 0.0 pricing should be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": 0.0, "completion": 0.0},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_handles_string_zero_variations(self):
+        """Models with various zero string formats should be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0.00", "completion": "0.000"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_handles_no_pricing_field(self):
+        """Models without pricing field should be enriched"""
+        model_data = {
+            "id": "test-model",
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_handles_empty_pricing(self):
+        """Models with empty pricing dict should be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_handles_none_pricing_values(self):
+        """Models with None pricing values should be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": None, "completion": None},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_handles_empty_string_pricing(self):
+        """Models with empty string pricing values should be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "", "completion": ""},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_handles_missing_model_id(self):
+        """Models without id should be returned unchanged"""
+        model_data = {
+            "pricing": {"prompt": "0", "completion": "0"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_not_called()
+            assert result == model_data
+
+    def test_handles_no_manual_pricing_available(self):
+        """Models without manual pricing should keep original pricing"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0", "completion": "0"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = None
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0", "completion": "0"}
+            assert "pricing_source" not in result
+
+    def test_handles_mixed_zero_and_nonzero_pricing(self):
+        """Models with some non-zero values should not be enriched"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0", "completion": "0.001", "image": "0"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            mock_get_pricing.assert_not_called()
+            assert result["pricing"] == {"prompt": "0", "completion": "0.001", "image": "0"}
+
+    def test_handles_invalid_pricing_values(self):
+        """Models with invalid pricing values should be treated as zero"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "invalid", "completion": "not-a-number"},
+        }
+
+        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+            mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
+
+            result = enrich_model_with_pricing(model_data, "test-gateway")
+
+            # Invalid values should be treated as "not non-zero" (i.e., zero)
+            mock_get_pricing.assert_called_once()
+            assert result["pricing"] == {"prompt": "0.001", "completion": "0.002"}
+            assert result["pricing_source"] == "manual"
+
+
+class TestGetModelPricing:
+    """Test get_model_pricing function"""
+
+    def test_returns_pricing_for_existing_model(self):
+        """Should return pricing for model in manual pricing data"""
+        mock_pricing_data = {
+            "test-gateway": {
+                "test-model": {"prompt": "0.001", "completion": "0.002"}
+            }
+        }
+
+        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+            mock_load.return_value = mock_pricing_data
+
+            result = get_model_pricing("test-gateway", "test-model")
+
+            assert result == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_returns_none_for_missing_gateway(self):
+        """Should return None for unknown gateway"""
+        mock_pricing_data = {
+            "other-gateway": {
+                "test-model": {"prompt": "0.001", "completion": "0.002"}
+            }
+        }
+
+        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+            mock_load.return_value = mock_pricing_data
+
+            result = get_model_pricing("test-gateway", "test-model")
+
+            assert result is None
+
+    def test_returns_none_for_missing_model(self):
+        """Should return None for unknown model"""
+        mock_pricing_data = {
+            "test-gateway": {
+                "other-model": {"prompt": "0.001", "completion": "0.002"}
+            }
+        }
+
+        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+            mock_load.return_value = mock_pricing_data
+
+            result = get_model_pricing("test-gateway", "test-model")
+
+            assert result is None
+
+    def test_case_insensitive_gateway_match(self):
+        """Should match gateway case-insensitively"""
+        mock_pricing_data = {
+            "test-gateway": {
+                "test-model": {"prompt": "0.001", "completion": "0.002"}
+            }
+        }
+
+        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+            mock_load.return_value = mock_pricing_data
+
+            result = get_model_pricing("TEST-GATEWAY", "test-model")
+
+            assert result == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_case_insensitive_model_match(self):
+        """Should match model case-insensitively"""
+        mock_pricing_data = {
+            "test-gateway": {
+                "Test-Model": {"prompt": "0.001", "completion": "0.002"}
+            }
+        }
+
+        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+            mock_load.return_value = mock_pricing_data
+
+            result = get_model_pricing("test-gateway", "test-model")
+
+            assert result == {"prompt": "0.001", "completion": "0.002"}
+
+    def test_returns_none_for_empty_pricing_data(self):
+        """Should return None when no pricing data loaded"""
+        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+            mock_load.return_value = {}
+
+            result = get_model_pricing("test-gateway", "test-model")
+
+            assert result is None
+
+
+class TestGatewayProviders:
+    """Test GATEWAY_PROVIDERS constant"""
+
+    def test_gateway_providers_contains_expected_providers(self):
+        """Test that GATEWAY_PROVIDERS contains all expected gateway providers
+
+        Note: AiHubMix is NOT a gateway provider because their API exposes pricing directly
+        """
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        # AiHubMix has direct pricing API, so it's not in GATEWAY_PROVIDERS
+        assert "aihubmix" not in GATEWAY_PROVIDERS
+        assert "anannas" in GATEWAY_PROVIDERS
+        assert "helicone" in GATEWAY_PROVIDERS
+        assert "vercel-ai-gateway" in GATEWAY_PROVIDERS
+
+    def test_gateway_providers_is_set(self):
+        """Test that GATEWAY_PROVIDERS is a set for O(1) lookup"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert isinstance(GATEWAY_PROVIDERS, set)
+
+
+class TestCrossReferencePricing:
+    """Test cross-reference pricing functionality"""
+
+    def test_cross_reference_pricing_returns_none_when_catalog_building(self):
+        """Test that cross-reference returns None when catalog is building"""
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=True):
+            result = _get_cross_reference_pricing("gpt-4o")
+            assert result is None
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_returns_none_when_no_openrouter_models(self):
+        """Test that cross-reference returns None when OpenRouter cache is empty"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(models, "get_cached_models", return_value=None):
+                result = _get_cross_reference_pricing("gpt-4o")
+                assert result is None
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_finds_matching_model(self):
+        """Test that cross-reference finds pricing for matching model"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": "0.000005",
+                    "completion": "0.000015",
+                    "request": "0",
+                    "image": "0",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                result = _get_cross_reference_pricing("gpt-4o")
+                assert result is not None
+                assert result["prompt"] == "0.000005"
+                assert result["completion"] == "0.000015"
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_handles_provider_prefix(self):
+        """Test that cross-reference works with provider/model format"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        mock_openrouter_models = [
+            {
+                "id": "anthropic/claude-3-opus",
+                "pricing": {
+                    "prompt": "0.00001",
+                    "completion": "0.00003",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                result = _get_cross_reference_pricing("anthropic/claude-3-opus")
+                assert result is not None
+                assert result["prompt"] == "0.00001"
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_returns_none_for_unknown_model(self):
+        """Test that cross-reference returns None for models not in OpenRouter"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {"prompt": "0.000005", "completion": "0.000015"},
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                result = _get_cross_reference_pricing("unknown-model-xyz")
+                assert result is None
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_handles_versioned_model_ids(self):
+        """Test that cross-reference matches versioned OpenRouter model IDs"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # OpenRouter uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
+        mock_openrouter_models = [
+            {
+                "id": "anthropic/claude-3-opus-20240229",
+                "pricing": {
+                    "prompt": "0.00001",
+                    "completion": "0.00003",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                # Should match "claude-3-opus" to "claude-3-opus-20240229"
+                result = _get_cross_reference_pricing("claude-3-opus")
+                assert result is not None
+                assert result["prompt"] == "0.00001"
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_does_not_match_different_model_variants(self):
+        """Test that cross-reference does NOT match different model variants incorrectly"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # gpt-4o-mini should NOT match gpt-4o (different model entirely)
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": "0.000005",
+                    "completion": "0.000015",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                # gpt-4o-mini should NOT match openai/gpt-4o
+                result = _get_cross_reference_pricing("gpt-4o-mini")
+                assert result is None
+
+    @pytest.mark.integration
+    def test_cross_reference_pricing_matches_correct_model_with_variants(self):
+        """Test that cross-reference matches the correct model when variants exist"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # Both gpt-4o and gpt-4o-mini should match their correct models
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": "0.000005",
+                    "completion": "0.000015",
+                },
+            },
+            {
+                "id": "openai/gpt-4o-mini",
+                "pricing": {
+                    "prompt": "0.0000001",
+                    "completion": "0.0000004",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                # gpt-4o should get gpt-4o pricing
+                result_4o = _get_cross_reference_pricing("gpt-4o")
+                assert result_4o is not None
+                assert result_4o["prompt"] == "0.000005"
+
+                # gpt-4o-mini should get gpt-4o-mini pricing
+                result_mini = _get_cross_reference_pricing("gpt-4o-mini")
+                assert result_mini is not None
+                assert result_mini["prompt"] == "0.0000001"
+
+
+class TestEnrichModelWithPricingGatewayProviders:
+    """Test enrich_model_with_pricing for gateway providers"""
+
+    def test_gateway_provider_uses_cross_reference_pricing(self):
+        """Gateway provider should use cross-reference pricing when no manual pricing"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        mock_cross_ref = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=mock_cross_ref,
+            ):
+                # Use anannas as gateway provider since aihubmix now has direct pricing API
+                result = enrich_model_with_pricing(model_data, "anannas")
+                assert result is not None
+                assert result["pricing"] == mock_cross_ref
+                assert result["pricing_source"] == "cross-reference"
+
+    def test_gateway_provider_returns_none_when_no_pricing_and_not_building(self):
+        """Gateway provider should return None when no pricing found and not building catalog"""
+        model_data = {
+            "id": "unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "helicone")
+                    assert result is None
+
+    def test_gateway_provider_keeps_model_during_catalog_build(self):
+        """Gateway provider should keep model with zero pricing during catalog build"""
+        model_data = {
+            "id": "unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=True):
+                    result = enrich_model_with_pricing(model_data, "helicone")
+                    # During catalog build, should return model with zero pricing
+                    assert result is not None
+                    assert result["pricing"]["prompt"] == "0"
+
+    def test_gateway_provider_prefers_manual_pricing(self):
+        """Gateway provider should prefer manual pricing over cross-reference"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.00001", "completion": "0.00002"}
+        cross_ref_pricing = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=cross_ref_pricing,
+            ) as mock_cross:
+                result = enrich_model_with_pricing(model_data, "anannas")
+                assert result is not None
+                assert result["pricing"] == manual_pricing
+                assert result["pricing_source"] == "manual"
+                # Cross-reference should not be called when manual pricing exists
+                mock_cross.assert_not_called()
+
+    def test_non_gateway_provider_returns_model_without_pricing(self):
+        """Non-gateway provider should return model unchanged when no pricing found"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            result = enrich_model_with_pricing(model_data, "deepinfra")
+            assert result is not None
+            assert result == model_data
+            assert "pricing_source" not in result
+
+    def test_gateway_provider_with_existing_non_zero_pricing(self):
+        """Gateway provider with non-zero pricing should not be enriched"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0.001", "completion": "0.002"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_manual:
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing"
+            ) as mock_cross:
+                # Use anannas as gateway provider since aihubmix now has direct pricing API
+                result = enrich_model_with_pricing(model_data, "anannas")
+                assert result is not None
+                assert result["pricing"]["prompt"] == "0.001"
+                mock_manual.assert_not_called()
+                mock_cross.assert_not_called()
+
+    def test_gateway_provider_filters_on_exception(self):
+        """Gateway provider should return None on exception to prevent appearing free"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
+            # Use anannas as gateway provider since aihubmix now has direct pricing API
+            result = enrich_model_with_pricing(model_data, "anannas")
+            # Gateway provider should be filtered out on error
+            assert result is None
+
+    def test_non_gateway_provider_returns_model_on_exception(self):
+        """Non-gateway provider should return model data on exception"""
+        model_data = {
+            "id": "test-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
+            result = enrich_model_with_pricing(model_data, "deepinfra")
+            # Non-gateway provider should return model data even on error
+            assert result is not None
+            assert result["id"] == "test-model"
+
+
+class TestCrossReferencePricingNullHandling:
+    """Test null/None value handling in cross-reference pricing"""
+
+    @pytest.mark.integration
+    def test_cross_reference_handles_none_pricing_values(self):
+        """Cross-reference should handle None pricing values correctly"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        # OpenRouter model with None values in pricing
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": None,  # Explicitly None
+                    "completion": "0.000015",
+                    "request": None,
+                    "image": None,
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                result = _get_cross_reference_pricing("gpt-4o")
+                assert result is not None
+                # None values should be converted to "0"
+                assert result["prompt"] == "0"
+                assert result["completion"] == "0.000015"
+                assert result["request"] == "0"
+                assert result["image"] == "0"
+
+    @pytest.mark.integration
+    def test_cross_reference_handles_empty_string_pricing(self):
+        """Cross-reference should handle empty string pricing values correctly"""
+        pytest.importorskip("fastapi")  # Skip if fastapi not available
+        from src.services.pricing_lookup import _get_cross_reference_pricing
+        from src.services import models
+
+        mock_openrouter_models = [
+            {
+                "id": "openai/gpt-4o",
+                "pricing": {
+                    "prompt": "",  # Empty string
+                    "completion": "0.000015",
+                },
+            }
+        ]
+
+        with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+            with patch.object(
+                models, "get_cached_models",
+                return_value=mock_openrouter_models,
+            ):
+                result = _get_cross_reference_pricing("gpt-4o")
+                assert result is not None
+                # Empty string should be converted to "0"
+                assert result["prompt"] == "0"
+                assert result["completion"] == "0.000015"

@@ -790,3 +790,151 @@ class TestDatabaseHealth:
             # Clean up
             if 'sentry_sdk' in sys.modules:
                 del sys.modules['sentry_sdk']
+
+
+# =============================================================================
+# ADDITIONAL HEALTH ENDPOINTS TESTS
+# =============================================================================
+
+
+class TestHealthAllEndpoint:
+    """Test /health/all endpoint"""
+
+    @patch('src.routes.health.simple_health_cache')
+    @patch('src.config.supabase_config.get_initialization_status')
+    def test_get_all_health_success(self, mock_db_status, mock_cache, client, auth_headers):
+        """Successfully get all health information"""
+        mock_db_status.return_value = {
+            'initialized': True,
+            'has_error': False,
+        }
+
+        mock_cache.get_system_health.return_value = {
+            'status': 'healthy',
+            'uptime': 99.9,
+        }
+        mock_cache.get_providers_health.return_value = [
+            {'provider': 'openrouter', 'status': 'online'},
+            {'provider': 'portkey', 'status': 'degraded'},
+        ]
+        mock_cache.get_models_health.return_value = [
+            {'model': 'gpt-4', 'status': 'online'},
+        ]
+
+        response = client.get('/health/all', headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'success'
+        assert 'overall_status' in data
+        assert 'providers' in data
+        assert 'models' in data
+        assert 'database' in data
+
+    @patch('src.routes.health.simple_health_cache')
+    @patch('src.config.supabase_config.get_initialization_status')
+    def test_get_all_health_degraded(self, mock_db_status, mock_cache, client, auth_headers):
+        """Return degraded status when providers are unhealthy"""
+        mock_db_status.return_value = {'initialized': True, 'has_error': False}
+
+        mock_cache.get_system_health.return_value = None
+        mock_cache.get_providers_health.return_value = [
+            {'provider': 'openrouter', 'status': 'offline'},
+        ]
+        mock_cache.get_models_health.return_value = []
+
+        response = client.get('/health/all', headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['overall_status'] == 'degraded'
+
+
+class TestHealthModelsStatsEndpoint:
+    """Test /health/models/stats endpoint"""
+
+    @patch('src.routes.health.simple_health_cache')
+    def test_get_models_stats_success(self, mock_cache, client, auth_headers):
+        """Successfully get model health stats"""
+        mock_cache.get_models_health.return_value = [
+            {'model': 'gpt-4', 'status': 'online', 'provider': 'openai', 'avg_response_time_ms': 500},
+            {'model': 'gpt-3.5', 'status': 'healthy', 'provider': 'openai', 'avg_response_time_ms': 300},
+            {'model': 'claude-3', 'status': 'degraded', 'provider': 'anthropic', 'avg_response_time_ms': 800},
+        ]
+
+        response = client.get('/health/models/stats', headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'success'
+        assert 'stats' in data
+        assert data['stats']['total_models'] == 3
+        assert data['stats']['healthy_models'] == 2
+        assert data['stats']['degraded_models'] == 1
+        assert 'by_provider' in data
+        assert 'openai' in data['by_provider']
+        assert 'anthropic' in data['by_provider']
+
+    @patch('src.routes.health.simple_health_cache')
+    def test_get_models_stats_empty(self, mock_cache, client, auth_headers):
+        """Handle empty model health data"""
+        mock_cache.get_models_health.return_value = []
+
+        response = client.get('/health/models/stats', headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['stats']['total_models'] == 0
+        assert data['stats']['health_rate'] == 0
+
+
+class TestHealthProvidersStatsEndpoint:
+    """Test /health/providers/stats endpoint"""
+
+    @patch('src.routes.health.simple_health_cache')
+    def test_get_providers_stats_success(self, mock_cache, client, auth_headers):
+        """Successfully get provider health stats"""
+        mock_cache.get_providers_health.return_value = [
+            {
+                'provider': 'openrouter',
+                'status': 'online',
+                'total_models': 100,
+                'healthy_models': 95,
+                'overall_uptime': 99.5,
+                'avg_response_time_ms': 450,
+            },
+            {
+                'provider': 'portkey',
+                'status': 'degraded',
+                'total_models': 50,
+                'healthy_models': 40,
+                'overall_uptime': 95.0,
+                'avg_response_time_ms': 600,
+            },
+        ]
+
+        response = client.get('/health/providers/stats', headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'success'
+        assert 'stats' in data
+        assert data['stats']['total_providers'] == 2
+        assert data['stats']['healthy_providers'] == 1
+        assert data['stats']['degraded_providers'] == 1
+        assert data['stats']['total_models'] == 150
+        assert 'providers' in data
+        assert len(data['providers']) == 2
+
+    @patch('src.routes.health.simple_health_cache')
+    def test_get_providers_stats_empty(self, mock_cache, client, auth_headers):
+        """Handle empty provider health data"""
+        mock_cache.get_providers_health.return_value = []
+
+        response = client.get('/health/providers/stats', headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['stats']['total_providers'] == 0
+        assert data['stats']['health_rate'] == 0
+        assert data['stats']['avg_uptime'] == 0

@@ -40,7 +40,8 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "openrouter",
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
-FAILOVER_STATUS_CODES = {401, 403, 404, 502, 503, 504}
+# Include 402 (Payment Required) to allow failover when provider credits are exhausted
+FAILOVER_STATUS_CODES = {401, 402, 403, 404, 502, 503, 504}
 _OPENROUTER_SUFFIX_LOCKS = {"exacto", "free", "extended"}
 _OPENROUTER_PREFIX_LOCKS = ("openrouter/", "openai/", "anthropic/")
 

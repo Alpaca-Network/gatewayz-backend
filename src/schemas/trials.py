@@ -22,7 +22,7 @@ class TrialStatus(BaseModel):
     trial_used_requests: int = 0
     trial_max_tokens: int = 100000
     trial_max_requests: int = 1000
-    trial_credits: float = 10.00
+    trial_credits: float = 5.00
     trial_used_credits: float = 0.00
     trial_converted: bool = False
     subscription_status: SubscriptionStatus = SubscriptionStatus.TRIAL
@@ -31,7 +31,7 @@ class TrialStatus(BaseModel):
     trial_expired: bool = False
     trial_remaining_tokens: int = 0
     trial_remaining_requests: int = 0
-    trial_remaining_credits: float = 10.00
+    trial_remaining_credits: float = 5.00
 
 
 class TrialUsage(BaseModel):

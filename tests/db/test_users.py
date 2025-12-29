@@ -1,7 +1,7 @@
 import types
 import uuid
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timedelta, timezone
 
 # ---- In-memory Supabase stub ------------------------------------------------
 
@@ -35,6 +35,11 @@ class _BaseQuery:
         self._filters.append(("lt", field, value))
         return self
 
+    def in_(self, field, values):
+        """Support Supabase .in_() filter for batch lookups."""
+        self._filters.append(("in", field, values))
+        return self
+
     def order(self, field, desc=False):
         self._order = (field, desc)
         return self
@@ -56,6 +61,10 @@ class _BaseQuery:
                     return False
             elif op == "lt":
                 if as_iso(rv) >= as_iso(v):
+                    return False
+            elif op == "in":
+                # v is a list of values to match against
+                if rv not in v:
                     return False
         return True
 
@@ -265,7 +274,7 @@ def test_create_enhanced_user_creates_trial_and_primary(sb):
         username="alice",
         email="alice@example.com",
         auth_method="password",
-        credits=10,
+        credits=5,
     )
     # user row created, then api_key updated to primary
     users_rows = sb.tables["users"]
@@ -372,19 +381,103 @@ def test_admin_monitor_data(sb):
         {"id": 1, "credits": 10, "api_key": "a"},
         {"id": 2, "credits": 0, "api_key": "b"},
     ]).execute()
-    # usage
+    # activity_log (primary source for usage tracking)
     now = datetime.now(timezone.utc).isoformat()
     older = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-    sb.table("usage_records").insert([
-        {"api_key": "a", "model": "m1", "tokens_used": 100, "cost": 0.5, "timestamp": now},
-        {"api_key": "a", "model": "m1", "tokens_used": 50, "cost": 0.2, "timestamp": older},
-        {"api_key": "b", "model": "m2", "tokens_used": 10, "cost": 0.05, "timestamp": now},
+    sb.table("activity_log").insert([
+        {"user_id": 1, "model": "m1", "tokens": 100, "cost": 0.5, "timestamp": now},
+        {"user_id": 1, "model": "m1", "tokens": 50, "cost": 0.2, "timestamp": older},
+        {"user_id": 2, "model": "m2", "tokens": 10, "cost": 0.05, "timestamp": now},
     ]).execute()
 
     out = users.get_admin_monitor_data()
     assert out["total_users"] == 2
+    # total_requests is from activity_log count
     assert out["system_usage_metrics"]["total_requests"] == 3
+    # tokens_today only includes today's records (2 records: 100 + 10 = 110)
+    assert out["system_usage_metrics"]["tokens_today"] == 110
+    # total_tokens uses monthly data as proxy, which includes all 3 records in last 30 days
     assert out["system_usage_metrics"]["total_tokens"] == 160
+
+
+def test_admin_monitor_data_deduplication(sb):
+    """Test that duplicate records in activity_log and usage_records are correctly deduplicated.
+
+    This test verifies the fix for the composite key deduplication issue where user_id from
+    activity_log and api_key from usage_records were being used inconsistently, causing
+    the same event to be double-counted.
+    """
+    import src.db.users as users
+
+    # Setup users with api_keys
+    sb.table("users").insert([
+        {"id": 1, "credits": 10, "api_key": "api_key_user_1"},
+        {"id": 2, "credits": 5, "api_key": "api_key_user_2"},
+    ]).execute()
+
+    # Create timestamps
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Insert activity_log entries (primary source)
+    sb.table("activity_log").insert([
+        {"user_id": 1, "model": "gpt-4", "tokens": 100, "cost": 0.5, "timestamp": now},
+        {"user_id": 2, "model": "gpt-3.5", "tokens": 50, "cost": 0.1, "timestamp": now},
+    ]).execute()
+
+    # Insert the SAME events in usage_records (legacy table) with api_key instead of user_id
+    # This simulates the scenario where the same event exists in both tables
+    sb.table("usage_records").insert([
+        {"user_id": 1, "api_key": "api_key_user_1", "model": "gpt-4", "tokens_used": 100, "cost": 0.5, "timestamp": now},
+        {"user_id": 2, "api_key": "api_key_user_2", "model": "gpt-3.5", "tokens_used": 50, "cost": 0.1, "timestamp": now},
+    ]).execute()
+
+    out = users.get_admin_monitor_data()
+
+    # With proper deduplication, we should only count each event once
+    # tokens_today should be 100 + 50 = 150 (not 300 from double-counting)
+    assert out["system_usage_metrics"]["tokens_today"] == 150, (
+        f"Expected 150 tokens (no double-counting), got {out['system_usage_metrics']['tokens_today']}"
+    )
+
+    # Cost should also not be double-counted
+    assert out["system_usage_metrics"]["cost_today"] == pytest.approx(0.6), (
+        f"Expected 0.6 cost (no double-counting), got {out['system_usage_metrics']['cost_today']}"
+    )
+
+
+def test_admin_monitor_data_deduplication_api_key_only(sb):
+    """Test deduplication when legacy records only have api_key (no user_id).
+
+    This is a critical edge case where legacy usage_records may not have user_id populated,
+    so deduplication must correctly use the api_key_to_user_id mapping.
+    """
+    import src.db.users as users
+
+    # Setup users with api_keys
+    sb.table("users").insert([
+        {"id": 1, "credits": 10, "api_key": "api_key_user_1"},
+    ]).execute()
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Insert activity_log entry
+    sb.table("activity_log").insert([
+        {"user_id": 1, "model": "claude-3", "tokens": 200, "cost": 1.0, "timestamp": now},
+    ]).execute()
+
+    # Insert the SAME event in usage_records but WITHOUT user_id (only api_key)
+    # This simulates older legacy records that only tracked by api_key
+    sb.table("usage_records").insert([
+        {"api_key": "api_key_user_1", "model": "claude-3", "tokens_used": 200, "cost": 1.0, "timestamp": now},
+    ]).execute()
+
+    out = users.get_admin_monitor_data()
+
+    # With proper deduplication via api_key_to_user_id mapping, should count once
+    assert out["system_usage_metrics"]["tokens_today"] == 200, (
+        f"Expected 200 tokens (no double-counting), got {out['system_usage_metrics']['tokens_today']}"
+    )
+
 
 def test_update_and_get_user_profile(sb):
     import src.db.users as users

@@ -484,9 +484,9 @@ async def _get_intelligent_monitor_summary() -> dict:
         try:
             models_response = (
                 supabase.table("model_health_tracking")
-                .select("model, provider, gateway, current_status, last_check_at, response_time_ms")
+                .select("model, provider, gateway, last_status, last_called_at, last_response_time_ms")
                 .eq("is_enabled", True)
-                .order("last_check_at", desc=True)
+                .order("last_called_at", desc=True)
                 .limit(100)
                 .execute()
             )
@@ -510,7 +510,7 @@ async def _get_intelligent_monitor_summary() -> dict:
         # Calculate summary stats from sample
         status_counts = {}
         for model in models_data:
-            status = model.get("current_status", "unknown")
+            status = model.get("last_status", "unknown")
             status_counts[status] = status_counts.get(status, 0) + 1
 
         return {
