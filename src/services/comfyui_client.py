@@ -185,6 +185,20 @@ class ComfyUIClient:
         """
         workflow = json.loads(json.dumps(workflow))  # Deep copy
 
+        # First pass: identify which CLIPTextEncode nodes are for negative prompts
+        # by checking if they connect to KSampler's "negative" input
+        negative_prompt_nodes: set[str] = set()
+        for node_id, node in workflow.items():
+            if not isinstance(node, dict):
+                continue
+            class_type = node.get("class_type", "")
+            if class_type in ["KSampler", "KSamplerAdvanced"]:
+                inputs = node.get("inputs", {})
+                # Check negative input - it's usually a list like ["node_id", output_index]
+                negative_input = inputs.get("negative")
+                if isinstance(negative_input, list) and len(negative_input) >= 1:
+                    negative_prompt_nodes.add(str(negative_input[0]))
+
         for node_id, node in workflow.items():
             if not isinstance(node, dict):
                 continue
@@ -192,18 +206,16 @@ class ComfyUIClient:
             class_type = node.get("class_type", "")
             inputs = node.get("inputs", {})
 
-            # Text prompt nodes
+            # Text prompt nodes - inject positive or negative based on connection analysis
             if class_type in ["CLIPTextEncode", "CLIPTextEncodeSDXL"]:
-                if "text" in inputs and request.prompt:
-                    # Check if this is positive or negative prompt based on node connections
-                    # For simplicity, update first occurrence with prompt, second with negative
-                    if request.prompt and inputs.get("text", "").strip() == "":
+                if node_id in negative_prompt_nodes:
+                    # This is a negative prompt node
+                    if request.negative_prompt and "text" in inputs:
+                        inputs["text"] = request.negative_prompt
+                else:
+                    # This is a positive prompt node
+                    if request.prompt and "text" in inputs:
                         inputs["text"] = request.prompt
-
-            # Negative prompt (usually connected to negative conditioning)
-            if class_type == "CLIPTextEncode" and request.negative_prompt:
-                # This is a simplified approach - in practice you'd trace connections
-                pass
 
             # KSampler nodes
             if class_type in ["KSampler", "KSamplerAdvanced"]:

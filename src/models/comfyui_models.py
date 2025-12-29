@@ -48,6 +48,20 @@ class ComfyUIWorkflowTemplate(BaseModel):
     updated_at: datetime | None = None
 
 
+class ComfyUIOutput(BaseModel):
+    """Individual output from ComfyUI execution"""
+    type: Literal["image", "video", "audio", "text"]
+    url: str | None = None
+    b64_data: str | None = None
+    filename: str | None = None
+    content_type: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_seconds: float | None = None  # For video/audio
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None  # Error message if output failed
+
+
 class ComfyUIExecutionRequest(BaseModel):
     """Request to execute a ComfyUI workflow"""
     model_config = ConfigDict(protected_namespaces=(), extra="allow")
@@ -91,25 +105,12 @@ class ComfyUIExecutionResponse(BaseModel):
     completed_at: datetime | None = None
 
     # Results (populated when completed)
-    outputs: list[dict[str, Any]] = Field(default_factory=list)  # Generated images/videos
+    outputs: list[ComfyUIOutput] = Field(default_factory=list)  # Generated images/videos
     error: str | None = None
 
     # Usage info
     credits_charged: int | None = None
     execution_time_ms: int | None = None
-
-
-class ComfyUIOutput(BaseModel):
-    """Individual output from ComfyUI execution"""
-    type: Literal["image", "video", "audio", "text"]
-    url: str | None = None
-    b64_data: str | None = None
-    filename: str | None = None
-    content_type: str | None = None
-    width: int | None = None
-    height: int | None = None
-    duration_seconds: float | None = None  # For video/audio
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ComfyUIProgressUpdate(BaseModel):
