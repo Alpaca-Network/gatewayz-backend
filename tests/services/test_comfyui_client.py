@@ -15,18 +15,13 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
-from datetime import datetime, timezone
 
 from src.services.comfyui_client import (
     ComfyUIClient,
     get_comfyui_client,
     close_comfyui_client,
 )
-from src.models.comfyui_models import (
-    ComfyUIExecutionRequest,
-    ExecutionStatus,
-    WorkflowType,
-)
+from src.models.comfyui_models import ComfyUIExecutionRequest
 
 
 # ============================================================

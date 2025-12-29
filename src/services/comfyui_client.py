@@ -22,8 +22,10 @@ from src.config import Config
 from src.models.comfyui_models import (
     ComfyUIExecutionRequest,
     ComfyUIExecutionResponse,
+    ComfyUIProgressUpdate,
     ComfyUIServerStatus,
     ExecutionStatus,
+    WorkflowType,
 )
 
 logger = logging.getLogger(__name__)
@@ -571,6 +573,11 @@ class ComfyUIClient:
                             filename = gif.get("filename")
                             subfolder = gif.get("subfolder", "")
 
+                            # Skip if filename is missing
+                            if not filename:
+                                logger.warning("Video output missing filename, skipping")
+                                continue
+
                             output_list.append({
                                 "type": "video",
                                 "filename": filename,
@@ -611,14 +618,24 @@ class ComfyUIClient:
 
         client = await self._get_http_client()
 
-        # Delete from queue
+        # First check if this prompt is currently running
+        queue_response = await client.get(f"{self.server_url}/queue")
+        if queue_response.status_code == 200:
+            queue_data = queue_response.json()
+            running_prompts = queue_data.get("queue_running", [])
+            is_running = any(
+                item[1] == prompt_id for item in running_prompts
+            )
+
+            # Only interrupt if our prompt is the one running
+            if is_running:
+                await client.post(f"{self.server_url}/interrupt")
+
+        # Delete from queue (handles both queued and completed states)
         response = await client.post(
             f"{self.server_url}/queue",
             json={"delete": [prompt_id]}
         )
-
-        # Also try to interrupt current execution
-        await client.post(f"{self.server_url}/interrupt")
 
         return response.status_code == 200
 

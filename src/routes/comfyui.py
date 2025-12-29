@@ -343,6 +343,7 @@ async def execute_workflow_stream(
                 yield {
                     "event": "error",
                     "data": json.dumps({
+                        "execution_id": prompt_id,
                         "status": "failed",
                         "error": "Workflow execution failed"
                     })
@@ -382,11 +383,29 @@ async def execute_workflow_stream(
                             "url": f"{client.server_url}/view?filename={gif.get('filename')}&type=output"
                         })
 
-                # Deduct credits
+                # Deduct credits and record usage
                 try:
                     await loop.run_in_executor(None, deduct_credits, api_key, credits_cost)
+
+                    # Record usage (consistent with non-streaming endpoint)
+                    cost = credits_cost * 0.02 / 1000  # Approximate cost
+                    wf_type = workflow_type.value if workflow_type else "custom"
+                    await loop.run_in_executor(
+                        None,
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        f"comfyui:{wf_type}",
+                        credits_cost,
+                        cost,
+                        int(elapsed * 1000),
+                    )
+
+                    # Increment API key usage
+                    await loop.run_in_executor(None, increment_api_key_usage, api_key)
+
                 except Exception as e:
-                    logger.error(f"Failed to deduct credits: {e}")
+                    logger.error(f"Failed to process billing: {e}")
 
                 yield {
                     "event": "complete",
@@ -401,6 +420,7 @@ async def execute_workflow_stream(
                 yield {
                     "event": "error",
                     "data": json.dumps({
+                        "execution_id": prompt_id,
                         "status": "failed",
                         "error": "No results returned from ComfyUI"
                     })
@@ -408,9 +428,12 @@ async def execute_workflow_stream(
 
         except Exception as e:
             logger.error(f"Streaming execution error: {e}", exc_info=True)
+            # Use prompt_id if available, otherwise indicate unknown
+            exec_id = prompt_id if 'prompt_id' in dir() else None
             yield {
                 "event": "error",
                 "data": json.dumps({
+                    "execution_id": exec_id,
                     "status": "failed",
                     "error": str(e)
                 })
