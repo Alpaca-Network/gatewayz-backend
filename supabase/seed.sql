@@ -12,45 +12,61 @@
 SET search_path TO public;
 
 -- =============================================================================
--- PROVIDERS
+-- PROVIDERS (only if table exists)
 -- =============================================================================
-INSERT INTO providers (name, slug, description, base_url, is_active, supports_streaming, supports_function_calling, supports_vision, health_status)
-VALUES
-    ('OpenRouter', 'openrouter', 'OpenRouter AI inference provider', 'https://openrouter.ai/api/v1', true, true, true, true, 'healthy'),
-    ('Portkey', 'portkey', 'Portkey gateway integration', 'https://api.portkey.ai/v1', true, true, true, true, 'healthy'),
-    ('Featherless', 'featherless', 'Featherless AI provider', 'https://api.featherless.ai/v1', true, true, false, false, 'healthy'),
-    ('DeepInfra', 'deepinfra', 'DeepInfra inference provider', 'https://api.deepinfra.com/v1', true, true, false, false, 'healthy'),
-    ('Fireworks AI', 'fireworks', 'Fireworks AI provider', 'https://api.fireworks.ai/inference/v1', true, true, true, false, 'healthy'),
-    ('Together AI', 'together', 'Together AI provider', 'https://api.together.xyz/v1', true, true, true, false, 'healthy'),
-    ('HuggingFace', 'huggingface', 'HuggingFace inference API', 'https://api-inference.huggingface.co', true, true, false, false, 'healthy')
-ON CONFLICT (slug) DO UPDATE SET
-    name = EXCLUDED.name,
-    description = EXCLUDED.description,
-    base_url = EXCLUDED.base_url,
-    is_active = EXCLUDED.is_active,
-    supports_streaming = EXCLUDED.supports_streaming,
-    supports_function_calling = EXCLUDED.supports_function_calling,
-    supports_vision = EXCLUDED.supports_vision,
-    health_status = EXCLUDED.health_status;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'providers') THEN
+        INSERT INTO providers (name, slug, description, base_url, is_active, supports_streaming, supports_function_calling, supports_vision, health_status)
+        VALUES
+            ('OpenRouter', 'openrouter', 'OpenRouter AI inference provider', 'https://openrouter.ai/api/v1', true, true, true, true, 'healthy'),
+            ('Portkey', 'portkey', 'Portkey gateway integration', 'https://api.portkey.ai/v1', true, true, true, true, 'healthy'),
+            ('Featherless', 'featherless', 'Featherless AI provider', 'https://api.featherless.ai/v1', true, true, false, false, 'healthy'),
+            ('DeepInfra', 'deepinfra', 'DeepInfra inference provider', 'https://api.deepinfra.com/v1', true, true, false, false, 'healthy'),
+            ('Fireworks AI', 'fireworks', 'Fireworks AI provider', 'https://api.fireworks.ai/inference/v1', true, true, true, false, 'healthy'),
+            ('Together AI', 'together', 'Together AI provider', 'https://api.together.xyz/v1', true, true, true, false, 'healthy'),
+            ('HuggingFace', 'huggingface', 'HuggingFace inference API', 'https://api-inference.huggingface.co', true, true, false, false, 'healthy')
+        ON CONFLICT (slug) DO UPDATE SET
+            name = EXCLUDED.name,
+            description = EXCLUDED.description,
+            base_url = EXCLUDED.base_url,
+            is_active = EXCLUDED.is_active,
+            supports_streaming = EXCLUDED.supports_streaming,
+            supports_function_calling = EXCLUDED.supports_function_calling,
+            supports_vision = EXCLUDED.supports_vision,
+            health_status = EXCLUDED.health_status;
+        RAISE NOTICE 'Seeded providers table';
+    ELSE
+        RAISE NOTICE 'Skipping providers table (does not exist)';
+    END IF;
+END $$;
 
 -- =============================================================================
--- SUBSCRIPTION PLANS
+-- SUBSCRIPTION PLANS (only if table exists)
 -- =============================================================================
-INSERT INTO plans (name, description, price_per_month, daily_request_limit, daily_token_limit, monthly_request_limit, monthly_token_limit, features, is_active, max_concurrent_requests)
-VALUES
-    ('Free', 'Free tier with limited usage', 0.00, 100, 10000, 1000, 100000, '["Basic models", "Community support"]'::jsonb, true, 2),
-    ('Pro', 'Professional tier for developers', 29.00, 1000, 100000, 30000, 3000000, '["All models", "Priority support", "API analytics"]'::jsonb, true, 10),
-    ('Enterprise', 'Enterprise tier with unlimited access', 99.00, 10000, 1000000, 300000, 30000000, '["All models", "24/7 support", "SLA", "Custom integrations"]'::jsonb, true, 50)
-ON CONFLICT (name) DO UPDATE SET
-    description = EXCLUDED.description,
-    price_per_month = EXCLUDED.price_per_month,
-    daily_request_limit = EXCLUDED.daily_request_limit,
-    daily_token_limit = EXCLUDED.daily_token_limit,
-    monthly_request_limit = EXCLUDED.monthly_request_limit,
-    monthly_token_limit = EXCLUDED.monthly_token_limit,
-    features = EXCLUDED.features,
-    is_active = EXCLUDED.is_active,
-    max_concurrent_requests = EXCLUDED.max_concurrent_requests;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'plans') THEN
+        INSERT INTO plans (name, description, price_per_month, daily_request_limit, daily_token_limit, monthly_request_limit, monthly_token_limit, features, is_active, max_concurrent_requests)
+        VALUES
+            ('Free', 'Free tier with limited usage', 0.00, 100, 10000, 1000, 100000, '["Basic models", "Community support"]'::jsonb, true, 2),
+            ('Pro', 'Professional tier for developers', 29.00, 1000, 100000, 30000, 3000000, '["All models", "Priority support", "API analytics"]'::jsonb, true, 10),
+            ('Enterprise', 'Enterprise tier with unlimited access', 99.00, 10000, 1000000, 300000, 30000000, '["All models", "24/7 support", "SLA", "Custom integrations"]'::jsonb, true, 50)
+        ON CONFLICT (name) DO UPDATE SET
+            description = EXCLUDED.description,
+            price_per_month = EXCLUDED.price_per_month,
+            daily_request_limit = EXCLUDED.daily_request_limit,
+            daily_token_limit = EXCLUDED.daily_token_limit,
+            monthly_request_limit = EXCLUDED.monthly_request_limit,
+            monthly_token_limit = EXCLUDED.monthly_token_limit,
+            features = EXCLUDED.features,
+            is_active = EXCLUDED.is_active,
+            max_concurrent_requests = EXCLUDED.max_concurrent_requests;
+        RAISE NOTICE 'Seeded plans table';
+    ELSE
+        RAISE NOTICE 'Skipping plans table (does not exist)';
+    END IF;
+END $$;
 
 -- =============================================================================
 -- TEST USERS
