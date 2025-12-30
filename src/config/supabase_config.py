@@ -86,6 +86,13 @@ def get_supabase_client() -> Client:
             max_conn, keepalive_conn = 100, 30
             logger.info("Using container-optimized connection pool settings")
 
+        # Configure transport with retry for transient connection errors
+        # Use shorter keepalive to prevent stale HTTP/2 connections causing SSL EOF errors
+        transport = httpx.HTTPTransport(
+            retries=2,  # Retry transient network errors
+            http2=True,  # Enable HTTP/2 for connection multiplexing
+        )
+
         httpx_client = httpx.Client(
             base_url=postgrest_base_url,
             headers={
@@ -96,9 +103,9 @@ def get_supabase_client() -> Client:
             limits=httpx.Limits(
                 max_connections=max_conn,
                 max_keepalive_connections=keepalive_conn,
-                keepalive_expiry=60.0,  # 60s to reduce connection churn
+                keepalive_expiry=30.0,  # Reduced from 60s to 30s to avoid stale HTTP/2 connections
             ),
-            http2=True,  # Enable HTTP/2 for connection multiplexing
+            transport=transport,
         )
 
         _supabase_client = create_client(

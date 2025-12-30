@@ -65,8 +65,15 @@ def _parse_trial_end_utc(s: str) -> datetime:
     return dt
 
 
-def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
-    """Internal function: Validate trial access from database (no caching)"""
+def _validate_trial_access_uncached(api_key: str, retry_count: int = 0) -> dict[str, Any]:
+    """Internal function: Validate trial access from database (no caching)
+
+    Args:
+        api_key: The API key to validate
+        retry_count: Number of retries attempted (for internal use)
+    """
+    MAX_RETRIES = 2
+
     try:
         client = get_supabase_client()
 
@@ -190,6 +197,29 @@ def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
         }
 
     except Exception as e:
+        error_str = str(e)
+
+        # Check for transient SSL/connection errors that may benefit from retry
+        is_transient_error = any(
+            msg in error_str
+            for msg in [
+                "EOF occurred in violation of protocol",
+                "Connection reset",
+                "Connection refused",
+                "timed out",
+                "ConnectionError",
+            ]
+        )
+
+        if is_transient_error and retry_count < MAX_RETRIES:
+            logger.warning(
+                f"Transient error validating trial access (attempt {retry_count + 1}/{MAX_RETRIES}): {e}"
+            )
+            # Brief pause before retry to allow connection to reset
+            import time
+            time.sleep(0.1 * (retry_count + 1))  # 0.1s, 0.2s backoff
+            return _validate_trial_access_uncached(api_key, retry_count + 1)
+
         logger.error(f"Error validating trial access: {e}")
         import traceback
 
