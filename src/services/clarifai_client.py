@@ -24,6 +24,7 @@ from src.cache import _clarifai_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_clarifai_pooled_client
+from src.services.pricing_lookup import enrich_model_with_pricing
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -180,6 +181,7 @@ def fetch_models_from_clarifai():
 
         # Transform to our standard format
         transformed_models = []
+        filtered_count = 0
         for model in models:
             model_id = getattr(model, "id", "") or ""
             context_length = getattr(model, "context_length", None) or getattr(model, "context_window", 4096)
@@ -204,9 +206,28 @@ def fetch_models_from_clarifai():
                 "provider_slug": "clarifai",
                 "source_gateway": "clarifai",
             }
-            transformed_models.append(transformed_model)
+            # Enrich with manual pricing if available; filter out models without valid pricing
+            enriched_model = enrich_model_with_pricing(transformed_model, "clarifai")
+            if enriched_model is None:
+                logger.debug(f"Filtering out Clarifai model {model_id} - no pricing available")
+                filtered_count += 1
+                continue
 
-        logger.info(f"Successfully fetched {len(transformed_models)} models from Clarifai")
+            # Additional check: filter models that still have zero pricing after enrichment
+            pricing = enriched_model.get("pricing", {})
+            try:
+                prompt_price = float(pricing.get("prompt", "0") or "0")
+                completion_price = float(pricing.get("completion", "0") or "0")
+                if prompt_price == 0 and completion_price == 0:
+                    logger.debug(f"Filtering out Clarifai model {model_id} - zero pricing after enrichment")
+                    filtered_count += 1
+                    continue
+            except (ValueError, TypeError):
+                pass  # Keep model if we can't parse pricing
+
+            transformed_models.append(enriched_model)
+
+        logger.info(f"Successfully fetched {len(transformed_models)} models from Clarifai ({filtered_count} filtered for missing/zero pricing)")
         return _cache_and_return(transformed_models)
 
     except Exception as e:

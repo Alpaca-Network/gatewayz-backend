@@ -322,7 +322,9 @@ class TestGatewayProviders:
         assert "aihubmix" in GATEWAY_PROVIDERS
         assert "alibaba-cloud" in GATEWAY_PROVIDERS
         assert "anannas" in GATEWAY_PROVIDERS
+        assert "clarifai" in GATEWAY_PROVIDERS
         assert "helicone" in GATEWAY_PROVIDERS
+        assert "onerouter" in GATEWAY_PROVIDERS
         assert "vercel-ai-gateway" in GATEWAY_PROVIDERS
 
     def test_gateway_providers_is_set(self):
@@ -663,6 +665,104 @@ class TestEnrichModelWithPricingGatewayProviders:
             # Non-gateway provider should return model data even on error
             assert result is not None
             assert result["id"] == "test-model"
+
+
+class TestGatewayProviderZeroPricingFiltering:
+    """Test that gateway providers filter out models with zero cross-reference pricing"""
+
+    def test_gateway_provider_filters_zero_cross_reference_pricing(self):
+        """Gateway provider should filter out models with zero cross-reference pricing"""
+        model_data = {
+            "id": "some-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Cross-reference returns zero pricing (model is free on OpenRouter)
+        zero_cross_ref = {"prompt": "0", "completion": "0", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=zero_cross_ref,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    # Test with aihubmix as a gateway provider
+                    result = enrich_model_with_pricing(model_data, "aihubmix")
+                    # Should be filtered out because cross-reference pricing is zero
+                    assert result is None
+
+    def test_gateway_provider_accepts_nonzero_cross_reference_pricing(self):
+        """Gateway provider should accept models with non-zero cross-reference pricing"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Cross-reference returns non-zero pricing
+        nonzero_cross_ref = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=nonzero_cross_ref,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "helicone")
+                    assert result is not None
+                    assert result["pricing"] == nonzero_cross_ref
+                    assert result["pricing_source"] == "cross-reference"
+
+    def test_gateway_provider_filters_zero_string_variants(self):
+        """Gateway provider should filter zero pricing in various formats"""
+        model_data = {
+            "id": "some-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Various zero formats
+        zero_variants = {"prompt": "0.0", "completion": "0.00", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=zero_variants,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "anannas")
+                    # Should be filtered out because all pricing values are zero
+                    assert result is None
+
+    def test_gateway_provider_accepts_partial_nonzero_pricing(self):
+        """Gateway provider should accept models with at least one non-zero prompt/completion"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Only completion is non-zero
+        partial_pricing = {"prompt": "0", "completion": "0.000015", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=partial_pricing,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "vercel-ai-gateway")
+                    assert result is not None
+                    assert result["pricing"]["completion"] == "0.000015"
+
+    def test_clarifai_in_gateway_providers(self):
+        """Test that clarifai is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "clarifai" in GATEWAY_PROVIDERS
+
+    def test_onerouter_in_gateway_providers(self):
+        """Test that onerouter is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "onerouter" in GATEWAY_PROVIDERS
 
 
 class TestCrossReferencePricingNullHandling:
