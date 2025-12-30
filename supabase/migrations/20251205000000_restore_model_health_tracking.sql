@@ -18,33 +18,38 @@ CREATE TABLE IF NOT EXISTS model_health_tracking (
     last_error_message TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    -- Token tracking columns (from 20251124120000_add_token_tracking_to_health.sql)
-    input_tokens INTEGER,
-    output_tokens INTEGER,
-    total_tokens INTEGER,
-    -- Enhanced monitoring columns (from 20251128000000_enhance_model_health_tracking.sql)
-    gateway TEXT,
-    monitoring_tier TEXT DEFAULT 'standard',
-    uptime_percentage_24h NUMERIC DEFAULT 100.0,
-    uptime_percentage_7d NUMERIC DEFAULT 100.0,
-    uptime_percentage_30d NUMERIC DEFAULT 100.0,
-    last_incident_at TIMESTAMP WITH TIME ZONE,
-    consecutive_failures INTEGER DEFAULT 0,
-    consecutive_successes INTEGER DEFAULT 0,
-    circuit_breaker_state TEXT DEFAULT 'closed',
-    last_check_duration_ms NUMERIC,
-    priority_score NUMERIC DEFAULT 0,
-    usage_count_24h INTEGER DEFAULT 0,
-    usage_count_7d INTEGER DEFAULT 0,
-    usage_count_30d INTEGER DEFAULT 0,
-    last_success_at TIMESTAMP WITH TIME ZONE,
-    last_failure_at TIMESTAMP WITH TIME ZONE,
-    next_check_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    check_interval_seconds INTEGER DEFAULT 3600,
-    is_enabled BOOLEAN DEFAULT TRUE,
-    metadata JSONB DEFAULT '{}'::jsonb,
     PRIMARY KEY (provider, model)
 );
+
+-- Add token tracking columns if they don't exist
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS total_tokens INTEGER;
+
+-- Add enhanced monitoring columns if they don't exist
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS gateway TEXT;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS monitoring_tier TEXT DEFAULT 'standard';
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS uptime_percentage_24h NUMERIC DEFAULT 100.0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS uptime_percentage_7d NUMERIC DEFAULT 100.0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS uptime_percentage_30d NUMERIC DEFAULT 100.0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_incident_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS consecutive_successes INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS circuit_breaker_state TEXT DEFAULT 'closed';
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_check_duration_ms NUMERIC;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS priority_score NUMERIC DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS usage_count_24h INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS usage_count_7d INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS usage_count_30d INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS check_interval_seconds INTEGER DEFAULT 3600;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT TRUE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
+-- Original CREATE TABLE removed since we now use ALTER TABLE ADD COLUMN IF NOT EXISTS above
+-- This ensures the table is created with basic columns first, then extended
 
 -- Create indexes for model_health_tracking
 CREATE INDEX IF NOT EXISTS idx_model_health_last_called
@@ -282,7 +287,7 @@ SELECT
     (SELECT COUNT(*) FROM model_health_incidents mhi
      WHERE mhi.provider = mht.provider
        AND mhi.model = mht.model
-       AND mhi.status = 'active') as active_incidents
+       AND mhi.status = 'active') as active_incidents_count
 FROM model_health_tracking mht
 WHERE mht.is_enabled = TRUE;
 
@@ -304,13 +309,15 @@ GRANT SELECT ON model_status_current TO anon;
 -- Enable RLS on model_health_tracking
 ALTER TABLE model_health_tracking ENABLE ROW LEVEL SECURITY;
 
--- Create policies
+-- Create policies (drop first to make idempotent)
+DROP POLICY IF EXISTS "Authenticated users can read model health" ON model_health_tracking;
 CREATE POLICY "Authenticated users can read model health"
     ON model_health_tracking
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Service role can do anything on model health" ON model_health_tracking;
 CREATE POLICY "Service role can do anything on model health"
     ON model_health_tracking
     FOR ALL
@@ -321,12 +328,14 @@ CREATE POLICY "Service role can do anything on model health"
 -- Enable RLS on model_health_incidents
 ALTER TABLE model_health_incidents ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users can read incidents" ON model_health_incidents;
 CREATE POLICY "Authenticated users can read incidents"
     ON model_health_incidents
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Service role can do anything on incidents" ON model_health_incidents;
 CREATE POLICY "Service role can do anything on incidents"
     ON model_health_incidents
     FOR ALL
@@ -337,12 +346,14 @@ CREATE POLICY "Service role can do anything on incidents"
 -- Enable RLS on model_health_history
 ALTER TABLE model_health_history ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users can read health history" ON model_health_history;
 CREATE POLICY "Authenticated users can read health history"
     ON model_health_history
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Service role can do anything on health history" ON model_health_history;
 CREATE POLICY "Service role can do anything on health history"
     ON model_health_history
     FOR ALL
