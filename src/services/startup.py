@@ -230,6 +230,34 @@ async def lifespan(app):
 
         _create_background_task(init_error_monitoring_background(), name="init_error_monitoring")
 
+        # Initialize health score aggregation in background
+        # This recalculates provider health scores every minute from aggregated metrics
+        # to eliminate volatility from per-request delta updates
+        async def init_health_score_aggregation():
+            try:
+                from src.services.redis_metrics import get_redis_metrics
+
+                async def health_aggregation_loop():
+                    """Recalculate health scores every minute"""
+                    redis_metrics = get_redis_metrics()
+                    while True:
+                        try:
+                            await redis_metrics._recalculate_all_health_scores()
+                            await asyncio.sleep(60)  # Recalculate every minute
+                        except asyncio.CancelledError:
+                            logger.info("Health score aggregation task cancelled")
+                            break
+                        except Exception as e:
+                            logger.warning(f"Health score aggregation error: {e}")
+                            await asyncio.sleep(60)  # Retry after delay
+
+                _create_background_task(health_aggregation_loop(), name="health_score_aggregation")
+                logger.info("✓ Health score aggregation (metrics caching) started (1min interval)")
+            except Exception as e:
+                logger.warning(f"Health score aggregation initialization warning: {e}")
+
+        _create_background_task(init_health_score_aggregation(), name="init_health_score_aggregation")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
