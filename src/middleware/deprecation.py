@@ -78,8 +78,9 @@ class DeprecationMiddleware(BaseHTTPMiddleware):
                 f"Sunset: {deprecation_info['sunset_date']}"
             )
 
-            # Log deprecation usage (can be used for tracking)
-            logger.info(
+            # Log deprecation usage at debug level to reduce log noise
+            # The deprecation headers on responses provide sufficient notification to clients
+            logger.debug(
                 f"Deprecated endpoint used: {path} by {request.client.host if request.client else 'unknown'}"
             )
 
