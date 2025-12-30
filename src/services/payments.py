@@ -145,6 +145,60 @@ class StripeService:
 
         return None
 
+    def _resolve_tier_from_subscription(self, subscription: Any, metadata_tier: str | None) -> tuple[str, str | None]:
+        """
+        Resolve the subscription tier from metadata or subscription items.
+
+        Args:
+            subscription: Stripe subscription object
+            metadata_tier: Tier value from subscription metadata (may be None or "basic")
+
+        Returns:
+            Tuple of (tier, product_id) where tier is guaranteed to be non-None
+        """
+        tier = metadata_tier
+        product_id = None
+
+        # If tier is missing or defaulted to basic, try to determine from subscription items
+        if not tier or tier == "basic":
+            items = self._get_stripe_object_value(subscription, "items")
+            if items:
+                items_data = self._get_stripe_object_value(items, "data")
+                if items_data and len(items_data) > 0:
+                    first_item = items_data[0]
+                    price = self._get_stripe_object_value(first_item, "price")
+                    if price:
+                        item_product_id = self._get_stripe_object_value(price, "product")
+                        if item_product_id:
+                            # Store product_id for logging even if tier lookup fails
+                            product_id = item_product_id
+                            looked_up_tier = get_tier_from_product_id(item_product_id)
+                            if looked_up_tier and looked_up_tier != "basic":
+                                logger.info(
+                                    f"Resolved tier '{looked_up_tier}' from subscription item product_id={item_product_id}"
+                                )
+                                tier = looked_up_tier
+                            else:
+                                logger.warning(
+                                    f"Product {item_product_id} not found in subscription_products table or mapped to 'basic'. "
+                                    f"Please add this product_id to the subscription_products table with the correct tier."
+                                )
+
+        # Final fallback to 'pro' for paid subscriptions if tier couldn't be determined
+        if not tier or tier == "basic":
+            subscription_status = self._get_stripe_object_value(subscription, "status")
+            if subscription_status == "active":
+                logger.warning(
+                    f"Could not determine tier for subscription {self._get_stripe_object_value(subscription, 'id')} "
+                    f"(product_id={product_id}). Defaulting to 'pro' since this is an active subscription. "
+                    f"ACTION REQUIRED: Add this product_id to the subscription_products table with the correct tier."
+                )
+                tier = "pro"
+            else:
+                tier = "basic"
+
+        return tier, product_id
+
     def _hydrate_checkout_session_metadata(self, session: Any) -> tuple[Any, dict[str, Any]]:
         """
         Ensure we have metadata for a checkout session by re-fetching it from Stripe when needed.
@@ -788,6 +842,36 @@ class StripeService:
 
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
 
+            # Clear trial status for the user when they purchase credits
+            # This converts trial users to paid users
+            try:
+                from src.config.supabase_config import get_supabase_client
+
+                client = get_supabase_client()
+
+                # Update user's subscription status to 'active' (no longer on trial)
+                client.table("users").update(
+                    {
+                        "subscription_status": "active",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).eq("id", user_id).execute()
+
+                # Clear trial status for all user's API keys
+                client.table("api_keys_new").update(
+                    {
+                        "is_trial": False,
+                        "trial_converted": True,
+                        "subscription_status": "active",
+                    }
+                ).eq("user_id", user_id).execute()
+
+                logger.info(f"User {user_id} trial status cleared after credit purchase")
+
+            except Exception as trial_error:
+                # Don't fail the payment if trial status update fails
+                logger.error(f"Error clearing trial status for user {user_id}: {trial_error}", exc_info=True)
+
             # Check for referral bonus (first purchase of $10+)
             try:
                 from src.config.supabase_config import get_supabase_client
@@ -1049,8 +1133,12 @@ class StripeService:
         """Handle subscription created event"""
         try:
             user_id = int(subscription.metadata.get("user_id"))
-            tier = subscription.metadata.get("tier", "pro")
+            metadata_tier = subscription.metadata.get("tier")
             product_id = subscription.metadata.get("product_id")
+
+            # Resolve tier from metadata or subscription items
+            tier, resolved_product_id = self._resolve_tier_from_subscription(subscription, metadata_tier)
+            product_id = product_id or resolved_product_id
 
             logger.info(f"Subscription created for user {user_id}: {subscription.id}, tier: {tier}")
 
@@ -1130,7 +1218,10 @@ class StripeService:
         try:
             user_id = int(subscription.metadata.get("user_id"))
             status = subscription.status  # active, past_due, canceled, etc.
-            tier = subscription.metadata.get("tier", "pro")
+            metadata_tier = subscription.metadata.get("tier")
+
+            # Resolve tier from metadata or subscription items
+            tier, _ = self._resolve_tier_from_subscription(subscription, metadata_tier)
 
             logger.info(
                 f"Subscription updated for user {user_id}: {subscription.id}, status: {status}, tier: {tier}"
@@ -1247,7 +1338,10 @@ class StripeService:
 
             subscription = stripe.Subscription.retrieve(invoice.subscription)
             user_id = int(subscription.metadata.get("user_id"))
-            tier = subscription.metadata.get("tier", "pro")
+            metadata_tier = subscription.metadata.get("tier")
+
+            # Resolve tier from metadata or subscription items
+            tier, _ = self._resolve_tier_from_subscription(subscription, metadata_tier)
 
             # Get credits from database configuration
             credits = get_credits_from_tier(tier)
