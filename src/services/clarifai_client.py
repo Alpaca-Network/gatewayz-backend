@@ -222,8 +222,9 @@ def fetch_models_from_clarifai():
                     logger.debug(f"Filtering out Clarifai model {model_id} - zero pricing after enrichment")
                     filtered_count += 1
                     continue
-            except (ValueError, TypeError):
-                pass  # Keep model if we can't parse pricing
+            except (ValueError, TypeError) as e:
+                # Keep model if we can't parse pricing, but log for troubleshooting
+                logger.debug(f"Could not parse pricing for Clarifai model {model_id}: {e}")
 
             transformed_models.append(enriched_model)
 

@@ -7,7 +7,7 @@ from src.cache import _onerouter_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_onerouter_pooled_client
-from src.services.pricing_lookup import enrich_model_with_pricing, get_model_pricing
+from src.services.pricing_lookup import get_model_pricing
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
@@ -286,6 +286,8 @@ def fetch_models_from_onerouter():
                 if manual_pricing:
                     prompt_price = manual_pricing.get("prompt", "0")
                     completion_price = manual_pricing.get("completion", "0")
+                    # Use manual pricing as pricing_info to get context_length and other metadata
+                    pricing_info = manual_pricing
                     pricing_source = "manual"
                     manual_pricing_count += 1
                 else:
@@ -304,6 +306,7 @@ def fetch_models_from_onerouter():
                 # Keep model if we can't parse pricing (assume it's valid)
                 pass
 
+            # Get metadata from pricing_info (API or manual)
             context_length = pricing_info.get("context_length", 128000)
             max_completion_tokens = pricing_info.get("max_completion_tokens", 4096)
             modality = pricing_info.get("modality", "text->text")
