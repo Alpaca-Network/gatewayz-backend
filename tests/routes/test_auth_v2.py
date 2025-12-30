@@ -192,7 +192,7 @@ def client(sb, monkeypatch):
         result = sb.table('users').select('*').eq('username', username).execute()
         return result.data[0] if result.data else None
 
-    def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=10):
+    def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5):
         # Create user (let stub auto-assign ID)
         trial_expires_at = datetime.now(timezone.utc).isoformat()
         user_data = {
@@ -459,7 +459,7 @@ def test_privy_auth_new_user_creation(client, sb):
     assert data['is_new_user'] is True
     assert isinstance(data['user_id'], int)  # Pydantic converts to int in response
     assert data['user_id'] > 0  # Valid ID
-    assert data['credits'] == 10.0
+    assert data['credits'] == 5.0
     assert 'api_key' in data
 
     # Verify user was created in database
@@ -604,7 +604,7 @@ def test_register_user_success(client, sb):
     assert data['user_id'] > 0  # Valid ID
     assert data['username'] == 'newreg'
     assert data['email'] == 'newreg@example.com'
-    assert data['credits'] == 10.0
+    assert data['credits'] == 5.0
     assert data['subscription_status'] == 'trial'
     assert 'api_key' in data
 

@@ -120,6 +120,93 @@ class TestBuildVertexContent:
         assert result[0]["role"] == "user"
         assert len(result[0]["parts"]) >= 2
 
+    def test_build_base64_image_content_strips_data_url_prefix(self):
+        """Test that base64 image data URLs are properly parsed to extract raw base64 data.
+
+        This is a critical fix for the 400 Bad Request error from Vertex AI.
+        The Gemini API expects only the raw base64-encoded data, NOT the data URI prefix.
+
+        Incorrect: data:image/png;base64,iVBORw0KGgo...
+        Correct:   iVBORw0KGgo...
+
+        See: https://github.com/google-gemini/generative-ai-js/issues/307
+        """
+        # Sample base64 data (just a small test string, not an actual image)
+        raw_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        data_url = f"data:image/png;base64,{raw_base64}"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url}
+                    },
+                ],
+            }
+        ]
+        result = _build_vertex_content(messages)
+
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        assert len(result[0]["parts"]) == 2
+
+        # Check the image part has the correct format
+        image_part = result[0]["parts"][1]
+        assert "inline_data" in image_part
+        assert image_part["inline_data"]["mime_type"] == "image/png"
+        # Critical assertion: the data should be raw base64, not the full data URL
+        assert image_part["inline_data"]["data"] == raw_base64
+        assert not image_part["inline_data"]["data"].startswith("data:")
+
+    def test_build_base64_image_content_jpeg(self):
+        """Test that JPEG base64 images are correctly parsed with proper MIME type."""
+        raw_base64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////"
+        data_url = f"data:image/jpeg;base64,{raw_base64}"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url}
+                    },
+                ],
+            }
+        ]
+        result = _build_vertex_content(messages)
+
+        image_part = result[0]["parts"][1]
+        assert image_part["inline_data"]["mime_type"] == "image/jpeg"
+        assert image_part["inline_data"]["data"] == raw_base64
+
+    def test_build_base64_image_content_webp(self):
+        """Test that WebP base64 images are correctly parsed with proper MIME type."""
+        raw_base64 = "UklGRlYAAABXRUJQVlA4IEoAAADwAQCdASoB"
+        data_url = f"data:image/webp;base64,{raw_base64}"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is this?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url}
+                    },
+                ],
+            }
+        ]
+        result = _build_vertex_content(messages)
+
+        image_part = result[0]["parts"][1]
+        assert image_part["inline_data"]["mime_type"] == "image/webp"
+        assert image_part["inline_data"]["data"] == raw_base64
+
     def test_build_system_message(self):
         """Test that system messages are mapped to model role"""
         messages = [

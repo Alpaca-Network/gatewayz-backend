@@ -279,44 +279,6 @@ def create_app() -> FastAPI:
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
 
-    # ==================== Fallback Health Endpoint ====================
-    # This endpoint is defined directly in main.py to ensure it ALWAYS exists,
-    # even if the health route fails to load. This is critical for Railway deployments.
-    @app.get("/health", tags=["health"], include_in_schema=False)
-    async def fallback_health_check():
-        """
-        Fallback health check endpoint - ALWAYS responds if app is running.
-
-        This endpoint is a safety net for Railway healthchecks. If the health route
-        fails to load, this fallback ensures the healthcheck endpoint still responds.
-        Returns HTTP 200 to indicate the app is alive, even in degraded mode.
-        """
-        from datetime import datetime, timezone
-
-        try:
-            from src.config.supabase_config import get_initialization_status
-            db_status = get_initialization_status()
-        except Exception as e:
-            logger.warning(f"Could not get DB status in fallback health check: {e}")
-            db_status = {"initialized": False, "has_error": True}
-
-        response = {
-            "status": "healthy",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        if db_status.get("has_error"):
-            response["database"] = "unavailable"
-            response["mode"] = "degraded"
-        elif db_status.get("initialized"):
-            response["database"] = "connected"
-        else:
-            response["database"] = "not_initialized"
-
-        return response
-
-    logger.info("  [OK] Fallback health check endpoint at /health")
-
     # Add structured metrics endpoint (parses Prometheus metrics)
     @app.get("/api/metrics/parsed", tags=["monitoring"], include_in_schema=False)
     async def get_parsed_metrics():
@@ -411,12 +373,12 @@ def create_app() -> FastAPI:
 
     # Define v1 routes (OpenAI-compatible API endpoints)
     # These routes are mounted under /v1 prefix via v1_router
-    # IMPORTANT: unified_chat must be first, then chat & messages for backward compatibility
+    # IMPORTANT: chat & messages must be before catalog to avoid /* being caught by /model/{provider}/{model}
     v1_routes_to_load = [
-        ("unified_chat", "Unified Chat API"),  # NEW: Single endpoint for all chat formats
         ("chat", "Chat Completions"),
         ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("images", "Image Generation"),  # Image generation endpoints
+        ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
@@ -430,7 +392,6 @@ def create_app() -> FastAPI:
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
-        ("prometheus_endpoints", "Prometheus Endpoints"),  # Structured Prometheus metrics (/prometheus/metrics/*)
         ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
@@ -446,6 +407,7 @@ def create_app() -> FastAPI:
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
+        ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),
         ("notifications", "Notifications"),
         ("plans", "Subscription Plans"),
@@ -555,41 +517,6 @@ def create_app() -> FastAPI:
     logger.info(f"   Total: {loaded_count + failed_count}")
 
     # ==================== Sentry Tunnel Router ====================
-    # ==================== Prometheus Metrics Endpoints ====================
-    # Explicitly load prometheus_endpoints to ensure /prometheus/metrics/* routes are available
-    try:
-        from src.routes.prometheus_endpoints import router as prometheus_router
-
-        app.include_router(prometheus_router)
-        logger.info("  [OK] Prometheus Endpoints (/prometheus/metrics/*)")
-        logger.info("       - /prometheus/metrics/all (all metrics)")
-        logger.info("       - /prometheus/metrics/summary (JSON summary)")
-        logger.info("       - /prometheus/metrics/system (HTTP metrics)")
-        logger.info("       - /prometheus/metrics/providers (provider health)")
-        logger.info("       - /prometheus/metrics/models (model performance)")
-        logger.info("       - /prometheus/metrics/business (cost & subscriptions)")
-        logger.info("       - /prometheus/metrics/performance (latency metrics)")
-        logger.info("       - /prometheus/metrics/docs (endpoint documentation)")
-    except ImportError as e:
-        logger.error(f"  [FAIL] Prometheus Endpoints router not loaded: {e}")
-        logger.error(f"         This is CRITICAL - /prometheus/metrics/* endpoints will be unavailable")
-    except Exception as e:
-        logger.error(f"  [FAIL] Unexpected error loading Prometheus Endpoints: {e}")
-
-    # ==================== Chat Metrics Endpoints ====================
-    # Load chat metrics router for tokens-per-second metrics
-    try:
-        from src.routes.chat_metrics import router as chat_metrics_router
-
-        app.include_router(chat_metrics_router)
-        logger.info("  [OK] Chat Metrics (/v1/chat/completions/metrics/*)")
-        logger.info("       - /v1/chat/completions/metrics/tokens-per-second/all (all time)")
-        logger.info("       - /v1/chat/completions/metrics/tokens-per-second (time-filtered)")
-    except ImportError as e:
-        logger.error(f"  [FAIL] Chat Metrics router not loaded: {e}")
-    except Exception as e:
-        logger.error(f"  [FAIL] Unexpected error loading Chat Metrics: {e}")
-
     # Load Sentry tunnel router separately (at root /monitoring path)
     try:
         from src.routes.monitoring import sentry_tunnel_router

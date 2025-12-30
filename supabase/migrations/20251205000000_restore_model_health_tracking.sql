@@ -98,6 +98,9 @@ COMMENT ON COLUMN model_health_tracking.next_check_at IS 'Scheduled time for nex
 COMMENT ON COLUMN model_health_tracking.check_interval_seconds IS 'Interval between health checks in seconds';
 COMMENT ON COLUMN model_health_tracking.is_enabled IS 'Whether monitoring is enabled for this model';
 COMMENT ON COLUMN model_health_tracking.metadata IS 'Additional metadata (JSON): pricing_tier, capabilities, etc.';
+COMMENT ON COLUMN model_health_tracking.input_tokens IS 'Number of input tokens in the last call';
+COMMENT ON COLUMN model_health_tracking.output_tokens IS 'Number of output tokens in the last call';
+COMMENT ON COLUMN model_health_tracking.total_tokens IS 'Total tokens (input + output) in the last call';
 
 -- Create trigger for updated_at
 CREATE OR REPLACE FUNCTION update_model_health_tracking_updated_at()
@@ -250,11 +253,8 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION clean_old_health_history IS 'Clean health history data older than retention period';
 
--- Drop existing view first to allow column name changes
-DROP VIEW IF EXISTS model_status_current;
-
 -- Create view for current model status (for status page)
-CREATE VIEW model_status_current AS
+CREATE OR REPLACE VIEW model_status_current AS
 SELECT
     mht.provider,
     mht.model,
@@ -304,10 +304,6 @@ GRANT SELECT ON model_status_current TO anon;
 -- Enable RLS on model_health_tracking
 ALTER TABLE model_health_tracking ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies if they exist
-DROP POLICY IF EXISTS "Authenticated users can read model health" ON model_health_tracking;
-DROP POLICY IF EXISTS "Service role can do anything on model health" ON model_health_tracking;
-
 -- Create policies
 CREATE POLICY "Authenticated users can read model health"
     ON model_health_tracking
@@ -325,10 +321,6 @@ CREATE POLICY "Service role can do anything on model health"
 -- Enable RLS on model_health_incidents
 ALTER TABLE model_health_incidents ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies if they exist
-DROP POLICY IF EXISTS "Authenticated users can read incidents" ON model_health_incidents;
-DROP POLICY IF EXISTS "Service role can do anything on incidents" ON model_health_incidents;
-
 CREATE POLICY "Authenticated users can read incidents"
     ON model_health_incidents
     FOR SELECT
@@ -344,10 +336,6 @@ CREATE POLICY "Service role can do anything on incidents"
 
 -- Enable RLS on model_health_history
 ALTER TABLE model_health_history ENABLE ROW LEVEL SECURITY;
-
--- Drop existing policies if they exist
-DROP POLICY IF EXISTS "Authenticated users can read health history" ON model_health_history;
-DROP POLICY IF EXISTS "Service role can do anything on health history" ON model_health_history;
 
 CREATE POLICY "Authenticated users can read health history"
     ON model_health_history

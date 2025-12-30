@@ -27,6 +27,7 @@ from src.models.health_models import (
     SystemHealthResponse,
     UptimeMetricsResponse,
 )
+from src.config.supabase_config import get_initialization_status, supabase
 from src.security.deps import get_api_key
 from src.services.simple_health_cache import (
     simple_health_cache,
@@ -48,8 +49,6 @@ async def health_check():
     even if the database is unavailable (degraded mode). Check the response body
     for detailed status including database connectivity.
     """
-    from src.config.supabase_config import get_initialization_status
-
     # Get database initialization status
     db_status = get_initialization_status()
 
@@ -979,8 +978,6 @@ async def database_health():
     This is critical for startup diagnostics in Railway.
     """
     try:
-        from src.config.supabase_config import get_initialization_status, supabase
-
         logger.info("Checking database connectivity...")
 
         # Get initialization status
@@ -998,8 +995,6 @@ async def database_health():
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
-        from src.config.supabase_config import get_initialization_status
-
         logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
 
         # Capture to Sentry
@@ -1030,20 +1025,11 @@ async def provider_health():
     This is essential for debugging chat endpoint issues in Railway.
     """
     try:
-        # Try to import provider import errors from unified_chat (new route)
-        # Fall back to empty dict if unavailable
-        _provider_import_errors = {}
-        try:
-            from src.routes.unified_chat import _provider_import_errors as unified_import_errors
-            _provider_import_errors = unified_import_errors
-        except (ImportError, AttributeError):
-            # Unified chat route may not have import errors tracking
-            # or it may not exist, use empty dict
-            logger.debug("Could not import _provider_import_errors from unified_chat")
+        from src.routes.chat import _provider_import_errors
 
         # Count total providers and failed
         total_providers = 16  # Based on the code, there are 16 providers
-        failed_count = len(_provider_import_errors) if _provider_import_errors else 0
+        failed_count = len(_provider_import_errors)
         loaded_count = total_providers - failed_count
 
         logger.info(
@@ -1060,6 +1046,287 @@ async def provider_health():
         }
     except Exception as e:
         logger.error(f"Error checking provider health: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+# =============================================================================
+# ADDITIONAL HEALTH ENDPOINTS FOR DASHBOARD COMPATIBILITY
+# =============================================================================
+
+
+@router.get("/health/all", tags=["health"])
+async def get_all_health(
+    api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """
+    Get comprehensive health information for all components.
+
+    This endpoint provides a complete overview of system health including:
+    - System status
+    - Provider health
+    - Model health
+    - Gateway health
+    - Database status
+
+    This is an alias for /health/summary with additional details.
+
+    Query Parameters:
+    - force_refresh: Currently ignored (data comes from health-service cache)
+    """
+    try:
+        # Get system health
+        cached_system = simple_health_cache.get_system_health()
+
+        # Get providers health
+        cached_providers = simple_health_cache.get_providers_health() or []
+
+        # Get models health
+        cached_models = simple_health_cache.get_models_health() or []
+
+        # Get database status
+        db_status = get_initialization_status()
+
+        # Calculate summary stats
+        total_providers = len(cached_providers)
+        healthy_providers = sum(
+            1 for p in cached_providers
+            if p.get("status", "").lower() in ["online", "healthy"]
+        )
+        degraded_providers = sum(
+            1 for p in cached_providers
+            if p.get("status", "").lower() == "degraded"
+        )
+        unhealthy_providers = total_providers - healthy_providers - degraded_providers
+
+        total_models = len(cached_models)
+        healthy_models = sum(
+            1 for m in cached_models
+            if m.get("status", "").lower() in ["online", "healthy"]
+        )
+
+        # Determine overall status
+        if unhealthy_providers > 0 or not db_status.get("initialized"):
+            overall_status = "degraded"
+        elif degraded_providers > 0:
+            overall_status = "degraded"
+        else:
+            overall_status = "healthy"
+
+        return {
+            "status": "success",
+            "overall_status": overall_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "system": cached_system or {
+                "status": "unknown",
+                "uptime": 0.0,
+            },
+            "providers": {
+                "total": total_providers,
+                "healthy": healthy_providers,
+                "degraded": degraded_providers,
+                "unhealthy": unhealthy_providers,
+                "details": cached_providers[:10],  # Limit to first 10 for performance
+            },
+            "models": {
+                "total": total_models,
+                "healthy": healthy_models,
+                "unhealthy": total_models - healthy_models,
+            },
+            "database": {
+                "status": "connected" if db_status.get("initialized") else "unavailable",
+                "initialized": db_status.get("initialized", False),
+                "error": db_status.get("error_type") if db_status.get("has_error") else None,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting all health: {e}")
+        return {
+            "status": "error",
+            "overall_status": "unknown",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.get("/health/models/stats", tags=["health"])
+async def get_models_health_stats(
+    api_key: str = Depends(get_api_key),
+) -> dict[str, Any]:
+    """
+    Get health statistics for all models.
+
+    This endpoint provides aggregate statistics about model health including:
+    - Total models count
+    - Healthy/degraded/unhealthy counts
+    - Average response times
+    - Error rates by provider
+
+    Note: Detailed per-model health is available at /model-health/stats
+    """
+    try:
+        # Get models health from cache
+        cached_models = simple_health_cache.get_models_health() or []
+
+        # Calculate statistics
+        total_models = len(cached_models)
+        healthy_models = 0
+        degraded_models = 0
+        unhealthy_models = 0
+        total_response_time = 0.0
+        response_time_count = 0
+        provider_stats = {}
+
+        for model in cached_models:
+            status = model.get("status", "unknown").lower()
+            if status in ["online", "healthy"]:
+                healthy_models += 1
+            elif status == "degraded":
+                degraded_models += 1
+            else:
+                unhealthy_models += 1
+
+            # Response time stats
+            if model.get("avg_response_time_ms"):
+                total_response_time += model["avg_response_time_ms"]
+                response_time_count += 1
+
+            # Provider stats
+            provider = model.get("provider", "unknown")
+            if provider not in provider_stats:
+                provider_stats[provider] = {
+                    "total": 0,
+                    "healthy": 0,
+                    "avg_response_time_ms": 0,
+                    "response_time_sum": 0,
+                    "response_time_count": 0,
+                }
+            provider_stats[provider]["total"] += 1
+            if status in ["online", "healthy"]:
+                provider_stats[provider]["healthy"] += 1
+            if model.get("avg_response_time_ms"):
+                provider_stats[provider]["response_time_sum"] += model["avg_response_time_ms"]
+                provider_stats[provider]["response_time_count"] += 1
+
+        # Calculate averages for providers
+        for provider in provider_stats:
+            if provider_stats[provider]["response_time_count"] > 0:
+                provider_stats[provider]["avg_response_time_ms"] = round(
+                    provider_stats[provider]["response_time_sum"]
+                    / provider_stats[provider]["response_time_count"],
+                    2,
+                )
+            # Clean up temp fields
+            del provider_stats[provider]["response_time_sum"]
+            del provider_stats[provider]["response_time_count"]
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "stats": {
+                "total_models": total_models,
+                "healthy_models": healthy_models,
+                "degraded_models": degraded_models,
+                "unhealthy_models": unhealthy_models,
+                "health_rate": round(healthy_models / total_models * 100, 2) if total_models > 0 else 0,
+                "avg_response_time_ms": (
+                    round(total_response_time / response_time_count, 2)
+                    if response_time_count > 0
+                    else None
+                ),
+            },
+            "by_provider": provider_stats,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting model health stats: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.get("/health/providers/stats", tags=["health"])
+async def get_providers_health_stats(
+    api_key: str = Depends(get_api_key),
+) -> dict[str, Any]:
+    """
+    Get health statistics for all providers.
+
+    This endpoint provides aggregate statistics about provider health including:
+    - Total providers count
+    - Healthy/degraded/unhealthy counts
+    - Average response times per provider
+    - Model counts per provider
+    - Uptime percentages
+    """
+    try:
+        # Get providers health from cache
+        cached_providers = simple_health_cache.get_providers_health() or []
+
+        # Calculate statistics
+        total_providers = len(cached_providers)
+        healthy_providers = 0
+        degraded_providers = 0
+        unhealthy_providers = 0
+        total_models = 0
+        total_uptime = 0.0
+
+        provider_details = []
+
+        for provider in cached_providers:
+            status = provider.get("status", "unknown").lower()
+            if status in ["online", "healthy"]:
+                healthy_providers += 1
+            elif status == "degraded":
+                degraded_providers += 1
+            else:
+                unhealthy_providers += 1
+
+            models_count = provider.get("total_models", 0)
+            total_models += models_count
+
+            uptime = provider.get("overall_uptime", 0.0)
+            total_uptime += uptime
+
+            provider_details.append({
+                "provider": provider.get("provider", "unknown"),
+                "gateway": provider.get("gateway"),
+                "status": status,
+                "models_count": models_count,
+                "healthy_models": provider.get("healthy_models", 0),
+                "uptime": round(uptime, 2),
+                "avg_response_time_ms": provider.get("avg_response_time_ms"),
+                "last_check": provider.get("last_check"),
+            })
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "stats": {
+                "total_providers": total_providers,
+                "healthy_providers": healthy_providers,
+                "degraded_providers": degraded_providers,
+                "unhealthy_providers": unhealthy_providers,
+                "health_rate": (
+                    round(healthy_providers / total_providers * 100, 2)
+                    if total_providers > 0
+                    else 0
+                ),
+                "total_models": total_models,
+                "avg_uptime": round(total_uptime / total_providers, 2) if total_providers > 0 else 0,
+            },
+            "providers": provider_details,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting provider health stats: {e}")
         return {
             "status": "error",
             "error": str(e),

@@ -52,11 +52,10 @@ def verify_negative_pricing_handling() -> Tuple[bool, str]:
 
     try:
         sanitized = sanitize_pricing(dynamic_pricing)
-        if sanitized["prompt"] != "0":
-            return False, f"Dynamic pricing not converted to 0: {sanitized['prompt']}"
-        if sanitized["completion"] != "10.00":
-            return False, "Sanitization affected valid pricing"
-        return True, "Dynamic pricing (-1) is correctly handled"
+        # sanitize_pricing returns None for dynamic pricing (negative values)
+        if sanitized is not None:
+            return False, f"Dynamic pricing should return None, got: {sanitized}"
+        return True, "Dynamic pricing (-1) correctly returns None"
     except Exception as e:
         return False, f"Error handling dynamic pricing: {e}"
 

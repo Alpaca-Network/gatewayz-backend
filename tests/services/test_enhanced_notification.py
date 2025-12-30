@@ -75,7 +75,7 @@ class TestEmailValidation:
             user_id=123,
             username="testuser",
             email="did:privy:abc123@privy.user",
-            credits=10
+            credits=5
         )
 
         # Should return True (success) without attempting to send

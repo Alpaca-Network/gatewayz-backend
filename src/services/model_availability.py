@@ -331,10 +331,17 @@ class ModelAvailabilityService:
         return self.fallback_mappings.get(model_id, [])
 
     def is_model_available(self, model_id: str, gateway: str = None) -> bool:
-        """Check if a model is available"""
+        """Check if a model is available
+
+        If no availability record exists for a model, we assume it's available
+        to avoid blocking new/unknown models. The circuit breaker will open
+        if the model starts failing.
+        """
         availability = self.get_model_availability(model_id, gateway)
         if not availability:
-            return False
+            # No availability record = assume available (optimistic approach)
+            # This prevents blocking new/unknown models before they're tracked
+            return True
 
         # Check circuit breaker
         if availability.circuit_breaker_state == CircuitBreakerState.OPEN:

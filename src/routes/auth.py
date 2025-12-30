@@ -32,7 +32,7 @@ from src.services.query_timeout import (
     QueryTimeoutError,
     safe_query_with_timeout,
 )
-from src.utils.security_validators import sanitize_for_logging
+from src.utils.security_validators import is_valid_email, sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -311,21 +311,35 @@ def _handle_existing_user(
 
 
 def _is_valid_deliverable_email(email: str) -> bool:
-    """Check if email is valid and deliverable (not a fallback placeholder)."""
+    """Check if email is valid and deliverable (not a fallback placeholder).
+
+    This function combines RFC validation with additional checks to ensure
+    we don't attempt to send emails to placeholder addresses that are only
+    used for database storage.
+    """
     if not email or "@" not in email:
         return False
     # Skip fallback placeholder emails that cannot receive mail
     if email.endswith("@privy.user"):
         return False
-    return True
+    # Skip new placeholder format used for database storage when no valid email exists
+    # These are RFC-valid but not deliverable (e.g., noemail+xxx@privy.placeholder)
+    if email.endswith("@privy.placeholder"):
+        return False
+    # Use RFC-compliant validation for real emails
+    return is_valid_email(email)
 
 
 def _send_welcome_email_background(user_id: str, username: str, email: str, credits: float):
     """Send welcome email in background for existing users"""
     try:
         logger.info(f"Background task: Sending welcome email to user {user_id}")
+        # Validate email is both RFC-compliant and deliverable (not a placeholder)
         if not _is_valid_deliverable_email(email):
-            logger.warning(f"Background task: Invalid or non-deliverable email '{email}' for user {user_id}, skipping")
+            logger.warning(
+                f"Background task: Invalid or non-deliverable email '{email}' for user {user_id}, "
+                f"skipping welcome email. User can still use the service."
+            )
             return
 
         success = notif_module.enhanced_notification_service.send_welcome_email_if_needed(
@@ -350,9 +364,11 @@ def _send_new_user_welcome_email_background(
     """Send welcome email in background for new users"""
     try:
         logger.info(f"Background task: Sending welcome email to new user {user_id}")
+        # Validate email is both RFC-compliant and deliverable (not a placeholder)
         if not _is_valid_deliverable_email(email):
             logger.warning(
-                f"Background task: Invalid or non-deliverable email '{email}' for new user {user_id}, skipping"
+                f"Background task: Invalid or non-deliverable email '{email}' for new user {user_id}, "
+                f"skipping welcome email. User can still use the service."
             )
             return
 
@@ -594,20 +610,18 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     continue
 
         # ISSUE FIX #3: Improved email extraction with better logging
-        if not email and request.token:
+        # NOTE: We no longer generate fallback emails from Privy IDs because they contain
+        # special characters (colons) that are not valid in email addresses per RFC 5321/5322.
+        # If no email is available, we'll skip sending the welcome email instead of attempting
+        # to send to an invalid address that will be rejected by email providers.
+        if not email:
             logger.warning(
-                f"No email found from linked accounts for user {request.user.id}, "
-                "using fallback email format"
+                f"No valid email found for user {request.user.id}. "
+                f"Welcome email will be skipped. User can still use the service."
             )
-            # Use a fallback email format instead of calling external API
-            email = f"{request.user.id}@privy.user"
-        elif not email:
-            logger.error(
-                f"Failed to extract any email for user {request.user.id} and no token provided"
-            )
-            raise ValueError(
-                "Unable to extract email from Privy user data and no fallback available"
-            )
+            # Set email to None to indicate it's not available
+            # The background task will check and skip sending if email is None or invalid
+            email = None
 
         logger.info(
             f"Email extraction completed for user {request.user.id}: {email}, "
@@ -720,12 +734,16 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 auth_method_str = (
                     auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                 )
+                # Use a placeholder email if no valid email is available
+                # Note: We use a safe placeholder instead of the Privy ID because
+                # Privy IDs contain colons which are not valid in email addresses
+                user_email = email if email and is_valid_email(email) else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
                 user_data = users_module.create_enhanced_user(
                     username=username,
-                    email=email or f"{request.user.id}@privy.user",
+                    email=user_email,
                     auth_method=auth_method_str,
                     privy_user_id=request.user.id,
-                    credits=10,  # Users start with $10 trial credits for 3 days
+                    credits=5,  # Users start with $5 trial credits for 3 days
                 )
             except Exception as creation_error:
                 logger.warning(
@@ -759,7 +777,10 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         else True,
                     )
 
-                fallback_email = email or f"{request.user.id}@privy.user"
+                # Use a safe placeholder email if no valid email is available
+                # Note: We use a safe placeholder instead of the Privy ID because
+                # Privy IDs contain colons which are not valid in email addresses
+                fallback_email = email if email and is_valid_email(email) else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
 
                 resolved_username = _generate_unique_username(client, username)
                 if resolved_username != username:
@@ -822,7 +843,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                                 .eq("id", partial_user["id"])
                                 .execute()
                             )
-                            if updated_result.data:
+                            if updated_result.data and len(updated_result.data) > 0:
                                 partial_user = updated_result.data[0]
                             else:
                                 partial_user.update(update_fields)
@@ -830,7 +851,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     else:
                         try:
                             user_insert = client.table("users").insert(user_payload).execute()
-                            if not user_insert.data:
+                            if not user_insert.data or len(user_insert.data) == 0:
                                 raise HTTPException(
                                     status_code=500, detail="Failed to create user account"
                                 ) from creation_error
@@ -859,7 +880,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                                         .limit(1)
                                         .execute()
                                     )
-                                if not existing_user.data:
+                                if not existing_user.data or len(existing_user.data) == 0:
                                     raise HTTPException(
                                         status_code=500,
                                         detail="Failed to fetch existing user after duplicate insert",
@@ -893,7 +914,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                             .limit(1)
                             .execute()
                         )
-                        if existing_key_result.data:
+                        if existing_key_result.data and len(existing_key_result.data) > 0:
                             api_key_value = existing_key_result.data[0]["api_key"]
                             logger.info(
                                 f"Reusing existing API key for fallback user {created_user['id']}"
@@ -1013,9 +1034,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 logger.error(
                     f"Failed to convert new user credits (value: {user_data['credits']}, "
                     f"type: {type(user_data['credits']).__name__}): {credits_error}, "
-                    "defaulting to 10.0"
+                    "defaulting to 5.0"
                 )
-                new_user_credits = 10.0
+                new_user_credits = 5.0
             logger.info(f"Returning registration response with credits: {new_user_credits}")
 
             tier_value = user_data.get("tier")
@@ -1131,7 +1152,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
                 email=request.email,
                 auth_method=auth_method_str,
                 privy_user_id=None,  # No Privy for direct registration
-                credits=10,
+                credits=5,
             )
         except Exception as creation_error:
             logger.warning(
@@ -1146,7 +1167,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
             fallback_payload = {
                 "username": request.username,
                 "email": request.email,
-                "credits": 10,
+                "credits": 5,
                 "privy_user_id": None,
                 "auth_method": (
                     request.auth_method.value
@@ -1162,7 +1183,7 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
 
             try:
                 user_insert = client.table("users").insert(fallback_payload).execute()
-                if not user_insert.data:
+                if not user_insert.data or len(user_insert.data) == 0:
                     raise HTTPException(
                         status_code=500, detail="Failed to create user account"
                     ) from creation_error
@@ -1285,7 +1306,7 @@ async def request_password_reset(email: str):
             client.table("users").select("id", "username", "email").eq("email", email).execute()
         )
 
-        if not user_result.data:
+        if not user_result.data or len(user_result.data) == 0:
             # Don't reveal if email exists or not for security
             return {
                 "message": "If an account with that email exists, a password reset link has been sent."
@@ -1325,7 +1346,7 @@ async def reset_password(token: str):
             .execute()
         )
 
-        if not token_result.data:
+        if not token_result.data or len(token_result.data) == 0:
             raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
         token_data = token_result.data[0]

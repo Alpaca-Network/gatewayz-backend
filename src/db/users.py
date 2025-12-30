@@ -182,10 +182,10 @@ def create_enhanced_user(
     username: str,
     email: str,
     auth_method: str,
-    credits: int = 10,
+    credits: int = 5,
     privy_user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $10 credits"""
+    """Create a new user with automatic 3-day trial and $5 credits"""
     try:
         client = get_supabase_client()
 
@@ -196,7 +196,7 @@ def create_enhanced_user(
         user_data = {
             "username": username,
             "email": email,
-            "credits": credits,  # $10 trial credits
+            "credits": credits,  # $5 trial credits
             "is_active": True,
             "registration_date": trial_start.isoformat(),
             "auth_method": auth_method,
@@ -683,7 +683,9 @@ def deduct_credits(
             # Fetch current balance and fail with accurate error
             with track_database_query(table="users", operation="select"):
                 current = client.table("users").select("credits").eq("id", user_id).execute()
-            current_balance = current.data[0]["credits"] if current.data else "unknown"
+            current_balance = (
+                current.data[0]["credits"] if current.data and len(current.data) > 0 else "unknown"
+            )
             raise ValueError(
                 f"Failed to update user balance due to concurrent modification. "
                 f"Current balance: {current_balance}, Required: {tokens}. Please retry."
@@ -883,54 +885,145 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
 
 
 def get_admin_monitor_data() -> dict[str, Any]:
-    """Get admin monitoring data with robust error handling"""
+    """Get admin monitoring data with robust error handling
+
+    NOTE: This function uses count queries and date-filtered queries to avoid
+    hitting Supabase's default 1000 row limit. For accurate counts, we use
+    count="exact" which performs a COUNT(*) query on the server side.
+    """
     try:
         client = get_supabase_client()
 
-        # Get users data with error handling
+        # Calculate time boundaries for filtering
+        now = datetime.now(timezone.utc)
+        day_ago = now - timedelta(days=1)
+        month_ago = now - timedelta(days=30)
+
+        # Get ACCURATE total user count using count="exact" (server-side COUNT(*))
+        # This avoids the 1000 row limit issue
+        total_users = 0
         users = []
         try:
-            users_result = client.table("users").select("*").execute()
+            # First get accurate count
+            count_result = client.table("users").select("id", count="exact").execute()
+            total_users = count_result.count or 0
+            logger.info(f"Total users count (exact): {total_users}")
+
+            # Then get user data for credit calculations (limited to avoid memory issues)
+            users_result = client.table("users").select("id, credits, api_key").limit(10000).execute()
             users = users_result.data or []
         except Exception as e:
             logger.error("Error retrieving users: %s", sanitize_for_logging(str(e)))
             users = []
+            total_users = 0
 
-        # Get activity_log data (primary source - actively updated)
+        # Get activity_log data for TODAY only (primary source - actively updated)
         # This is the main source of truth for API usage tracking
-        activity_logs = []
+        # Filter by date to avoid hitting the 1000 row limit
+        activity_logs_today = []
+        activity_logs_month = []
+        total_activity_count = 0
         try:
-            activity_result = (
-                client.table("activity_log").select("*").order("timestamp", desc=True).execute()
+            # Get accurate total count of all activity logs
+            total_count_result = client.table("activity_log").select("id", count="exact").execute()
+            total_activity_count = total_count_result.count or 0
+
+            # Get today's activity logs (should be much less than 1000 typically)
+            day_ago_iso = day_ago.isoformat()
+            activity_today_result = (
+                client.table("activity_log")
+                .select("*")
+                .gte("timestamp", day_ago_iso)
+                .order("timestamp", desc=True)
+                .limit(10000)  # Higher limit for today's data
+                .execute()
             )
-            activity_logs = activity_result.data or []
-            logger.info(f"Retrieved {len(activity_logs)} activity log records")
+            activity_logs_today = activity_today_result.data or []
+            logger.info(f"Retrieved {len(activity_logs_today)} activity log records for today")
+
+            # Get this month's activity logs for monthly stats
+            month_ago_iso = month_ago.isoformat()
+            activity_month_result = (
+                client.table("activity_log")
+                .select("*")
+                .gte("timestamp", month_ago_iso)
+                .order("timestamp", desc=True)
+                .limit(50000)  # Higher limit for monthly data
+                .execute()
+            )
+            activity_logs_month = activity_month_result.data or []
+            logger.info(f"Retrieved {len(activity_logs_month)} activity log records for this month")
+
         except Exception as e:
             logger.error(f"Error retrieving activity_log: {e}", exc_info=True)
-            activity_logs = []
+            activity_logs_today = []
+            activity_logs_month = []
+            total_activity_count = 0  # Reset count on error for consistency
 
         # Get usage records data as fallback (legacy table, may not be updated)
-        usage_records_legacy = []
+        # Get both today's and month's records for complete data
+        usage_records_legacy_today = []
+        usage_records_legacy_month = []
         try:
-            usage_result = client.table("usage_records").select("*").execute()
-            usage_records_legacy = usage_result.data or []
-            logger.debug(f"Retrieved {len(usage_records_legacy)} legacy usage_records")
+            # Get today's legacy records
+            day_ago_iso = day_ago.isoformat()
+            usage_today_result = (
+                client.table("usage_records")
+                .select("*")
+                .gte("timestamp", day_ago_iso)
+                .limit(10000)
+                .execute()
+            )
+            usage_records_legacy_today = usage_today_result.data or []
+            logger.debug(f"Retrieved {len(usage_records_legacy_today)} legacy usage_records for today")
+
+            # Get month's legacy records for complete monthly stats
+            month_ago_iso = month_ago.isoformat()
+            usage_month_result = (
+                client.table("usage_records")
+                .select("*")
+                .gte("timestamp", month_ago_iso)
+                .limit(50000)
+                .execute()
+            )
+            usage_records_legacy_month = usage_month_result.data or []
+            logger.debug(f"Retrieved {len(usage_records_legacy_month)} legacy usage_records for month")
         except Exception as e:
             logger.warning(f"Error retrieving usage_records (legacy): {e}")
-            usage_records_legacy = []
+            usage_records_legacy_today = []
+            usage_records_legacy_month = []
 
         # Create user_id -> api_key mapping for efficient lookup
+        # Only fetch mappings for users that appear in activity logs to avoid
+        # hitting row limits on systems with many users
+        active_user_ids = set()
+        for activity in activity_logs_today:
+            user_id = activity.get("user_id")
+            if user_id:
+                active_user_ids.add(user_id)
+        for activity in activity_logs_month:
+            user_id = activity.get("user_id")
+            if user_id:
+                active_user_ids.add(user_id)
+
+        # Create mappings for both directions:
+        # - user_id_to_api_key: for resolving api_key from activity_log user_ids
+        # - api_key_to_user_id: for deduplication with legacy usage_records that only have api_key
         user_id_to_api_key = {}
+        api_key_to_user_id = {}
+
+        # First, build mappings from already-fetched users data
         for user in users:
             user_id = user.get("id")
             api_key = user.get("api_key")
             if user_id and api_key:
                 user_id_to_api_key[user_id] = api_key
+                api_key_to_user_id[api_key] = user_id
 
         # Also check api_keys_new table for users who might not have api_key in users table
         try:
             api_keys_result = (
-                client.table("api_keys_new").select("user_id, api_key, is_primary").execute()
+                client.table("api_keys_new").select("user_id, api_key, is_primary").limit(10000).execute()
             )
             if api_keys_result.data:
                 for key_data in api_keys_result.data:
@@ -941,19 +1034,20 @@ def get_admin_monitor_data() -> dict[str, Any]:
                     if user_id and api_key:
                         if user_id not in user_id_to_api_key or is_primary:
                             user_id_to_api_key[user_id] = api_key
+                        # Always add to reverse mapping (needed for deduplication)
+                        api_key_to_user_id[api_key] = user_id
         except Exception as e:
             logger.warning(f"Error retrieving api_keys_new for user mapping: {e}")
 
         # Convert activity_log to usage_records format for compatibility
         # activity_log has: user_id, model, provider, tokens, cost, timestamp, metadata
         # usage_records format: user_id, api_key, model, tokens_used, cost, timestamp
-        usage_records = []
-        for activity in activity_logs:
-            user_id = activity.get("user_id")
-            # Look up API key from mapping
-            api_key = user_id_to_api_key.get(user_id, "unknown")
 
-            # Create a usage record-like entry from activity log
+        # Process TODAY's activity logs
+        day_usage = []
+        for activity in activity_logs_today:
+            user_id = activity.get("user_id")
+            api_key = user_id_to_api_key.get(user_id, "unknown")
             usage_record = {
                 "user_id": user_id,
                 "api_key": api_key,
@@ -962,109 +1056,100 @@ def get_admin_monitor_data() -> dict[str, Any]:
                 "cost": activity.get("cost", 0.0),
                 "timestamp": activity.get("timestamp", ""),
             }
-            usage_records.append(usage_record)
+            day_usage.append(usage_record)
 
-        # Add legacy usage_records that might not be in activity_log (for backward compatibility)
-        # Only add if timestamp is not already covered by activity_log
-        activity_timestamps = {r.get("timestamp", "") for r in usage_records}
-        for legacy_record in usage_records_legacy:
-            legacy_timestamp = legacy_record.get("timestamp", "")
-            if legacy_timestamp and legacy_timestamp not in activity_timestamps:
-                usage_records.append(legacy_record)
+        # Add legacy usage_records for today that might not be in activity_log
+        # Use composite key (user_id + timestamp + model) for deduplication since:
+        # 1. activity_log and usage_records have different ID spaces
+        # 2. Timestamps alone are not unique (concurrent requests can share timestamps)
+        # A composite key provides a reasonable approximation of uniqueness
+        def make_composite_key(record):
+            """Create a composite key from user_id, timestamp, and model.
 
-        # Calculate basic statistics
-        total_users = len(users)
-        sum(user.get("credits", 0) for user in users)
-        len([user for user in users if user.get("credits", 0) > 0])
+            Uses user_id as the consistent identifier across both activity_log and
+            usage_records tables. For legacy records that only have api_key,
+            we look up the corresponding user_id from the api_key_to_user_id mapping.
+            """
+            # Always prefer user_id for consistent deduplication
+            user_id = record.get("user_id")
+            if not user_id:
+                # Legacy records may only have api_key - look up user_id
+                api_key = record.get("api_key")
+                if api_key:
+                    user_id = api_key_to_user_id.get(api_key)
+            # Convert to string for consistent key format
+            user_key = str(user_id) if user_id else ""
+            timestamp = record.get("timestamp") or ""
+            model = record.get("model") or ""
+            return f"{user_key}|{timestamp}|{model}"
 
-        # Calculate time-based statistics
-        now = datetime.now(timezone.utc)
-        day_ago = now - timedelta(days=1)
-        week_ago = now - timedelta(days=7)
-        month_ago = now - timedelta(days=30)
+        activity_keys_today = {make_composite_key(r) for r in activity_logs_today}
+        for legacy_record in usage_records_legacy_today:
+            legacy_key = make_composite_key(legacy_record)
+            # Only include legacy record if it's not already represented in activity_log
+            if legacy_key not in activity_keys_today:
+                day_usage.append(legacy_record)
 
-        # Filter usage records by time periods with error handling
-        day_usage = []
-        week_usage = []
+        # Sort day_usage by timestamp descending to ensure correct order for recent activity
+        day_usage.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+
+
+        # Process MONTH's activity logs
         month_usage = []
+        for activity in activity_logs_month:
+            user_id = activity.get("user_id")
+            api_key = user_id_to_api_key.get(user_id, "unknown")
+            usage_record = {
+                "user_id": user_id,
+                "api_key": api_key,
+                "model": activity.get("model", "unknown"),
+                "tokens_used": activity.get("tokens", 0),
+                "cost": activity.get("cost", 0.0),
+                "timestamp": activity.get("timestamp", ""),
+            }
+            month_usage.append(usage_record)
 
-        for record in usage_records:
-            try:
-                timestamp_str = record.get("timestamp", "")
-                if timestamp_str:
-                    # Handle different timestamp formats
-                    if "Z" in timestamp_str:
-                        timestamp_str = timestamp_str.replace("Z", "+00:00")
-
-                    # Fix malformed timestamps with odd-numbered microseconds
-                    # e.g., "2025-10-14T15:24:27.81588+00:00" -> "2025-10-14T15:24:27.815880+00:00"
-                    if "." in timestamp_str and "+" in timestamp_str:
-                        parts = timestamp_str.split("+")
-                        if len(parts) == 2:
-                            time_part = parts[0]
-                            tz_part = "+" + parts[1]
-                            if "." in time_part:
-                                time_parts = time_part.split(".")
-                                if len(time_parts) == 2:
-                                    seconds_part = time_parts[0]
-                                    micros_part = time_parts[1]
-                                    # Pad or truncate microseconds to 6 digits
-                                    if len(micros_part) < 6:
-                                        micros_part = micros_part.ljust(6, "0")
-                                    elif len(micros_part) > 6:
-                                        micros_part = micros_part[:6]
-                                    timestamp_str = f"{seconds_part}.{micros_part}{tz_part}"
-
-                    record_time = datetime.fromisoformat(timestamp_str)
-
-                    if record_time > day_ago:
-                        day_usage.append(record)
-                    if record_time > week_ago:
-                        week_usage.append(record)
-                    if record_time > month_ago:
-                        month_usage.append(record)
-            except Exception as e:
-                logger.warning(
-                    f"Error parsing timestamp for record {record.get('id', 'unknown')}: {e}, timestamp: {record.get('timestamp', '')[:50]}"
-                )
-                continue
+        # Add legacy usage_records for month that might not be in activity_log
+        # Use composite key for deduplication (same approach as daily data)
+        activity_keys_month = {make_composite_key(r) for r in activity_logs_month}
+        for legacy_record in usage_records_legacy_month:
+            legacy_key = make_composite_key(legacy_record)
+            if legacy_key not in activity_keys_month:
+                month_usage.append(legacy_record)
 
         # Calculate totals with safe aggregation
         def safe_sum(records, field):
-            return sum(record.get(field, 0) for record in records)
+            return sum(record.get(field, 0) or 0 for record in records)
 
         total_tokens_day = safe_sum(day_usage, "tokens_used")
-        safe_sum(week_usage, "tokens_used")
         total_tokens_month = safe_sum(month_usage, "tokens_used")
-        total_tokens_all = safe_sum(usage_records, "tokens_used")
 
         total_cost_day = safe_sum(day_usage, "cost")
-        safe_sum(week_usage, "cost")
         total_cost_month = safe_sum(month_usage, "cost")
-        total_cost_all = safe_sum(usage_records, "cost")
 
         requests_day = len(day_usage)
-        len(week_usage)
         requests_month = len(month_usage)
-        requests_all = len(usage_records)
 
-        # Get top users by usage
+        # For total requests, use the accurate count from server
+        requests_all = total_activity_count
+
+        # Use month_usage for top users and recent activity calculations
+        # (this gives us a reasonable sample without fetching all historical data)
+
+        # Get top users by usage (based on this month's data)
         user_usage = {}
-        for record in usage_records:
+        for record in month_usage:
             api_key = record.get("api_key", "unknown")
             if api_key not in user_usage:
                 user_usage[api_key] = {"tokens_used": 0, "cost": 0, "requests": 0}
-            user_usage[api_key]["tokens_used"] += record.get("tokens_used", 0)
-            user_usage[api_key]["cost"] += record.get("cost", 0)
+            user_usage[api_key]["tokens_used"] += record.get("tokens_used", 0) or 0
+            user_usage[api_key]["cost"] += record.get("cost", 0) or 0
             user_usage[api_key]["requests"] += 1
 
         top_users = sorted(user_usage.items(), key=lambda x: x[1]["tokens_used"], reverse=True)[:10]
         top_users_data = [{"api_key": k, **v} for k, v in top_users]
 
-        # Get recent activity
-        recent_activity = sorted(usage_records, key=lambda x: x.get("timestamp", ""), reverse=True)[
-            :20
-        ]
+        # Get recent activity (from today's usage, already sorted by timestamp desc)
         recent_activity_data = [
             {
                 "api_key": record.get("api_key", "unknown"),
@@ -1072,30 +1157,44 @@ def get_admin_monitor_data() -> dict[str, Any]:
                 "tokens_used": record.get("tokens_used", 0),
                 "timestamp": record.get("timestamp", ""),
             }
-            for record in recent_activity
+            for record in day_usage[:20]
         ]
 
-        # Calculate most used model safely
+        # Calculate most used model safely (based on month's data)
+        # Exclude "auth" entries as they are authentication events, not model usage
         most_used_model = "No models used"
-        if usage_records:
+        if month_usage:
             model_counts = {}
-            for record in usage_records:
+            for record in month_usage:
                 model = record.get("model", "unknown")
+                # Skip auth events - they're not actual model usage
+                if model.lower() == "auth":
+                    continue
                 model_counts[model] = model_counts.get(model, 0) + 1
 
             if model_counts:
                 most_used_model = max(model_counts.items(), key=lambda x: x[1])[0]
 
-        # Calculate last request time safely
+        # Calculate last request time safely (prefer today's data, fall back to month)
         last_request_time = None
-        if usage_records:
+        if day_usage:
             timestamps = [
-                record.get("timestamp", "") for record in usage_records if record.get("timestamp")
+                record.get("timestamp", "") for record in day_usage if record.get("timestamp")
+            ]
+            if timestamps:
+                last_request_time = max(timestamps)
+        # Fall back to month_usage if no activity today
+        if last_request_time is None and month_usage:
+            timestamps = [
+                record.get("timestamp", "") for record in month_usage if record.get("timestamp")
             ]
             if timestamps:
                 last_request_time = max(timestamps)
 
         # Build response data
+        # Note: For "all time" metrics, we use monthly data as a proxy since
+        # fetching all historical data would be too expensive. The total_requests
+        # count is accurate thanks to the count="exact" query.
         response_data = {
             "total_users": total_users,
             "active_users_today": len({record.get("api_key", "") for record in day_usage}),
@@ -1104,8 +1203,8 @@ def get_admin_monitor_data() -> dict[str, Any]:
             "total_cost_today": total_cost_day,
             "system_usage_metrics": {
                 "total_requests": requests_all,
-                "total_tokens": total_tokens_all,
-                "total_cost": total_cost_all,
+                "total_tokens": total_tokens_month,  # Use monthly as proxy for "all"
+                "total_cost": total_cost_month,  # Use monthly as proxy for "all"
                 "requests_today": requests_day,
                 "tokens_today": total_tokens_day,
                 "cost_today": total_cost_day,
@@ -1113,7 +1212,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
                 "tokens_this_month": total_tokens_month,
                 "cost_this_month": total_cost_month,
                 "average_tokens_per_request": (
-                    total_tokens_all / requests_all if requests_all > 0 else 0
+                    total_tokens_month / requests_month if requests_month > 0 else 0
                 ),
                 "most_used_model": most_used_model,
                 "last_request_time": last_request_time,
