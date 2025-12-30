@@ -488,11 +488,11 @@ async def test_create_or_update_incident_handles_none_response(mock_supabase, mo
     # Should not raise an exception
     await health_monitor._create_or_update_incident(result, consecutive_failures=3)
 
-    # Verify warning was logged
-    mock_logger.warning.assert_called_once()
-    warning_call = mock_logger.warning.call_args[0][0]
-    assert "Supabase query returned None" in warning_call
-    assert "gpt-4" in warning_call
+    # Verify debug log was called (changed from warning to debug to reduce log noise)
+    mock_logger.debug.assert_called()
+    debug_call = mock_logger.debug.call_args[0][0]
+    assert "Supabase query returned None" in debug_call
+    assert "gpt-4" in debug_call
 
 
 @pytest.mark.asyncio
@@ -524,8 +524,146 @@ async def test_process_health_check_result_handles_none_response(mock_supabase, 
     # Should not raise an exception
     await health_monitor._process_health_check_result(result)
 
-    # Verify warning was logged
-    mock_logger.warning.assert_called_once()
-    warning_call = mock_logger.warning.call_args[0][0]
-    assert "Supabase query returned None" in warning_call
-    assert "gpt-4" in warning_call
+    # Verify debug log was called (changed from warning to debug to reduce log noise)
+    mock_logger.debug.assert_called()
+    debug_call = mock_logger.debug.call_args[0][0]
+    assert "Supabase query returned None" in debug_call
+    assert "gpt-4" in debug_call
+
+
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_process_health_check_result_retries_on_query_failure(mock_supabase, mock_logger, mock_sleep, health_monitor):
+    """Test that _process_health_check_result retries queries on failure before giving up"""
+    # Create a mock that raises an exception on first call, succeeds on second
+    mock_table = MagicMock()
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+
+    # First call raises, second call succeeds
+    mock_response = MagicMock()
+    mock_response.data = {"provider": "openai", "model": "gpt-4", "call_count": 10, "success_count": 9}
+    call_count = [0]
+
+    def execute_side_effect():
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise Exception("Temporary connection error")
+        return mock_response
+
+    mock_table.execute.side_effect = execute_side_effect
+    mock_supabase.table.return_value = mock_table
+
+    # Create a test health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4",
+        gateway="openrouter",
+        status=HealthCheckStatus.SUCCESS,
+        response_time_ms=150.5,
+        error_message=None,
+        http_status_code=200,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    # Should not raise an exception - retry should succeed
+    await health_monitor._process_health_check_result(result)
+
+    # Verify retry happened (sleep was called for delay between retries)
+    mock_sleep.assert_called_once_with(0.5)
+
+    # Verify execute was called twice (initial + retry)
+    assert call_count[0] == 2
+
+
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_create_or_update_incident_retries_on_query_failure(mock_supabase, mock_logger, mock_sleep, health_monitor):
+    """Test that _create_or_update_incident retries queries on failure before giving up"""
+    # Create a mock that raises an exception on first call, succeeds on second
+    mock_table = MagicMock()
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.order.return_value = mock_table
+    mock_table.limit.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+
+    # First call raises, second call succeeds
+    mock_response = MagicMock()
+    mock_response.data = None  # No active incident
+    call_count = [0]
+
+    def execute_side_effect():
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise Exception("Temporary connection error")
+        return mock_response
+
+    mock_table.execute.side_effect = execute_side_effect
+    mock_supabase.table.return_value = mock_table
+
+    # Create a test health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4",
+        gateway="openrouter",
+        status=HealthCheckStatus.ERROR,
+        response_time_ms=150.5,
+        error_message="Test error",
+        http_status_code=500,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    # Should not raise an exception - retry should succeed
+    await health_monitor._create_or_update_incident(result, consecutive_failures=3)
+
+    # Verify retry happened (sleep was called for delay between retries)
+    mock_sleep.assert_called_once_with(0.5)
+
+    # Verify execute was called twice (initial + retry)
+    assert call_count[0] == 2
+
+
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_process_health_check_result_logs_debug_after_max_retries(mock_supabase, mock_logger, mock_sleep, health_monitor):
+    """Test that _process_health_check_result logs at debug level after all retries fail"""
+    # Create a mock that always raises an exception
+    mock_table = MagicMock()
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+    mock_table.execute.side_effect = Exception("Persistent connection error")
+
+    mock_supabase.table.return_value = mock_table
+
+    # Create a test health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4",
+        gateway="openrouter",
+        status=HealthCheckStatus.SUCCESS,
+        response_time_ms=150.5,
+        error_message=None,
+        http_status_code=200,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    # Should not raise an exception - gracefully handle failure
+    await health_monitor._process_health_check_result(result)
+
+    # Verify retry delay was called once (between attempt 1 and 2)
+    mock_sleep.assert_called_once_with(0.5)
+
+    # Verify debug log was called on final failure
+    mock_logger.debug.assert_called()
+    debug_call = mock_logger.debug.call_args[0][0]
+    assert "Health tracking query failed" in debug_call
+    assert "after 2 attempts" in debug_call
