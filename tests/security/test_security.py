@@ -327,26 +327,41 @@ class TestAuditLoggerFormat:
         - Yellow/orange icon for WARNING logs
         - Red icon for ERROR logs
         """
-        logger = get_audit_logger()
+        import io
+        import logging
 
-        # Get the formatter from the first handler
-        handler = logger.logger.handlers[0]
-        formatter = handler.formatter
+        # Create a fresh logger and capture actual output to verify format
+        test_logger = AuditLogger()
+        original_handlers = test_logger.logger.handlers[:]
 
-        # Check the format string
-        format_string = formatter._fmt
+        try:
+            # Add a test handler to capture output
+            stream = io.StringIO()
+            test_handler = logging.StreamHandler(stream)
+            # Use the same formatter as the original handler
+            if original_handlers and original_handlers[0].formatter:
+                test_handler.setFormatter(original_handlers[0].formatter)
+            test_logger.logger.addHandler(test_handler)
 
-        # The format should have %(levelname)s before [AUDIT] or AUDIT
-        # This ensures Railway parses the level correctly
-        levelname_pos = format_string.find("%(levelname)s")
-        audit_pos = format_string.find("AUDIT")
+            # Log a test event
+            test_logger.log_api_key_creation(1, 100, "test_key", "live", "user")
 
-        assert levelname_pos != -1, "Format must include %(levelname)s"
-        assert audit_pos != -1, "Format must include AUDIT marker"
-        assert levelname_pos < audit_pos, (
-            f"%(levelname)s must come before AUDIT in format. "
-            f"Format: {format_string}"
-        )
+            output = stream.getvalue()
+
+            # Verify the output format has level before AUDIT
+            # Expected format: "timestamp - INFO - [AUDIT] - message"
+            assert "INFO" in output, "Output must include INFO level"
+            assert "AUDIT" in output, "Output must include AUDIT marker"
+
+            info_pos = output.find("INFO")
+            audit_pos = output.find("AUDIT")
+            assert info_pos < audit_pos, (
+                f"Level (INFO) must come before AUDIT in output. "
+                f"Output: {output}"
+            )
+        finally:
+            # Remove our test handler
+            test_logger.logger.removeHandler(test_handler)
 
     def test_audit_logger_log_methods_exist(self):
         """AuditLogger should have all required logging methods"""
@@ -370,26 +385,33 @@ class TestAuditLoggerFormat:
         # Create a fresh AuditLogger instance with a StringIO handler
         # to capture output
         test_logger = AuditLogger()
+        original_handlers = test_logger.logger.handlers[:]
 
-        # Clear existing handlers and add a test handler
-        test_logger.logger.handlers.clear()
-        stream = io.StringIO()
-        handler = logging.StreamHandler(stream)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
-        ))
-        test_logger.logger.addHandler(handler)
+        try:
+            # Clear existing handlers and add a test handler
+            test_logger.logger.handlers.clear()
+            stream = io.StringIO()
+            handler = logging.StreamHandler(stream)
+            handler.setFormatter(logging.Formatter(
+                "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
+            ))
+            test_logger.logger.addHandler(handler)
 
-        # Log a normal event
-        test_logger.log_api_key_creation(1, 100, "test_key", "live", "user")
+            # Log a normal event
+            test_logger.log_api_key_creation(1, 100, "test_key", "live", "user")
 
-        # Get the output
-        output = stream.getvalue()
+            # Get the output
+            output = stream.getvalue()
 
-        # Should contain INFO level
-        assert "INFO" in output
-        assert "[AUDIT]" in output
-        assert "API_KEY_CREATED" in output
+            # Should contain INFO level
+            assert "INFO" in output
+            assert "[AUDIT]" in output
+            assert "API_KEY_CREATED" in output
+        finally:
+            # Restore original handlers
+            test_logger.logger.handlers.clear()
+            for h in original_handlers:
+                test_logger.logger.addHandler(h)
 
     def test_audit_logger_uses_warning_level_for_security_violations(self):
         """Security violations should use WARNING level"""
@@ -398,23 +420,30 @@ class TestAuditLoggerFormat:
 
         # Create a fresh AuditLogger instance with a StringIO handler
         test_logger = AuditLogger()
+        original_handlers = test_logger.logger.handlers[:]
 
-        # Clear existing handlers and add a test handler
-        test_logger.logger.handlers.clear()
-        stream = io.StringIO()
-        handler = logging.StreamHandler(stream)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
-        ))
-        test_logger.logger.addHandler(handler)
+        try:
+            # Clear existing handlers and add a test handler
+            test_logger.logger.handlers.clear()
+            stream = io.StringIO()
+            handler = logging.StreamHandler(stream)
+            handler.setFormatter(logging.Formatter(
+                "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
+            ))
+            test_logger.logger.addHandler(handler)
 
-        # Log a security violation
-        test_logger.log_security_violation("TEST_VIOLATION", 1, 100, "test details", "127.0.0.1")
+            # Log a security violation
+            test_logger.log_security_violation("TEST_VIOLATION", 1, 100, "test details", "127.0.0.1")
 
-        # Get the output
-        output = stream.getvalue()
+            # Get the output
+            output = stream.getvalue()
 
-        # Should contain WARNING level
-        assert "WARNING" in output
-        assert "[AUDIT]" in output
-        assert "SECURITY_VIOLATION" in output
+            # Should contain WARNING level
+            assert "WARNING" in output
+            assert "[AUDIT]" in output
+            assert "SECURITY_VIOLATION" in output
+        finally:
+            # Restore original handlers
+            test_logger.logger.handlers.clear()
+            for h in original_handlers:
+                test_logger.logger.addHandler(h)

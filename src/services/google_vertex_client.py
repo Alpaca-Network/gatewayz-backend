@@ -636,13 +636,15 @@ def _make_google_vertex_request_rest(
                 request_body["tools"] = vertex_tools
                 logger.debug(f"Added tools to request: {vertex_tools}")
 
-                # Translate tool_choice to toolConfig if provided
-                tool_choice = kwargs.get("tool_choice")
-                if tool_choice:
-                    tool_config = _translate_tool_choice_to_vertex(tool_choice)
-                    if tool_config:
-                        request_body["toolConfig"] = tool_config
-                        logger.debug(f"Added toolConfig to request: {tool_config}")
+        # Translate tool_choice to toolConfig if provided
+        # This is handled separately from tools because tool_choice="none" is valid
+        # even when no tools are provided (explicitly disabling tool calling)
+        tool_choice = kwargs.get("tool_choice")
+        if tool_choice:
+            tool_config = _translate_tool_choice_to_vertex(tool_choice)
+            if tool_config:
+                request_body["toolConfig"] = tool_config
+                logger.debug(f"Added toolConfig to request: {tool_config}")
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
