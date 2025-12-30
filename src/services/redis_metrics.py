@@ -12,6 +12,7 @@ This service provides:
 All data is stored in Redis with appropriate TTLs to prevent unbounded growth.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -22,6 +23,10 @@ from typing import Any
 from src.config.redis_config import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+# Cache configuration
+HEALTH_CACHE_TTL = 300  # 5 minutes - cache calculated health scores
+AGGREGATION_INTERVAL = 60  # 1 minute - recalculate health scores
 
 
 @dataclass
@@ -63,12 +68,17 @@ class RedisMetrics:
     - errors:{provider} -> List (last 100 errors)
     - health:{provider} -> Float (health score 0-100)
     - circuit:{provider}:{model} -> String (circuit breaker state)
+    - provider_health_scores_current -> Hash (cached calculated scores)
     """
 
     def __init__(self, redis_client=None):
         """Initialize Redis metrics service"""
         self.redis = redis_client or get_redis_client()
         self.enabled = self.redis is not None
+
+        # In-memory cache for health scores (reduces volatility)
+        self._health_cache: dict[str, float] = {}
+        self._health_cache_time = 0
 
         if not self.enabled:
             logger.warning("Redis not available - metrics service will operate in no-op mode")
@@ -165,24 +175,17 @@ class RedisMetrics:
             logger.warning(f"Failed to record Redis metrics: {e}")
 
     async def _update_health_score_pipe(self, pipe, provider: str, success: bool):
-        """Update provider health score (internal helper for pipeline)"""
-        health_key = f"health:{provider}"
+        """
+        Update provider health score (internal helper for pipeline).
 
-        # Adjust health score based on success/failure
-        delta = 2 if success else -5
-
-        # We can't easily get current value in a pipeline, so we'll do this separately
-        # This is a minor inconsistency but acceptable for health scores
-        try:
-            current = self.redis.zscore("provider_health", provider)
-            if current is None:
-                current = 100.0
-
-            new_score = max(0.0, min(100.0, current + delta))
-            pipe.zadd("provider_health", {provider: new_score})
-        except Exception:
-            # If we can't get current score, just set to a reasonable default
-            pipe.zadd("provider_health", {provider: 85.0 if success else 50.0})
+        NOTE: Health scores are now calculated from aggregated metrics, not per-request deltas.
+        This method is kept for backwards compatibility but does minimal work.
+        The actual health score calculation happens in _recalculate_all_health_scores().
+        """
+        # Health scores are now calculated from aggregated metrics
+        # No per-request updates to avoid volatility
+        # See _recalculate_all_health_scores() for calculation logic
+        pass
 
     async def get_provider_health(self, provider: str) -> float:
         """
@@ -348,26 +351,174 @@ class RedisMetrics:
 
     async def get_all_provider_health(self) -> dict[str, float]:
         """
-        Get health scores for all providers.
+        Get health scores for all providers with caching to reduce volatility.
+
+        Health scores are cached for HEALTH_CACHE_TTL (5 minutes) to provide
+        stable values across page refreshes. After cache expires, fresh scores
+        are calculated from aggregated metrics.
 
         Returns:
-            Dictionary mapping provider name to health score
+            Dictionary mapping provider name to health score (0-100)
         """
         if not self.enabled:
             return {}
 
         try:
-            # Get all providers from sorted set (high to low)
-            providers = self.redis.zrevrange("provider_health", 0, -1, withscores=True)
+            now = time.time()
 
-            # Decode bytes to strings if needed
-            return {
-                provider.decode() if isinstance(provider, bytes) else provider: score
-                for provider, score in providers
-            }
+            # Return cached values if still valid (within 5 minutes)
+            if (self._health_cache and
+                (now - self._health_cache_time) < HEALTH_CACHE_TTL):
+                logger.debug(f"Returning cached health scores (age: {now - self._health_cache_time:.0f}s)")
+                return self._health_cache
+
+            # Cache expired or empty - try to get pre-calculated scores from Redis
+            # These are updated every minute by _recalculate_all_health_scores()
+            try:
+                cached_scores = self.redis.hgetall("provider_health_scores_current")
+                if cached_scores:
+                    # Convert from bytes to dict[str, float]
+                    health_scores = {
+                        k.decode() if isinstance(k, bytes) else k: float(v)
+                        for k, v in cached_scores.items()
+                    }
+                    # Cache in memory
+                    self._health_cache = health_scores
+                    self._health_cache_time = now
+                    logger.debug(f"Loaded {len(health_scores)} health scores from Redis cache")
+                    return health_scores
+            except Exception as e:
+                logger.debug(f"No pre-calculated health scores in Redis: {e}")
+
+            # Fallback: Calculate health from current metrics
+            health_scores = await self._calculate_all_health_scores()
+
+            # Cache the results
+            if health_scores:
+                self._health_cache = health_scores
+                self._health_cache_time = now
+
+            return health_scores
+
         except Exception as e:
             logger.warning(f"Failed to get all provider health: {e}")
+            # Return last known good cache if available
+            return self._health_cache if self._health_cache else {}
+
+    async def _calculate_all_health_scores(self) -> dict[str, float]:
+        """
+        Calculate health scores for all providers from aggregated metrics.
+
+        Formula:
+            Health = (Success Rate %) × 0.7 + Latency Score × 0.3
+            where:
+              Success Rate = successful_requests / total_requests
+              Latency Score = (1 - min(avg_latency_ms / acceptable_latency_ms, 1.0)) × 100
+
+        This provides stable, statistical health scores instead of per-request deltas.
+
+        Returns:
+            Dictionary mapping provider name to health score (0-100)
+        """
+        if not self.enabled:
             return {}
+
+        try:
+            health_scores = {}
+            now = datetime.now(timezone.utc)
+
+            # Get current hour's metrics
+            hour_key = now.strftime("%Y-%m-%d:%H")
+
+            # Scan all providers in metrics (get unique providers from current hour)
+            providers = set()
+            for metric_key in self.redis.scan_iter("metrics:*"):
+                key_str = metric_key.decode() if isinstance(metric_key, bytes) else metric_key
+                parts = key_str.split(":")
+                if len(parts) >= 2:
+                    providers.add(parts[1])
+
+            # Calculate health for each provider
+            for provider in providers:
+                metrics_key = f"metrics:{provider}:{hour_key}"
+
+                try:
+                    metrics_data = self.redis.hgetall(metrics_key)
+
+                    if not metrics_data:
+                        # No recent metrics - assume healthy
+                        health_scores[provider] = 100.0
+                        continue
+
+                    # Extract metrics
+                    total_requests = int(metrics_data.get(b"total_requests", 0) or 0)
+                    successful_requests = int(metrics_data.get(b"successful_requests", 0) or 0)
+
+                    if total_requests == 0:
+                        # No requests yet - assume healthy
+                        health_scores[provider] = 100.0
+                        continue
+
+                    # Calculate success rate (0-100)
+                    success_rate = (successful_requests / total_requests) * 100
+
+                    # Calculate latency score
+                    # For now, use success rate as primary metric
+                    # In future, could calculate from latency percentiles
+                    latency_score = success_rate  # Placeholder
+
+                    # Weighted combination: 70% success rate, 30% latency
+                    health = (success_rate * 0.7) + (latency_score * 0.3)
+
+                    # Clamp to 0-100
+                    health_scores[provider] = max(0.0, min(100.0, health))
+
+                    logger.debug(
+                        f"{provider}: health={health:.1f}, "
+                        f"success_rate={success_rate:.1f}%, "
+                        f"requests={total_requests}"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"Failed to calculate health for {provider}: {e}")
+                    health_scores[provider] = 100.0  # Default to healthy on error
+
+            return health_scores
+
+        except Exception as e:
+            logger.warning(f"Failed to calculate all health scores: {e}")
+            return {}
+
+    async def _recalculate_all_health_scores(self):
+        """
+        Background job: Recalculate all provider health scores from aggregated metrics.
+
+        This should be called periodically (every minute) from a background task.
+        Calculated scores are stored in Redis for quick access and caching.
+        """
+        if not self.enabled:
+            return
+
+        try:
+            # Calculate health scores from current metrics
+            health_scores = await self._calculate_all_health_scores()
+
+            if not health_scores:
+                logger.debug("No health scores calculated")
+                return
+
+            # Store in Redis with 2-minute TTL (so they're refreshed every minute)
+            # This provides stable values even if calculation takes time
+            self.redis.hset(
+                "provider_health_scores_current",
+                mapping={k: v for k, v in health_scores.items()}
+            )
+            self.redis.expire("provider_health_scores_current", 120)  # 2 min TTL
+
+            logger.debug(f"Recalculated and cached {len(health_scores)} provider health scores")
+
+        except Exception as e:
+            logger.warning(f"Failed to recalculate health scores: {e}")
 
     async def cleanup_old_data(self, hours: int = 2):
         """
