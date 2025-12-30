@@ -309,13 +309,15 @@ GRANT SELECT ON model_status_current TO anon;
 -- Enable RLS on model_health_tracking
 ALTER TABLE model_health_tracking ENABLE ROW LEVEL SECURITY;
 
--- Create policies
+-- Create policies (drop first to make idempotent)
+DROP POLICY IF EXISTS "Authenticated users can read model health" ON model_health_tracking;
 CREATE POLICY "Authenticated users can read model health"
     ON model_health_tracking
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Service role can do anything on model health" ON model_health_tracking;
 CREATE POLICY "Service role can do anything on model health"
     ON model_health_tracking
     FOR ALL
@@ -326,12 +328,14 @@ CREATE POLICY "Service role can do anything on model health"
 -- Enable RLS on model_health_incidents
 ALTER TABLE model_health_incidents ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users can read incidents" ON model_health_incidents;
 CREATE POLICY "Authenticated users can read incidents"
     ON model_health_incidents
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Service role can do anything on incidents" ON model_health_incidents;
 CREATE POLICY "Service role can do anything on incidents"
     ON model_health_incidents
     FOR ALL
@@ -342,12 +346,14 @@ CREATE POLICY "Service role can do anything on incidents"
 -- Enable RLS on model_health_history
 ALTER TABLE model_health_history ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users can read health history" ON model_health_history;
 CREATE POLICY "Authenticated users can read health history"
     ON model_health_history
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Service role can do anything on health history" ON model_health_history;
 CREATE POLICY "Service role can do anything on health history"
     ON model_health_history
     FOR ALL
