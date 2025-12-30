@@ -452,21 +452,38 @@ class IntelligentHealthMonitor:
 
             is_success = result.status == HealthCheckStatus.SUCCESS
 
-            # Get current health data
-            current = (
-                supabase.table("model_health_tracking")
-                .select("*")
-                .eq("provider", result.provider)
-                .eq("model", result.model)
-                .maybe_single()
-                .execute()
-            )
+            # Get current health data with retry logic
+            current = None
+            max_retries = 2
 
-            # Handle case where response is None (e.g., Supabase client not initialized)
+            for attempt in range(max_retries):
+                try:
+                    current = (
+                        supabase.table("model_health_tracking")
+                        .select("*")
+                        .eq("provider", result.provider)
+                        .eq("model", result.model)
+                        .maybe_single()
+                        .execute()
+                    )
+                    break  # Success, exit retry loop
+                except Exception as query_error:
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.5)  # Brief delay before retry
+                        continue
+                    # Log only on final failure, and at debug level to reduce noise
+                    logger.debug(
+                        f"Health tracking query failed for {result.model} after {max_retries} attempts: {query_error}"
+                    )
+                    return
+
+            # Handle case where response is None (e.g., Supabase client not initialized or table doesn't exist)
             if current is None:
-                logger.warning(
+                # Log at debug level - this happens frequently during initial setup
+                # or when model_health_tracking table is not configured
+                logger.debug(
                     f"Supabase query returned None for health tracking on {result.model}. "
-                    "Skipping health result processing."
+                    "This may indicate the model_health_tracking table is not configured."
                 )
                 return
 
@@ -603,25 +620,42 @@ class IntelligentHealthMonitor:
         try:
             from src.config.supabase_config import supabase
 
-            # Check for active incident
-            active = (
-                supabase.table("model_health_incidents")
-                .select("*")
-                .eq("provider", result.provider)
-                .eq("model", result.model)
-                .eq("gateway", result.gateway)
-                .eq("status", "active")
-                .order("started_at", desc=True)
-                .limit(1)
-                .maybe_single()
-                .execute()
-            )
+            # Check for active incident with retry logic
+            active = None
+            max_retries = 2
 
-            # Handle case where response is None (e.g., Supabase client not initialized)
+            for attempt in range(max_retries):
+                try:
+                    active = (
+                        supabase.table("model_health_incidents")
+                        .select("*")
+                        .eq("provider", result.provider)
+                        .eq("model", result.model)
+                        .eq("gateway", result.gateway)
+                        .eq("status", "active")
+                        .order("started_at", desc=True)
+                        .limit(1)
+                        .maybe_single()
+                        .execute()
+                    )
+                    break  # Success, exit retry loop
+                except Exception as query_error:
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.5)  # Brief delay before retry
+                        continue
+                    # Log only on final failure, and at debug level to reduce noise
+                    logger.debug(
+                        f"Incident query failed for {result.model} after {max_retries} attempts: {query_error}"
+                    )
+                    return
+
+            # Handle case where response is None (e.g., Supabase client not initialized or table doesn't exist)
             if active is None:
-                logger.warning(
+                # Log at debug level - this happens frequently and is usually due to
+                # the model_health_incidents table not existing or RLS policy issues
+                logger.debug(
                     f"Supabase query returned None for incident check on {result.model}. "
-                    "Skipping incident creation/update."
+                    "This may indicate the model_health_incidents table is not configured."
                 )
                 return
 
