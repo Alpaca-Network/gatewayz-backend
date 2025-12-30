@@ -18,33 +18,38 @@ CREATE TABLE IF NOT EXISTS model_health_tracking (
     last_error_message TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    -- Token tracking columns (from 20251124120000_add_token_tracking_to_health.sql)
-    input_tokens INTEGER,
-    output_tokens INTEGER,
-    total_tokens INTEGER,
-    -- Enhanced monitoring columns (from 20251128000000_enhance_model_health_tracking.sql)
-    gateway TEXT,
-    monitoring_tier TEXT DEFAULT 'standard',
-    uptime_percentage_24h NUMERIC DEFAULT 100.0,
-    uptime_percentage_7d NUMERIC DEFAULT 100.0,
-    uptime_percentage_30d NUMERIC DEFAULT 100.0,
-    last_incident_at TIMESTAMP WITH TIME ZONE,
-    consecutive_failures INTEGER DEFAULT 0,
-    consecutive_successes INTEGER DEFAULT 0,
-    circuit_breaker_state TEXT DEFAULT 'closed',
-    last_check_duration_ms NUMERIC,
-    priority_score NUMERIC DEFAULT 0,
-    usage_count_24h INTEGER DEFAULT 0,
-    usage_count_7d INTEGER DEFAULT 0,
-    usage_count_30d INTEGER DEFAULT 0,
-    last_success_at TIMESTAMP WITH TIME ZONE,
-    last_failure_at TIMESTAMP WITH TIME ZONE,
-    next_check_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    check_interval_seconds INTEGER DEFAULT 3600,
-    is_enabled BOOLEAN DEFAULT TRUE,
-    metadata JSONB DEFAULT '{}'::jsonb,
     PRIMARY KEY (provider, model)
 );
+
+-- Add token tracking columns if they don't exist
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS total_tokens INTEGER;
+
+-- Add enhanced monitoring columns if they don't exist
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS gateway TEXT;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS monitoring_tier TEXT DEFAULT 'standard';
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS uptime_percentage_24h NUMERIC DEFAULT 100.0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS uptime_percentage_7d NUMERIC DEFAULT 100.0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS uptime_percentage_30d NUMERIC DEFAULT 100.0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_incident_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS consecutive_successes INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS circuit_breaker_state TEXT DEFAULT 'closed';
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_check_duration_ms NUMERIC;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS priority_score NUMERIC DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS usage_count_24h INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS usage_count_7d INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS usage_count_30d INTEGER DEFAULT 0;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS check_interval_seconds INTEGER DEFAULT 3600;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT TRUE;
+ALTER TABLE model_health_tracking ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
+-- Original CREATE TABLE removed since we now use ALTER TABLE ADD COLUMN IF NOT EXISTS above
+-- This ensures the table is created with basic columns first, then extended
 
 -- Create indexes for model_health_tracking
 CREATE INDEX IF NOT EXISTS idx_model_health_last_called
