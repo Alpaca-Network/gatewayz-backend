@@ -3352,9 +3352,16 @@ async def unified_responses(
                 else:
                     input_messages.append({"role": inp_msg.role, "content": str(inp_msg.content)})
 
+            # Safely extract output content for Braintrust logging
+            bt_output = ""
+            if response.get("output") and len(response["output"]) > 0:
+                first_output = response["output"][0]
+                if isinstance(first_output, dict):
+                    bt_output = first_output.get("content", "")
+
             span.log(
                 input=input_messages,
-                output=response["output"][0].get("content", "") if response["output"] else "",
+                output=bt_output,
                 metrics={
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
