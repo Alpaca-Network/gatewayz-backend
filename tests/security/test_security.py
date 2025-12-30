@@ -294,3 +294,127 @@ class TestSecurityEdgeCases:
         # Should handle gracefully without crashing
         result = validate_domain_referrers(referer, allowed_domains)
         assert isinstance(result, bool)
+
+
+class TestAuditLoggerFormat:
+    """Test AuditLogger log format for Railway compatibility
+
+    Railway's log viewer parses log lines to determine log level icons.
+    The format must place the log level (INFO, WARNING, ERROR) before
+    any custom prefixes to ensure correct icon display.
+    """
+
+    def test_audit_logger_exists(self):
+        """AuditLogger should be available via get_audit_logger()"""
+        logger = get_audit_logger()
+        assert logger is not None
+        assert isinstance(logger, AuditLogger)
+
+    def test_audit_logger_has_handlers(self):
+        """AuditLogger should have configured handlers"""
+        logger = get_audit_logger()
+        assert len(logger.logger.handlers) > 0
+
+    def test_audit_logger_format_has_level_before_audit(self):
+        """Log format should have levelname before [AUDIT] for Railway compatibility
+
+        Railway scans log lines for keywords to determine log level icons.
+        The format should be: timestamp - LEVEL - [AUDIT] - message
+        NOT: timestamp - AUDIT - LEVEL - message
+
+        This ensures Railway correctly shows:
+        - Green icon for INFO logs
+        - Yellow/orange icon for WARNING logs
+        - Red icon for ERROR logs
+        """
+        logger = get_audit_logger()
+
+        # Get the formatter from the first handler
+        handler = logger.logger.handlers[0]
+        formatter = handler.formatter
+
+        # Check the format string
+        format_string = formatter._fmt
+
+        # The format should have %(levelname)s before [AUDIT] or AUDIT
+        # This ensures Railway parses the level correctly
+        levelname_pos = format_string.find("%(levelname)s")
+        audit_pos = format_string.find("AUDIT")
+
+        assert levelname_pos != -1, "Format must include %(levelname)s"
+        assert audit_pos != -1, "Format must include AUDIT marker"
+        assert levelname_pos < audit_pos, (
+            f"%(levelname)s must come before AUDIT in format. "
+            f"Format: {format_string}"
+        )
+
+    def test_audit_logger_log_methods_exist(self):
+        """AuditLogger should have all required logging methods"""
+        logger = get_audit_logger()
+
+        # Check all expected methods exist
+        assert hasattr(logger, 'log_api_key_creation')
+        assert hasattr(logger, 'log_api_key_deletion')
+        assert hasattr(logger, 'log_api_key_usage')
+        assert hasattr(logger, 'log_security_violation')
+        assert hasattr(logger, 'log_plan_assignment')
+        assert hasattr(logger, 'log_rate_limit_exceeded')
+        assert hasattr(logger, 'log_authentication_failure')
+        assert hasattr(logger, 'log_payment_event')
+
+    def test_audit_logger_uses_info_level_for_normal_events(self):
+        """Normal events should use INFO level"""
+        import io
+        import logging
+
+        # Create a fresh AuditLogger instance with a StringIO handler
+        # to capture output
+        test_logger = AuditLogger()
+
+        # Clear existing handlers and add a test handler
+        test_logger.logger.handlers.clear()
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
+        ))
+        test_logger.logger.addHandler(handler)
+
+        # Log a normal event
+        test_logger.log_api_key_creation(1, 100, "test_key", "live", "user")
+
+        # Get the output
+        output = stream.getvalue()
+
+        # Should contain INFO level
+        assert "INFO" in output
+        assert "[AUDIT]" in output
+        assert "API_KEY_CREATED" in output
+
+    def test_audit_logger_uses_warning_level_for_security_violations(self):
+        """Security violations should use WARNING level"""
+        import io
+        import logging
+
+        # Create a fresh AuditLogger instance with a StringIO handler
+        test_logger = AuditLogger()
+
+        # Clear existing handlers and add a test handler
+        test_logger.logger.handlers.clear()
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
+        ))
+        test_logger.logger.addHandler(handler)
+
+        # Log a security violation
+        test_logger.log_security_violation("TEST_VIOLATION", 1, 100, "test details", "127.0.0.1")
+
+        # Get the output
+        output = stream.getvalue()
+
+        # Should contain WARNING level
+        assert "WARNING" in output
+        assert "[AUDIT]" in output
+        assert "SECURITY_VIOLATION" in output

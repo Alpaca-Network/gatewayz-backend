@@ -227,6 +227,161 @@ def _sanitize_system_content(content: Any) -> str:
     return str(content)
 
 
+def _translate_openai_tools_to_vertex(tools: list[dict]) -> list[dict]:
+    """Translate OpenAI tools format to Google Vertex AI functionDeclarations format.
+
+    OpenAI format:
+    [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get weather for a location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string", "description": "City name"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+    ]
+
+    Vertex AI format:
+    [
+        {
+            "functionDeclarations": [
+                {
+                    "name": "get_weather",
+                    "description": "Get weather for a location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string", "description": "City name"}
+                        },
+                        "required": ["location"]
+                    }
+                }
+            ]
+        }
+    ]
+
+    Args:
+        tools: List of OpenAI-format tool definitions
+
+    Returns:
+        List containing a single dict with functionDeclarations for Vertex AI
+    """
+    if not tools:
+        return []
+
+    function_declarations = []
+
+    for tool in tools:
+        # Only process function-type tools
+        if tool.get("type") != "function":
+            logger.warning(
+                f"Skipping non-function tool type: {tool.get('type')}. "
+                "Only 'function' type tools are supported for Vertex AI."
+            )
+            continue
+
+        function_def = tool.get("function", {})
+        if not function_def:
+            logger.warning("Skipping tool with missing 'function' definition")
+            continue
+
+        name = function_def.get("name")
+        if not name:
+            logger.warning("Skipping function with missing 'name' field")
+            continue
+
+        # Build Vertex AI function declaration
+        vertex_function = {
+            "name": name,
+        }
+
+        # Add description if present
+        if function_def.get("description"):
+            vertex_function["description"] = function_def["description"]
+
+        # Add parameters if present
+        # Vertex AI uses OpenAPI 3.0.3 schema format which is compatible with OpenAI's JSON Schema
+        if function_def.get("parameters"):
+            vertex_function["parameters"] = function_def["parameters"]
+
+        function_declarations.append(vertex_function)
+
+    if not function_declarations:
+        logger.warning("No valid function declarations found after translation")
+        return []
+
+    logger.info(
+        f"Translated {len(function_declarations)} OpenAI tool(s) to Vertex AI functionDeclarations"
+    )
+
+    # Vertex AI expects tools as: [{"functionDeclarations": [...]}]
+    return [{"functionDeclarations": function_declarations}]
+
+
+def _translate_tool_choice_to_vertex(tool_choice: str | dict | None) -> dict | None:
+    """Translate OpenAI tool_choice to Vertex AI toolConfig.
+
+    OpenAI tool_choice values:
+    - "none": Model will not call any tools
+    - "auto": Model decides whether to call tools (default)
+    - "required": Model must call at least one tool
+    - {"type": "function", "function": {"name": "..."}}:  Model must call the specific function
+
+    Vertex AI toolConfig format:
+    {
+        "functionCallingConfig": {
+            "mode": "NONE" | "AUTO" | "ANY",
+            "allowedFunctionNames": ["..."]  # Only for ANY mode
+        }
+    }
+
+    Args:
+        tool_choice: OpenAI tool_choice value
+
+    Returns:
+        Vertex AI toolConfig dict, or None if no translation needed
+    """
+    if tool_choice is None:
+        return None
+
+    # String values
+    if isinstance(tool_choice, str):
+        if tool_choice == "none":
+            return {"functionCallingConfig": {"mode": "NONE"}}
+        elif tool_choice == "auto":
+            return {"functionCallingConfig": {"mode": "AUTO"}}
+        elif tool_choice == "required":
+            return {"functionCallingConfig": {"mode": "ANY"}}
+        else:
+            logger.warning(f"Unknown tool_choice value: {tool_choice}. Using AUTO mode.")
+            return {"functionCallingConfig": {"mode": "AUTO"}}
+
+    # Object value: force specific function
+    if isinstance(tool_choice, dict):
+        if tool_choice.get("type") == "function":
+            function_name = tool_choice.get("function", {}).get("name")
+            if function_name:
+                return {
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": [function_name],
+                    }
+                }
+            else:
+                logger.warning("tool_choice function object missing 'name'. Using ANY mode.")
+                return {"functionCallingConfig": {"mode": "ANY"}}
+
+    logger.warning(f"Unrecognized tool_choice format: {tool_choice}. Using AUTO mode.")
+    return {"functionCallingConfig": {"mode": "AUTO"}}
+
+
 def _prepare_vertex_contents(messages: list) -> tuple[list, str | None]:
     """Split OpenAI messages into conversational content and system instruction."""
     system_messages = []
@@ -462,23 +617,31 @@ def _make_google_vertex_request_rest(
         model_name = transform_google_vertex_model_id(model)
         logger.info(f"Using REST model name: {model_name}")
 
-        tools = kwargs.get("tools")
-        if tools:
-            logger.info(
-                "Tools parameter detected for Vertex REST call (count=%s). "
-                "Tool/function calling translation is not yet implemented.",
-                len(tools) if isinstance(tools, list) else 0,
-            )
-            logger.warning(
-                "Function calling is not currently supported for Vertex REST transport. "
-                "Requests will proceed without tool definitions."
-            )
-
         contents, system_instruction = _prepare_vertex_contents(messages)
         request_body: dict[str, Any] = {"contents": contents}
 
         if system_instruction:
             request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        # Translate OpenAI tools to Vertex AI functionDeclarations
+        tools = kwargs.get("tools")
+        if tools:
+            logger.info(
+                f"Tools parameter detected for Vertex REST call (count={len(tools) if isinstance(tools, list) else 0}). "
+                "Translating to Vertex AI functionDeclarations format."
+            )
+            vertex_tools = _translate_openai_tools_to_vertex(tools)
+            if vertex_tools:
+                request_body["tools"] = vertex_tools
+                logger.debug(f"Added tools to request: {vertex_tools}")
+
+                # Translate tool_choice to toolConfig if provided
+                tool_choice = kwargs.get("tool_choice")
+                if tool_choice:
+                    tool_config = _translate_tool_choice_to_vertex(tool_choice)
+                    if tool_config:
+                        request_body["toolConfig"] = tool_config
+                        logger.debug(f"Added toolConfig to request: {tool_config}")
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
