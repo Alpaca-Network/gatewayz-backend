@@ -401,15 +401,30 @@ class SecurityManager:
 
 
 class AuditLogger:
-    """Comprehensive audit logging system for security events"""
+    """Comprehensive audit logging system for security events
+
+    Log format is designed for Railway compatibility:
+    - levelname appears before the logger name to ensure proper log level detection
+    - Format: "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
+
+    This ensures Railway's log viewer correctly identifies INFO logs as INFO
+    (green) and WARNING logs as warnings (yellow/orange), rather than
+    misinterpreting the "AUDIT" prefix as an error indicator.
+    """
 
     def __init__(self):
         self.logger = logging.getLogger("audit")
 
-        # Set up audit-specific logging with custom format
+        # Set up audit-specific logging with Railway-compatible format
+        # Key: levelname MUST come before any custom prefixes like [AUDIT]
+        # to ensure Railway's log parser correctly identifies the log level
         if not self.logger.handlers:
             audit_handler = logging.StreamHandler()
-            audit_formatter = logging.Formatter("%(asctime)s - AUDIT - %(levelname)s - %(message)s")
+            # Format: timestamp - LEVEL - [AUDIT] - message
+            # This ensures Railway parses the log level correctly
+            audit_formatter = logging.Formatter(
+                "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
+            )
             audit_handler.setFormatter(audit_formatter)
             self.logger.addHandler(audit_handler)
             self.logger.setLevel(logging.INFO)
