@@ -287,7 +287,7 @@ SELECT
     (SELECT COUNT(*) FROM model_health_incidents mhi
      WHERE mhi.provider = mht.provider
        AND mhi.model = mht.model
-       AND mhi.status = 'active') as active_incidents
+       AND mhi.status = 'active') as active_incidents_count
 FROM model_health_tracking mht
 WHERE mht.is_enabled = TRUE;
 
