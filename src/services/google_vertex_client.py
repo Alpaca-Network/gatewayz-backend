@@ -366,7 +366,8 @@ def _translate_tool_choice_to_vertex(tool_choice: str | dict | None) -> dict | N
     # Object value: force specific function
     if isinstance(tool_choice, dict):
         if tool_choice.get("type") == "function":
-            function_name = tool_choice.get("function", {}).get("name")
+            function_obj = tool_choice.get("function")
+            function_name = function_obj.get("name") if function_obj else None
             if function_name:
                 return {
                     "functionCallingConfig": {

@@ -13,7 +13,6 @@ sys.modules['google.protobuf.json_format'] = MagicMock()
 from src.config import Config
 from src.services.google_vertex_client import (
     make_google_vertex_request_openai,
-    _ensure_vertex_imports,
     _translate_openai_tools_to_vertex,
     _translate_tool_choice_to_vertex,
 )
@@ -262,6 +261,17 @@ class TestToolChoiceTranslation:
         tool_choice = {
             "type": "function",
             "function": {},  # Missing name
+        }
+
+        result = _translate_tool_choice_to_vertex(tool_choice)
+
+        assert result == {"functionCallingConfig": {"mode": "ANY"}}
+
+    def test_translate_tool_choice_function_is_none(self):
+        """Test translating tool_choice when function value is None"""
+        tool_choice = {
+            "type": "function",
+            "function": None,  # function is explicitly None
         }
 
         result = _translate_tool_choice_to_vertex(tool_choice)
