@@ -19,45 +19,39 @@ INSERT INTO plans (
     name,
     description,
     plan_type,
-    daily_request_limit,
-    monthly_request_limit,
-    daily_token_limit,
-    monthly_token_limit,
     price_per_month,
-    yearly_price,
+    daily_request_limit,
+    daily_token_limit,
+    monthly_request_limit,
+    monthly_token_limit,
     max_concurrent_requests,
     features,
-    is_active,
-    is_pay_as_you_go
+    is_active
 )
 VALUES (
     'Admin',
     'Administrative tier with unlimited access and no resource constraints',
     'admin',
-    2147483647,  -- Max integer value (~2.1 billion requests/day)
-    2147483647,  -- Max integer value (~2.1 billion requests/month)
-    2147483647,  -- Max integer value (~2.1 billion tokens/day)
-    2147483647,  -- Max integer value (~2.1 billion tokens/month)
     0.00,        -- No monthly cost
-    0.00,        -- No yearly cost
+    2147483647,  -- Max integer value (~2.1 billion requests/day)
+    2147483647,  -- Max integer value (~2.1 billion tokens/day)
+    2147483647,  -- Max integer value (~2.1 billion requests/month)
+    2147483647,  -- Max integer value (~2.1 billion tokens/month)
     1000,        -- High concurrent request limit
-    ARRAY['unlimited_access', 'priority_support', 'admin_features', 'all_models']::text[],
-    TRUE,        -- Active
-    FALSE        -- Not pay-as-you-go
+    '["unlimited_access", "priority_support", "admin_features", "all_models"]'::jsonb,
+    TRUE         -- Active
 )
 ON CONFLICT (name) DO UPDATE SET
     description = EXCLUDED.description,
     plan_type = EXCLUDED.plan_type,
-    daily_request_limit = EXCLUDED.daily_request_limit,
-    monthly_request_limit = EXCLUDED.monthly_request_limit,
-    daily_token_limit = EXCLUDED.daily_token_limit,
-    monthly_token_limit = EXCLUDED.monthly_token_limit,
     price_per_month = EXCLUDED.price_per_month,
-    yearly_price = EXCLUDED.yearly_price,
+    daily_request_limit = EXCLUDED.daily_request_limit,
+    daily_token_limit = EXCLUDED.daily_token_limit,
+    monthly_request_limit = EXCLUDED.monthly_request_limit,
+    monthly_token_limit = EXCLUDED.monthly_token_limit,
     max_concurrent_requests = EXCLUDED.max_concurrent_requests,
     features = EXCLUDED.features,
-    is_active = EXCLUDED.is_active,
-    is_pay_as_you_go = EXCLUDED.is_pay_as_you_go;
+    is_active = EXCLUDED.is_active;
 
 -- Add comment to document the admin plan
 COMMENT ON TABLE plans IS 'Subscription plans including the special admin tier with unlimited resources';
