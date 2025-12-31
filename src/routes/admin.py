@@ -23,7 +23,7 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
-from src.security.deps import require_admin
+from src.security.deps import get_admin_key
 from src.services.models import (
     enhance_model_with_provider_info,
     fetch_huggingface_model,
@@ -90,7 +90,7 @@ async def create_api_key(request: UserRegistrationRequest):
 
 # Admin endpoints
 @router.post("/admin/add_credits", tags=["admin"])
-async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(require_admin)):
+async def admin_add_credits(req: AddCreditsRequest, _: str = Depends(get_admin_key)):
     try:
         user = get_user(req.api_key)
         if not user:
@@ -118,7 +118,7 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
 
 
 @router.get("/admin/balance", tags=["admin"])
-async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
+async def admin_get_all_balances(_: str = Depends(get_admin_key)):
     try:
         users = get_all_users()
 
@@ -141,7 +141,7 @@ async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
 
 
 @router.get("/admin/monitor", tags=["admin"])
-async def admin_monitor(admin_user: dict = Depends(require_admin)):
+async def admin_monitor(_: str = Depends(get_admin_key)):
     try:
         monitor_data = get_admin_monitor_data()
 
@@ -173,7 +173,7 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
 
 
 @router.post("/admin/limit", tags=["admin"])
-async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depends(require_admin)):
+async def admin_set_rate_limit(req: SetRateLimitRequest, _: str = Depends(get_admin_key)):
     try:
         set_user_rate_limits(req.api_key, req.rate_limits.model_dump())
 
@@ -206,7 +206,7 @@ async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depe
 
 # Admin cache management endpoints
 @router.post("/admin/refresh-providers", tags=["admin"])
-async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
+async def admin_refresh_providers(_: str = Depends(get_admin_key)):
     try:
         # Invalidate provider cache to force refresh
         _provider_cache["data"] = None
@@ -227,7 +227,7 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
 
 
 @router.get("/admin/cache-status", tags=["admin"])
-async def admin_cache_status(admin_user: dict = Depends(require_admin)):
+async def admin_cache_status(_: str = Depends(get_admin_key)):
     try:
         cache_age = None
         if _provider_cache["timestamp"]:
@@ -253,7 +253,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
 
 
 @router.get("/admin/huggingface-cache-status", tags=["admin"])
-async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admin)):
+async def admin_huggingface_cache_status(_: str = Depends(get_admin_key)):
     """Get Hugging Face cache status and statistics"""
     try:
         cache_age = None
@@ -280,7 +280,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
 
 
 @router.post("/admin/refresh-huggingface-cache", tags=["admin"])
-async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_admin)):
+async def admin_refresh_huggingface_cache(_: str = Depends(get_admin_key)):
     """Clear Hugging Face cache to force refresh on the next request"""
     try:
         _huggingface_cache["data"] = {}
@@ -298,7 +298,7 @@ async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_adm
 
 @router.get("/admin/test-huggingface/{hugging_face_id}", tags=["admin"])
 async def admin_test_huggingface(
-    hugging_face_id: str = "openai/gpt-oss-120b", admin_user: dict = Depends(require_admin)
+    hugging_face_id: str = "openai/gpt-oss-120b", _: str = Depends(get_admin_key)
 ):
     """Test Hugging Face API response for debugging"""
     try:
@@ -351,7 +351,7 @@ async def admin_test_huggingface(
 
 
 @router.get("/admin/debug-models", tags=["admin"])
-async def admin_debug_models(admin_user: dict = Depends(require_admin)):
+async def admin_debug_models(_: str = Depends(get_admin_key)):
     """Debug models and providers data for troubleshooting"""
     try:
         # Get raw data
@@ -596,7 +596,7 @@ async def test_openrouter_providers():
 
 
 @router.post("/admin/clear-rate-limit-cache", tags=["admin"])
-async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)):
+async def admin_clear_rate_limit_cache(_: str = Depends(get_admin_key)):
     """Clear rate limit configuration cache to force reload from database"""
     try:
         from src.services.rate_limiting import get_rate_limit_manager
@@ -624,7 +624,7 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
 
 
 @router.get("/admin/trial/analytics", tags=["admin"])
-async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
+async def get_trial_analytics_admin(_: str = Depends(get_admin_key)):
     """Get trial analytics and conversion metrics for admin"""
     try:
         analytics = get_trial_analytics()
@@ -635,7 +635,7 @@ async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
 
 
 @router.get("/admin/users", tags=["admin"])
-async def get_all_users_info(admin_user: dict = Depends(require_admin)):
+async def get_all_users_info(_: str = Depends(get_admin_key)):
     """Get all users information from users table (Admin only)"""
     try:
         from src.config.supabase_config import get_supabase_client
@@ -643,12 +643,14 @@ async def get_all_users_info(admin_user: dict = Depends(require_admin)):
         client = get_supabase_client()
 
         # Get all users with their information
+        # Note: Supabase has a default limit of 1000, so we set a high limit to fetch all users
         result = (
             client.table("users")
             .select(
-                "id, username, email, credits, is_active, role, registration_date, "
+                "id, username, email, api_key, credits, is_active, role, registration_date, "
                 "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
             )
+            .limit(100000)  # Set high limit to fetch all users
             .execute()
         )
 
@@ -723,7 +725,7 @@ async def get_all_credit_transactions_admin(
     ),
     sort_order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
     include_summary: bool = Query(False, description="Include summary analytics in response"),
-    admin_user: dict = Depends(require_admin),
+    _: str = Depends(get_admin_key),
 ):
     """
     Get all credit transactions across all users (Admin only)
@@ -846,7 +848,7 @@ async def get_all_credit_transactions_admin(
 
 
 @router.get("/admin/users/{user_id}", tags=["admin"])
-async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_admin)):
+async def get_user_info_by_id(user_id: int, _: str = Depends(get_admin_key)):
     """Get detailed information for a specific user (Admin only)"""
     try:
         from src.config.supabase_config import get_supabase_client
@@ -907,3 +909,324 @@ async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_a
     except Exception as e:
         logger.error(f"Error getting user info for ID {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user information") from e
+
+
+@router.put("/admin/users/{user_id}", tags=["admin"])
+async def update_user(
+    user_id: int,
+    username: str | None = None,
+    email: str | None = None,
+    is_active: bool | None = None,
+    _: str = Depends(get_admin_key),
+):
+    """
+    Update user details (Admin only)
+
+    Update basic user information such as username, email, and active status.
+    At least one field must be provided.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        from src.db.users import invalidate_user_cache_by_id
+
+        client = get_supabase_client()
+
+        # Verify user exists
+        user_result = client.table("users").select("id").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Build update data
+        update_data = {}
+        if username is not None:
+            update_data["username"] = username
+        if email is not None:
+            update_data["email"] = email
+        if is_active is not None:
+            update_data["is_active"] = is_active
+
+        if not update_data:
+            raise HTTPException(
+                status_code=400, detail="At least one field must be provided to update"
+            )
+
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Update user
+        result = client.table("users").update(update_data).eq("id", user_id).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update user")
+
+        # Invalidate cache
+        invalidate_user_cache_by_id(user_id)
+
+        updated_user = result.data[0]
+
+        return {
+            "status": "success",
+            "message": f"User {user_id} updated successfully",
+            "user": updated_user,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user") from e
+
+
+@router.put("/admin/users/{user_id}/tier", tags=["admin"])
+async def update_user_tier(
+    user_id: int,
+    tier: str,
+    _: str = Depends(get_admin_key),
+):
+    """
+    Update user's subscription tier (Admin only)
+
+    Valid tiers: basic, pro, max
+    This updates the user's tier and can optionally assign a corresponding plan.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        from src.db.users import invalidate_user_cache_by_id
+
+        # Validate tier
+        valid_tiers = ["basic", "pro", "max"]
+        if tier.lower() not in valid_tiers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid tier. Must be one of: {', '.join(valid_tiers)}",
+            )
+
+        client = get_supabase_client()
+
+        # Verify user exists
+        user_result = client.table("users").select("id").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Update tier
+        update_data = {
+            "tier": tier.lower(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        result = client.table("users").update(update_data).eq("id", user_id).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update user tier")
+
+        # Invalidate cache
+        invalidate_user_cache_by_id(user_id)
+
+        return {
+            "status": "success",
+            "message": f"User {user_id} tier updated to {tier}",
+            "user_id": user_id,
+            "new_tier": tier.lower(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user tier for {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user tier") from e
+
+
+@router.put("/admin/users/{user_id}/credits", tags=["admin"])
+async def set_user_credits(
+    user_id: int,
+    credits: float,
+    _: str = Depends(get_admin_key),
+):
+    """
+    Set user's credit balance (Admin only)
+
+    This sets the absolute credit balance (not adding to existing balance).
+    Use /admin/add_credits to add credits instead.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        from src.db.credit_transactions import log_credit_transaction
+        from src.db.users import invalidate_user_cache_by_id
+
+        if credits < 0:
+            raise HTTPException(status_code=400, detail="Credits cannot be negative")
+
+        client = get_supabase_client()
+
+        # Get current balance
+        user_result = client.table("users").select("id, credits").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        balance_before = user_result.data[0]["credits"]
+
+        # Set new balance
+        update_data = {
+            "credits": credits,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        result = client.table("users").update(update_data).eq("id", user_id).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to set user credits")
+
+        # Log transaction
+        amount_diff = credits - balance_before
+        log_credit_transaction(
+            user_id=user_id,
+            amount=amount_diff,
+            transaction_type="admin_credit" if amount_diff > 0 else "admin_debit",
+            description=f"Admin set credits to {credits} (was {balance_before})",
+            balance_before=balance_before,
+            balance_after=credits,
+            metadata={"action": "set_credits", "method": "admin_api_key"},
+        )
+
+        # Invalidate cache
+        invalidate_user_cache_by_id(user_id)
+
+        return {
+            "status": "success",
+            "message": f"User {user_id} credits set to {credits}",
+            "user_id": user_id,
+            "balance_before": balance_before,
+            "balance_after": credits,
+            "difference": amount_diff,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting user credits for {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set user credits") from e
+
+
+@router.patch("/admin/users/{user_id}/status", tags=["admin"])
+async def update_user_status(
+    user_id: int,
+    is_active: bool,
+    _: str = Depends(get_admin_key),
+):
+    """
+    Activate or deactivate a user (Admin only)
+
+    When deactivated, the user cannot use their API keys.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        from src.db.users import invalidate_user_cache_by_id
+
+        client = get_supabase_client()
+
+        # Verify user exists
+        user_result = client.table("users").select("id, is_active").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        current_status = user_result.data[0].get("is_active", True)
+
+        # Update status
+        update_data = {
+            "is_active": is_active,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        result = client.table("users").update(update_data).eq("id", user_id).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update user status")
+
+        # Invalidate cache
+        invalidate_user_cache_by_id(user_id)
+
+        status_text = "activated" if is_active else "deactivated"
+
+        return {
+            "status": "success",
+            "message": f"User {user_id} {status_text}",
+            "user_id": user_id,
+            "is_active": is_active,
+            "previous_status": current_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user status for {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user status") from e
+
+
+@router.delete("/admin/users/{user_id}", tags=["admin"])
+async def delete_user_by_id(
+    user_id: int,
+    confirm: bool = Query(False, description="Must be true to confirm deletion"),
+    _: str = Depends(get_admin_key),
+):
+    """
+    Delete a user and all associated data (Admin only)
+
+    This is a permanent action that cannot be undone. Requires confirmation.
+    Deletes:
+    - User account
+    - API keys
+    - Usage records
+    - Credit transactions
+    - All other associated data (via CASCADE)
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        from src.db.users import invalidate_user_cache_by_id
+
+        if not confirm:
+            raise HTTPException(
+                status_code=400,
+                detail="Deletion must be confirmed. Set confirm=true in query parameters.",
+            )
+
+        client = get_supabase_client()
+
+        # Verify user exists and get their info before deletion
+        user_result = client.table("users").select("id, username, email").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        user_info = user_result.data[0]
+
+        # Delete user (CASCADE will handle related records)
+        delete_result = client.table("users").delete().eq("id", user_id).execute()
+
+        if not delete_result.data:
+            raise HTTPException(status_code=500, detail="Failed to delete user")
+
+        # Invalidate cache
+        invalidate_user_cache_by_id(user_id)
+
+        logger.info(
+            f"Admin deleted user {user_id} ({user_info.get('username')}, {user_info.get('email')})"
+        )
+
+        return {
+            "status": "success",
+            "message": f"User {user_id} deleted successfully",
+            "deleted_user": {
+                "id": user_id,
+                "username": user_info.get("username"),
+                "email": user_info.get("email"),
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete user") from e

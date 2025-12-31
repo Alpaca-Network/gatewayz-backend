@@ -488,3 +488,301 @@ def search_models_with_chat_summary(
             exc_info=True
         )
         return []
+
+
+def get_top_models_by_requests(limit: int = 3) -> list[dict[str, Any]]:
+    """
+    Get the top N models by request count.
+
+    Args:
+        limit: Number of top models to return (default: 3)
+
+    Returns:
+        List of dictionaries with model info and request counts:
+        [
+            {
+                "id": int,
+                "model_name": str,
+                "provider": str,
+                "requests": int,
+                "total_tokens": int
+            },
+            ...
+        ]
+    """
+    try:
+        client = get_supabase_client()
+
+        # Query to get models with their request and token counts
+        query_str = """
+        SELECT
+            m.id,
+            m.model_name,
+            p.slug as provider,
+            COUNT(ccr.id) as request_count,
+            COALESCE(SUM(ccr.input_tokens + ccr.output_tokens), 0) as total_tokens
+        FROM chat_completion_requests ccr
+        JOIN models m ON ccr.model_id = m.id
+        JOIN providers p ON m.provider_id = p.id
+        WHERE ccr.status = 'completed'
+        GROUP BY m.id, m.model_name, p.slug
+        ORDER BY request_count DESC
+        LIMIT %s
+        """
+
+        # Use raw SQL via RPC or direct query
+        result = client.table("models").select("*").execute()
+        models = result.data or []
+
+        # Get request counts for each model
+        models_with_counts = []
+        for model in models:
+            model_id = model.get('id')
+
+            # Get request count
+            requests = client.table("chat_completion_requests").select("*", count='exact').eq(
+                "model_id", model_id
+            ).eq("status", "completed").execute()
+
+            request_count = requests.count if hasattr(requests, 'count') else len(requests.data or [])
+
+            # Get total tokens
+            requests_data = (
+                client.table("chat_completion_requests")
+                .select("input_tokens, output_tokens")
+                .eq("model_id", model_id)
+                .eq("status", "completed")
+                .execute()
+            )
+
+            total_tokens = sum(
+                (r.get('input_tokens', 0) + r.get('output_tokens', 0))
+                for r in (requests_data.data or [])
+            )
+
+            if request_count > 0:
+                models_with_counts.append({
+                    'id': model_id,
+                    'model_name': model.get('model_name'),
+                    'provider': model.get('providers', {}).get('slug', 'unknown') if isinstance(
+                        model.get('providers'), dict
+                    ) else 'unknown',
+                    'requests': request_count,
+                    'total_tokens': total_tokens
+                })
+
+        # Sort by request count and return top N
+        models_with_counts.sort(key=lambda x: x['requests'], reverse=True)
+        return models_with_counts[:limit]
+
+    except Exception as e:
+        logger.error(f"Failed to get top models by requests: {e}", exc_info=True)
+        return []
+
+
+def get_all_providers() -> list[str]:
+    """
+    Get all distinct provider slugs from the models table.
+
+    Returns:
+        List of provider slugs
+    """
+    try:
+        client = get_supabase_client()
+
+        # Get all models with provider info
+        result = client.table("models").select("providers!inner(slug)").execute()
+
+        providers = set()
+        for model in (result.data or []):
+            if isinstance(model.get('providers'), dict):
+                provider_slug = model['providers'].get('slug')
+                if provider_slug:
+                    providers.add(provider_slug)
+
+        return list(providers)
+
+    except Exception as e:
+        logger.error(f"Failed to get all providers: {e}", exc_info=True)
+        return []
+
+
+def calculate_tokens_per_second(
+    model_id: int,
+    provider_id: str,
+    time_range: str | None = None
+) -> dict[str, Any]:
+    """
+    Calculate tokens per second throughput for a specific model and provider.
+
+    Args:
+        model_id: Model ID to calculate for
+        provider_id: Provider ID/slug
+        time_range: Time range filter (hour, week, month, 1year, 2year) or None for all time
+
+    Returns:
+        Dictionary with:
+        {
+            "model_id": int,
+            "model_name": str,
+            "provider": str,
+            "tokens_per_second": float,
+            "request_count": int,
+            "total_tokens": int,
+            "time_range": str
+        }
+    """
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        client = get_supabase_client()
+
+        # Get time range filter
+        start_time = None
+        if time_range:
+            now = datetime.now(timezone.utc)
+            if time_range == "hour":
+                start_time = now - timedelta(hours=1)
+            elif time_range == "week":
+                start_time = now - timedelta(days=7)
+            elif time_range == "month":
+                start_time = now - timedelta(days=30)
+            elif time_range == "1year":
+                start_time = now - timedelta(days=365)
+            elif time_range == "2year":
+                start_time = now - timedelta(days=730)
+
+        # Query requests for this model
+        query = (
+            client.table("chat_completion_requests")
+            .select("input_tokens, output_tokens, processing_time_ms, created_at")
+            .eq("model_id", model_id)
+            .eq("status", "completed")
+        )
+
+        if start_time:
+            query = query.gte("created_at", start_time.isoformat())
+
+        result = query.execute()
+        requests = result.data or []
+
+        # Get model name and provider
+        model_result = client.table("models").select("model_name, providers!inner(slug)").eq(
+            "id", model_id
+        ).execute()
+
+        model_name = "Unknown"
+        provider = "unknown"
+        if model_result.data and len(model_result.data) > 0:
+            model_name = model_result.data[0].get('model_name', 'Unknown')
+            if isinstance(model_result.data[0].get('providers'), dict):
+                provider = model_result.data[0]['providers'].get('slug', 'unknown')
+
+        # Calculate tokens per second
+        if requests:
+            total_tokens = sum(
+                r.get('input_tokens', 0) + r.get('output_tokens', 0) for r in requests
+            )
+            total_time_ms = sum(r.get('processing_time_ms', 0) for r in requests)
+            total_time_seconds = total_time_ms / 1000 if total_time_ms > 0 else 1
+
+            tokens_per_second = round(total_tokens / total_time_seconds, 2)
+        else:
+            total_tokens = 0
+            tokens_per_second = 0.0
+
+        return {
+            'model_id': model_id,
+            'model_name': model_name,
+            'provider': provider,
+            'tokens_per_second': tokens_per_second,
+            'request_count': len(requests),
+            'total_tokens': total_tokens,
+            'time_range': time_range or 'all'
+        }
+
+    except Exception as e:
+        logger.error(
+            f"Failed to calculate tokens per second for model {model_id}: {e}",
+            exc_info=True
+        )
+        return {
+            'model_id': model_id,
+            'model_name': 'Unknown',
+            'provider': 'unknown',
+            'tokens_per_second': 0.0,
+            'request_count': 0,
+            'total_tokens': 0,
+            'time_range': time_range or 'all',
+            'error': str(e)
+        }
+
+
+def get_models_with_min_one_per_provider(
+    top_models: list[dict],
+    all_providers: list[str]
+) -> list[dict]:
+    """
+    Ensure at least one model per provider from top models list.
+    If a provider is not in top models, adds their most popular model.
+
+    Args:
+        top_models: List of top models (from get_top_models_by_requests)
+        all_providers: List of all provider slugs
+
+    Returns:
+        List of model dictionaries ensuring minimum 1 per provider
+    """
+    try:
+        client = get_supabase_client()
+
+        # Create a dictionary of top models by provider
+        models_by_provider = {}
+        for model in top_models:
+            provider = model.get('provider', 'unknown')
+            if provider not in models_by_provider:
+                models_by_provider[provider] = model
+
+        # For each provider not in top models, add their most popular model
+        for provider in all_providers:
+            if provider not in models_by_provider:
+                # Get most popular model for this provider
+                models = client.table("models").select("id, model_name, providers!inner(slug)").eq(
+                    "providers.slug", provider
+                ).eq("is_active", True).execute()
+
+                if models.data:
+                    # Find the one with most requests
+                    best_model = None
+                    max_requests = 0
+
+                    for model in models.data:
+                        requests = client.table("chat_completion_requests").select(
+                            "*", count='exact'
+                        ).eq("model_id", model.get('id')).eq("status", "completed").execute()
+
+                        request_count = requests.count if hasattr(requests, 'count') else len(
+                            requests.data or []
+                        )
+
+                        if request_count > max_requests:
+                            max_requests = request_count
+                            best_model = {
+                                'id': model.get('id'),
+                                'model_name': model.get('model_name'),
+                                'provider': provider,
+                                'requests': request_count,
+                                'total_tokens': 0
+                            }
+
+                    if best_model:
+                        models_by_provider[provider] = best_model
+
+        return list(models_by_provider.values())
+
+    except Exception as e:
+        logger.error(
+            f"Failed to get models with min one per provider: {e}",
+            exc_info=True
+        )
+        return top_models
