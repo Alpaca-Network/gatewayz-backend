@@ -8,6 +8,7 @@ import importlib
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -17,6 +18,7 @@ from fastapi.responses import JSONResponse
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
 import src.db.chat_history as chat_history_module
+import src.db.chat_completion_requests as chat_completion_requests_module
 import src.db.model_health as model_health_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
@@ -243,6 +245,9 @@ async def anthropic_messages(
     }
     ```
     """
+    # Generate request correlation ID for distributed tracing
+    request_id = str(uuid.uuid4())
+
     # Initialize performance tracker
     PerformanceTracker(endpoint="/v1/messages")
 
@@ -251,7 +256,13 @@ async def anthropic_messages(
         if auth_header and auth_header.lower().startswith("bearer "):
             api_key = auth_header.split(" ", 1)[1].strip()
 
-    logger.info("anthropic_messages start (api_key=%s, model=%s)", mask_key(api_key), req.model)
+    logger.info(
+        "anthropic_messages start (request_id=%s, api_key=%s, model=%s)",
+        request_id,
+        mask_key(api_key),
+        req.model,
+        extra={"request_id": request_id},
+    )
     logger.debug("Messages endpoint Config.IS_TESTING=%s", Config.IS_TESTING)
 
     try:
@@ -918,6 +929,21 @@ async def anthropic_messages(
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
             },
+        )
+
+        # Save chat completion request metadata to database - run as background task
+        background_tasks.add_task(
+            chat_completion_requests_module.save_chat_completion_request,
+            request_id=request_id,
+            model_name=model,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            processing_time_ms=int(elapsed * 1000),
+            status="completed",
+            error_message=None,
+            user_id=user["id"],
+            provider_name=provider,
+            model_id=None,
         )
 
         # Prepare headers including rate limit information

@@ -2369,12 +2369,22 @@ async def unified_responses(
     - Supports response_format for structured JSON output
     - Future-ready for multimodal input/output
     """
+    # Generate request correlation ID for distributed tracing
+    request_id = str(uuid.uuid4())
+    request_id_var.set(request_id)
+
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             api_key = auth_header.split(" ", 1)[1].strip()
 
-    logger.info("unified_responses start (api_key=%s, model=%s)", mask_key(api_key), req.model)
+    logger.info(
+        "unified_responses start (request_id=%s, api_key=%s, model=%s)",
+        request_id,
+        mask_key(api_key),
+        req.model,
+        extra={"request_id": request_id},
+    )
 
     # Start Braintrust span for this request
     span = start_span(name=f"responses_{req.model}", type="llm")
@@ -3422,6 +3432,21 @@ async def unified_responses(
             span.end()
         except Exception as e:
             logger.warning(f"Failed to log to Braintrust: {e}")
+
+        # Save chat completion request metadata to database - run as background task
+        background_tasks.add_task(
+            chat_completion_requests_module.save_chat_completion_request,
+            request_id=request_id,
+            model_name=model,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            processing_time_ms=int(elapsed * 1000),
+            status="completed",
+            error_message=None,
+            user_id=user["id"],
+            provider_name=provider,
+            model_id=None,
+        )
 
         return response
 
