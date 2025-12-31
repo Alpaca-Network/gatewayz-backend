@@ -739,6 +739,277 @@ def test_privy_auth_phone_camelcase_field(client, sb):
     assert data['phone_number'] == '+15557778888'
 
 
+def test_privy_auth_phone_international_format(client, sb):
+    """Test phone authentication with various international phone number formats"""
+    # Test with UK phone number
+    request_data = {
+        "user": {
+            "id": "privy_phone_uk",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+447911123456",  # UK format
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_uk"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['auth_method'] == 'phone'
+    assert data['phone_number'] == '+447911123456'
+    # Username should use last 4 digits: 3456
+    assert '3456' in data['display_name']
+
+
+def test_privy_auth_phone_short_number(client, sb):
+    """Test phone authentication with a short phone number (edge case)"""
+    request_data = {
+        "user": {
+            "id": "privy_phone_short",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+123",  # Very short number
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_short"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['phone_number'] == '+123'
+    # Short numbers should fall back to privy ID for username
+    assert 'user_' in data['display_name']
+
+
+def test_privy_auth_phone_first_then_email_added(client, sb):
+    """Test user who signed up with phone, then added email later"""
+    request_data = {
+        "user": {
+            "id": "privy_phone_then_email",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+15551112222",
+                    "verified_at": 1705123456
+                },
+                {
+                    "type": "email",
+                    "email": "added_later@example.com",
+                    "verified_at": 1705200000  # Added later
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_phone_then_email"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    # Phone comes first in linked_accounts, so phone is extracted
+    assert data['phone_number'] == '+15551112222'
+    # But email is also extracted
+    assert data['email'] == 'added_later@example.com'
+    # Auth method should be email since email was found (takes priority)
+    assert data['auth_method'] == 'email'
+
+
+def test_privy_auth_phone_with_google_oauth(client, sb):
+    """Test user with phone and Google OAuth linked"""
+    request_data = {
+        "user": {
+            "id": "privy_phone_google",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+15553334444",
+                    "verified_at": 1705123456
+                },
+                {
+                    "type": "google_oauth",
+                    "email": "googleuser@gmail.com",
+                    "name": "Google User",
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_phone_google"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    # Phone extracted
+    assert data['phone_number'] == '+15553334444'
+    # Google email extracted
+    assert data['email'] == 'googleuser@gmail.com'
+    # Auth method should be Google since Google OAuth provides email
+    assert data['auth_method'] == 'google'
+    # Display name from Google
+    assert data['display_name'] == 'Google User'
+
+
+def test_privy_auth_phone_returning_user_updates_phone(client, sb):
+    """Test returning user who adds phone number to their account"""
+    # Create existing user without phone
+    sb.table('users').insert({
+        'id': '600',
+        'username': 'existing_no_phone',
+        'email': 'existinguser@example.com',
+        'credits': 100.0,
+        'privy_user_id': 'privy_add_phone',
+        'api_key': 'gw_live_existing_key',
+        'subscription_status': 'active',
+    }).execute()
+
+    sb.table('api_keys_new').insert({
+        'id': '20',
+        'user_id': '600',
+        'api_key': 'gw_live_existing_primary',
+        'is_primary': True,
+        'is_active': True,
+    }).execute()
+
+    # User returns with phone number added to their account
+    request_data = {
+        "user": {
+            "id": "privy_add_phone",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "email",
+                    "email": "existinguser@example.com",
+                    "verified_at": 1705123456
+                },
+                {
+                    "type": "phone",
+                    "phone_number": "+15559998888",
+                    "verified_at": 1705200000
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_add_phone"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['message'] == 'Login successful'
+    assert data['is_new_user'] is False
+    # Both email and phone should be present in response
+    assert data['email'] == 'existinguser@example.com'
+    assert data['phone_number'] == '+15559998888'
+    assert data['user_id'] == 600
+
+
+def test_privy_auth_phone_only_no_email_placeholder(client, sb):
+    """Test that phone-only users get proper placeholder email in database"""
+    request_data = {
+        "user": {
+            "id": "privy_phone_only_placeholder",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+15550001111",
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_placeholder"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['auth_method'] == 'phone'
+    assert data['phone_number'] == '+15550001111'
+    # Email should be None or a placeholder format (not a real email)
+    # The response email might be None for phone-only users
+    if data['email']:
+        # If there's an email, it should be a placeholder format
+        assert '@privy.placeholder' in data['email'] or data['email'] is None
+
+
+def test_privy_auth_phone_username_generation_various_lengths(client, sb):
+    """Test username generation from phone numbers of various lengths"""
+    test_cases = [
+        ("+15551234567", "4567"),  # Standard US number
+        ("+12025551234", "1234"),  # Different last 4
+        ("+8613912345678", "5678"),  # Chinese number
+        ("+919876543210", "3210"),  # Indian number
+    ]
+
+    for i, (phone, expected_suffix) in enumerate(test_cases):
+        request_data = {
+            "user": {
+                "id": f"privy_phone_len_{i}",
+                "created_at": 1705123456,
+                "linked_accounts": [
+                    {
+                        "type": "phone",
+                        "phone_number": phone,
+                        "verified_at": 1705123456
+                    }
+                ],
+                "mfa_methods": [],
+                "has_accepted_terms": True,
+                "is_guest": False
+            },
+            "token": f"privy_token_len_{i}"
+        }
+
+        response = client.post('/auth', json=request_data)
+
+        assert response.status_code == 200, f"Failed for phone: {phone}"
+        data = response.json()
+        assert data['success'] is True, f"Failed for phone: {phone}"
+        assert data['phone_number'] == phone
+        # Check username contains expected suffix
+        assert expected_suffix in data['display_name'], f"Expected {expected_suffix} in {data['display_name']} for {phone}"
+
+
 # ==================================================
 # TESTS: User Registration
 # ==================================================
