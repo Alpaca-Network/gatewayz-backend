@@ -1182,8 +1182,42 @@ def _process_google_vertex_rest_response(response_data: dict, model: str) -> dic
         logger.debug(f"Candidates count: {len(candidates)}")
 
         if not candidates:
-            logger.error(f"No candidates in Vertex AI response. Full response: {response_data}")
-            raise ValueError("No candidates in Vertex AI response")
+            # Check for promptFeedback which indicates why the prompt was blocked
+            prompt_feedback = response_data.get("promptFeedback", {})
+            block_reason = prompt_feedback.get("blockReason", "")
+            safety_ratings = prompt_feedback.get("safetyRatings", [])
+
+            # Build a descriptive error message
+            error_details = []
+            if block_reason:
+                error_details.append(f"Block reason: {block_reason}")
+            if safety_ratings:
+                blocked_categories = [
+                    f"{r.get('category', 'UNKNOWN')}: {r.get('probability', 'UNKNOWN')}"
+                    for r in safety_ratings
+                    if r.get("blocked", False) or r.get("probability") in ["HIGH", "MEDIUM"]
+                ]
+                if blocked_categories:
+                    error_details.append(f"Safety issues: {', '.join(blocked_categories)}")
+
+            # If no promptFeedback, check for other response indicators
+            # Some Gemini 3 preview models may return empty candidates without promptFeedback
+            # This can happen due to model overload or transient issues
+            usage_metadata = response_data.get("usageMetadata", {})
+            model_version = response_data.get("modelVersion", "")
+
+            if not error_details:
+                # No explicit block reason - likely a transient/model issue
+                error_details.append(
+                    f"Model '{model_version or model}' returned no candidates without explicit block reason. "
+                    "This may be a transient issue with preview models or rate limiting."
+                )
+                if usage_metadata.get("promptTokenCount"):
+                    error_details.append(f"Prompt tokens: {usage_metadata.get('promptTokenCount')}")
+
+            error_msg = "Vertex AI returned no candidates. " + " | ".join(error_details)
+            logger.error(f"{error_msg}. Full response: {response_data}")
+            raise ValueError(error_msg)
 
         # Get the first candidate
         candidate = candidates[0]

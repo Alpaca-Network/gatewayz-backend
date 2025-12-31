@@ -228,6 +228,27 @@ def map_provider_error(
                 status_code=503,
                 detail=f"{provider} credentials not configured or invalid. Trying alternative providers.",
             )
+
+        # Check if this is a "no candidates" error from Vertex AI or Gemini
+        # This can happen due to safety filters, model overload, or transient issues
+        # Map to 503 to trigger failover to alternative providers
+        no_candidates_keywords = [
+            "no candidates",
+            "returned no candidates",
+            "empty candidates",
+            "promptfeedback",
+            "block reason",
+        ]
+        if any(keyword.lower() in error_msg.lower() for keyword in no_candidates_keywords):
+            logger.info(
+                f"Detected 'no candidates' error for provider '{provider}': {error_msg[:300]}. "
+                "This will trigger failover to alternative providers."
+            )
+            return HTTPException(
+                status_code=503,
+                detail=f"{provider} returned no response candidates. Trying alternative providers.",
+            )
+
         # Other ValueErrors are treated as bad requests
         return HTTPException(status_code=400, detail=str(exc))
 
