@@ -423,3 +423,149 @@ class TestFalAiIntegration:
         result = detect_model_gateway("unknown", "model")
 
         assert result == "openrouter"
+
+
+class TestOpenRouterIsFreeField:
+    """Test that OpenRouter models correctly set the is_free field"""
+
+    @patch('src.services.models.httpx.get')
+    @patch('src.services.models.Config')
+    def test_openrouter_free_model_sets_is_free_true(self, mock_config, mock_httpx_get):
+        """OpenRouter models with :free suffix should have is_free=True"""
+        from src.services.models import fetch_models_from_openrouter
+
+        mock_config.OPENROUTER_API_KEY = "test-api-key"
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "google/gemini-2.0-flash-exp:free",
+                    "name": "Gemini 2.0 Flash Experimental (Free)",
+                    "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+                }
+            ]
+        }
+        mock_httpx_get.return_value = mock_response
+
+        result = fetch_models_from_openrouter()
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["is_free"] is True
+
+    @patch('src.services.models.httpx.get')
+    @patch('src.services.models.Config')
+    def test_openrouter_paid_model_sets_is_free_false(self, mock_config, mock_httpx_get):
+        """OpenRouter models without :free suffix should have is_free=False"""
+        from src.services.models import fetch_models_from_openrouter
+
+        mock_config.OPENROUTER_API_KEY = "test-api-key"
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "openai/gpt-4o",
+                    "name": "GPT-4o",
+                    "pricing": {"prompt": "2.50", "completion": "10.00", "request": "0", "image": "0"},
+                }
+            ]
+        }
+        mock_httpx_get.return_value = mock_response
+
+        result = fetch_models_from_openrouter()
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["is_free"] is False
+
+    @patch('src.services.models.httpx.get')
+    @patch('src.services.models.Config')
+    def test_openrouter_mixed_models_correct_is_free(self, mock_config, mock_httpx_get):
+        """Test that mixed models (free and paid) are correctly marked"""
+        from src.services.models import fetch_models_from_openrouter
+
+        mock_config.OPENROUTER_API_KEY = "test-api-key"
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "google/gemini-2.0-flash-exp:free",
+                    "name": "Gemini 2.0 Flash (Free)",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                },
+                {
+                    "id": "openai/gpt-4o",
+                    "name": "GPT-4o",
+                    "pricing": {"prompt": "2.50", "completion": "10.00"},
+                },
+                {
+                    "id": "google/gemma-2-9b-it:free",
+                    "name": "Gemma 2 9B IT (Free)",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                },
+                {
+                    "id": "anthropic/claude-3-opus",
+                    "name": "Claude 3 Opus",
+                    "pricing": {"prompt": "15.00", "completion": "75.00"},
+                },
+            ]
+        }
+        mock_httpx_get.return_value = mock_response
+
+        result = fetch_models_from_openrouter()
+
+        assert result is not None
+        assert len(result) == 4
+
+        # Check each model's is_free status
+        free_model_1 = next(m for m in result if m["id"] == "google/gemini-2.0-flash-exp:free")
+        assert free_model_1["is_free"] is True
+
+        paid_model_1 = next(m for m in result if m["id"] == "openai/gpt-4o")
+        assert paid_model_1["is_free"] is False
+
+        free_model_2 = next(m for m in result if m["id"] == "google/gemma-2-9b-it:free")
+        assert free_model_2["is_free"] is True
+
+        paid_model_2 = next(m for m in result if m["id"] == "anthropic/claude-3-opus")
+        assert paid_model_2["is_free"] is False
+
+    @patch('src.services.models.httpx.get')
+    @patch('src.services.models.Config')
+    def test_openrouter_exacto_and_extended_suffixes_not_free(self, mock_config, mock_httpx_get):
+        """Models with :exacto or :extended suffixes should NOT be marked as free"""
+        from src.services.models import fetch_models_from_openrouter
+
+        mock_config.OPENROUTER_API_KEY = "test-api-key"
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "z-ai/glm-4.6:exacto",
+                    "name": "GLM 4.6 Exacto",
+                    "pricing": {"prompt": "0.50", "completion": "1.00"},
+                },
+                {
+                    "id": "anthropic/claude-3-opus:extended",
+                    "name": "Claude 3 Opus Extended",
+                    "pricing": {"prompt": "15.00", "completion": "75.00"},
+                },
+            ]
+        }
+        mock_httpx_get.return_value = mock_response
+
+        result = fetch_models_from_openrouter()
+
+        assert result is not None
+        assert len(result) == 2
+
+        # Neither :exacto nor :extended should be marked as free
+        exacto_model = next(m for m in result if m["id"] == "z-ai/glm-4.6:exacto")
+        assert exacto_model["is_free"] is False
+
+        extended_model = next(m for m in result if m["id"] == "anthropic/claude-3-opus:extended")
+        assert extended_model["is_free"] is False

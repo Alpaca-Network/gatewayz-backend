@@ -1021,3 +1021,107 @@ class TestCrossReferencePricingNullHandling:
                 # Empty string should be converted to "0"
                 assert result["prompt"] == "0"
                 assert result["completion"] == "0.000015"
+
+
+class TestIsFreeField:
+    """Test is_free field is set correctly for models"""
+
+    def test_non_openrouter_gateway_sets_is_free_false(self):
+        """Non-OpenRouter gateways should have is_free set to False"""
+        model_data = {
+            "id": "groq/llama-3.3-70b-versatile",
+            "pricing": {"prompt": "0.59", "completion": "0.79"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "groq")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_deepinfra_sets_is_free_false(self):
+        """DeepInfra models should have is_free set to False"""
+        model_data = {
+            "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0.06", "completion": "0.06"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "deepinfra")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_featherless_sets_is_free_false(self):
+        """Featherless models should have is_free set to False"""
+        model_data = {
+            "id": "meta-llama/Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0.10", "completion": "0.10"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "featherless")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_together_sets_is_free_false(self):
+        """Together models should have is_free set to False"""
+        model_data = {
+            "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "pricing": {"prompt": "0.88", "completion": "0.88"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "together")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_fireworks_sets_is_free_false(self):
+        """Fireworks models should have is_free set to False"""
+        model_data = {
+            "id": "accounts/fireworks/models/deepseek-v3",
+            "pricing": {"prompt": "0.56", "completion": "1.68"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value={"prompt": "0.56", "completion": "1.68"}):
+            result = enrich_model_with_pricing(model_data, "fireworks")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_openrouter_does_not_set_is_free(self):
+        """OpenRouter models should not have is_free set by enrich_model_with_pricing
+        (it's set by fetch_models_from_openrouter based on :free suffix)"""
+        model_data = {
+            "id": "openai/gpt-4o",
+            "pricing": {"prompt": "2.50", "completion": "10.00"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "openrouter")
+
+        assert result is not None
+        # OpenRouter models don't get is_free set by enrich_model_with_pricing
+        # because is_free is set by fetch_models_from_openrouter based on :free suffix
+        assert "is_free" not in result
+
+    def test_aihubmix_sets_is_free_false(self):
+        """AiHubMix gateway models should have is_free set to False"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "2.50", "completion": "10.00"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "aihubmix")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_helicone_sets_is_free_false(self):
+        """Helicone gateway models should have is_free set to False"""
+        model_data = {
+            "id": "claude-3-opus",
+            "pricing": {"prompt": "15.00", "completion": "75.00"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "helicone")
+
+        assert result is not None
+        assert result["is_free"] is False

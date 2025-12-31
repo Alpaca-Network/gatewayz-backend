@@ -224,6 +224,11 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
     gateway_lower = gateway.lower()
     is_gateway_provider = gateway_lower in GATEWAY_PROVIDERS
 
+    # Only OpenRouter has legitimately free models (those with :free suffix)
+    # All other providers/gateways should not be marked as free
+    if gateway_lower != "openrouter":
+        model_data["is_free"] = False
+
     try:
         # Skip if pricing already exists and has non-zero values
         # (Zero pricing means no real pricing was set, so we should try to enrich)
