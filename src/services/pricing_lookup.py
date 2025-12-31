@@ -18,6 +18,8 @@ GATEWAY_PROVIDERS = {
     "alibaba-cloud",
     "anannas",
     "clarifai",
+    "deepinfra",
+    "featherless",
     "helicone",
     "onerouter",
     "vercel-ai-gateway",

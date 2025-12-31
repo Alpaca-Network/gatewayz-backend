@@ -323,6 +323,8 @@ class TestGatewayProviders:
         assert "alibaba-cloud" in GATEWAY_PROVIDERS
         assert "anannas" in GATEWAY_PROVIDERS
         assert "clarifai" in GATEWAY_PROVIDERS
+        assert "deepinfra" in GATEWAY_PROVIDERS
+        assert "featherless" in GATEWAY_PROVIDERS
         assert "helicone" in GATEWAY_PROVIDERS
         assert "onerouter" in GATEWAY_PROVIDERS
         assert "vercel-ai-gateway" in GATEWAY_PROVIDERS
@@ -617,7 +619,8 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
-            result = enrich_model_with_pricing(model_data, "deepinfra")
+            # Use openrouter as non-gateway provider (primary source, not a gateway)
+            result = enrich_model_with_pricing(model_data, "openrouter")
             assert result is not None
             assert result == model_data
             assert "pricing_source" not in result
@@ -661,7 +664,8 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
-            result = enrich_model_with_pricing(model_data, "deepinfra")
+            # Use openrouter as non-gateway provider (primary source, not a gateway)
+            result = enrich_model_with_pricing(model_data, "openrouter")
             # Non-gateway provider should return model data even on error
             assert result is not None
             assert result["id"] == "test-model"
@@ -763,6 +767,82 @@ class TestGatewayProviderZeroPricingFiltering:
         from src.services.pricing_lookup import GATEWAY_PROVIDERS
 
         assert "onerouter" in GATEWAY_PROVIDERS
+
+    def test_deepinfra_in_gateway_providers(self):
+        """Test that deepinfra is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "deepinfra" in GATEWAY_PROVIDERS
+
+    def test_featherless_in_gateway_providers(self):
+        """Test that featherless is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "featherless" in GATEWAY_PROVIDERS
+
+    def test_deepinfra_filters_models_without_pricing(self):
+        """Test that deepinfra filters out models without valid pricing"""
+        model_data = {
+            "id": "unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "deepinfra")
+                    # Should be filtered out because no pricing found
+                    assert result is None
+
+    def test_featherless_filters_models_without_pricing(self):
+        """Test that featherless filters out models without valid pricing"""
+        model_data = {
+            "id": "unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "featherless")
+                    # Should be filtered out because no pricing found
+                    assert result is None
+
+    def test_deepinfra_accepts_models_with_manual_pricing(self):
+        """Test that deepinfra accepts models with manual pricing"""
+        model_data = {
+            "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.055", "completion": "0.055", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "deepinfra")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
+
+    def test_featherless_accepts_models_with_manual_pricing(self):
+        """Test that featherless accepts models with manual pricing"""
+        model_data = {
+            "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.05", "completion": "0.05", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "featherless")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
 
 
 class TestCrossReferencePricingNullHandling:
