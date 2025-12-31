@@ -919,5 +919,72 @@ class TestMaxOutputTokensValidation:
         assert request_body["generationConfig"]["maxOutputTokens"] == 4096
 
 
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
+class TestNoCandidatesErrorHandling:
+    """Tests for handling 'no candidates' responses from Vertex AI"""
+
+    def test_no_candidates_without_prompt_feedback(self):
+        """Test that 'no candidates' error includes model version when no promptFeedback is present"""
+        # This response mimics what Gemini 3 preview returns when it fails silently
+        response_data = {
+            "usageMetadata": {
+                "promptTokenCount": 12456,
+                "totalTokenCount": 12456,
+                "cachedContentTokenCount": 12251,
+                "trafficType": "ON_DEMAND",
+            },
+            "modelVersion": "gemini-3-flash-preview",
+            "createTime": "2025-12-31T08:01:02.219993Z",
+            "responseId": "test-response-id",
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            _process_google_vertex_rest_response(response_data, "gemini-3-flash-preview")
+
+        error_msg = str(exc_info.value).lower()
+        assert "no candidates" in error_msg
+        assert "gemini-3-flash-preview" in error_msg
+        assert "transient" in error_msg or "preview" in error_msg
+
+    def test_no_candidates_with_block_reason(self):
+        """Test that 'no candidates' error includes block reason when promptFeedback is present"""
+        response_data = {
+            "promptFeedback": {
+                "blockReason": "SAFETY",
+                "safetyRatings": [
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "probability": "HIGH", "blocked": True}
+                ]
+            },
+            "usageMetadata": {"promptTokenCount": 100},
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            _process_google_vertex_rest_response(response_data, "gemini-2.5-flash")
+
+        error_msg = str(exc_info.value)
+        assert "no candidates" in error_msg.lower()
+        assert "SAFETY" in error_msg or "Block reason" in error_msg
+
+    def test_no_candidates_with_safety_ratings(self):
+        """Test that safety rating details are included in error when blocked"""
+        response_data = {
+            "promptFeedback": {
+                "safetyRatings": [
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "HIGH", "blocked": True},
+                    {"category": "HARM_CATEGORY_VIOLENCE", "probability": "LOW", "blocked": False}
+                ]
+            },
+            "usageMetadata": {"promptTokenCount": 50},
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            _process_google_vertex_rest_response(response_data, "gemini-2.5-flash")
+
+        error_msg = str(exc_info.value)
+        assert "HARM_CATEGORY_HATE_SPEECH" in error_msg
+        # LOW probability items should not be included
+        assert "HARM_CATEGORY_VIOLENCE" not in error_msg or "LOW" not in error_msg
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
