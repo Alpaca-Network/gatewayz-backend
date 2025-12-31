@@ -2250,10 +2250,10 @@ async def chat_completions(
                 m.model_dump() if hasattr(m, "model_dump") else m for m in req.messages
             ]
             # Safely extract output content for Braintrust logging
-            bt_choices = processed.get("choices") or [{}]
-            bt_first_choice = bt_choices[0] if bt_choices else {}
-            bt_message = bt_first_choice.get("message") or {}
-            bt_output = bt_message.get("content", "")
+            bt_choices = processed.get("choices") or []
+            bt_first_choice = bt_choices[0] if bt_choices else None
+            bt_message = bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
+            bt_output = bt_message.get("content", "") if isinstance(bt_message, dict) else ""
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -3354,8 +3354,9 @@ async def unified_responses(
 
             # Safely extract output content for Braintrust logging
             bt_output = ""
-            if response.get("output") and len(response["output"]) > 0:
-                first_output = response["output"][0]
+            output_list = response.get("output")
+            if isinstance(output_list, list) and len(output_list) > 0:
+                first_output = output_list[0]
                 if isinstance(first_output, dict):
                     bt_output = first_output.get("content", "")
 
