@@ -3,8 +3,14 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from postgrest import APIError
+
+from src.services.auth_rate_limiting import (
+    AuthRateLimitType,
+    check_auth_rate_limit,
+    get_client_ip,
+)
 
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
@@ -553,8 +559,26 @@ def _process_referral_code_background(
 
 
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
-async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTasks):
+async def privy_auth(
+    request: PrivyAuthRequest,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+):
     """Authenticate user via Privy and return API key"""
+    # Rate limit check - 10 attempts per 15 minutes per IP
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.LOGIN)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many login attempts. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         logger.info(f"Privy auth request for user: {request.user.id}")
         if request.referral_code:
@@ -1098,8 +1122,26 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])
-async def register_user(request: UserRegistrationRequest, background_tasks: BackgroundTasks):
+async def register_user(
+    request: UserRegistrationRequest,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+):
     """Register a new user with username and email"""
+    # Rate limit check - 3 attempts per hour per IP (prevent mass account creation)
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.REGISTER)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many registration attempts. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         logger.info(f"Registration request for user: {request.username}")
 
@@ -1297,8 +1339,22 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
 
 
 @router.post("/auth/password-reset", tags=["authentication"])
-async def request_password_reset(email: str):
+async def request_password_reset(email: str, raw_request: Request):
     """Request password reset email"""
+    # Rate limit check - 3 attempts per hour per IP (prevent email bombing)
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.PASSWORD_RESET)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many password reset requests. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         # Find the user by email
         client = supabase_config.get_supabase_client()
@@ -1332,8 +1388,22 @@ async def request_password_reset(email: str):
 
 
 @router.post("/auth/reset-password", tags=["authentication"])
-async def reset_password(token: str):
+async def reset_password(token: str, raw_request: Request):
     """Reset password using token"""
+    # Rate limit check - 3 attempts per hour per IP (prevent token enumeration)
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.PASSWORD_RESET)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many password reset attempts. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         client = supabase_config.get_supabase_client()
 
