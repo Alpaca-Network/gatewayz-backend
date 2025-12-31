@@ -27,7 +27,36 @@ def get_google_models() -> list[MultiProviderModel]:
     """
 
     models = [
-        # Gemini 3 Models
+        # Gemini 3 Models (Preview - requires global endpoint)
+        MultiProviderModel(
+            id="gemini-3-pro",
+            name="Gemini 3 Pro",
+            description="Google's most capable reasoning model with adaptive thinking for complex agentic workflows",
+            context_length=1000000,
+            modalities=["text", "image", "audio", "video"],
+            providers=[
+                ProviderConfig(
+                    name="google-vertex",
+                    model_id="gemini-3-pro",
+                    priority=1,
+                    requires_credentials=True,
+                    cost_per_1k_input=0.00125,  # $1.25/1M tokens
+                    cost_per_1k_output=0.01,  # $10.00/1M tokens
+                    max_tokens=65536,
+                    features=["streaming", "multimodal", "function_calling", "thinking", "grounding"],
+                ),
+                ProviderConfig(
+                    name="openrouter",
+                    model_id="google/gemini-3-pro",
+                    priority=2,
+                    requires_credentials=False,
+                    cost_per_1k_input=0.0015,
+                    cost_per_1k_output=0.012,
+                    max_tokens=65536,
+                    features=["streaming", "multimodal", "function_calling"],
+                ),
+            ],
+        ),
         MultiProviderModel(
             id="gemini-3-flash",
             name="Gemini 3 Flash",
@@ -37,7 +66,7 @@ def get_google_models() -> list[MultiProviderModel]:
             providers=[
                 ProviderConfig(
                     name="google-vertex",
-                    model_id="gemini-3-flash-preview",
+                    model_id="gemini-3-flash",
                     priority=1,
                     requires_credentials=True,
                     cost_per_1k_input=0.0005,  # $0.50/1M tokens
@@ -47,7 +76,7 @@ def get_google_models() -> list[MultiProviderModel]:
                 ),
                 ProviderConfig(
                     name="openrouter",
-                    model_id="google/gemini-3-flash-preview",
+                    model_id="google/gemini-3-flash",
                     priority=2,
                     requires_credentials=False,
                     cost_per_1k_input=0.0006,  # $0.60/1M tokens (OpenRouter markup)
@@ -204,6 +233,35 @@ def get_google_models() -> list[MultiProviderModel]:
                 ),
             ],
         ),
+        MultiProviderModel(
+            id="gemini-2.0-flash-lite",
+            name="Gemini 2.0 Flash-Lite",
+            description="Streamlined and ultra-efficient for simple, high-frequency tasks",
+            context_length=1000000,
+            modalities=["text", "image", "audio", "video"],
+            providers=[
+                ProviderConfig(
+                    name="google-vertex",
+                    model_id="gemini-2.0-flash-lite",
+                    priority=1,
+                    requires_credentials=True,
+                    cost_per_1k_input=0.0375,  # $0.0375/1k tokens
+                    cost_per_1k_output=0.15,  # $0.15/1k tokens
+                    max_tokens=8192,
+                    features=["streaming", "multimodal"],
+                ),
+                ProviderConfig(
+                    name="openrouter",
+                    model_id="google/gemini-2.0-flash-lite-001",
+                    priority=2,
+                    requires_credentials=False,
+                    cost_per_1k_input=0.05,
+                    cost_per_1k_output=0.20,
+                    max_tokens=8192,
+                    features=["streaming", "multimodal"],
+                ),
+            ],
+        ),
         # Gemini 1.5 Models - REMOVED
         # These models were fully retired by Google in April-September 2025
         # They return 404 errors on Vertex AI and have been removed from this registry
@@ -271,6 +329,45 @@ def get_google_models() -> list[MultiProviderModel]:
                     cost_per_1k_output=0.25,
                     max_tokens=8192,
                     features=["streaming"],
+                ),
+            ],
+        ),
+        # Embeddings Models
+        MultiProviderModel(
+            id="text-embedding-004",
+            name="Text Embedding 004",
+            description="Google's latest text embedding model for semantic search and similarity",
+            context_length=2048,
+            modalities=["text"],
+            providers=[
+                ProviderConfig(
+                    name="google-vertex",
+                    model_id="text-embedding-004",
+                    priority=1,
+                    requires_credentials=True,
+                    cost_per_1k_input=0.00001,  # $0.00001/1k tokens
+                    cost_per_1k_output=0.0,  # Embeddings don't have output tokens
+                    max_tokens=2048,
+                    features=["embeddings"],
+                ),
+            ],
+        ),
+        MultiProviderModel(
+            id="text-multilingual-embedding-002",
+            name="Text Multilingual Embedding 002",
+            description="Multilingual text embedding model supporting 100+ languages",
+            context_length=2048,
+            modalities=["text"],
+            providers=[
+                ProviderConfig(
+                    name="google-vertex",
+                    model_id="text-multilingual-embedding-002",
+                    priority=1,
+                    requires_credentials=True,
+                    cost_per_1k_input=0.00001,
+                    cost_per_1k_output=0.0,
+                    max_tokens=2048,
+                    features=["embeddings", "multilingual"],
                 ),
             ],
         ),
