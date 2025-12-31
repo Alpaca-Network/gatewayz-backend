@@ -149,12 +149,15 @@ class AuthRateLimiter:
             current_count = len(window[identifier])
 
             if current_count >= limit:
-                # Calculate retry_after based on oldest entry
+                # Calculate retry_after based on oldest entry in the window
+                # The oldest entry will expire first, freeing up a slot
                 if window[identifier]:
                     oldest = window[identifier][0]
-                    retry_after = int(oldest + window_seconds - current_time) + 1
+                    retry_after = max(1, int(oldest + window_seconds - current_time) + 1)
                 else:
-                    retry_after = window_seconds
+                    # This branch shouldn't happen (count >= limit but empty window)
+                    # Use a short retry as a safe fallback
+                    retry_after = 60
 
                 logger.warning(
                     "Auth rate limit exceeded: type=%s, identifier=%s, count=%d, limit=%d",

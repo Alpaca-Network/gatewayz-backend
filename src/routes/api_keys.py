@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.services.auth_rate_limiting import (
     AuthRateLimitType,
@@ -38,7 +38,6 @@ router = APIRouter()
 @router.post("/user/api-keys", tags=["authentication"])
 async def create_user_api_key(
     request: CreateApiKeyRequest,
-    raw_request: Request,
     api_key: str = Depends(get_api_key),
 ):
     """Create a new API key for the user"""
