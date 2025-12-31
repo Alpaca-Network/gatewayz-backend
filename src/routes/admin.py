@@ -643,12 +643,14 @@ async def get_all_users_info(_: str = Depends(get_admin_key)):
         client = get_supabase_client()
 
         # Get all users with their information
+        # Note: Supabase has a default limit of 1000, so we set a high limit to fetch all users
         result = (
             client.table("users")
             .select(
-                "id, username, email, credits, is_active, role, registration_date, "
+                "id, username, email, api_key, credits, is_active, role, registration_date, "
                 "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
             )
+            .limit(100000)  # Set high limit to fetch all users
             .execute()
         )
 
