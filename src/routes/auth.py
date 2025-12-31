@@ -637,16 +637,17 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             f"email={email}, phone={phone_number}, auth_method={auth_method}"
         )
 
-        # Generate username from email, phone number, or privy ID (for fallback check)
+        # Generate base username from email, phone number, or privy ID
+        # Note: This is just the base - uniqueness is ensured later via _generate_unique_username
         if email:
             username = email.split("@")[0]
         elif phone_number:
-            # Use last 4 digits of phone number for username
+            # Use last 4 digits of phone number as base for username
             clean_phone = "".join(filter(str.isdigit, phone_number))
             username = f"user_{clean_phone[-4:]}" if len(clean_phone) >= 4 else f"user_{request.user.id[:8]}"
         else:
             username = f"user_{request.user.id[:8]}"
-        logger.debug(f"Generated username for user {request.user.id}: {username}")
+        logger.debug(f"Generated base username for user {request.user.id}: {username}")
 
         # Check if user already exists by privy_user_id (with cache + timeout)
         existing_user = None
@@ -745,7 +746,14 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             # New user - create account
             logger.info(f"Creating new Privy user: {request.user.id}")
 
-            # Create user with Privy ID (username already generated above)
+            # Ensure username is unique before attempting to create user
+            # This prevents duplicate username errors, especially for phone auth
+            # where multiple users might have phone numbers ending in the same 4 digits
+            client = supabase_config.get_supabase_client()
+            username = _generate_unique_username(client, username)
+            logger.debug(f"Resolved unique username for new user: {username}")
+
+            # Create user with Privy ID
             try:
                 # Convert auth_method enum to string for create_enhanced_user
                 auth_method_str = (
