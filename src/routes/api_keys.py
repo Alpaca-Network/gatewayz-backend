@@ -3,6 +3,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.services.auth_rate_limiting import (
+    AuthRateLimitType,
+    check_auth_rate_limit,
+)
 from src.db.api_keys import (
     create_api_key,
     delete_api_key,
@@ -32,12 +36,29 @@ router = APIRouter()
 
 # API Key Management Endpoints
 @router.post("/user/api-keys", tags=["authentication"])
-async def create_user_api_key(request: CreateApiKeyRequest, api_key: str = Depends(get_api_key)):
+async def create_user_api_key(
+    request: CreateApiKeyRequest,
+    api_key: str = Depends(get_api_key),
+):
     """Create a new API key for the user"""
     try:
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Rate limit check - 10 API key creations per hour per user (prevent key spam)
+        user_id = str(user["id"])
+        rate_limit_result = await check_auth_rate_limit(user_id, AuthRateLimitType.API_KEY_CREATE)
+        if not rate_limit_result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "Rate limit exceeded",
+                    "message": f"Too many API key creation requests. Please try again in {rate_limit_result.retry_after} seconds.",
+                    "retry_after": rate_limit_result.retry_after,
+                },
+                headers={"Retry-After": str(rate_limit_result.retry_after)},
+            )
 
         # Validate permissions - check if the user can create keys
         if not validate_api_key_permissions(api_key, "write", "api_keys"):
