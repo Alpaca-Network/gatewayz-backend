@@ -605,7 +605,9 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                     )
                 elif account.type == "github" and account.name and not display_name:
                     display_name = account.name
-                    if not email:
+                    # Only set auth method to GITHUB if no email AND no phone auth
+                    # Phone auth (priority 3) takes precedence over GitHub (priority 4)
+                    if not email and auth_method != AuthMethod.PHONE:
                         auth_method = AuthMethod.GITHUB
                     logger.debug(f"Extracted GitHub username: {display_name}")
                     # GitHub doesn't provide email in this field, will use fallback
