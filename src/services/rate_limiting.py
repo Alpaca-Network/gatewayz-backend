@@ -582,6 +582,34 @@ class RateLimitManager:
         self, api_key: str, tokens_used: int = 0, request_type: str = "api"
     ) -> RateLimitResult:
         """Check rate limit for a specific API key (OPTIMIZED: with short-lived caching)"""
+        # ADMIN BYPASS: Check if this is an admin tier user (skip rate limits)
+        try:
+            from src.services.user_lookup_cache import get_user
+            from src.db.plans import is_admin_tier_user
+
+            user = get_user(api_key)
+            if user and is_admin_tier_user(user.get("id")):
+                logger.info(f"Admin tier user - bypassing rate limit checks")
+                config = await self.get_key_config(api_key)
+                # Return unlimited rate limit result for admin users
+                return RateLimitResult(
+                    allowed=True,
+                    remaining_requests=2147483647,  # Max int
+                    remaining_tokens=2147483647,
+                    reset_time=datetime.now(timezone.utc) + timedelta(days=365),
+                    retry_after=None,
+                    reason="Admin tier - unlimited access",
+                    burst_remaining=2147483647,
+                    concurrency_remaining=1000,
+                    ratelimit_limit_requests=2147483647,
+                    ratelimit_limit_tokens=2147483647,
+                    ratelimit_reset_requests=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
+                    ratelimit_reset_tokens=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
+                    burst_window_description="unlimited",
+                )
+        except Exception as e:
+            logger.debug(f"Error checking admin tier for rate limiting: {e}")
+
         # OPTIMIZATION: Check cache first (saves 15-30ms on cache hits)
         now = time.time()
         cache_key = f"{api_key}:{tokens_used}"

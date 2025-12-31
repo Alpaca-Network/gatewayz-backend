@@ -7,10 +7,27 @@ Tests cover:
 - Text generation model normalization (text->text)
 - Pricing extraction for time-based models
 - Deprecation notice handling
+
+Note: These tests mock enrich_model_with_pricing to test the normalization logic
+in isolation. Since DeepInfra is a gateway provider, models without valid pricing
+would normally return None from normalize_deepinfra_model. The mock ensures we
+test the normalization structure without triggering the pricing filter.
 """
 
 import pytest
+from unittest.mock import patch
 from src.services.models import normalize_deepinfra_model
+
+
+# Helper fixture that mocks enrich_model_with_pricing to return the model unchanged
+@pytest.fixture(autouse=True)
+def mock_enrich_pricing():
+    """Mock enrich_model_with_pricing to return model unchanged for testing normalization logic."""
+    with patch(
+        "src.services.models.enrich_model_with_pricing",
+        side_effect=lambda model, gateway: model,
+    ):
+        yield
 
 
 class TestDeepInfraNormalization:

@@ -646,3 +646,56 @@ class TestProviderFailoverIntegration:
             if expected_status == 404:
                 assert model in mapped.detail
                 assert provider in mapped.detail.lower()
+
+
+# ============================================================
+# TEST CLASS: No Candidates Error Handling for Vertex AI
+# ============================================================
+
+class TestMapProviderErrorNoCandidates:
+    """Test that 'no candidates' errors from Vertex AI trigger failover"""
+
+    def test_no_candidates_error_triggers_failover(self):
+        """Test 'no candidates' ValueError maps to 503 for failover"""
+        exc = ValueError(
+            "Vertex AI returned no candidates. Model 'gemini-3-flash-preview' returned "
+            "no candidates without explicit block reason."
+        )
+        http_exc = map_provider_error("google-vertex", "gemini-3-flash-preview", exc)
+
+        assert http_exc.status_code == 503  # Should trigger failover
+        assert "no response candidates" in http_exc.detail.lower()
+
+    def test_block_reason_error_triggers_failover(self):
+        """Test that block reason errors map to 503"""
+        exc = ValueError("Vertex AI returned no candidates. Block reason: SAFETY")
+        http_exc = map_provider_error("google-vertex", "gemini-2.5-flash", exc)
+
+        assert http_exc.status_code == 503
+
+    def test_prompt_feedback_error_triggers_failover(self):
+        """Test that promptFeedback errors map to 503"""
+        exc = ValueError("No candidates, promptFeedback indicates content was blocked")
+        http_exc = map_provider_error("google-vertex", "gemini-2.5-pro", exc)
+
+        assert http_exc.status_code == 503
+
+    def test_regular_value_error_does_not_trigger_failover(self):
+        """Test that regular ValueErrors map to 400 (no failover)"""
+        exc = ValueError("Invalid parameter: temperature must be between 0 and 2")
+        http_exc = map_provider_error("google-vertex", "gemini-2.5-flash", exc)
+
+        assert http_exc.status_code == 400  # Bad request, no failover
+
+    def test_503_is_in_failover_status_codes(self):
+        """Verify that 503 is in the set of status codes that trigger failover"""
+        assert 503 in FAILOVER_STATUS_CODES
+
+    def test_no_candidates_from_other_provider(self):
+        """Test 'no candidates' detection works for any provider, not just google-vertex"""
+        exc = ValueError("Response returned no candidates. Empty candidates array.")
+        http_exc = map_provider_error("openrouter", "google/gemini-3-flash", exc)
+
+        # Should still trigger failover even if provider is different
+        # The error pattern is the key, not the provider
+        assert http_exc.status_code == 503

@@ -73,6 +73,22 @@ def _validate_trial_access_uncached(api_key: str) -> dict[str, Any]:
         # Get API key data from api_keys_new table
         result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
+        # ADMIN BYPASS: Check if user has admin plan (bypass all trial checks)
+        if result.data:
+            user_id = result.data[0].get("user_id")
+            if user_id:
+                try:
+                    from src.db.plans import is_admin_tier_user
+                    if is_admin_tier_user(user_id):
+                        logger.info(f"Admin tier user - bypassing trial validation")
+                        return {
+                            "is_valid": True,
+                            "is_trial": False,
+                            "message": "Admin tier - unlimited access"
+                        }
+                except Exception as e:
+                    logger.warning(f"Error checking admin tier status: {e}")
+
         if not result.data:
             # Fallback to legacy users table for basic trial info
             logger.info(

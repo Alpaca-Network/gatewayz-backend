@@ -13,6 +13,10 @@ DEFAULT_DAILY_TOKEN_LIMIT = 500_000
 DEFAULT_MONTHLY_TOKEN_LIMIT = 15_000_000
 DEFAULT_TRIAL_FEATURES = ["basic_models"]
 
+# Admin tier constants
+ADMIN_PLAN_TYPE = "admin"
+ADMIN_BYPASS_LIMITS = True  # Flag to enable admin bypass of all checks
+
 # PERF: In-memory cache for usage data to reduce database queries
 # Short TTL since usage data changes frequently and is billing-critical
 _usage_cache: dict[str, dict[str, Any]] = {}
@@ -242,6 +246,21 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
 def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[str, Any]:
     """Check if user's current plan allows certain usage"""
     try:
+        # ADMIN BYPASS: Admin tier users have unlimited entitlements
+        if is_admin_tier_user(user_id):
+            logger.debug(f"Admin tier user {user_id} - returning unlimited entitlements")
+            return {
+                "has_plan": True,
+                "plan_name": "Admin",
+                "daily_request_limit": 2147483647,  # Max int
+                "monthly_request_limit": 2147483647,
+                "daily_token_limit": 2147483647,
+                "monthly_token_limit": 2147483647,
+                "features": ["unlimited_access", "priority_support", "admin_features", "all_models"],
+                "can_access_feature": True,  # Admin can access any feature
+                "plan_expires": None,  # Admin plans don't expire
+            }
+
         user_plan = get_user_plan(user_id)
 
         # If get_user_plan() failed, inspect user_plans directly to avoid dropping to trial by mistake
@@ -503,6 +522,11 @@ def enforce_plan_limits(
 ) -> dict[str, Any]:
     """Check if user can make a request within their plan limits"""
     try:
+        # ADMIN BYPASS: Admin tier users have unlimited access
+        if is_admin_tier_user(user_id):
+            logger.debug(f"Admin tier user {user_id} - bypassing plan limit checks")
+            return {"allowed": True, "reason": "Admin tier - unlimited access"}
+
         usage_data = get_user_usage_within_plan_limits(user_id)
         if not usage_data:
             return {"allowed": False, "reason": "Unable to check plan limits"}
@@ -575,3 +599,44 @@ def get_subscription_plans() -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting subscription plans: {e}")
         return []
+
+
+def is_admin_tier_user(user_id: int) -> bool:
+    """
+    Check if a user has an active admin tier plan
+
+    Admin tier users bypass all resource limits, credit checks, and rate limiting.
+
+    Args:
+        user_id: The user ID to check
+
+    Returns:
+        True if user has active admin plan, False otherwise
+    """
+    if not ADMIN_BYPASS_LIMITS:
+        return False
+
+    try:
+        client = get_supabase_client()
+
+        # Check if user has an active admin plan
+        result = (
+            client.table("user_plans")
+            .select("plans!inner(plan_type)")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
+
+        if result.data:
+            for row in result.data:
+                plan = row.get("plans", {})
+                if isinstance(plan, dict) and plan.get("plan_type") == ADMIN_PLAN_TYPE:
+                    logger.info(f"User {user_id} has active admin tier - bypassing all limits")
+                    return True
+
+        return False
+
+    except Exception as e:
+        logger.error(f"Error checking admin tier for user {user_id}: {e}")
+        return False

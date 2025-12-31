@@ -3,9 +3,11 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from src.cache import _huggingface_cache, _models_cache, _provider_cache
 from src.config import Config
+from src.config.supabase_config import get_supabase_client
 from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
 from src.db.trials import get_trial_analytics
@@ -35,6 +37,11 @@ from src.services.providers import fetch_providers_from_openrouter, get_cached_p
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# Request models for admin endpoints
+class DisableTrialRequest(BaseModel):
+    user_id: int
 
 
 @router.post("/create", response_model=UserRegistrationResponse, tags=["authentication"])
@@ -635,54 +642,88 @@ async def get_trial_analytics_admin(_: str = Depends(get_admin_key)):
 
 
 @router.get("/admin/users", tags=["admin"])
-async def get_all_users_info(_: str = Depends(get_admin_key)):
-    """Get all users information from users table (Admin only)"""
+async def get_all_users_info(
+    _: str = Depends(get_admin_key),
+    limit: int = Query(50, ge=1, le=1000, description="Number of users per page"),
+    offset: int = Query(0, ge=0, description="Number of users to skip"),
+):
+    """
+    Get paginated users information from users table (Admin only)
+
+    Supports server-side pagination for efficient data loading.
+
+    Args:
+        limit: Number of users to return (1-1000, default 50)
+        offset: Number of users to skip (default 0)
+
+    Returns:
+        Paginated user data with total count and statistics
+    """
     try:
         from src.config.supabase_config import get_supabase_client
 
         client = get_supabase_client()
 
-        # Get all users with their information
-        # Note: Supabase has a default limit of 1000, so we set a high limit to fetch all users
+        # Get total count of users (efficient - doesn't fetch data)
+        count_result = (
+            client.table("users")
+            .select("id", count="exact")
+            .execute()
+        )
+        total_users = count_result.count if count_result.count is not None else 0
+
+        # Get paginated users
         result = (
             client.table("users")
             .select(
                 "id, username, email, api_key, credits, is_active, role, registration_date, "
                 "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
             )
-            .limit(100000)  # Set high limit to fetch all users
+            .range(offset, offset + limit - 1)  # PostgREST uses inclusive range
+            .order("created_at", desc=True)  # Most recent users first
             .execute()
         )
 
         if not result.data:
             return {
                 "status": "success",
-                "total_users": 0,
+                "total_users": total_users,
                 "users": [],
+                "limit": limit,
+                "offset": offset,
+                "has_more": False,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         users = result.data
+        has_more = offset + len(users) < total_users
 
-        # Get additional statistics
-        total_users = len(users)
-        active_users = len([u for u in users if u.get("is_active", True)])
-        admin_users = len([u for u in users if u.get("role") == "admin"])
-        developer_users = len([u for u in users if u.get("role") == "developer"])
-        regular_users = len([u for u in users if u.get("role") == "user" or u.get("role") is None])
+        # Get global statistics (across all users, not just current page)
+        # Fetch all users for stats calculation (efficient - we cache this)
+        all_users_result = client.table("users").select("is_active, role, credits, subscription_status").execute()
+        all_users = all_users_result.data if all_users_result.data else []
+
+        active_users = len([u for u in all_users if u.get("is_active", True)])
+        admin_users = len([u for u in all_users if u.get("role") == "admin"])
+        developer_users = len([u for u in all_users if u.get("role") == "developer"])
+        regular_users = len([u for u in all_users if u.get("role") == "user" or u.get("role") is None])
 
         # Calculate total credits across all users
-        total_credits = sum(float(u.get("credits", 0)) for u in users)
+        total_credits = sum(float(u.get("credits", 0)) for u in all_users)
 
         # Get subscription status breakdown
         subscription_stats = {}
-        for user in users:
+        for user in all_users:
             status = user.get("subscription_status", "unknown")
             subscription_stats[status] = subscription_stats.get(status, 0) + 1
 
         return {
             "status": "success",
             "total_users": total_users,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+            "returned_count": len(users),
             "statistics": {
                 "active_users": active_users,
                 "inactive_users": total_users - active_users,
@@ -1230,3 +1271,228 @@ async def delete_user_by_id(
     except Exception as e:
         logger.error(f"Error deleting user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete user") from e
+
+
+@router.get("/admin/plans", tags=["admin"])
+async def get_all_plans(_: str = Depends(get_admin_key)):
+    """
+    Get all available subscription plans (Admin only)
+
+    Returns:
+        List of all active plans with their details
+    """
+    try:
+        from src.db.plans import get_all_plans
+
+        plans = get_all_plans()
+
+        return {
+            "status": "success",
+            "total_plans": len(plans),
+            "plans": plans,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting all plans: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get plans") from e
+
+
+@router.post("/admin/users/{user_id}/assign-plan", tags=["admin"])
+async def assign_plan_to_user(
+    user_id: int,
+    plan_id: int = Query(..., description="Plan ID to assign"),
+    duration_months: int = Query(1, ge=1, le=120, description="Duration in months (1-120)"),
+    _: str = Depends(get_admin_key),
+):
+    """
+    Assign or update a user's subscription plan (Admin only)
+
+    This will:
+    - Deactivate any existing active plans for the user
+    - Create a new plan assignment with the specified duration
+    - Update user's subscription status to 'active'
+
+    Args:
+        user_id: User ID to assign plan to
+        plan_id: Plan ID to assign
+        duration_months: Duration of the plan in months (default: 1)
+
+    Returns:
+        Plan assignment details
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        from src.db.plans import assign_user_plan, get_plan_by_id
+
+        # Verify user exists
+        client = get_supabase_client()
+        user_result = client.table("users").select("id, username, email").eq("id", user_id).execute()
+
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+
+        user_info = user_result.data[0]
+
+        # Verify plan exists
+        plan = get_plan_by_id(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found")
+
+        # Assign the plan
+        success = assign_user_plan(user_id, plan_id, duration_months)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to assign plan")
+
+        # Get the newly created plan assignment
+        new_plan_result = (
+            client.table("user_plans")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
+
+        user_plan = new_plan_result.data[0] if new_plan_result.data else None
+
+        return {
+            "status": "success",
+            "message": f"Plan '{plan['name']}' assigned to user {user_info['username']} for {duration_months} month(s)",
+            "user": {
+                "id": user_id,
+                "username": user_info["username"],
+                "email": user_info["email"],
+            },
+            "plan": {
+                "id": plan["id"],
+                "name": plan["name"],
+                "description": plan.get("description", ""),
+                "price_per_month": plan.get("price_per_month", 0),
+            },
+            "assignment": {
+                "started_at": user_plan["started_at"] if user_plan else None,
+                "expires_at": user_plan["expires_at"] if user_plan else None,
+                "duration_months": duration_months,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning plan {plan_id} to user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to assign plan: {str(e)}") from e
+
+
+@router.post("/admin/disable-trial", tags=["admin"])
+async def admin_disable_trial(req: DisableTrialRequest, _: str = Depends(get_admin_key)):
+    """
+    Disable trial status for a user
+
+    This endpoint converts a trial user to a regular user by:
+    1. Setting is_trial = FALSE in api_keys_new table
+    2. Updating subscription_status in users table
+    3. Clearing trial limits and usage tracking
+
+    Args:
+        req: DisableTrialRequest with user_id
+
+    Returns:
+        Success message with updated user status
+
+    Raises:
+        HTTPException: 404 if user not found, 500 on error
+    """
+    try:
+        client = get_supabase_client()
+        user_id = req.user_id
+
+        # Get user info first to verify they exist
+        user_result = client.table("users").select("id, username, email, subscription_status").eq("id", user_id).execute()
+
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+
+        user_info = user_result.data[0]
+
+        # Update all API keys for this user in api_keys_new table
+        api_keys_update = (
+            client.table("api_keys_new")
+            .update({
+                "is_trial": False,
+                "trial_end_date": None,
+                "trial_used_tokens": 0,
+                "trial_used_requests": 0,
+                "trial_used_credits": 0.0,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        # Update subscription status in users table to 'active' (not 'trial')
+        users_update = (
+            client.table("users")
+            .update({
+                "subscription_status": "active",
+                "trial_expires_at": None,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+            .eq("id", user_id)
+            .execute()
+        )
+
+        # Get count of updated API keys
+        updated_keys_count = len(api_keys_update.data) if api_keys_update.data else 0
+
+        # Invalidate trial cache for all user's API keys to ensure immediate effect
+        try:
+            from src.services.trial_validation import clear_trial_cache
+            from src.db.users import invalidate_user_cache_by_id
+
+            # Clear trial cache for all API keys belonging to this user
+            if api_keys_update.data:
+                for key_data in api_keys_update.data:
+                    api_key = key_data.get("api_key")
+                    if api_key:
+                        clear_trial_cache(api_key)
+
+            # Also invalidate user cache
+            invalidate_user_cache_by_id(user_id)
+            logger.info(f"Invalidated caches for user {user_id}")
+        except Exception as cache_error:
+            logger.warning(f"Failed to invalidate caches for user {user_id}: {cache_error}")
+
+        # Get updated user info
+        updated_user_result = client.table("users").select("*").eq("id", user_id).execute()
+        updated_user = updated_user_result.data[0] if updated_user_result.data else user_info
+
+        logger.info(
+            f"Trial disabled for user {user_id} ({user_info.get('username', 'unknown')}). "
+            f"Updated {updated_keys_count} API key(s)."
+        )
+
+        return {
+            "status": "success",
+            "message": f"Trial disabled for user {user_info.get('username', user_id)}",
+            "user": {
+                "id": user_id,
+                "username": user_info.get("username"),
+                "email": user_info.get("email"),
+                "previous_status": user_info.get("subscription_status"),
+                "new_status": updated_user.get("subscription_status"),
+            },
+            "updates": {
+                "api_keys_updated": updated_keys_count,
+                "trial_status_cleared": True,
+                "trial_limits_reset": True,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disabling trial for user {req.user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to disable trial: {str(e)}") from e

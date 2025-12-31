@@ -657,6 +657,16 @@ def deduct_credits(
             raise ValueError(f"User with API key not found")
 
         user_id = user_lookup.data[0]["id"]
+
+        # ADMIN BYPASS: Admin tier users don't consume credits
+        try:
+            from src.db.plans import is_admin_tier_user
+            if is_admin_tier_user(user_id):
+                logger.info(f"Admin tier user {user_id} - skipping credit deduction of ${tokens:.6f}")
+                return
+        except Exception as e:
+            logger.warning(f"Error checking admin tier status for credit deduction: {e}")
+
         balance_before = user_lookup.data[0]["credits"]
 
         # Check sufficiency with fresh balance
