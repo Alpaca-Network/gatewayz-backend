@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
 
 from src.schemas.common import AuthMethod
 
@@ -11,23 +11,15 @@ class PrivyLinkedAccount(BaseModel):
     email: str | None = None
     address: str | None = None
     name: str | None = None
-    phone_number: str | None = None  # Phone number for SMS/phone auth (Privy uses 'phoneNumber' in camelCase)
+    # Phone number for SMS/phone auth - Privy sends 'phoneNumber' in camelCase
+    # Using AliasChoices to accept both snake_case and camelCase formats
+    phone_number: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("phone_number", "phoneNumber"),
+    )
     verified_at: int | None = None
     first_verified_at: int | None = None
     latest_verified_at: int | None = None
-
-    class Config:
-        # Allow Privy's camelCase field names to map to our snake_case fields
-        populate_by_name = True
-
-    @field_validator("phone_number", mode="before")
-    @classmethod
-    def normalize_phone_number(cls, v, info):
-        """Accept phoneNumber from Privy and normalize to phone_number"""
-        # Privy sends phoneNumber in camelCase, handle both formats
-        if v is None and hasattr(info, "data") and info.data:
-            v = info.data.get("phoneNumber")
-        return v
 
     @field_validator("type")
     @classmethod
