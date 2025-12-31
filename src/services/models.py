@@ -1001,7 +1001,14 @@ def fetch_models_from_deepinfra():
 
         logger.info(f"Fetched {len(raw_models)} models from DeepInfra")
 
-        normalized_models = [normalize_deepinfra_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_deepinfra_model(model)]
+            if norm_model is not None
+        ]
 
         _deepinfra_models_cache["data"] = normalized_models
         _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1053,7 +1060,14 @@ def fetch_models_from_featherless():
 
         logger.info(f"Fetched {len(all_models)} total models from Featherless")
 
-        normalized_models = [normalize_featherless_model(model) for model in all_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in all_models
+            if model
+            for norm_model in [normalize_featherless_model(model)]
+            if norm_model is not None
+        ]
 
         if len(normalized_models) < 6000:
             logger.warning(
@@ -1061,7 +1075,8 @@ def fetch_models_from_featherless():
             )
             export_models = load_featherless_catalog_export()
             if export_models:
-                combined = {model["id"]: model for model in normalized_models if model.get("id")}
+                # Models in normalized_models are already validated (not None), so we can safely use model["id"]
+                combined = {model["id"]: model for model in normalized_models}
                 for export_model in export_models:
                     combined[export_model["id"]] = export_model
                 normalized_models = list(combined.values())
@@ -1220,7 +1235,14 @@ def fetch_models_from_groq():
 
         payload = response.json()
         raw_models = payload.get("data", [])
-        normalized_models = [normalize_groq_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_groq_model(model)]
+            if norm_model is not None
+        ]
 
         _groq_models_cache["data"] = normalized_models
         _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1412,7 +1434,14 @@ def fetch_models_from_fireworks():
 
         payload = response.json()
         raw_models = payload.get("data", [])
-        normalized_models = [normalize_fireworks_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_fireworks_model(model)]
+            if norm_model is not None
+        ]
 
         _fireworks_models_cache["data"] = normalized_models
         _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1560,7 +1589,14 @@ def fetch_models_from_together():
         payload = response.json()
         # Together API returns a list directly, not wrapped in {"data": [...]}
         raw_models = payload if isinstance(payload, list) else payload.get("data", [])
-        normalized_models = [normalize_together_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_together_model(model)]
+            if norm_model is not None
+        ]
 
         _together_models_cache["data"] = normalized_models
         _together_models_cache["timestamp"] = datetime.now(timezone.utc)
