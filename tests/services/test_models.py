@@ -569,3 +569,42 @@ class TestOpenRouterIsFreeField:
 
         extended_model = next(m for m in result if m["id"] == "anthropic/claude-3-opus:extended")
         assert extended_model["is_free"] is False
+
+    @patch('src.services.models.httpx.get')
+    @patch('src.services.models.Config')
+    def test_openrouter_null_model_id_does_not_crash(self, mock_config, mock_httpx_get):
+        """Models with null id should not crash and should have is_free=False"""
+        from src.services.models import fetch_models_from_openrouter
+
+        mock_config.OPENROUTER_API_KEY = "test-api-key"
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": None,  # Null ID from API
+                    "name": "Model With Null ID",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                },
+                {
+                    "id": "valid/model:free",
+                    "name": "Valid Free Model",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                },
+            ]
+        }
+        mock_httpx_get.return_value = mock_response
+
+        # Should not raise an exception
+        result = fetch_models_from_openrouter()
+
+        assert result is not None
+        # The null ID model should be included with is_free=False
+        null_id_model = next((m for m in result if m.get("id") is None), None)
+        if null_id_model:
+            assert null_id_model["is_free"] is False
+
+        # The valid free model should still have is_free=True
+        valid_model = next((m for m in result if m.get("id") == "valid/model:free"), None)
+        if valid_model:
+            assert valid_model["is_free"] is True
