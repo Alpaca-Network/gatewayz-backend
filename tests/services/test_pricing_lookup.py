@@ -320,13 +320,18 @@ class TestGatewayProviders:
 
         # All gateway providers that don't expose reliable pricing directly
         assert "aihubmix" in GATEWAY_PROVIDERS
+        assert "akash" in GATEWAY_PROVIDERS
         assert "alibaba-cloud" in GATEWAY_PROVIDERS
         assert "anannas" in GATEWAY_PROVIDERS
         assert "clarifai" in GATEWAY_PROVIDERS
+        assert "cloudflare-workers-ai" in GATEWAY_PROVIDERS
         assert "deepinfra" in GATEWAY_PROVIDERS
         assert "featherless" in GATEWAY_PROVIDERS
+        assert "fireworks" in GATEWAY_PROVIDERS
+        assert "groq" in GATEWAY_PROVIDERS
         assert "helicone" in GATEWAY_PROVIDERS
         assert "onerouter" in GATEWAY_PROVIDERS
+        assert "together" in GATEWAY_PROVIDERS
         assert "vercel-ai-gateway" in GATEWAY_PROVIDERS
 
     def test_gateway_providers_is_set(self):
@@ -840,6 +845,114 @@ class TestGatewayProviderZeroPricingFiltering:
 
         with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
             result = enrich_model_with_pricing(model_data, "featherless")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
+
+    def test_groq_in_gateway_providers(self):
+        """Test that groq is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "groq" in GATEWAY_PROVIDERS
+
+    def test_fireworks_in_gateway_providers(self):
+        """Test that fireworks is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "fireworks" in GATEWAY_PROVIDERS
+
+    def test_together_in_gateway_providers(self):
+        """Test that together is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "together" in GATEWAY_PROVIDERS
+
+    def test_akash_in_gateway_providers(self):
+        """Test that akash is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "akash" in GATEWAY_PROVIDERS
+
+    def test_cloudflare_workers_ai_in_gateway_providers(self):
+        """Test that cloudflare-workers-ai is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "cloudflare-workers-ai" in GATEWAY_PROVIDERS
+
+    def test_groq_filters_models_without_pricing(self):
+        """Test that groq filters out models without valid pricing"""
+        model_data = {
+            "id": "groq/unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "groq")
+                    assert result is None
+
+    def test_fireworks_filters_models_without_pricing(self):
+        """Test that fireworks filters out models without valid pricing"""
+        model_data = {
+            "id": "accounts/fireworks/models/unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "fireworks")
+                    assert result is None
+
+    def test_together_filters_models_without_pricing(self):
+        """Test that together filters out models without valid pricing"""
+        model_data = {
+            "id": "unknown/unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "together")
+                    assert result is None
+
+    def test_groq_accepts_models_with_manual_pricing(self):
+        """Test that groq accepts models with manual pricing"""
+        model_data = {
+            "id": "groq/llama-3.3-70b-versatile",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.59", "completion": "0.79", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "groq")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
+
+    def test_fireworks_accepts_models_with_manual_pricing(self):
+        """Test that fireworks accepts models with manual pricing"""
+        model_data = {
+            "id": "accounts/fireworks/models/deepseek-v3",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.56", "completion": "1.68", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "fireworks")
             assert result is not None
             assert result["pricing"] == manual_pricing
             assert result["pricing_source"] == "manual"

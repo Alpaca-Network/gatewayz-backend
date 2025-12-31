@@ -15,13 +15,18 @@ logger = logging.getLogger(__name__)
 # Models without valid pricing will be filtered out to avoid appearing as "free"
 GATEWAY_PROVIDERS = {
     "aihubmix",
+    "akash",
     "alibaba-cloud",
     "anannas",
     "clarifai",
+    "cloudflare-workers-ai",
     "deepinfra",
     "featherless",
+    "fireworks",
+    "groq",
     "helicone",
     "onerouter",
+    "together",
     "vercel-ai-gateway",
 }
 
