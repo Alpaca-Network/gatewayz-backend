@@ -119,6 +119,27 @@
               "path": ["v1", "messages"]
             }
           }
+        },
+        {
+          "name": "AI SDK (Vercel AI Gateway)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"openai/gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Test 5: AI SDK endpoint - tracking verification\"\n    }\n  ],\n  \"max_tokens\": 50,\n  \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/ai-sdk",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "ai-sdk"]
+            }
+          }
         }
       ]
     },

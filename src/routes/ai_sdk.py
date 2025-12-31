@@ -13,11 +13,14 @@ Endpoints:
 import asyncio
 import json
 import logging
+import time
+import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import src.db.chat_completion_requests as chat_completion_requests_module
 from src.services.ai_sdk_client import (
     make_ai_sdk_request_openai,
     make_ai_sdk_request_openai_stream_async,
@@ -134,7 +137,7 @@ def _is_openrouter_model(model: str) -> bool:
 
 @router.post("/api/chat/ai-sdk-completions", tags=["ai-sdk"], response_model=AISDKChatResponse)
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
-async def ai_sdk_chat_completion(request: AISDKChatRequest):
+async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: BackgroundTasks):
     """
     Vercel AI SDK compatible chat completion endpoint.
 
@@ -193,6 +196,14 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
     **Returns:**
         AISDKChatResponse: Chat completion response with choices and usage
     """
+    # Generate request correlation ID for distributed tracing
+    request_id = str(uuid.uuid4())
+    start_time = time.monotonic()
+
+    logger.info(
+        f"ai_sdk_chat_completion start (request_id={request_id}, model={request.model}, stream={request.stream})"
+    )
+
     try:
         # Build kwargs for API request
         kwargs = _build_request_kwargs(request)
@@ -215,6 +226,26 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
 
             # Process and return response
             processed = await asyncio.to_thread(process_openrouter_response, response)
+
+            # Calculate processing time and extract usage
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            usage = processed.get("usage", {})
+
+            # Save chat completion request metadata - run as background task
+            background_tasks.add_task(
+                chat_completion_requests_module.save_chat_completion_request,
+                request_id=request_id,
+                model_name=request.model,
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                processing_time_ms=elapsed_ms,
+                status="completed",
+                error_message=None,
+                user_id=None,  # AI SDK endpoint doesn't require authentication
+                provider_name="openrouter",
+                model_id=None,
+            )
+
             return processed
 
         # Default path: Use Vercel AI Gateway
@@ -232,6 +263,31 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest):
 
         # Process and return response
         processed = await asyncio.to_thread(process_ai_sdk_response, response)
+
+        # Calculate processing time and extract usage
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        usage = processed.get("usage", {})
+
+        # Extract provider from model (format: provider/model)
+        provider_name = "vercel-ai-gateway"
+        if "/" in request.model:
+            provider_name = request.model.split("/")[0]
+
+        # Save chat completion request metadata - run as background task
+        background_tasks.add_task(
+            chat_completion_requests_module.save_chat_completion_request,
+            request_id=request_id,
+            model_name=request.model,
+            input_tokens=usage.get("prompt_tokens", 0),
+            output_tokens=usage.get("completion_tokens", 0),
+            processing_time_ms=elapsed_ms,
+            status="completed",
+            error_message=None,
+            user_id=None,  # AI SDK endpoint doesn't require authentication
+            provider_name=provider_name,
+            model_id=None,
+        )
+
         return processed
 
     except HTTPException:
