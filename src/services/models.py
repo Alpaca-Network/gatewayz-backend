@@ -938,6 +938,13 @@ def fetch_models_from_openrouter():
                     )
                     continue
                 model["pricing"] = sanitized_pricing
+
+            # Mark OpenRouter free models (those with :free suffix)
+            # Only OpenRouter has legitimately free models
+            # Use `or ""` to handle both missing keys and null values
+            model_id = model.get("id") or ""
+            model["is_free"] = model_id.endswith(":free")
+
             filtered_models.append(model)
 
         logger.info(
