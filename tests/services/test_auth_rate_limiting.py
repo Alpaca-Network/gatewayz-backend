@@ -5,7 +5,6 @@ Tests for Authentication Rate Limiting Module
 Tests IP-based rate limiting for authentication endpoints.
 """
 
-import asyncio
 import pytest
 from unittest.mock import MagicMock
 
@@ -248,15 +247,30 @@ class TestAuthRateLimiter:
 class TestGetClientIP:
     """Tests for get_client_ip helper function"""
 
-    def test_get_ip_from_x_forwarded_for(self):
-        """Test extracting IP from X-Forwarded-For header"""
+    def test_get_ip_from_x_real_ip(self):
+        """Test extracting IP from X-Real-IP header (highest priority)"""
         request = MagicMock()
+        request.headers = {
+            "X-Real-IP": "10.20.30.40",
+            "X-Forwarded-For": "203.0.113.195, 70.41.3.18",
+        }
+        request.client = MagicMock()
+        request.client.host = "10.0.0.1"
+
+        ip = get_client_ip(request)
+        assert ip == "10.20.30.40"
+
+    def test_get_ip_from_x_forwarded_for_rightmost(self):
+        """Test extracting rightmost IP from X-Forwarded-For header (proxy-added)"""
+        request = MagicMock()
+        # Format: "client, proxy1, proxy2" - rightmost is added by our trusted proxy
         request.headers = {"X-Forwarded-For": "203.0.113.195, 70.41.3.18, 150.172.238.178"}
         request.client = MagicMock()
         request.client.host = "10.0.0.1"
 
         ip = get_client_ip(request)
-        assert ip == "203.0.113.195"
+        # Should return rightmost IP (added by Railway proxy, harder to spoof)
+        assert ip == "150.172.238.178"
 
     def test_get_ip_from_x_forwarded_for_single(self):
         """Test extracting IP from X-Forwarded-For header with single IP"""
@@ -286,6 +300,19 @@ class TestGetClientIP:
 
         ip = get_client_ip(request)
         assert ip == "unknown"
+
+    def test_spoofed_x_forwarded_for_uses_proxy_added_ip(self):
+        """Test that spoofed X-Forwarded-For headers don't bypass rate limiting"""
+        request = MagicMock()
+        # Attacker tries to spoof by adding fake IPs at the start
+        # But Railway's proxy adds the real IP at the end
+        request.headers = {"X-Forwarded-For": "1.2.3.4, 5.6.7.8, 192.168.1.100"}
+        request.client = MagicMock()
+        request.client.host = "10.0.0.1"
+
+        ip = get_client_ip(request)
+        # Should use rightmost IP (what Railway's proxy actually added)
+        assert ip == "192.168.1.100"
 
 
 class TestGlobalRateLimiter:

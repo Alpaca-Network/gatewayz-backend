@@ -282,8 +282,11 @@ def get_client_ip(request) -> str:
     """
     Get the real client IP address from a FastAPI request.
 
-    Checks X-Forwarded-For header first (for proxied requests via Railway/nginx),
-    then falls back to direct connection IP.
+    Security considerations:
+    - X-Forwarded-For can be spoofed by attackers
+    - Railway proxy adds the real client IP as the rightmost entry
+    - We use a combination approach: prefer X-Real-IP (set by trusted proxy),
+      then rightmost X-Forwarded-For entry, then direct connection
 
     Args:
         request: FastAPI Request object
@@ -291,11 +294,24 @@ def get_client_ip(request) -> str:
     Returns:
         Client IP address string
     """
-    # Check X-Forwarded-For header (Railway/proxy sets this)
+    # First check X-Real-IP (set by trusted proxies like nginx)
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+
+    # Check X-Forwarded-For header
+    # Format: "client, proxy1, proxy2" - the rightmost non-private IP is most reliable
+    # as proxies append to this header (harder to spoof the rightmost entry)
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        # X-Forwarded-For can be comma-separated, take the first IP
-        return forwarded_for.split(",")[0].strip()
+        # Split and get all IPs in the chain
+        ips = [ip.strip() for ip in forwarded_for.split(",")]
+
+        # For Railway: take the rightmost IP (added by Railway's proxy)
+        # This is harder to spoof as the attacker would need to control the proxy
+        if len(ips) >= 1:
+            # Use rightmost IP - this is what Railway's proxy adds
+            return ips[-1]
 
     # Fall back to direct connection IP
     return request.client.host if request.client else "unknown"
