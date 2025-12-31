@@ -2,6 +2,18 @@
 -- This creates an admin subscription tier with unlimited resources
 -- Admin tier bypasses all checks: rate limits, credit deductions, trial validations
 
+-- Add plan_type column if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'plans' AND column_name = 'plan_type'
+    ) THEN
+        ALTER TABLE plans ADD COLUMN plan_type TEXT;
+        COMMENT ON COLUMN plans.plan_type IS 'Type of plan: standard, pro, max, admin, etc.';
+    END IF;
+END $$;
+
 -- Insert the admin plan with effectively unlimited limits
 INSERT INTO plans (
     name,
