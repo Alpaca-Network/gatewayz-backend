@@ -11,9 +11,23 @@ class PrivyLinkedAccount(BaseModel):
     email: str | None = None
     address: str | None = None
     name: str | None = None
+    phone_number: str | None = None  # Phone number for SMS/phone auth (Privy uses 'phoneNumber' in camelCase)
     verified_at: int | None = None
     first_verified_at: int | None = None
     latest_verified_at: int | None = None
+
+    class Config:
+        # Allow Privy's camelCase field names to map to our snake_case fields
+        populate_by_name = True
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def normalize_phone_number(cls, v, info):
+        """Accept phoneNumber from Privy and normalize to phone_number"""
+        # Privy sends phoneNumber in camelCase, handle both formats
+        if v is None and hasattr(info, "data") and info.data:
+            v = info.data.get("phoneNumber")
+        return v
 
     @field_validator("type")
     @classmethod
@@ -21,6 +35,7 @@ class PrivyLinkedAccount(BaseModel):
         """Validate account type is a known provider"""
         valid_types = {
             "email",
+            "phone",
             "google_oauth",
             "github",
             "apple_oauth",
@@ -114,6 +129,7 @@ class PrivyAuthResponse(BaseModel):
     is_new_user: bool | None = None
     display_name: str | None = None
     email: str | None = None
+    phone_number: str | None = None  # Phone number for users who authenticated via SMS
     credits: float | None = None
     timestamp: datetime | None = None
     subscription_status: str | None = None

@@ -585,6 +585,161 @@ def test_privy_auth_email_fallback(client, sb):
 
 
 # ==================================================
+# TESTS: Phone Authentication
+# ==================================================
+
+def test_privy_auth_phone_new_user(client, sb):
+    """Test authentication with phone number for new user"""
+    request_data = {
+        "user": {
+            "id": "privy_phone_123",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+15551234567",
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_phone"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['auth_method'] == 'phone'
+    assert data['phone_number'] == '+15551234567'
+    assert data['is_new_user'] is True
+    # Username should be generated from last 4 digits of phone
+    assert 'user_' in data['display_name']
+
+
+def test_privy_auth_phone_existing_user(client, sb):
+    """Test authentication with phone number for existing user"""
+    # Create existing user with phone
+    sb.table('users').insert({
+        'id': '500',
+        'username': 'user_4567',
+        'email': 'noemail+phone_user@privy.placeholder',
+        'phone_number': '+15551234567',
+        'credits': 25.0,
+        'privy_user_id': 'privy_phone_existing',
+        'api_key': 'gw_live_phone_user_key',
+        'subscription_status': 'active',
+    }).execute()
+
+    sb.table('api_keys_new').insert({
+        'id': '10',
+        'user_id': '500',
+        'api_key': 'gw_live_phone_user_primary',
+        'is_primary': True,
+        'is_active': True,
+    }).execute()
+
+    request_data = {
+        "user": {
+            "id": "privy_phone_existing",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phone_number": "+15551234567",
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_phone_existing"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['message'] == 'Login successful'
+    assert data['is_new_user'] is False
+    assert data['phone_number'] == '+15551234567'
+    assert data['user_id'] == 500
+
+
+def test_privy_auth_phone_with_email(client, sb):
+    """Test user with both phone and email linked accounts"""
+    request_data = {
+        "user": {
+            "id": "privy_multi_123",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "email",
+                    "email": "multiuser@example.com",
+                    "verified_at": 1705123456
+                },
+                {
+                    "type": "phone",
+                    "phone_number": "+15559876543",
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_multi"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    # Email should be the primary identifier (comes first)
+    assert data['email'] == 'multiuser@example.com'
+    # Phone should also be extracted
+    assert data['phone_number'] == '+15559876543'
+    # Auth method should be email since email was found
+    assert data['auth_method'] == 'email'
+
+
+def test_privy_auth_phone_camelcase_field(client, sb):
+    """Test that phoneNumber (camelCase from Privy) is properly handled"""
+    # This tests the Pydantic validator that maps phoneNumber -> phone_number
+    request_data = {
+        "user": {
+            "id": "privy_camel_123",
+            "created_at": 1705123456,
+            "linked_accounts": [
+                {
+                    "type": "phone",
+                    "phoneNumber": "+15557778888",  # camelCase as sent by Privy
+                    "verified_at": 1705123456
+                }
+            ],
+            "mfa_methods": [],
+            "has_accepted_terms": True,
+            "is_guest": False
+        },
+        "token": "privy_token_camel"
+    }
+
+    response = client.post('/auth', json=request_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert data['auth_method'] == 'phone'
+    assert data['phone_number'] == '+15557778888'
+
+
+# ==================================================
 # TESTS: User Registration
 # ==================================================
 

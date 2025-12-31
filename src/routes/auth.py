@@ -86,6 +86,7 @@ def _handle_existing_user(
     auth_method: AuthMethod,
     display_name: str | None,
     email: str | None,
+    phone_number: str | None = None,
     auto_create_api_key: bool = True,
 ) -> PrivyAuthResponse:
     """Build a consistent response for existing users."""
@@ -296,6 +297,7 @@ def _handle_existing_user(
         is_new_user=False,
         display_name=existing_user.get("username") or display_name,
         email=user_email,
+        phone_number=phone_number or existing_user.get("phone_number"),
         credits=user_credits,
         timestamp=datetime.now(timezone.utc),
         subscription_status=subscription_status_value,
@@ -573,41 +575,46 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             request.user.linked_accounts = []
 
         # Extract user info from Privy linked accounts
-        # Priority: 1) Top-level email from request, 2) Email from linked accounts, 3) Fallback
+        # Priority: 1) Top-level email from request, 2) Email from linked accounts, 3) Phone from linked accounts, 4) Fallback
         email = request.email  # Start with top-level email if provided by frontend
+        phone_number = None  # Phone number for SMS auth
         display_name = None
         auth_method = AuthMethod.EMAIL  # Default
 
         # Try to extract from linked accounts if not provided at top level
-        if not email and request.user.linked_accounts:
-            for account in request.user.linked_accounts:
-                try:
-                    account_email = _resolve_account_email(account)
-                    if account.type == "email" and account_email:
-                        email = account_email
-                        auth_method = AuthMethod.EMAIL
-                        logger.debug(f"Extracted email from email account: {email}")
-                        break
-                    elif account.type == "google_oauth" and account_email:
-                        email = account_email
-                        display_name = account.name
-                        auth_method = AuthMethod.GOOGLE
-                        logger.debug(
-                            f"Extracted email from Google OAuth: {email}, "
-                            f"display_name: {display_name}"
-                        )
-                        break
-                    elif account.type == "github" and account.name:
-                        display_name = account.name
-                        auth_method = AuthMethod.GITHUB
-                        logger.debug(f"Extracted GitHub username: {display_name}")
-                        # GitHub doesn't provide email in this field, will use fallback
-                except Exception as account_error:
-                    logger.warning(
-                        f"Error processing linked account for user {request.user.id}: "
-                        f"{account_error}"
+        for account in request.user.linked_accounts or []:
+            try:
+                account_email = _resolve_account_email(account)
+                if account.type == "phone" and account.phone_number:
+                    # Phone authentication - extract phone number
+                    phone_number = account.phone_number
+                    if not email:  # Only set auth method if email wasn't found first
+                        auth_method = AuthMethod.PHONE
+                    logger.debug(f"Extracted phone number from phone account: {phone_number}")
+                elif account.type == "email" and account_email and not email:
+                    email = account_email
+                    auth_method = AuthMethod.EMAIL
+                    logger.debug(f"Extracted email from email account: {email}")
+                elif account.type == "google_oauth" and account_email and not email:
+                    email = account_email
+                    display_name = account.name
+                    auth_method = AuthMethod.GOOGLE
+                    logger.debug(
+                        f"Extracted email from Google OAuth: {email}, "
+                        f"display_name: {display_name}"
                     )
-                    continue
+                elif account.type == "github" and account.name and not display_name:
+                    display_name = account.name
+                    if not email:
+                        auth_method = AuthMethod.GITHUB
+                    logger.debug(f"Extracted GitHub username: {display_name}")
+                    # GitHub doesn't provide email in this field, will use fallback
+            except Exception as account_error:
+                logger.warning(
+                    f"Error processing linked account for user {request.user.id}: "
+                    f"{account_error}"
+                )
+                continue
 
         # ISSUE FIX #3: Improved email extraction with better logging
         # NOTE: We no longer generate fallback emails from Privy IDs because they contain
@@ -624,12 +631,19 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             email = None
 
         logger.info(
-            f"Email extraction completed for user {request.user.id}: {email}, "
-            f"auth_method: {auth_method}"
+            f"Auth info extraction completed for user {request.user.id}: "
+            f"email={email}, phone={phone_number}, auth_method={auth_method}"
         )
 
-        # Generate username from email or privy ID (for fallback check)
-        username = email.split("@")[0] if email else f"user_{request.user.id[:8]}"
+        # Generate username from email, phone number, or privy ID (for fallback check)
+        if email:
+            username = email.split("@")[0]
+        elif phone_number:
+            # Use last 4 digits of phone number for username
+            clean_phone = "".join(filter(str.isdigit, phone_number))
+            username = f"user_{clean_phone[-4:]}" if len(clean_phone) >= 4 else f"user_{request.user.id[:8]}"
+        else:
+            username = f"user_{request.user.id[:8]}"
         logger.debug(f"Generated username for user {request.user.id}: {username}")
 
         # Check if user already exists by privy_user_id (with cache + timeout)
@@ -720,6 +734,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 auth_method=auth_method,
                 display_name=display_name,
                 email=email,
+                phone_number=phone_number,
                 auto_create_api_key=request.auto_create_api_key
                 if request.auto_create_api_key is not None
                 else True,
@@ -772,6 +787,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         auth_method=auth_method,
                         display_name=display_name,
                         email=email,
+                        phone_number=phone_number,
                         auto_create_api_key=request.auto_create_api_key
                         if request.auto_create_api_key is not None
                         else True,
@@ -1067,6 +1083,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 is_new_user=True,
                 display_name=display_name or user_data["username"],
                 email=email,
+                phone_number=phone_number,
                 credits=new_user_credits,
                 timestamp=datetime.now(timezone.utc),
                 subscription_status=user_data.get("subscription_status", "trial"),
