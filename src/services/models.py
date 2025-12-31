@@ -1075,10 +1075,17 @@ def fetch_models_from_featherless():
             )
             export_models = load_featherless_catalog_export()
             if export_models:
-                # Models in normalized_models are already validated (not None), so we can safely use model["id"]
-                combined = {model["id"]: model for model in normalized_models}
+                # Filter models that have a valid id (normalize functions may return models without id)
+                combined = {model["id"]: model for model in normalized_models if model.get("id")}
                 for export_model in export_models:
-                    combined[export_model["id"]] = export_model
+                    # Run export models through pricing enrichment to filter those without valid pricing.
+                    # Note: During catalog build (_is_building_catalog=True), models are kept even without
+                    # pricing to bootstrap the catalog. During regular operation, only models with valid
+                    # pricing (from manual_pricing.json or cross-reference) are kept. This intentionally
+                    # filters out export models without pricing to prevent them appearing as "free".
+                    enriched = enrich_model_with_pricing(export_model, "featherless")
+                    if enriched and enriched.get("id"):
+                        combined[enriched["id"]] = enriched
                 normalized_models = list(combined.values())
                 logger.info(
                     f"Combined Featherless catalog now includes {len(normalized_models)} models from API + export"
