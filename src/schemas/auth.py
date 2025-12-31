@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
 
 from src.schemas.common import AuthMethod
 
@@ -11,6 +11,12 @@ class PrivyLinkedAccount(BaseModel):
     email: str | None = None
     address: str | None = None
     name: str | None = None
+    # Phone number for SMS/phone auth - Privy sends 'phoneNumber' in camelCase
+    # Using AliasChoices to accept both snake_case and camelCase formats
+    phone_number: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("phone_number", "phoneNumber"),
+    )
     verified_at: int | None = None
     first_verified_at: int | None = None
     latest_verified_at: int | None = None
@@ -21,6 +27,7 @@ class PrivyLinkedAccount(BaseModel):
         """Validate account type is a known provider"""
         valid_types = {
             "email",
+            "phone",
             "google_oauth",
             "github",
             "apple_oauth",
@@ -114,6 +121,7 @@ class PrivyAuthResponse(BaseModel):
     is_new_user: bool | None = None
     display_name: str | None = None
     email: str | None = None
+    phone_number: str | None = None  # Phone number for users who authenticated via SMS
     credits: float | None = None
     timestamp: datetime | None = None
     subscription_status: str | None = None

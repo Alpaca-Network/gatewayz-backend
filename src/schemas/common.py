@@ -3,6 +3,7 @@ from enum import Enum
 
 class AuthMethod(str, Enum):
     EMAIL = "email"
+    PHONE = "phone"
     WALLET = "wallet"
     GOOGLE = "google"
     GITHUB = "github"
