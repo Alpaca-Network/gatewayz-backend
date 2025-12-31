@@ -24,6 +24,7 @@ Endpoints:
 - GET /api/monitoring/anomalies - Detected anomalies
 - GET /api/monitoring/trial-analytics - Trial funnel metrics
 - GET /api/monitoring/cost-analysis - Cost breakdown by provider
+- GET /api/monitoring/chat-requests/providers - Get all providers with chat completion requests
 - GET /api/monitoring/chat-requests/counts - Get request counts per model (lightweight)
 - GET /api/monitoring/chat-requests/models - Get all models with chat completion requests
 - GET /api/monitoring/chat-requests - Chat completion requests with flexible filtering
@@ -762,6 +763,113 @@ async def get_token_efficiency(provider: str, model: str, api_key: str | None = 
         raise HTTPException(status_code=500, detail=f"Failed to get token efficiency: {str(e)}")
 
 
+@router.get("/chat-requests/providers")
+async def get_providers_with_requests(api_key: str | None = Depends(get_optional_api_key)):
+    """
+    Get all providers that have models with chat completion requests.
+
+    Returns a list of providers that have at least one model with chat completion requests.
+    Useful for building provider selection UI.
+
+    Returns:
+    - List of providers with:
+      - Provider information (id, name, slug)
+      - Count of models with requests
+      - Total requests across all models
+
+    Example:
+    - /api/monitoring/chat-requests/providers
+
+    Authentication: Optional. Provide API key for authenticated access.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Get all requests with provider info through models
+        result = client.table("chat_completion_requests").select(
+            """
+            model_id,
+            models!inner(
+                provider_id,
+                providers!inner(
+                    id,
+                    name,
+                    slug
+                )
+            )
+            """
+        ).execute()
+
+        if not result.data:
+            return {
+                "success": True,
+                "data": [],
+                "metadata": {
+                    "total_providers": 0,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            }
+
+        # Aggregate by provider
+        provider_stats = {}
+        for record in result.data:
+            model_id = record.get("model_id")
+            if model_id is None:
+                continue
+
+            model_info = record.get("models", {})
+            provider_info = model_info.get("providers", {})
+            provider_id = provider_info.get("id")
+
+            if provider_id is None:
+                continue
+
+            if provider_id not in provider_stats:
+                provider_stats[provider_id] = {
+                    "provider_id": provider_id,
+                    "name": provider_info.get("name"),
+                    "slug": provider_info.get("slug"),
+                    "model_ids": set(),
+                    "request_count": 0
+                }
+
+            provider_stats[provider_id]["model_ids"].add(model_id)
+            provider_stats[provider_id]["request_count"] += 1
+
+        # Convert to list and format
+        providers_list = [
+            {
+                "provider_id": stats["provider_id"],
+                "name": stats["name"],
+                "slug": stats["slug"],
+                "models_with_requests": len(stats["model_ids"]),
+                "total_requests": stats["request_count"]
+            }
+            for stats in provider_stats.values()
+        ]
+
+        # Sort by request count (most used first)
+        providers_list.sort(key=lambda x: x["total_requests"], reverse=True)
+
+        return {
+            "success": True,
+            "data": providers_list,
+            "metadata": {
+                "total_providers": len(providers_list),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get providers with requests: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get providers with requests: {str(e)}"
+        )
+
+
 @router.get("/chat-requests/counts")
 async def get_request_counts_by_model(api_key: str | None = Depends(get_optional_api_key)):
     """
@@ -855,12 +963,18 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
 
 
 @router.get("/chat-requests/models")
-async def get_models_with_requests(api_key: str | None = Depends(get_optional_api_key)):
+async def get_models_with_requests(
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    api_key: str | None = Depends(get_optional_api_key)
+):
     """
     Get all unique models that have chat completion requests.
 
     Returns a list of all models that have been used in chat completion requests,
     along with basic statistics for each model.
+
+    Query Parameters:
+    - provider_id: Optional filter to only show models from a specific provider
 
     Returns:
     - List of models with:
@@ -869,8 +983,9 @@ async def get_models_with_requests(api_key: str | None = Depends(get_optional_ap
       - Total tokens used
       - Average processing time
 
-    Example:
-    - /api/monitoring/chat-requests/models
+    Examples:
+    - /api/monitoring/chat-requests/models (all models)
+    - /api/monitoring/chat-requests/models?provider_id=5 (only models from provider 5)
 
     Authentication: Optional. Provide API key for authenticated access.
     """
@@ -916,6 +1031,8 @@ async def get_models_with_requests(api_key: str | None = Depends(get_optional_ap
         # Fetch model details and aggregate stats
         models_data = []
         for model_id in model_ids:
+            # Skip if provider_id filter is set and doesn't match
+            # (We'll filter after fetching model info)
             # Skip if model_id is invalid
             if model_id is None:
                 continue
@@ -953,6 +1070,10 @@ async def get_models_with_requests(api_key: str | None = Depends(get_optional_ap
                 sum(r.get("processing_time_ms", 0) for r in stats_result.data) / total_requests
                 if total_requests > 0 else 0
             )
+
+            # Apply provider_id filter if specified
+            if provider_id is not None and model_info.get("provider_id") != provider_id:
+                continue
 
             models_data.append({
                 "model_id": model_info["id"],
@@ -994,6 +1115,8 @@ async def get_chat_completion_requests(
     model_id: int | None = Query(None, description="Filter by model ID"),
     provider_id: int | None = Query(None, description="Filter by provider ID"),
     model_name: str | None = Query(None, description="Filter by model name (contains)"),
+    start_date: str | None = Query(None, description="Filter by start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"),
+    end_date: str | None = Query(None, description="Filter by end date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip (pagination)"),
     api_key: str | None = Depends(get_optional_api_key)
@@ -1008,6 +1131,8 @@ async def get_chat_completion_requests(
     - model_id: Filter by specific model ID
     - provider_id: Filter by specific provider ID
     - model_name: Filter by model name (partial match/contains)
+    - start_date: Filter requests created after this date (ISO format)
+    - end_date: Filter requests created before this date (ISO format)
     - limit: Maximum number of records (default: 100, max: 1000)
     - offset: Pagination offset (default: 0)
 
@@ -1023,6 +1148,7 @@ async def get_chat_completion_requests(
     - /api/monitoring/chat-requests?model_id=123
     - /api/monitoring/chat-requests?provider_id=5
     - /api/monitoring/chat-requests?model_name=gpt-4
+    - /api/monitoring/chat-requests?model_id=123&start_date=2025-12-01&end_date=2025-12-31
     - /api/monitoring/chat-requests?provider_id=5&limit=50
 
     Authentication: Optional. Provide API key for authenticated access.
@@ -1062,6 +1188,12 @@ async def get_chat_completion_requests(
             # Use ilike for case-insensitive partial matching
             query = query.ilike("models.model_name", f"%{model_name}%")
 
+        if start_date is not None:
+            query = query.gte("created_at", start_date)
+
+        if end_date is not None:
+            query = query.lte("created_at", end_date)
+
         # Apply ordering (most recent first), pagination
         query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
 
@@ -1095,7 +1227,9 @@ async def get_chat_completion_requests(
                 "filters": {
                     "model_id": model_id,
                     "provider_id": provider_id,
-                    "model_name": model_name
+                    "model_name": model_name,
+                    "start_date": start_date,
+                    "end_date": end_date
                 },
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
