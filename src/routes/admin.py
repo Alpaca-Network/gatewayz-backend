@@ -643,18 +643,35 @@ async def get_all_users_info(_: str = Depends(get_admin_key)):
         client = get_supabase_client()
 
         # Get all users with their information
-        # Note: Supabase has a default limit of 1000, so we set a high limit to fetch all users
-        result = (
-            client.table("users")
-            .select(
-                "id, username, email, api_key, credits, is_active, role, registration_date, "
-                "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
-            )
-            .limit(100000)  # Set high limit to fetch all users
-            .execute()
-        )
+        # Note: Supabase PostgREST has a default max-rows limit of 1000
+        # To fetch all users, we use pagination to retrieve them in batches
+        all_users = []
+        page_size = 1000
+        offset = 0
 
-        if not result.data:
+        while True:
+            result = (
+                client.table("users")
+                .select(
+                    "id, username, email, api_key, credits, is_active, role, registration_date, "
+                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
+                )
+                .range(offset, offset + page_size - 1)  # PostgREST uses inclusive range
+                .execute()
+            )
+
+            if not result.data:
+                break
+
+            all_users.extend(result.data)
+
+            # If we got less than page_size results, we've reached the end
+            if len(result.data) < page_size:
+                break
+
+            offset += page_size
+
+        if not all_users:
             return {
                 "status": "success",
                 "total_users": 0,
@@ -662,7 +679,7 @@ async def get_all_users_info(_: str = Depends(get_admin_key)):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-        users = result.data
+        users = all_users
 
         # Get additional statistics
         total_users = len(users)
