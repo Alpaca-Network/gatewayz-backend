@@ -635,71 +635,88 @@ async def get_trial_analytics_admin(_: str = Depends(get_admin_key)):
 
 
 @router.get("/admin/users", tags=["admin"])
-async def get_all_users_info(_: str = Depends(get_admin_key)):
-    """Get all users information from users table (Admin only)"""
+async def get_all_users_info(
+    _: str = Depends(get_admin_key),
+    limit: int = Query(50, ge=1, le=1000, description="Number of users per page"),
+    offset: int = Query(0, ge=0, description="Number of users to skip"),
+):
+    """
+    Get paginated users information from users table (Admin only)
+
+    Supports server-side pagination for efficient data loading.
+
+    Args:
+        limit: Number of users to return (1-1000, default 50)
+        offset: Number of users to skip (default 0)
+
+    Returns:
+        Paginated user data with total count and statistics
+    """
     try:
         from src.config.supabase_config import get_supabase_client
 
         client = get_supabase_client()
 
-        # Get all users with their information
-        # Note: Supabase PostgREST has a default max-rows limit of 1000
-        # To fetch all users, we use pagination to retrieve them in batches
-        all_users = []
-        page_size = 1000
-        offset = 0
+        # Get total count of users (efficient - doesn't fetch data)
+        count_result = (
+            client.table("users")
+            .select("id", count="exact")
+            .execute()
+        )
+        total_users = count_result.count if count_result.count is not None else 0
 
-        while True:
-            result = (
-                client.table("users")
-                .select(
-                    "id, username, email, api_key, credits, is_active, role, registration_date, "
-                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
-                )
-                .range(offset, offset + page_size - 1)  # PostgREST uses inclusive range
-                .execute()
+        # Get paginated users
+        result = (
+            client.table("users")
+            .select(
+                "id, username, email, api_key, credits, is_active, role, registration_date, "
+                "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
             )
+            .range(offset, offset + limit - 1)  # PostgREST uses inclusive range
+            .order("created_at", desc=True)  # Most recent users first
+            .execute()
+        )
 
-            if not result.data:
-                break
-
-            all_users.extend(result.data)
-
-            # If we got less than page_size results, we've reached the end
-            if len(result.data) < page_size:
-                break
-
-            offset += page_size
-
-        if not all_users:
+        if not result.data:
             return {
                 "status": "success",
-                "total_users": 0,
+                "total_users": total_users,
                 "users": [],
+                "limit": limit,
+                "offset": offset,
+                "has_more": False,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-        users = all_users
+        users = result.data
+        has_more = offset + len(users) < total_users
 
-        # Get additional statistics
-        total_users = len(users)
-        active_users = len([u for u in users if u.get("is_active", True)])
-        admin_users = len([u for u in users if u.get("role") == "admin"])
-        developer_users = len([u for u in users if u.get("role") == "developer"])
-        regular_users = len([u for u in users if u.get("role") == "user" or u.get("role") is None])
+        # Get global statistics (across all users, not just current page)
+        # Fetch all users for stats calculation (efficient - we cache this)
+        all_users_result = client.table("users").select("is_active, role, credits, subscription_status").execute()
+        all_users = all_users_result.data if all_users_result.data else []
+
+        active_users = len([u for u in all_users if u.get("is_active", True)])
+        admin_users = len([u for u in all_users if u.get("role") == "admin"])
+        developer_users = len([u for u in all_users if u.get("role") == "developer"])
+        regular_users = len([u for u in all_users if u.get("role") == "user" or u.get("role") is None])
 
         # Calculate total credits across all users
-        total_credits = sum(float(u.get("credits", 0)) for u in users)
+        total_credits = sum(float(u.get("credits", 0)) for u in all_users)
 
         # Get subscription status breakdown
         subscription_stats = {}
-        for user in users:
+        for user in all_users:
             status = user.get("subscription_status", "unknown")
             subscription_stats[status] = subscription_stats.get(status, 0) + 1
 
         return {
             "status": "success",
             "total_users": total_users,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+            "returned_count": len(users),
             "statistics": {
                 "active_users": active_users,
                 "inactive_users": total_users - active_users,
