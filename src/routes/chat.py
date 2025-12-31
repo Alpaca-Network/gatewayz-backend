@@ -17,6 +17,7 @@ import importlib
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
 import src.db.chat_history as chat_history_module
+import src.db.chat_completion_requests as chat_completion_requests_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
@@ -682,6 +683,7 @@ async def _process_stream_completion_background(
     elapsed,
     provider,
     is_anonymous=False,
+    request_id=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -925,6 +927,25 @@ async def _process_stream_completion_background(
         except Exception as e:
             logger.debug(f"Failed to capture health metric: {e}")
 
+        # Save chat completion request metadata to database
+        if request_id:
+            try:
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    processing_time_ms=int(elapsed * 1000),
+                    status="completed",
+                    error_message=None,
+                    user_id=user["id"] if user else None,
+                    provider_name=provider,
+                    model_id=None,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to save chat completion request: {e}")
+
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
@@ -943,6 +964,7 @@ async def stream_generator(
     tracker=None,
     is_anonymous=False,
     is_async_stream=False,  # PERF: Flag to indicate if stream is async
+    request_id=None,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -1121,6 +1143,7 @@ async def stream_generator(
                 elapsed=elapsed,
                 provider=provider,
                 is_anonymous=is_anonymous,
+                request_id=request_id,
             )
         )
 
@@ -1692,6 +1715,7 @@ async def chat_completions(
                             tracker,
                             is_anonymous,
                             is_async_stream=is_async_stream,
+                            request_id=request_id,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -2289,6 +2313,21 @@ async def chat_completions(
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
             },
+        )
+
+        # Save chat completion request metadata to database - run as background task
+        background_tasks.add_task(
+            chat_completion_requests_module.save_chat_completion_request,
+            request_id=request_id,
+            model_name=model,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            processing_time_ms=int(elapsed * 1000),
+            status="completed",
+            error_message=None,
+            user_id=user["id"] if not is_anonymous else None,
+            provider_name=provider,
+            model_id=None,
         )
 
         # Prepare headers including rate limit information
