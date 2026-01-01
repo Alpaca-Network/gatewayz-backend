@@ -32,6 +32,7 @@ from src.services.prometheus_metrics import (
     tokens_used,
     credits_used,
     track_time_to_first_chunk,
+    record_free_model_usage,
 )
 from src.services.redis_metrics import get_redis_metrics
 from src.services.stream_normalizer import (
@@ -527,6 +528,111 @@ PROVIDER_TIMEOUTS = {
 
 def mask_key(k: str) -> str:
     return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
+
+
+def is_free_model(model_id: str) -> bool:
+    """Check if the model is a free model (OpenRouter free models end with :free suffix).
+
+    Args:
+        model_id: The model identifier (e.g., "google/gemini-2.0-flash-exp:free")
+
+    Returns:
+        True if the model is free, False otherwise
+    """
+    if not model_id:
+        return False
+    return model_id.endswith(":free")
+
+
+def validate_trial_with_free_model_bypass(
+    trial: dict,
+    model_id: str,
+    request_id: str,
+    api_key: str | None,
+    logger_instance,
+) -> dict:
+    """Validate trial access with free model bypass logic.
+
+    Allows expired trials and trials with exceeded limits to access free models.
+    Records metrics and logs for free model access.
+
+    Args:
+        trial: Trial validation result from validate_trial_access()
+        model_id: The requested model identifier
+        request_id: Request correlation ID for logging
+        api_key: The API key (will be masked in logs)
+        logger_instance: Logger to use for logging
+
+    Returns:
+        Updated trial dict with is_valid=True if free model bypass applies
+
+    Raises:
+        HTTPException: If trial is invalid and model is not free
+    """
+    model_is_free = is_free_model(model_id)
+
+    # IMPORTANT: Work with a copy to avoid mutating the cached trial dict.
+    # The trial dict may be cached in _trial_cache and mutating it would corrupt
+    # the cache, potentially allowing expired trials to access premium models.
+    trial = trial.copy()
+
+    if not trial.get("is_valid", False):
+        if trial.get("is_trial") and trial.get("is_expired"):
+            if model_is_free:
+                # Allow expired trial to use free model - log and track this access
+                logger_instance.info(
+                    "Expired trial accessing free model (request_id=%s, api_key=%s, model=%s, trial_end_date=%s)",
+                    request_id,
+                    mask_key(api_key) if api_key else "unknown",
+                    model_id,
+                    trial.get("trial_end_date", "unknown"),
+                    extra={"request_id": request_id, "free_model_bypass": True},
+                )
+                record_free_model_usage("expired_trial", model_id)
+                # Mark trial as valid for this request (free model access)
+                trial["is_valid"] = True
+                trial["free_model_bypass"] = True
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail=trial["error"],
+                    headers={
+                        "X-Trial-Expired": "true",
+                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
+                    },
+                )
+        elif trial.get("is_trial"):
+            # Trial limits exceeded (tokens/requests/credits)
+            if model_is_free:
+                # Allow trial with exceeded limits to use free model
+                logger_instance.info(
+                    "Trial with exceeded limits accessing free model (request_id=%s, api_key=%s, model=%s, error=%s)",
+                    request_id,
+                    mask_key(api_key) if api_key else "unknown",
+                    model_id,
+                    trial.get("error", "unknown"),
+                    extra={"request_id": request_id, "free_model_bypass": True},
+                )
+                record_free_model_usage("active_trial", model_id)
+                # Mark trial as valid for this request (free model access)
+                trial["is_valid"] = True
+                trial["free_model_bypass"] = True
+            else:
+                headers = {}
+                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
+                    if k in trial:
+                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
+                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
+        else:
+            raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+    elif model_is_free:
+        # Track free model usage for valid trials and paid users too
+        if trial.get("is_trial"):
+            record_free_model_usage("active_trial", model_id)
+        else:
+            record_free_model_usage("paid", model_id)
+
+    return trial
 
 
 async def _to_thread(func, *args, **kwargs):
@@ -1264,25 +1370,15 @@ async def chat_completions(
                 # Step 2: Only validate trial access (plan limits checked after token usage known)
                 trial = await _to_thread(validate_trial_access, api_key)
 
-        # Validate trial access (only for authenticated users)
-        if not is_anonymous and not trial.get("is_valid", False):
-            if trial.get("is_trial") and trial.get("is_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=trial["error"],
-                    headers={
-                        "X-Trial-Expired": "true",
-                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
-                    },
-                )
-            elif trial.get("is_trial"):
-                headers = {}
-                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
-                    if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
-                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
-            else:
-                raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+        # Validate trial access with free model bypass (only for authenticated users)
+        if not is_anonymous:
+            trial = validate_trial_with_free_model_bypass(
+                trial=trial,
+                model_id=req.model,
+                request_id=request_id,
+                api_key=api_key,
+                logger_instance=logger,
+            )
 
         # Fast-fail requests that would exceed plan limits before hitting any upstream provider
         # (only for authenticated users)
@@ -2426,24 +2522,15 @@ async def unified_responses(
         environment_tag = user.get("environment_tag", "live")
 
         trial = await _to_thread(validate_trial_access, api_key)
-        if not trial.get("is_valid", False):
-            if trial.get("is_trial") and trial.get("is_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=trial["error"],
-                    headers={
-                        "X-Trial-Expired": "true",
-                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
-                    },
-                )
-            elif trial.get("is_trial"):
-                headers = {}
-                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
-                    if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
-                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
-            else:
-                raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+
+        # Validate trial access with free model bypass
+        trial = validate_trial_with_free_model_bypass(
+            trial=trial,
+            model_id=req.model,
+            request_id=request_id,
+            api_key=api_key,
+            logger_instance=logger,
+        )
 
         rate_limit_mgr = get_rate_limit_manager()
 
