@@ -571,6 +571,11 @@ def validate_trial_with_free_model_bypass(
     """
     model_is_free = is_free_model(model_id)
 
+    # IMPORTANT: Work with a copy to avoid mutating the cached trial dict.
+    # The trial dict may be cached in _trial_cache and mutating it would corrupt
+    # the cache, potentially allowing expired trials to access premium models.
+    trial = trial.copy()
+
     if not trial.get("is_valid", False):
         if trial.get("is_trial") and trial.get("is_expired"):
             if model_is_free:

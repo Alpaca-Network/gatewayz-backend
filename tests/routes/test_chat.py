@@ -492,6 +492,102 @@ def test_is_free_model_edge_cases():
 # ==================== END is_free_model HELPER TESTS ====================
 
 
+# ==================== validate_trial_with_free_model_bypass TESTS ====================
+
+def test_validate_trial_with_free_model_bypass_does_not_mutate_original_dict():
+    """Test that validate_trial_with_free_model_bypass does not mutate the original trial dict.
+
+    This is critical for security: the trial dict may be cached in _trial_cache, and mutating
+    it would corrupt the cache, potentially allowing expired trials to access premium models.
+    """
+    from src.routes.chat import validate_trial_with_free_model_bypass
+    import logging
+
+    # Create an expired trial dict (simulating what would be cached)
+    original_trial = {
+        "is_valid": False,
+        "is_trial": True,
+        "is_expired": True,
+        "trial_end_date": "2024-01-01",
+        "error": "Trial expired",
+    }
+
+    # Keep a reference to verify original is not mutated
+    original_is_valid = original_trial["is_valid"]
+    original_keys = set(original_trial.keys())
+
+    # Call with a free model - should succeed and return modified copy
+    logger = logging.getLogger("test")
+    result = validate_trial_with_free_model_bypass(
+        original_trial,
+        "google/gemini-2.0-flash-exp:free",
+        "test-request-id",
+        "test-api-key",
+        logger,
+    )
+
+    # The returned dict should have is_valid=True
+    assert result["is_valid"] is True, "Returned trial should be marked as valid"
+    assert result.get("free_model_bypass") is True, "Returned trial should have free_model_bypass flag"
+
+    # CRITICAL: The original dict should NOT have been mutated
+    assert original_trial["is_valid"] == original_is_valid, \
+        "Original trial dict was mutated - this is a security vulnerability!"
+    assert "free_model_bypass" not in original_trial, \
+        "Original trial dict was mutated with free_model_bypass flag"
+    assert set(original_trial.keys()) == original_keys, \
+        "Original trial dict keys were modified"
+
+
+def test_validate_trial_with_free_model_bypass_cache_isolation():
+    """Test that multiple calls don't share state through the original dict.
+
+    Simulates the scenario where the same cached trial dict is used for multiple requests.
+    """
+    from src.routes.chat import validate_trial_with_free_model_bypass
+    from fastapi import HTTPException
+    import logging
+    import pytest
+
+    # Create an expired trial dict (simulating cached value)
+    cached_trial = {
+        "is_valid": False,
+        "is_trial": True,
+        "is_expired": True,
+        "trial_end_date": "2024-01-01",
+        "error": "Trial expired",
+    }
+
+    logger = logging.getLogger("test")
+
+    # First request: access free model - should succeed
+    result1 = validate_trial_with_free_model_bypass(
+        cached_trial,
+        "google/gemini-2.0-flash-exp:free",
+        "request-1",
+        "test-api-key",
+        logger,
+    )
+    assert result1["is_valid"] is True
+
+    # Second request with SAME cached dict: access premium model - should fail
+    # If cache was corrupted, this would incorrectly succeed
+    with pytest.raises(HTTPException) as exc_info:
+        validate_trial_with_free_model_bypass(
+            cached_trial,
+            "openai/gpt-4",  # Premium model
+            "request-2",
+            "test-api-key",
+            logger,
+        )
+
+    assert exc_info.value.status_code == 403, \
+        "Premium model access should be denied for expired trial"
+
+
+# ==================== END validate_trial_with_free_model_bypass TESTS ====================
+
+
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')
