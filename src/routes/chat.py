@@ -2277,7 +2277,21 @@ async def chat_completions(
             bt_choices = processed.get("choices") or []
             bt_first_choice = bt_choices[0] if bt_choices else None
             bt_message = bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
-            bt_output = bt_message.get("content", "") if isinstance(bt_message, dict) else ""
+            bt_content = bt_message.get("content") if isinstance(bt_message, dict) else None
+            # Handle case where content is None, a string, or a list (multimodal)
+            if bt_content is None:
+                bt_output = ""
+            elif isinstance(bt_content, str):
+                bt_output = bt_content
+            elif isinstance(bt_content, list):
+                # Extract text from multimodal content
+                bt_output = " ".join(
+                    item.get("text", "") if isinstance(item, dict) else str(item)
+                    for item in bt_content
+                    if item is not None
+                )
+            else:
+                bt_output = str(bt_content)
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -3407,7 +3421,21 @@ async def unified_responses(
             if isinstance(output_list, list) and len(output_list) > 0:
                 first_output = output_list[0]
                 if isinstance(first_output, dict):
-                    bt_output = first_output.get("content", "")
+                    bt_content = first_output.get("content")
+                    # Handle case where content is None, a string, or a list (multimodal)
+                    if bt_content is None:
+                        bt_output = ""
+                    elif isinstance(bt_content, str):
+                        bt_output = bt_content
+                    elif isinstance(bt_content, list):
+                        # Extract text from multimodal content
+                        bt_output = " ".join(
+                            item.get("text", "") if isinstance(item, dict) else str(item)
+                            for item in bt_content
+                            if item is not None
+                        )
+                    else:
+                        bt_output = str(bt_content)
 
             span.log(
                 input=input_messages,
