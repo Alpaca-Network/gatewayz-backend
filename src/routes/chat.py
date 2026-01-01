@@ -2277,7 +2277,27 @@ async def chat_completions(
             bt_choices = processed.get("choices") or []
             bt_first_choice = bt_choices[0] if bt_choices else None
             bt_message = bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
-            bt_output = bt_message.get("content", "") if isinstance(bt_message, dict) else ""
+            bt_content = bt_message.get("content") if isinstance(bt_message, dict) else None
+            # Handle case where content is None, a string, or a list (multimodal)
+            if bt_content is None:
+                bt_output = ""
+            elif isinstance(bt_content, str):
+                bt_output = bt_content
+            elif isinstance(bt_content, list):
+                # Extract text from multimodal content, filtering empty strings
+                texts = []
+                for item in bt_content:
+                    if item is None:
+                        continue
+                    if isinstance(item, dict):
+                        text = item.get("text")
+                        if text is not None:
+                            texts.append(str(text))
+                    else:
+                        texts.append(str(item))
+                bt_output = " ".join(t for t in texts if t)
+            else:
+                bt_output = str(bt_content)
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -3312,13 +3332,15 @@ async def unified_responses(
                         # Extract text content from multimodal content if needed
                         user_content = last_user.get("content", "")
                         if isinstance(user_content, list):
-                            # Extract text from multimodal content
+                            # Extract text from multimodal content, filtering empty strings
                             text_parts = []
                             for item in user_content:
                                 if isinstance(item, dict) and item.get("type") == "text":
-                                    text_parts.append(item.get("text", ""))
+                                    text = item.get("text")
+                                    if text is not None:
+                                        text_parts.append(str(text))
                             user_content = (
-                                " ".join(text_parts) if text_parts else "[multimodal content]"
+                                " ".join(t for t in text_parts if t) if text_parts else "[multimodal content]"
                             )
 
                         await _to_thread(
@@ -3407,7 +3429,27 @@ async def unified_responses(
             if isinstance(output_list, list) and len(output_list) > 0:
                 first_output = output_list[0]
                 if isinstance(first_output, dict):
-                    bt_output = first_output.get("content", "")
+                    bt_content = first_output.get("content")
+                    # Handle case where content is None, a string, or a list (multimodal)
+                    if bt_content is None:
+                        bt_output = ""
+                    elif isinstance(bt_content, str):
+                        bt_output = bt_content
+                    elif isinstance(bt_content, list):
+                        # Extract text from multimodal content, filtering empty strings
+                        texts = []
+                        for item in bt_content:
+                            if item is None:
+                                continue
+                            if isinstance(item, dict):
+                                text = item.get("text")
+                                if text is not None:
+                                    texts.append(str(text))
+                            else:
+                                texts.append(str(item))
+                        bt_output = " ".join(t for t in texts if t)
+                    else:
+                        bt_output = str(bt_content)
 
             span.log(
                 input=input_messages,
