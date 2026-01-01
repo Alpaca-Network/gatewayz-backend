@@ -257,6 +257,241 @@ def test_trial_expired_403(mock_get_user, mock_enforce_limits, mock_trial, clien
     assert r.headers.get("X-Trial-Expired") == "true"
 
 
+# ==================== FREE MODEL BYPASS TESTS ====================
+
+@patch('src.services.prometheus_metrics.record_free_model_usage')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+def test_expired_trial_can_use_free_model(
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
+    client, auth_headers
+):
+    """Test that expired trial can still access free models (with :free suffix)"""
+    mock_trial.return_value = {
+        "is_valid": False,
+        "is_trial": True,
+        "is_expired": True,
+        "error": "Trial expired",
+        "trial_end_date": "2025-09-01"
+    }
+    mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Free model response"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 30, "prompt_tokens": 10, "completion_tokens": 20},
+    }
+
+    # Use a free model (ends with :free)
+    free_model_payload = {
+        "model": "google/gemini-2.0-flash-exp:free",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["choices"][0]["message"]["content"] == "Free model response"
+    # Verify free model usage was recorded with expired_trial status
+    mock_record_free.assert_called_once_with("expired_trial", "google/gemini-2.0-flash-exp:free")
+
+
+@patch('src.services.prometheus_metrics.record_free_model_usage')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+def test_trial_limits_exceeded_can_use_free_model(
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
+    client, auth_headers
+):
+    """Test that trial with exceeded limits can still access free models"""
+    mock_trial.return_value = {
+        "is_valid": False,
+        "is_trial": True,
+        "is_expired": False,
+        "error": "Trial token limit exceeded",
+        "remaining_tokens": 0,
+        "remaining_requests": 5,
+        "remaining_credits": 1.0
+    }
+    mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Free model response"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 30, "prompt_tokens": 10, "completion_tokens": 20},
+    }
+
+    # Use a free model (ends with :free)
+    free_model_payload = {
+        "model": "xiaomi/mimo-v2-flash:free",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["choices"][0]["message"]["content"] == "Free model response"
+    # Verify free model usage was recorded with active_trial status (exceeded limits but not expired)
+    mock_record_free.assert_called_once_with("active_trial", "xiaomi/mimo-v2-flash:free")
+
+
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+def test_expired_trial_blocked_for_non_free_model(mock_get_user, mock_enforce_limits, mock_trial, client, auth_headers):
+    """Test that expired trial is blocked for non-free models"""
+    mock_trial.return_value = {
+        "is_valid": False,
+        "is_trial": True,
+        "is_expired": True,
+        "error": "Trial expired",
+        "trial_end_date": "2025-09-01"
+    }
+    mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+
+    # Use a non-free model (no :free suffix)
+    non_free_payload = {
+        "model": "openai/gpt-4",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    r = client.post("/v1/chat/completions", json=non_free_payload, headers=auth_headers)
+
+    assert r.status_code == 403
+    assert "Trial expired" in r.text
+    assert r.headers.get("X-Trial-Expired") == "true"
+
+
+@patch('src.services.prometheus_metrics.record_free_model_usage')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+def test_valid_trial_free_model_usage_tracked(
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
+    client, auth_headers
+):
+    """Test that free model usage is tracked for valid trials too"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": True, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Free model response"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 30, "prompt_tokens": 10, "completion_tokens": 20},
+    }
+
+    free_model_payload = {
+        "model": "google/gemini-2.0-flash-exp:free",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
+
+    assert r.status_code == 200
+    # Verify free model usage was recorded with active_trial status
+    mock_record_free.assert_called_once_with("active_trial", "google/gemini-2.0-flash-exp:free")
+
+
+@patch('src.services.prometheus_metrics.record_free_model_usage')
+@patch('src.services.trial_validation.validate_trial_access')
+@patch('src.db.plans.enforce_plan_limits')
+@patch('src.db.users.get_user')
+@patch('src.routes.chat.process_openrouter_response')
+@patch('src.routes.chat.make_openrouter_request_openai')
+@patch('src.services.pricing.calculate_cost')
+@patch('src.db.users.deduct_credits')
+@patch('src.db.users.record_usage')
+@patch('src.db.rate_limits.update_rate_limit_usage')
+@patch('src.db.api_keys.increment_api_key_usage')
+def test_paid_user_free_model_usage_tracked(
+    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
+    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
+    client, auth_headers
+):
+    """Test that free model usage is tracked for paid users"""
+    mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
+    mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
+    mock_enforce_limits.return_value = {"allowed": True}
+    mock_make_request.return_value = {"_raw": True}
+    mock_process.return_value = {
+        "choices": [{"message": {"content": "Free model response"}, "finish_reason": "stop"}],
+        "usage": {"total_tokens": 30, "prompt_tokens": 10, "completion_tokens": 20},
+    }
+    mock_calculate_cost.return_value = 0.0
+
+    free_model_payload = {
+        "model": "google/gemini-2.0-flash-exp:free",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+
+    rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
+    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
+
+    assert r.status_code == 200
+    # Verify free model usage was recorded with paid status
+    mock_record_free.assert_called_once_with("paid", "google/gemini-2.0-flash-exp:free")
+
+
+# ==================== END FREE MODEL BYPASS TESTS ====================
+
+
+# ==================== is_free_model HELPER TESTS ====================
+
+def test_is_free_model_with_free_suffix():
+    """Test that models with :free suffix are detected as free"""
+    from src.routes.chat import is_free_model
+
+    assert is_free_model("google/gemini-2.0-flash-exp:free") is True
+    assert is_free_model("xiaomi/mimo-v2-flash:free") is True
+    assert is_free_model("arcee-ai/trinity-mini:free") is True
+    assert is_free_model("meta/llama-3.2-1b-instruct:free") is True
+
+
+def test_is_free_model_without_free_suffix():
+    """Test that models without :free suffix are not detected as free"""
+    from src.routes.chat import is_free_model
+
+    assert is_free_model("openai/gpt-4") is False
+    assert is_free_model("anthropic/claude-3-opus") is False
+    assert is_free_model("google/gemini-2.0-flash-exp") is False
+    assert is_free_model("openrouter/auto") is False
+
+
+def test_is_free_model_edge_cases():
+    """Test edge cases for is_free_model"""
+    from src.routes.chat import is_free_model
+
+    assert is_free_model("") is False
+    assert is_free_model(None) is False
+    # Models with :exacto or :extended are not free
+    assert is_free_model("z-ai/glm-4.6:exacto") is False
+    assert is_free_model("model:extended") is False
+    # Only exact :free suffix counts
+    assert is_free_model("model:FREE") is False  # Case sensitive
+    assert is_free_model("model:freemium") is False
+
+
+# ==================== END is_free_model HELPER TESTS ====================
+
+
 @patch('src.services.trial_validation.validate_trial_access')
 @patch('src.db.plans.enforce_plan_limits')
 @patch('src.db.users.get_user')

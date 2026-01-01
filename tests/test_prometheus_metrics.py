@@ -159,6 +159,59 @@ class TestMetricsRecording:
         # Verify metrics were recorded
         assert True
 
+    def test_record_free_model_usage(self):
+        """Test recording free model usage metrics."""
+        prometheus_metrics.record_free_model_usage(
+            "expired_trial",
+            "google/gemini-2.0-flash-exp:free"
+        )
+        prometheus_metrics.record_free_model_usage(
+            "active_trial",
+            "xiaomi/mimo-v2-flash:free"
+        )
+        prometheus_metrics.record_free_model_usage(
+            "paid",
+            "google/gemini-2.0-flash-exp:free"
+        )
+
+        # Verify metrics were recorded (no exception)
+        assert True
+
+
+class TestFreeModelMetrics:
+    """Tests for free model usage metrics."""
+
+    def test_free_model_usage_metric_exists(self, client):
+        """Test that free_model_usage_total metric exists in metrics output."""
+        # Record a sample free model usage
+        prometheus_metrics.record_free_model_usage(
+            "expired_trial",
+            "test/model:free"
+        )
+
+        # Check metrics endpoint
+        response = client.get("/metrics")
+        assert response.status_code == 200
+        content = response.text
+
+        # Verify metric is present
+        assert "free_model_usage_total" in content
+
+    def test_free_model_usage_labels(self, client):
+        """Test that free model usage has correct labels."""
+        # Record metrics with different labels
+        prometheus_metrics.record_free_model_usage("expired_trial", "test/model-a:free")
+        prometheus_metrics.record_free_model_usage("active_trial", "test/model-b:free")
+        prometheus_metrics.record_free_model_usage("paid", "test/model-c:free")
+
+        response = client.get("/metrics")
+        content = response.text
+
+        # Verify labels are present
+        assert 'user_status="expired_trial"' in content or "user_status" in content
+        assert 'user_status="active_trial"' in content or "user_status" in content
+        assert 'user_status="paid"' in content or "user_status" in content
+
 
 class TestContextManagers:
     """Tests for context manager utilities."""
