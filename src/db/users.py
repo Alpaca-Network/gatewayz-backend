@@ -8,6 +8,7 @@ from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key
 from src.services.prometheus_metrics import track_database_query
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
 
 logger = logging.getLogger(__name__)
 
@@ -214,11 +215,17 @@ def create_enhanced_user(
         user_data["api_key"] = f"gw_live_{secrets.token_urlsafe(16)}"
         user_result = client.table("users").insert(user_data).execute()
 
-        if not user_result.data:
-            raise ValueError("Failed to create user account")
-
-        user = user_result.data[0]
-        user_id = user["id"]
+        # Use safe_get_first to safely extract user data with validation
+        try:
+            user = safe_get_first(
+                user_result,
+                error_message="Failed to create user account - no data returned",
+                validate_keys=["id"]
+            )
+            user_id = user["id"]
+        except (DatabaseResultError, KeyError) as e:
+            logger.error(f"User creation failed: {e}")
+            raise ValueError(f"Failed to create user account: {e}")
 
         # Generate primary API key
         primary_key, _ = create_api_key(
@@ -307,30 +314,49 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
         with track_database_query(table="api_keys_new", operation="select"):
             key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
-        if key_result.data:
-            key_data = key_result.data[0]
-            user_id = key_data["user_id"]
+        if key_result.data and len(key_result.data) > 0:
+            try:
+                key_data = safe_get_first(
+                    key_result,
+                    error_message="API key found but data structure invalid",
+                    validate_keys=["id", "user_id"]
+                )
+                user_id = key_data["user_id"]
 
-            # Get user info from users table
-            with track_database_query(table="users", operation="select"):
-                user_result = client.table("users").select("*").eq("id", user_id).execute()
+                # Get user info from users table
+                with track_database_query(table="users", operation="select"):
+                    user_result = client.table("users").select("*").eq("id", user_id).execute()
 
-            if user_result.data:
-                user = user_result.data[0]
-                # Add key information to user data
-                user["key_id"] = key_data["id"]
-                user["key_name"] = key_data["key_name"]
-                user["environment_tag"] = key_data["environment_tag"]
-                user["scope_permissions"] = key_data.get("scope_permissions")
-                user["is_primary"] = key_data["is_primary"]
-                return user
+                if user_result.data and len(user_result.data) > 0:
+                    user = safe_get_first(
+                        user_result,
+                        error_message=f"User {user_id} not found",
+                        validate_keys=["id"]
+                    )
+                    # Add key information to user data
+                    user["key_id"] = key_data["id"]
+                    user["key_name"] = key_data.get("key_name", "")
+                    user["environment_tag"] = key_data.get("environment_tag", "live")
+                    user["scope_permissions"] = key_data.get("scope_permissions")
+                    user["is_primary"] = key_data.get("is_primary", False)
+                    return user
+            except (DatabaseResultError, KeyError) as e:
+                logger.warning(f"Error extracting API key data: {e}. Falling back to legacy lookup.")
 
         # Fallback: Check if this is a legacy key (for backward compatibility during migration)
         # PERF: Legacy keys are allowed to authenticate immediately - no blocking
         with track_database_query(table="users", operation="select"):
             legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
-        if legacy_result.data:
-            user = legacy_result.data[0]
+        if legacy_result.data and len(legacy_result.data) > 0:
+            try:
+                user = safe_get_first(
+                    legacy_result,
+                    error_message="Legacy key found but user data invalid",
+                    validate_keys=["id"]
+                )
+            except (DatabaseResultError, KeyError) as e:
+                logger.error(f"Error extracting legacy user data: {e}")
+                return None
 
             # Check if this is a temporary key that should be replaced
             if _is_temporary_api_key(api_key):
@@ -489,11 +515,18 @@ def add_credits_to_user(
 
         # Get current balance
         user_result = client.table("users").select("credits").eq("id", user_id).execute()
-        if not user_result.data:
-            raise ValueError(f"User with ID {user_id} not found")
 
-        balance_before = user_result.data[0]["credits"]
-        balance_after = balance_before + credits
+        try:
+            user_data = safe_get_first(
+                user_result,
+                error_message=f"User with ID {user_id} not found",
+                validate_keys=["credits"]
+            )
+            balance_before = safe_get_value(user_data, "credits", default=0.0, expected_type=float)
+            balance_after = balance_before + credits
+        except (DatabaseResultError, KeyError, TypeError) as e:
+            logger.error(f"Error getting user balance for user {user_id}: {e}")
+            raise ValueError(f"Failed to get user balance: {e}")
 
         # Update user credits
         result = (
