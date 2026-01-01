@@ -330,12 +330,13 @@ class CanonicalModelRegistry:
 
         # Determine priority based on provider reliability/routing
         priority_map = {
-            "openrouter": 1,  # Highest priority - main router
-            "google-vertex": 2,  # Fast, reliable
-            "together": 3,  # Good coverage
-            "fireworks": 4,  # Solid provider
-            "featherless": 5,  # Many models
-            "deepinfra": 6,  # Good performance
+            "onerouter": 1,  # Highest priority - main router
+            "openrouter": 2,  # Fallback router
+            "google-vertex": 3,  # Fast, reliable
+            "together": 4,  # Good coverage
+            "fireworks": 5,  # Solid provider
+            "featherless": 6,  # Many models
+            "deepinfra": 7,  # Good performance
             # Add more priorities as needed
         }
 

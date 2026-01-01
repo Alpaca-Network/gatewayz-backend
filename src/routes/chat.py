@@ -1436,7 +1436,7 @@ async def chat_completions(
             req_provider_missing = req.provider is None or (
                 isinstance(req.provider, str) and not req.provider
             )
-            provider = (req.provider or "openrouter").lower()
+            provider = (req.provider or "onerouter").lower()
 
             # Normalize provider aliases
             if provider == "hug":
@@ -1498,7 +1498,7 @@ async def chat_completions(
                                 f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
                             )
                             break
-                    # Otherwise default to openrouter (already set)
+                    # Otherwise default to onerouter (already set)
 
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(original_model, provider_chain)

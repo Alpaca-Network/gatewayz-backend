@@ -2867,11 +2867,11 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
                     if model.get("id", "").lower() == model_id:
                         return "huggingface" if gateway in ("hug", "huggingface") else gateway
 
-        # Default to openrouter if not found
-        return "openrouter"
+        # Default to onerouter if not found
+        return "onerouter"
     except Exception as e:
         logger.error(f"Error detecting gateway for model {provider_name}/{model_name}: {e}")
-        return "openrouter"
+        return "onerouter"
 
 
 def fetch_specific_model(provider_name: str, model_name: str, gateway: str = None):

@@ -27,6 +27,8 @@ except ImportError:  # pragma: no cover - handled gracefully below
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
+    "onerouter",
+    "openrouter",
     "cerebras",
     "huggingface",
     "featherless",
@@ -37,7 +39,6 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "fireworks",
     "together",
     "google-vertex",
-    "openrouter",
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 # Include 402 (Payment Required) to allow failover when provider credits are exhausted
@@ -55,7 +56,7 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     provider = (initial_provider or "").lower()
 
     if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
-        return [provider] if provider else ["openrouter"]
+        return [provider] if provider else ["onerouter"]
 
     chain: list[str] = []
     if provider:
@@ -65,10 +66,10 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
         if candidate not in chain:
             chain.append(candidate)
 
-    # Always include openrouter as ultimate fallback if nothing else is available
-    if not chain or (len(chain) == 1 and chain[0] == provider and provider != "openrouter"):
-        if "openrouter" not in chain:
-            chain.append("openrouter")
+    # Always include onerouter as ultimate fallback if nothing else is available
+    if not chain or (len(chain) == 1 and chain[0] == provider and provider != "onerouter"):
+        if "onerouter" not in chain:
+            chain.append("onerouter")
 
     return chain
 
