@@ -433,7 +433,7 @@ async def anthropic_messages(
         original_model = req.model
 
         # Auto-detect provider
-        provider = (req.provider or "openrouter").lower()
+        provider = (req.provider or "onerouter").lower()
 
         # Normalize provider aliases
         if provider == "hug":
@@ -492,7 +492,7 @@ async def anthropic_messages(
                                 sanitize_for_logging(transformed),
                             )
                             break
-                    # Otherwise default to openrouter (already set)
+                    # Otherwise default to onerouter (already set)
 
         provider_chain = build_provider_failover_chain(provider)
         provider_chain = enforce_model_failover_rules(original_model, provider_chain)
