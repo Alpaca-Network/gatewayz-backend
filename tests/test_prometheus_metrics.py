@@ -207,10 +207,10 @@ class TestFreeModelMetrics:
         response = client.get("/metrics")
         content = response.text
 
-        # Verify labels are present
-        assert 'user_status="expired_trial"' in content or "user_status" in content
-        assert 'user_status="active_trial"' in content or "user_status" in content
-        assert 'user_status="paid"' in content or "user_status" in content
+        # Verify each specific user_status label is present
+        assert 'user_status="expired_trial"' in content, "expired_trial label not found in metrics"
+        assert 'user_status="active_trial"' in content, "active_trial label not found in metrics"
+        assert 'user_status="paid"' in content, "paid label not found in metrics"
 
 
 class TestContextManagers:
