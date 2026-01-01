@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +15,17 @@ def start_trial_for_key(api_key: str, trial_days: int = 14) -> dict[str, Any]:
 
         # Get API key ID
         key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-        if not key_result.data:
-            return {"success": False, "error": "API key not found"}
 
-        api_key_id = key_result.data[0]["id"]
+        try:
+            key_data = safe_get_first(
+                key_result,
+                error_message="API key not found",
+                validate_keys=["id"]
+            )
+            api_key_id = key_data["id"]
+        except (DatabaseResultError, KeyError) as e:
+            logger.warning(f"Failed to get API key ID: {e}")
+            return {"success": False, "error": "API key not found"}
 
         # Call database function
         result = client.rpc(
@@ -38,10 +46,17 @@ def get_trial_status_for_key(api_key: str) -> dict[str, Any]:
 
         # Get API key ID
         key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-        if not key_result.data:
-            return {"success": False, "error": "API key not found"}
 
-        api_key_id = key_result.data[0]["id"]
+        try:
+            key_data = safe_get_first(
+                key_result,
+                error_message="API key not found",
+                validate_keys=["id"]
+            )
+            api_key_id = key_data["id"]
+        except (DatabaseResultError, KeyError) as e:
+            logger.warning(f"Failed to get API key ID: {e}")
+            return {"success": False, "error": "API key not found"}
 
         # Call database function
         result = client.rpc("check_trial_status", {"api_key_id": api_key_id}).execute()
@@ -60,10 +75,17 @@ def convert_trial_to_paid_for_key(api_key: str, plan_name: str) -> dict[str, Any
 
         # Get API key ID
         key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-        if not key_result.data:
-            return {"success": False, "error": "API key not found"}
 
-        api_key_id = key_result.data[0]["id"]
+        try:
+            key_data = safe_get_first(
+                key_result,
+                error_message="API key not found",
+                validate_keys=["id"]
+            )
+            api_key_id = key_data["id"]
+        except (DatabaseResultError, KeyError) as e:
+            logger.warning(f"Failed to get API key ID: {e}")
+            return {"success": False, "error": "API key not found"}
 
         # Call database function
         result = client.rpc(
@@ -86,10 +108,17 @@ def track_trial_usage_for_key(
 
         # Get API key ID
         key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-        if not key_result.data:
-            return {"success": False, "error": "API key not found"}
 
-        api_key_id = key_result.data[0]["id"]
+        try:
+            key_data = safe_get_first(
+                key_result,
+                error_message="API key not found",
+                validate_keys=["id"]
+            )
+            api_key_id = key_data["id"]
+        except (DatabaseResultError, KeyError) as e:
+            logger.warning(f"Failed to get API key ID: {e}")
+            return {"success": False, "error": "API key not found"}
 
         # Call database function
         result = client.rpc(
