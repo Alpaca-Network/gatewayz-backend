@@ -4,15 +4,12 @@ Tests for provider safety utilities
 
 import pytest
 import time
-from unittest.mock import Mock, patch
-import httpx
+from unittest.mock import Mock
 
 from src.utils.provider_safety import (
     CircuitBreaker,
     CircuitState,
     ProviderError,
-    ProviderTimeoutError,
-    ProviderRateLimitError,
     ProviderUnavailableError,
     retry_with_backoff,
     safe_provider_call,
@@ -48,7 +45,7 @@ class TestCircuitBreaker:
         for i in range(3):
             try:
                 cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-            except:
+            except Exception:
                 pass
 
         assert cb.state == CircuitState.OPEN
@@ -61,7 +58,7 @@ class TestCircuitBreaker:
         # Cause failure to open circuit
         try:
             cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        except:
+        except Exception:
             pass
 
         assert cb.state == CircuitState.OPEN
@@ -77,7 +74,7 @@ class TestCircuitBreaker:
         # Cause failure
         try:
             cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        except:
+        except Exception:
             pass
 
         assert cb.state == CircuitState.OPEN
@@ -88,7 +85,7 @@ class TestCircuitBreaker:
         # Next call should attempt recovery (will fail but state should be HALF_OPEN)
         try:
             cb.call(lambda: (_ for _ in ()).throw(Exception("still failing")))
-        except:
+        except Exception:
             pass
 
         # Should have attempted HALF_OPEN (then failed and reopened)
@@ -101,7 +98,7 @@ class TestCircuitBreaker:
         # Cause failure
         try:
             cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        except:
+        except Exception:
             pass
 
         # Wait for recovery

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
-from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
+from src.utils.db_safety import safe_get_first, DatabaseResultError
 
 logger = logging.getLogger(__name__)
 

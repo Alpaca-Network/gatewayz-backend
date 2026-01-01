@@ -7,6 +7,7 @@ Provides retry logic, circuit breakers, and defensive patterns for external prov
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
@@ -212,7 +213,12 @@ def retry_with_backoff(
                         )
 
             # All retries exhausted
-            raise last_exception
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError(
+                f"{func.__name__} failed after {max_retries + 1} attempts, "
+                "but no exception was captured to re-raise."
+            )
 
         return wrapper
 
@@ -273,7 +279,12 @@ async def retry_async_with_backoff(
                 )
 
     # All retries exhausted
-    raise last_exception
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError(
+        f"{func.__name__} failed after {max_retries + 1} attempts, "
+        "but no exception was captured to re-raise."
+    )
 
 
 def safe_provider_call(
@@ -306,20 +317,29 @@ def safe_provider_call(
         ...     circuit_breaker=cb
         ... )
     """
+    def execute_with_timeout():
+        """Execute function with timeout enforcement."""
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func)
+            try:
+                return future.result(timeout=timeout)
+            except FuturesTimeoutError:
+                logger.error(f"{provider_name} call timed out after {timeout}s")
+                raise ProviderTimeoutError(f"{provider_name} call timed out after {timeout}s")
+            except Exception as e:
+                logger.error(f"{provider_name} call failed: {e}")
+                raise
+
     # Wrap in circuit breaker if provided
     if circuit_breaker:
         try:
-            return circuit_breaker.call(func)
+            return circuit_breaker.call(execute_with_timeout)
         except Exception as e:
             logger.error(f"{provider_name} call failed through circuit breaker: {e}")
             raise
 
     # Direct call without circuit breaker
-    try:
-        return func()
-    except Exception as e:
-        logger.error(f"{provider_name} call failed: {e}")
-        raise
+    return execute_with_timeout()
 
 
 def validate_provider_response(
@@ -352,13 +372,13 @@ def validate_provider_response(
     if response is None:
         raise ProviderError(f"{provider_name}: Response is None")
 
-    # Convert to dict if has __dict__
-    if hasattr(response, "__dict__"):
-        response_dict = response.__dict__
-    elif hasattr(response, "model_dump"):
+    # Convert to dict - prioritize model_dump for Pydantic models
+    if hasattr(response, "model_dump") and callable(getattr(response, "model_dump")):
         response_dict = response.model_dump()
     elif isinstance(response, dict):
         response_dict = response
+    elif hasattr(response, "__dict__"):
+        response_dict = response.__dict__
     else:
         raise ProviderError(
             f"{provider_name}: Cannot convert response to dict (type: {type(response)})"
@@ -454,7 +474,7 @@ def safe_get_usage(
 
     # Extract usage fields safely
     return {
-        "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-        "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-        "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+        "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+        "completion_tokens": getattr(usage, "completion_tokens", 0),
+        "total_tokens": getattr(usage, "total_tokens", 0),
     }

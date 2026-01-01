@@ -113,9 +113,10 @@ def safe_get_value(
         # Try to convert if types don't match
         if not isinstance(value, expected_type):
             try:
+                original_type = type(value).__name__
                 value = expected_type(value)
                 logger.debug(
-                    f"Converted key '{key}' from {type(value).__name__} to {expected_type.__name__}"
+                    f"Converted key '{key}' from {original_type} to {expected_type.__name__}"
                 )
             except (ValueError, TypeError) as e:
                 raise TypeError(
