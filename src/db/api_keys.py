@@ -9,6 +9,7 @@ from src.config.supabase_config import get_supabase_client
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
+from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -290,13 +291,20 @@ def create_api_key(
             else:
                 raise
 
-        if not result.data:
-            raise ValueError("Failed to create API key")
+        # Safely get the created API key record
+        try:
+            api_key_record = safe_get_first(
+                result,
+                error_message="Failed to create API key",
+                validate_keys=["id"]
+            )
+        except DatabaseResultError as e:
+            raise ValueError(str(e))
 
         # Create rate limit configuration for the new key
         try:
             rate_limit_config = {
-                "api_key_id": result.data[0]["id"],
+                "api_key_id": api_key_record["id"],
                 "window_type": "sliding",
                 "window_size": 3600,  # 1 hour
                 "max_requests": max_requests or 1000,
@@ -328,7 +336,7 @@ def create_api_key(
                 {
                     "user_id": user_id,
                     "action": "create",
-                    "api_key_id": result.data[0]["id"],
+                    "api_key_id": api_key_record["id"],
                     "details": {
                         "key_name": key_name,
                         "environment_tag": environment_tag,
@@ -354,7 +362,7 @@ def create_api_key(
                     sanitize_for_logging(str(audit_error)),
                 )
 
-        return api_key, result.data[0]["id"]
+        return api_key, api_key_record["id"]
 
     except Exception as e:
         logger.error("Failed to create API key: %s", sanitize_for_logging(str(e)))
@@ -467,51 +475,54 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
             .execute()
         )
 
-        if result.data:
-            # Also delete associated rate limit configs
-            try:
-                client.table("rate_limit_configs").delete().eq(
-                    "api_key_id", result.data[0]["id"]
-                ).execute()
-            except Exception as e:
-                # Only log if it's NOT a missing table error
-                if not is_schema_cache_error(e):
-                    logger.warning(
-                        "Failed to delete rate limit configs for key %s: %s",
-                        sanitize_for_logging(api_key[:20] + "..."),
-                        sanitize_for_logging(str(e)),
-                    )
-                else:
-                    logger.debug("rate_limit_configs table not found - skipping deletion")
-
-            # Create audit log entry
-            try:
-                client.table("api_key_audit_logs").insert(
-                    {
-                        "user_id": user_id,
-                        "action": "delete",
-                        "api_key_id": result.data[0]["id"],
-                        "details": {
-                            "deleted_at": datetime.now(timezone.utc).isoformat(),
-                            "key_name": result.data[0].get("key_name", "Unknown"),
-                            "environment_tag": result.data[0].get("environment_tag", "unknown"),
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                ).execute()
-            except Exception as e:
-                # Only log if it's NOT a missing table error
-                if not is_schema_cache_error(e):
-                    logger.warning(
-                        "Failed to create audit log for key deletion: %s",
-                        sanitize_for_logging(str(e)),
-                    )
-                else:
-                    logger.debug("api_key_audit_logs table not found - skipping audit log")
-
-            return True
-        else:
+        # Safely extract deleted key data
+        try:
+            deleted_key = safe_get_first(result, error_message="API key not found for deletion")
+        except DatabaseResultError:
             return False
+
+        # Also delete associated rate limit configs
+        try:
+            client.table("rate_limit_configs").delete().eq(
+                "api_key_id", deleted_key["id"]
+            ).execute()
+        except Exception as e:
+            # Only log if it's NOT a missing table error
+            if not is_schema_cache_error(e):
+                logger.warning(
+                    "Failed to delete rate limit configs for key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(str(e)),
+                )
+            else:
+                logger.debug("rate_limit_configs table not found - skipping deletion")
+
+        # Create audit log entry
+        try:
+            client.table("api_key_audit_logs").insert(
+                {
+                    "user_id": user_id,
+                    "action": "delete",
+                    "api_key_id": deleted_key["id"],
+                    "details": {
+                        "deleted_at": datetime.now(timezone.utc).isoformat(),
+                        "key_name": deleted_key.get("key_name", "Unknown"),
+                        "environment_tag": deleted_key.get("environment_tag", "unknown"),
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            ).execute()
+        except Exception as e:
+            # Only log if it's NOT a missing table error
+            if not is_schema_cache_error(e):
+                logger.warning(
+                    "Failed to create audit log for key deletion: %s",
+                    sanitize_for_logging(str(e)),
+                )
+            else:
+                logger.debug("api_key_audit_logs table not found - skipping audit log")
+
+        return True
 
     except Exception as e:
         logger.error("Failed to delete API key: %s", sanitize_for_logging(str(e)))
@@ -662,7 +673,10 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
         # Query the api_keys_new table
         key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
-        if not key_result.data:
+        # Safely get the API key data
+        try:
+            key_data = safe_get_first(key_result, error_message="API key not found")
+        except DatabaseResultError:
             logger.warning(
                 "API key not found in api_keys_new table: %s",
                 sanitize_for_logging(api_key[:20] + "..."),
@@ -679,8 +693,6 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
                 "created_at": None,
                 "last_used_at": None,
             }
-
-        key_data = key_result.data[0]
 
         # Calculate requests remaining and usage percentage
         requests_remaining = None
@@ -737,10 +749,16 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             .execute()
         )
 
-        if not key_result.data:
-            raise ValueError("API key not found or not owned by user")
+        # Safely get the API key record
+        try:
+            key_data = safe_get_first(
+                key_result,
+                error_message="API key not found or not owned by user",
+                validate_keys=["id"]
+            )
+        except DatabaseResultError as e:
+            raise ValueError(str(e))
 
-        key_data = key_result.data[0]
         key_id = key_data["id"]
 
         # Prepare update data
@@ -785,8 +803,11 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         # Update the API key
         result = client.table("api_keys_new").update(update_data).eq("id", key_id).execute()
 
-        if not result.data:
-            raise ValueError("Failed to update API key")
+        # Validate the update succeeded
+        try:
+            safe_get_first(result, error_message="Failed to update API key")
+        except DatabaseResultError as e:
+            raise ValueError(str(e))
 
         # Update rate limit config if max_requests changed
         if "max_requests" in updates and updates["max_requests"] is not None:
@@ -866,19 +887,20 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
             .execute()
         )
 
-        if not key_result.data:
-            logger.warning(
-                "API key not found in api_keys_new table: %s",
-                sanitize_for_logging(api_key[:10] + "..."),
-            )
-            return False
-        else:
-            key_data = key_result.data[0]
+        # Safely get the API key data
+        try:
+            key_data = safe_get_first(key_result, error_message="API key not found")
             logger.info(
                 "Found in api_keys_new - is_active: %s, is_primary: %s",
                 key_data.get("is_active"),
                 key_data.get("is_primary", False),
             )
+        except DatabaseResultError:
+            logger.warning(
+                "API key not found in api_keys_new table: %s",
+                sanitize_for_logging(api_key[:10] + "..."),
+            )
+            return False
 
         # Check if key is active
         if not key_data.get("is_active", True):
