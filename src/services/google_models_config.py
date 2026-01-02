@@ -37,7 +37,7 @@ def get_google_models() -> list[MultiProviderModel]:
             providers=[
                 ProviderConfig(
                     name="google-vertex",
-                    model_id="gemini-3-pro",
+                    model_id="gemini-3-pro-preview",  # Preview models require -preview suffix
                     priority=1,
                     requires_credentials=True,
                     cost_per_1k_input=0.00125,  # $1.25/1M tokens
@@ -66,7 +66,7 @@ def get_google_models() -> list[MultiProviderModel]:
             providers=[
                 ProviderConfig(
                     name="google-vertex",
-                    model_id="gemini-3-flash",
+                    model_id="gemini-3-flash-preview",  # Preview models require -preview suffix
                     priority=1,
                     requires_credentials=True,
                     cost_per_1k_input=0.0005,  # $0.50/1M tokens
