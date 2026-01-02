@@ -2366,9 +2366,23 @@ async def chat_completions(
 
         # === 7) Log to Braintrust ===
         try:
-            messages_for_log = [
-                m.model_dump() if hasattr(m, "model_dump") else m for m in req.messages
-            ]
+            # Safely convert messages to dicts, filtering out None values and sanitizing content
+            messages_for_log = []
+            for m in req.messages:
+                if m is None:
+                    continue
+                msg_dict = m.model_dump() if hasattr(m, "model_dump") else m
+                if msg_dict is None:
+                    continue
+                # Sanitize content to avoid NoneType subscript errors in Braintrust SDK
+                if isinstance(msg_dict, dict) and "content" in msg_dict:
+                    content = msg_dict.get("content")
+                    if content is None:
+                        msg_dict["content"] = ""
+                    elif isinstance(content, list):
+                        # Filter out None items from content list
+                        msg_dict["content"] = [item for item in content if item is not None]
+                messages_for_log.append(msg_dict)
             # Safely extract output content for Braintrust logging
             bt_choices = processed.get("choices") or []
             bt_first_choice = bt_choices[0] if bt_choices else None
@@ -3502,13 +3516,21 @@ async def unified_responses(
 
         # === 7) Log to Braintrust ===
         try:
-            # Convert input messages to loggable format
+            # Convert input messages to loggable format, safely handling None values
             input_messages = []
             for inp_msg in req.input:
-                if isinstance(inp_msg.content, str):
-                    input_messages.append({"role": inp_msg.role, "content": inp_msg.content})
-                else:
-                    input_messages.append({"role": inp_msg.role, "content": str(inp_msg.content)})
+                if inp_msg is None:
+                    continue
+                content = inp_msg.content
+                if content is None:
+                    content = ""
+                elif isinstance(content, list):
+                    # Filter out None items from content list
+                    content = [item for item in content if item is not None]
+                    content = str(content) if content else ""
+                elif not isinstance(content, str):
+                    content = str(content)
+                input_messages.append({"role": inp_msg.role, "content": content})
 
             # Safely extract output content for Braintrust logging
             bt_output = ""
