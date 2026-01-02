@@ -1370,7 +1370,7 @@ def _fetch_models_from_vertex_api() -> list[dict] | None:
     """
     try:
         _prepare_vertex_environment()
-        access_token = _get_access_token()
+        access_token = _get_google_vertex_access_token()
 
         # Use the Vertex AI discovery endpoint to list publisher models
         # This endpoint lists all Google-published models available in Vertex AI

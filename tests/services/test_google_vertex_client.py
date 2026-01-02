@@ -387,9 +387,23 @@ class TestMakeGoogleVertexRequest:
         # Collect all chunks
         chunks = list(gen)
 
-        assert len(chunks) >= 2  # At least a content chunk and a DONE chunk
-        assert any("Streaming response" in chunk for chunk in chunks)
-        assert any("[DONE]" in chunk for chunk in chunks)
+        # Streaming now yields dict objects, not SSE strings
+        assert len(chunks) >= 2  # At least a content chunk and a finish chunk
+
+        # Check that we have content in the chunks
+        content_found = False
+        finish_found = False
+        for chunk in chunks:
+            if isinstance(chunk, dict):
+                choices = chunk.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    if delta.get("content"):
+                        content_found = True
+                    if choices[0].get("finish_reason"):
+                        finish_found = True
+        assert content_found, "Should find content in streaming chunks"
+        assert finish_found, "Should find finish_reason in streaming chunks"
 
     @patch("src.services.google_vertex_client.initialize_vertex_ai")
     @patch("src.services.google_vertex_client._ensure_vertex_imports")
@@ -524,10 +538,12 @@ class TestGoogleVertexModelIntegration:
         """Test that gemini models are properly detected when credentials are available"""
         from src.services.model_transformations import detect_provider_from_model_id
 
+        # Note: Gemini 1.5 models were retired by Google in April-September 2025
+        # They now default to OpenRouter as Vertex AI returns 404 for them
         models = [
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "google/gemini-1.5-flash",
+            "gemini-2.5-flash",
+            "google/gemini-3-flash",
         ]
 
         for model in models:
@@ -566,12 +582,14 @@ class TestFetchModelsFromGoogleVertex:
         model_ids = [m["id"] for m in models]
 
         # Check for expected Gemini models
+        # Note: Gemini 1.5 models were retired by Google in April-September 2025
+        # and are no longer included in the static config
         expected_models = [
+            "gemini-3-pro",
+            "gemini-3-flash",
             "gemini-2.5-flash",
             "gemini-2.5-pro",
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
         ]
 
         for expected in expected_models:
