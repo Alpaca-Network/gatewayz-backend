@@ -336,7 +336,7 @@ def create_api_key(
                 {
                     "user_id": user_id,
                     "action": "create",
-                    "api_key_id": result.data[0]["id"],
+                    "api_key_id": api_key_record["id"],
                     "details": {
                         "key_name": key_name,
                         "environment_tag": environment_tag,
@@ -362,7 +362,7 @@ def create_api_key(
                     sanitize_for_logging(str(audit_error)),
                 )
 
-        return api_key, result.data[0]["id"]
+        return api_key, api_key_record["id"]
 
     except Exception as e:
         logger.error("Failed to create API key: %s", sanitize_for_logging(str(e)))
@@ -475,51 +475,54 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
             .execute()
         )
 
-        if result.data:
-            # Also delete associated rate limit configs
-            try:
-                client.table("rate_limit_configs").delete().eq(
-                    "api_key_id", result.data[0]["id"]
-                ).execute()
-            except Exception as e:
-                # Only log if it's NOT a missing table error
-                if not is_schema_cache_error(e):
-                    logger.warning(
-                        "Failed to delete rate limit configs for key %s: %s",
-                        sanitize_for_logging(api_key[:20] + "..."),
-                        sanitize_for_logging(str(e)),
-                    )
-                else:
-                    logger.debug("rate_limit_configs table not found - skipping deletion")
-
-            # Create audit log entry
-            try:
-                client.table("api_key_audit_logs").insert(
-                    {
-                        "user_id": user_id,
-                        "action": "delete",
-                        "api_key_id": result.data[0]["id"],
-                        "details": {
-                            "deleted_at": datetime.now(timezone.utc).isoformat(),
-                            "key_name": result.data[0].get("key_name", "Unknown"),
-                            "environment_tag": result.data[0].get("environment_tag", "unknown"),
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                ).execute()
-            except Exception as e:
-                # Only log if it's NOT a missing table error
-                if not is_schema_cache_error(e):
-                    logger.warning(
-                        "Failed to create audit log for key deletion: %s",
-                        sanitize_for_logging(str(e)),
-                    )
-                else:
-                    logger.debug("api_key_audit_logs table not found - skipping audit log")
-
-            return True
-        else:
+        # Safely extract deleted key data
+        try:
+            deleted_key = safe_get_first(result, error_message="API key not found for deletion")
+        except DatabaseResultError:
             return False
+
+        # Also delete associated rate limit configs
+        try:
+            client.table("rate_limit_configs").delete().eq(
+                "api_key_id", deleted_key["id"]
+            ).execute()
+        except Exception as e:
+            # Only log if it's NOT a missing table error
+            if not is_schema_cache_error(e):
+                logger.warning(
+                    "Failed to delete rate limit configs for key %s: %s",
+                    sanitize_for_logging(api_key[:20] + "..."),
+                    sanitize_for_logging(str(e)),
+                )
+            else:
+                logger.debug("rate_limit_configs table not found - skipping deletion")
+
+        # Create audit log entry
+        try:
+            client.table("api_key_audit_logs").insert(
+                {
+                    "user_id": user_id,
+                    "action": "delete",
+                    "api_key_id": deleted_key["id"],
+                    "details": {
+                        "deleted_at": datetime.now(timezone.utc).isoformat(),
+                        "key_name": deleted_key.get("key_name", "Unknown"),
+                        "environment_tag": deleted_key.get("environment_tag", "unknown"),
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            ).execute()
+        except Exception as e:
+            # Only log if it's NOT a missing table error
+            if not is_schema_cache_error(e):
+                logger.warning(
+                    "Failed to create audit log for key deletion: %s",
+                    sanitize_for_logging(str(e)),
+                )
+            else:
+                logger.debug("api_key_audit_logs table not found - skipping audit log")
+
+        return True
 
     except Exception as e:
         logger.error("Failed to delete API key: %s", sanitize_for_logging(str(e)))
