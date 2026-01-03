@@ -605,24 +605,45 @@ async def get_users_rate_limits(
 
         client = get_supabase_client()
 
-        # Build query for api_keys_new table
-        query = client.table("api_keys_new").select(
-            "id, api_key, key_name, user_id, rate_limit_config, environment_tag, created_at"
-        )
+        # Try query with rate_limit_config column first, fallback without it
+        rate_limit_config_available = True
+        try:
+            # Build query for api_keys_new table
+            query = client.table("api_keys_new").select(
+                "id, api_key, key_name, user_id, rate_limit_config, environment_tag, created_at"
+            )
 
-        if user_id is not None:
-            query = query.eq("user_id", user_id)
+            if user_id is not None:
+                query = query.eq("user_id", user_id)
 
-        # Apply has_custom_config filter at database level if possible
-        if has_custom_config is not None:
-            if has_custom_config:
-                query = query.not_.is_("rate_limit_config", "null")
+            # Apply has_custom_config filter at database level if possible
+            if has_custom_config is not None:
+                if has_custom_config:
+                    query = query.not_.is_("rate_limit_config", "null")
+                else:
+                    query = query.is_("rate_limit_config", "null")
+
+            # Execute query - fetch one extra to determine has_more
+            result = query.range(offset, offset + limit).execute()
+            api_keys = result.data or []
+        except Exception as e:
+            # rate_limit_config column may not exist
+            if "rate_limit_config" in str(e):
+                logger.debug(f"rate_limit_config column not available: {e}")
+                rate_limit_config_available = False
+                # Fallback query without rate_limit_config
+                query = client.table("api_keys_new").select(
+                    "id, api_key, key_name, user_id, environment_tag, created_at"
+                )
+
+                if user_id is not None:
+                    query = query.eq("user_id", user_id)
+
+                # Skip has_custom_config filter when column doesn't exist
+                result = query.range(offset, offset + limit).execute()
+                api_keys = result.data or []
             else:
-                query = query.is_("rate_limit_config", "null")
-
-        # Execute query - fetch one extra to determine has_more
-        result = query.range(offset, offset + limit).execute()
-        api_keys = result.data or []
+                raise
 
         # Determine if there are more records and trim to limit
         has_more = len(api_keys) > limit
@@ -631,14 +652,41 @@ async def get_users_rate_limits(
         # Format response
         users_rate_limits = []
         for key in api_keys:
-            config = key.get("rate_limit_config") or DEFAULT_RATE_LIMIT_CONFIG
+            if rate_limit_config_available:
+                config = key.get("rate_limit_config") or DEFAULT_RATE_LIMIT_CONFIG
+                has_custom = key.get("rate_limit_config") is not None
+            else:
+                # Try to get config from rate_limit_configs table
+                config = DEFAULT_RATE_LIMIT_CONFIG
+                has_custom = False
+                try:
+                    config_result = (
+                        client.table("rate_limit_configs")
+                        .select("*")
+                        .eq("api_key_id", key["id"])
+                        .execute()
+                    )
+                    if config_result.data:
+                        cfg = config_result.data[0]
+                        config = {
+                            "requests_per_minute": cfg.get("max_requests", 1000) // 60,
+                            "requests_per_hour": cfg.get("max_requests", 1000),
+                            "requests_per_day": cfg.get("max_requests", 1000) * 24,
+                            "tokens_per_minute": cfg.get("max_tokens", 1000000) // 60,
+                            "tokens_per_hour": cfg.get("max_tokens", 1000000),
+                            "tokens_per_day": cfg.get("max_tokens", 1000000) * 24,
+                        }
+                        has_custom = True
+                except Exception:
+                    pass
+
             users_rate_limits.append({
                 "key_id": key["id"],
                 "api_key": key["api_key"][:15] + "...",
                 "key_name": key.get("key_name"),
                 "user_id": key["user_id"],
                 "environment_tag": key.get("environment_tag"),
-                "has_custom_config": key.get("rate_limit_config") is not None,
+                "has_custom_config": has_custom,
                 "config": config,
                 "created_at": key.get("created_at"),
             })

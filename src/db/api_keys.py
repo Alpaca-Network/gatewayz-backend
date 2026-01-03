@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 SCHEMA_CACHE_ERROR_CODE = "PGRST204"
 ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
 
+# Track if we've already logged the encryption warning to reduce log noise
+_encryption_warning_logged = False
+
 
 # near the top of the module
 def _pct(used: int, limit: int | None) -> float | None:
@@ -139,6 +142,7 @@ def create_api_key(
     is_primary: bool = False,
 ) -> tuple[str, int]:
     """Create a new API key for a user"""
+    global _encryption_warning_logged
     try:
         client = get_supabase_client()
 
@@ -219,11 +223,13 @@ def create_api_key(
                 )
                 logger.error(error_msg)
                 raise ValueError(error_msg) from hash_error
-            # Encryption keys are optional - log warning and continue
-            logger.warning(
-                "Encryption unavailable; proceeding without encrypted fields: %s",
-                sanitize_for_logging(str(hash_error)),
-            )
+            # Encryption keys are optional - log warning once and continue
+            if not _encryption_warning_logged:
+                logger.warning(
+                    "Encryption unavailable; proceeding without encrypted fields: %s",
+                    sanitize_for_logging(str(hash_error)),
+                )
+                _encryption_warning_logged = True
             encrypted_token, key_version, api_key_hash, api_key_last4 = (
                 None,
                 None,
@@ -231,10 +237,13 @@ def create_api_key(
                 (api_key[-4:] if api_key else None),
             )
         except Exception as enc_e:
-            logger.warning(
-                "Encryption unavailable or failed; proceeding without encrypted fields: %s",
-                sanitize_for_logging(str(enc_e)),
-            )
+            # Log encryption failures once to reduce noise
+            if not _encryption_warning_logged:
+                logger.warning(
+                    "Encryption unavailable or failed; proceeding without encrypted fields: %s",
+                    sanitize_for_logging(str(enc_e)),
+                )
+                _encryption_warning_logged = True
             encrypted_token, key_version, api_key_hash, api_key_last4 = (
                 None,
                 None,
