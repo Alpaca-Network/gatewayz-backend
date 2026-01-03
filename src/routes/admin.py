@@ -635,63 +635,174 @@ async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
 
 
 @router.get("/admin/users", tags=["admin"])
-async def get_all_users_info(admin_user: dict = Depends(require_admin)):
-    """Get all users information from users table (Admin only)"""
+async def get_all_users_info(
+    # Search filters
+    email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
+    api_key: str | None = Query(None, description="Filter by API key (case-insensitive partial match)"),
+    is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
+    # Pagination
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of users to return"),
+    offset: int = Query(0, ge=0, description="Number of users to skip (pagination)"),
+    # Auth
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get users information with search and pagination (Admin only)
+
+    **Search Parameters**:
+    - `email`: Case-insensitive partial match (e.g., "john" matches "john@example.com")
+    - `api_key`: Case-insensitive partial match (e.g., "gw_live" matches keys starting with "gw_live")
+    - `is_active`: Filter by active status (true = active only, false = inactive only, null = all)
+
+    **Pagination**:
+    - `limit`: Records per page (1-1000, default: 100)
+    - `offset`: Records to skip (default: 0)
+
+    **Response**:
+    - `total_users`: Total matching the filters (not total in database)
+    - `has_more`: Whether more results exist beyond current page
+    - `users`: Current page of filtered users
+    - `statistics`: Stats calculated from **filtered results only**
+    """
     try:
         from src.config.supabase_config import get_supabase_client
 
         client = get_supabase_client()
 
-        # Get all users with their information
-        result = (
-            client.table("users")
-            .select(
-                "id, username, email, credits, is_active, role, registration_date, "
-                "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
+        # Build base query for users data
+        # If searching by API key, we need to join with api_keys_new table
+        if api_key:
+            # Query with JOIN for API key search
+            data_query = (
+                client.table("users")
+                .select(
+                    "id, username, email, credits, is_active, role, registration_date, "
+                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at, "
+                    "api_keys_new!inner(api_key)",
+                    count="exact"
+                )
             )
-            .execute()
+        else:
+            # Query without JOIN for better performance when not searching by API key
+            data_query = (
+                client.table("users")
+                .select(
+                    "id, username, email, credits, is_active, role, registration_date, "
+                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at",
+                    count="exact"
+                )
+            )
+
+        # Apply filters
+        if email:
+            # Case-insensitive partial match using ilike
+            data_query = data_query.ilike("email", f"%{email}%")
+
+        if api_key:
+            # Case-insensitive partial match for API key (already joined above)
+            data_query = data_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+
+        if is_active is not None:
+            # Exact match for boolean
+            data_query = data_query.eq("is_active", is_active)
+
+        # Apply sorting and pagination
+        data_query = data_query.order("created_at", desc=True).range(offset, offset + limit - 1)
+
+        # Execute query
+        result = data_query.execute()
+
+        # Get total count from result
+        total_users = result.count if result.count is not None else 0
+
+        # Get users data
+        users_data = result.data if result.data else []
+
+        # Clean up api_keys_new from response if it was included
+        users = []
+        for user in users_data:
+            # Remove the api_keys_new join data from response
+            user_clean = {k: v for k, v in user.items() if k != "api_keys_new"}
+            users.append(user_clean)
+
+        # Calculate has_more for pagination
+        has_more = (offset + limit) < total_users
+
+        # Build statistics query for ALL filtered users (not just current page)
+        # This ensures statistics reflect the filtered dataset
+        if api_key:
+            stats_query = (
+                client.table("users")
+                .select(
+                    "id, is_active, role, credits, subscription_status, "
+                    "api_keys_new!inner(api_key)"
+                )
+            )
+        else:
+            stats_query = (
+                client.table("users")
+                .select("id, is_active, role, credits, subscription_status")
+            )
+
+        # Apply same filters to statistics query
+        if email:
+            stats_query = stats_query.ilike("email", f"%{email}%")
+
+        if api_key:
+            stats_query = stats_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+
+        if is_active is not None:
+            stats_query = stats_query.eq("is_active", is_active)
+
+        # Execute statistics query
+        stats_result = stats_query.execute()
+        stats_data = stats_result.data if stats_result.data else []
+
+        # Calculate statistics from filtered results
+        active_users = sum(1 for u in stats_data if u.get("is_active", True))
+        inactive_users = total_users - active_users
+        admin_users = sum(1 for u in stats_data if u.get("role") == "admin")
+        developer_users = sum(1 for u in stats_data if u.get("role") == "developer")
+        regular_users = sum(
+            1 for u in stats_data if u.get("role") == "user" or u.get("role") is None
         )
 
-        if not result.data:
-            return {
-                "status": "success",
-                "total_users": 0,
-                "users": [],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+        # Calculate total credits across filtered users
+        total_credits = sum(float(u.get("credits", 0)) for u in stats_data)
+        avg_credits = round(total_credits / total_users, 2) if total_users > 0 else 0
 
-        users = result.data
-
-        # Get additional statistics
-        total_users = len(users)
-        active_users = len([u for u in users if u.get("is_active", True)])
-        admin_users = len([u for u in users if u.get("role") == "admin"])
-        developer_users = len([u for u in users if u.get("role") == "developer"])
-        regular_users = len([u for u in users if u.get("role") == "user" or u.get("role") is None])
-
-        # Calculate total credits across all users
-        total_credits = sum(float(u.get("credits", 0)) for u in users)
-
-        # Get subscription status breakdown
+        # Get subscription status breakdown from filtered users
         subscription_stats = {}
-        for user in users:
+        for user in stats_data:
             status = user.get("subscription_status", "unknown")
             subscription_stats[status] = subscription_stats.get(status, 0) + 1
 
         return {
             "status": "success",
-            "total_users": total_users,
+            "total_users": total_users,  # Total matching filters
+            "has_more": has_more,  # Whether more results exist
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "current_page": (offset // limit) + 1,
+                "total_pages": (total_users + limit - 1) // limit if total_users > 0 else 0,
+            },
+            "filters_applied": {
+                "email": email,
+                "api_key": api_key,
+                "is_active": is_active,
+            },
             "statistics": {
                 "active_users": active_users,
-                "inactive_users": total_users - active_users,
+                "inactive_users": inactive_users,
                 "admin_users": admin_users,
                 "developer_users": developer_users,
                 "regular_users": regular_users,
                 "total_credits": round(total_credits, 2),
-                "average_credits": round(total_credits / total_users, 2) if total_users > 0 else 0,
+                "average_credits": avg_credits,
                 "subscription_breakdown": subscription_stats,
             },
-            "users": users,
+            "users": users,  # Current page of users
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
