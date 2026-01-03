@@ -8,7 +8,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import (
+    execute_with_retry,
+    get_supabase_client,
+)
 from src.utils.sentry_context import capture_database_error
 
 logger = logging.getLogger(__name__)
@@ -55,24 +58,38 @@ def log_credit_transaction(
 
     Returns:
         Created transaction record or None if failed
+
+    Note:
+        This function includes automatic retry logic for HTTP/2 connection errors.
+        If the connection is terminated (e.g., after handling many requests),
+        it will refresh the client and retry up to 2 times.
     """
-    try:
-        client = get_supabase_client()
+    transaction_data = {
+        "user_id": user_id,
+        "amount": amount,
+        "transaction_type": transaction_type,
+        "description": description,
+        "balance_before": balance_before,
+        "balance_after": balance_after,
+        "payment_id": payment_id,
+        "metadata": metadata or {},
+        "created_by": created_by,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
 
-        transaction_data = {
-            "user_id": user_id,
-            "amount": amount,
-            "transaction_type": transaction_type,
-            "description": description,
-            "balance_before": balance_before,
-            "balance_after": balance_after,
-            "payment_id": payment_id,
-            "metadata": metadata or {},
-            "created_by": created_by,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-
+    def do_insert(client):
+        """Execute the insert operation with the given client."""
         result = client.table("credit_transactions").insert(transaction_data).execute()
+        return result
+
+    try:
+        # Use execute_with_retry to handle connection errors automatically
+        result = execute_with_retry(
+            do_insert,
+            max_retries=2,
+            retry_delay=0.5,
+            operation_name=f"log_credit_transaction(user={user_id}, type={transaction_type})",
+        )
 
         if not result.data:
             logger.error("Failed to log credit transaction - no data returned")
@@ -137,10 +154,12 @@ def get_user_transactions(
 
     Returns:
         List of transaction records
-    """
-    try:
-        client = get_supabase_client()
 
+    Note:
+        This function includes automatic retry logic for HTTP/2 connection errors.
+    """
+
+    def build_and_execute_query(client):
         query = client.table("credit_transactions").select("*").eq("user_id", user_id)
 
         # Filter by transaction type
@@ -148,6 +167,7 @@ def get_user_transactions(
             query = query.eq("transaction_type", transaction_type)
 
         # Filter by date range
+        nonlocal from_date, to_date
         if from_date:
             try:
                 if "T" not in from_date:
@@ -209,13 +229,19 @@ def get_user_transactions(
             transactions = filtered_transactions
 
             # Apply pagination after filtering
-            paginated_transactions = transactions[offset : offset + limit]
-            return paginated_transactions
+            return transactions[offset : offset + limit]
         else:
             # Use database-side pagination for efficiency
             result = query.range(offset, offset + limit - 1).execute()
             return result.data or []
 
+    try:
+        return execute_with_retry(
+            build_and_execute_query,
+            max_retries=2,
+            retry_delay=0.5,
+            operation_name=f"get_user_transactions(user={user_id})",
+        )
     except Exception as e:
         logger.error(f"Error getting transactions for user {user_id}: {e}", exc_info=True)
         return []
