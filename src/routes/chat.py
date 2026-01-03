@@ -2427,8 +2427,23 @@ async def chat_completions(
                     if content is None:
                         msg_dict["content"] = ""
                     elif isinstance(content, list):
-                        # Filter out None items from content list
-                        msg_dict["content"] = [item for item in content if item is not None]
+                        # Filter out None items and sanitize nested dicts in content list
+                        sanitized_content = []
+                        for item in content:
+                            if item is None:
+                                continue
+                            if isinstance(item, dict):
+                                # Deep sanitize dict items (e.g., {"type": "text", "text": None})
+                                sanitized_item = {}
+                                for k, v in item.items():
+                                    if v is None:
+                                        sanitized_item[k] = "" if k in ("text", "content") else v
+                                    else:
+                                        sanitized_item[k] = v
+                                sanitized_content.append(sanitized_item)
+                            else:
+                                sanitized_content.append(item)
+                        msg_dict["content"] = sanitized_content
                 messages_for_log.append(msg_dict)
             # Safely extract output content for Braintrust logging
             bt_choices = processed.get("choices") or []
@@ -3619,9 +3634,19 @@ async def unified_responses(
                 if content is None:
                     content = ""
                 elif isinstance(content, list):
-                    # Filter out None items from content list
-                    content = [item for item in content if item is not None]
-                    content = str(content) if content else ""
+                    # Safely extract text from multimodal content, filtering None items
+                    text_parts = []
+                    for item in content:
+                        if item is None:
+                            continue
+                        if isinstance(item, dict):
+                            # Extract text field if present
+                            text = item.get("text")
+                            if text is not None:
+                                text_parts.append(str(text))
+                        elif isinstance(item, str):
+                            text_parts.append(item)
+                    content = " ".join(text_parts) if text_parts else ""
                 elif not isinstance(content, str):
                     content = str(content)
                 input_messages.append({"role": inp_msg.role, "content": content})
