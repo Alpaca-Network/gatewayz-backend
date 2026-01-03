@@ -230,3 +230,88 @@ class TestProcessFeatherlessResponse:
         # The function doesn't explicitly handle errors, so it should raise
         with pytest.raises(Exception):
             process_featherless_response(bad_response)
+
+
+class TestSanitizeMessagesForFeatherless:
+    """Test _sanitize_messages_for_featherless function"""
+
+    def test_removes_null_tool_calls_from_dict(self):
+        """Test that null tool_calls are removed from dict messages"""
+        from src.services.featherless_client import _sanitize_messages_for_featherless
+
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there", "tool_calls": None},
+            {"role": "user", "content": "How are you?"},
+        ]
+
+        sanitized = _sanitize_messages_for_featherless(messages)
+
+        assert len(sanitized) == 3
+        assert "tool_calls" not in sanitized[1]
+        assert sanitized[1]["role"] == "assistant"
+        assert sanitized[1]["content"] == "Hi there"
+
+    def test_preserves_valid_tool_calls(self):
+        """Test that valid tool_calls arrays are preserved"""
+        from src.services.featherless_client import _sanitize_messages_for_featherless
+
+        tool_calls = [{"id": "call_123", "function": {"name": "test", "arguments": "{}"}}]
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": None, "tool_calls": tool_calls},
+        ]
+
+        sanitized = _sanitize_messages_for_featherless(messages)
+
+        assert len(sanitized) == 2
+        assert "tool_calls" in sanitized[1]
+        assert sanitized[1]["tool_calls"] == tool_calls
+
+    def test_preserves_messages_without_tool_calls(self):
+        """Test that messages without tool_calls field are unchanged"""
+        from src.services.featherless_client import _sanitize_messages_for_featherless
+
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+        ]
+
+        sanitized = _sanitize_messages_for_featherless(messages)
+
+        assert len(sanitized) == 2
+        assert sanitized[0] == {"role": "user", "content": "Hello"}
+        assert sanitized[1] == {"role": "assistant", "content": "Hi there"}
+
+    def test_does_not_mutate_original_messages(self):
+        """Test that original messages are not modified"""
+        from src.services.featherless_client import _sanitize_messages_for_featherless
+
+        original = {"role": "assistant", "content": "Hi", "tool_calls": None}
+        messages = [original]
+
+        _sanitize_messages_for_featherless(messages)
+
+        # Original should still have tool_calls
+        assert "tool_calls" in original
+        assert original["tool_calls"] is None
+
+    def test_removes_invalid_tool_calls_type(self):
+        """Test that non-array tool_calls are removed"""
+        from src.services.featherless_client import _sanitize_messages_for_featherless
+
+        messages = [
+            {"role": "assistant", "content": "Hi", "tool_calls": "invalid_string"},
+        ]
+
+        sanitized = _sanitize_messages_for_featherless(messages)
+
+        assert len(sanitized) == 1
+        assert "tool_calls" not in sanitized[0]
+
+    def test_handles_empty_list(self):
+        """Test that empty message list is handled"""
+        from src.services.featherless_client import _sanitize_messages_for_featherless
+
+        sanitized = _sanitize_messages_for_featherless([])
+        assert sanitized == []
