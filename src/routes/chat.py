@@ -1545,6 +1545,23 @@ async def chat_completions(
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
                     override_provider = "huggingface"
+                # FAL models are for image/video generation only, not chat completions
+                if override_provider == "fal":
+                    logger.warning(
+                        "FAL model '%s' requested via chat completions endpoint - "
+                        "FAL models only support image/video generation",
+                        sanitize_for_logging(original_model),
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Model '{original_model}' is a FAL image/video generation model and "
+                            "does not support chat completions. Please use the /v1/images/generations "
+                            "endpoint for image generation, or choose a chat-compatible model. "
+                            "FAL models support: text-to-image, text-to-video, image-to-video, and "
+                            "other media generation tasks. See https://fal.ai/models for details."
+                        ),
+                    )
                 if provider_locked and override_provider != provider:
                     logger.info(
                         "Skipping provider override for model %s: request locked provider to '%s'",
@@ -2752,6 +2769,23 @@ async def unified_responses(
             override_provider = override_provider.lower()
             if override_provider == "hug":
                 override_provider = "huggingface"
+            # FAL models are for image/video generation only, not chat completions
+            if override_provider == "fal":
+                logger.warning(
+                    "FAL model '%s' requested via responses endpoint - "
+                    "FAL models only support image/video generation",
+                    sanitize_for_logging(original_model),
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Model '{original_model}' is a FAL image/video generation model and "
+                        "does not support chat completions. Please use the /v1/images/generations "
+                        "endpoint for image generation, or choose a chat-compatible model. "
+                        "FAL models support: text-to-image, text-to-video, image-to-video, and "
+                        "other media generation tasks. See https://fal.ai/models for details."
+                    ),
+                )
             if provider_locked and override_provider != provider:
                 logger.info(
                     "Skipping provider override for model %s: request locked provider to '%s'",
