@@ -302,7 +302,7 @@ def get_openrouter_pooled_client() -> OpenAI:
         api_key=Config.OPENROUTER_API_KEY,
         default_headers={
             "HTTP-Referer": Config.OPENROUTER_SITE_URL,
-            "X-TitleSection": Config.OPENROUTER_SITE_NAME,
+            "X-Title": Config.OPENROUTER_SITE_NAME,
         },
     )
 
