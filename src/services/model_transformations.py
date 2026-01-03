@@ -1298,12 +1298,6 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
             return "openrouter"
 
-    # Check for Cloudflare Workers AI models (use @cf/ prefix)
-    # IMPORTANT: This must come before the general @ prefix check below
-    if model_id.startswith("@cf/"):
-        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
-        return "cloudflare-workers-ai"
-
     # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
     # After Portkey removal, @ prefix models are now routed through OpenRouter
     # which supports multi-provider model format
