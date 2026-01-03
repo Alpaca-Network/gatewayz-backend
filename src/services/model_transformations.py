@@ -802,6 +802,22 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Qwen Coder models
             "qwen/qwen-coder": "qwen-coder",
             "qwen-coder": "qwen-coder",
+            # Qwen 2.5 Coder models (specific versions)
+            "qwen/qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen/qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen/qwen-2.5-coder-32b": "qwen2.5-coder-32b-instruct",
+            "qwen/qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen/qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen/qwen-2.5-coder-7b": "qwen2.5-coder-7b-instruct",
+            "qwen/qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen/qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen/qwen-2.5-coder-14b": "qwen2.5-coder-14b-instruct",
 
             # Qwen reasoning models
             "qwen/qwq-32b-preview": "qwq-32b-preview",
