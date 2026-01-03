@@ -3,11 +3,9 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 
 from src.cache import _huggingface_cache, _models_cache, _provider_cache
 from src.config import Config
-from src.config.supabase_config import get_supabase_client
 from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
 from src.db.trials import get_trial_analytics
@@ -25,7 +23,7 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
-from src.security.deps import get_admin_key
+from src.security.deps import require_admin
 from src.services.models import (
     enhance_model_with_provider_info,
     fetch_huggingface_model,
@@ -37,11 +35,6 @@ from src.services.providers import fetch_providers_from_openrouter, get_cached_p
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# Request models for admin endpoints
-class DisableTrialRequest(BaseModel):
-    user_id: int
 
 
 @router.post("/create", response_model=UserRegistrationResponse, tags=["authentication"])
@@ -97,7 +90,7 @@ async def create_api_key(request: UserRegistrationRequest):
 
 # Admin endpoints
 @router.post("/admin/add_credits", tags=["admin"])
-async def admin_add_credits(req: AddCreditsRequest, _: str = Depends(get_admin_key)):
+async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(require_admin)):
     try:
         user = get_user(req.api_key)
         if not user:
@@ -125,7 +118,7 @@ async def admin_add_credits(req: AddCreditsRequest, _: str = Depends(get_admin_k
 
 
 @router.get("/admin/balance", tags=["admin"])
-async def admin_get_all_balances(_: str = Depends(get_admin_key)):
+async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
     try:
         users = get_all_users()
 
@@ -148,7 +141,7 @@ async def admin_get_all_balances(_: str = Depends(get_admin_key)):
 
 
 @router.get("/admin/monitor", tags=["admin"])
-async def admin_monitor(_: str = Depends(get_admin_key)):
+async def admin_monitor(admin_user: dict = Depends(require_admin)):
     try:
         monitor_data = get_admin_monitor_data()
 
@@ -180,7 +173,7 @@ async def admin_monitor(_: str = Depends(get_admin_key)):
 
 
 @router.post("/admin/limit", tags=["admin"])
-async def admin_set_rate_limit(req: SetRateLimitRequest, _: str = Depends(get_admin_key)):
+async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depends(require_admin)):
     try:
         set_user_rate_limits(req.api_key, req.rate_limits.model_dump())
 
@@ -213,7 +206,7 @@ async def admin_set_rate_limit(req: SetRateLimitRequest, _: str = Depends(get_ad
 
 # Admin cache management endpoints
 @router.post("/admin/refresh-providers", tags=["admin"])
-async def admin_refresh_providers(_: str = Depends(get_admin_key)):
+async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
     try:
         # Invalidate provider cache to force refresh
         _provider_cache["data"] = None
@@ -234,7 +227,7 @@ async def admin_refresh_providers(_: str = Depends(get_admin_key)):
 
 
 @router.get("/admin/cache-status", tags=["admin"])
-async def admin_cache_status(_: str = Depends(get_admin_key)):
+async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     try:
         cache_age = None
         if _provider_cache["timestamp"]:
@@ -260,7 +253,7 @@ async def admin_cache_status(_: str = Depends(get_admin_key)):
 
 
 @router.get("/admin/huggingface-cache-status", tags=["admin"])
-async def admin_huggingface_cache_status(_: str = Depends(get_admin_key)):
+async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admin)):
     """Get Hugging Face cache status and statistics"""
     try:
         cache_age = None
@@ -287,7 +280,7 @@ async def admin_huggingface_cache_status(_: str = Depends(get_admin_key)):
 
 
 @router.post("/admin/refresh-huggingface-cache", tags=["admin"])
-async def admin_refresh_huggingface_cache(_: str = Depends(get_admin_key)):
+async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_admin)):
     """Clear Hugging Face cache to force refresh on the next request"""
     try:
         _huggingface_cache["data"] = {}
@@ -305,7 +298,7 @@ async def admin_refresh_huggingface_cache(_: str = Depends(get_admin_key)):
 
 @router.get("/admin/test-huggingface/{hugging_face_id}", tags=["admin"])
 async def admin_test_huggingface(
-    hugging_face_id: str = "openai/gpt-oss-120b", _: str = Depends(get_admin_key)
+    hugging_face_id: str = "openai/gpt-oss-120b", admin_user: dict = Depends(require_admin)
 ):
     """Test Hugging Face API response for debugging"""
     try:
@@ -358,7 +351,7 @@ async def admin_test_huggingface(
 
 
 @router.get("/admin/debug-models", tags=["admin"])
-async def admin_debug_models(_: str = Depends(get_admin_key)):
+async def admin_debug_models(admin_user: dict = Depends(require_admin)):
     """Debug models and providers data for troubleshooting"""
     try:
         # Get raw data
@@ -603,7 +596,7 @@ async def test_openrouter_providers():
 
 
 @router.post("/admin/clear-rate-limit-cache", tags=["admin"])
-async def admin_clear_rate_limit_cache(_: str = Depends(get_admin_key)):
+async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)):
     """Clear rate limit configuration cache to force reload from database"""
     try:
         from src.services.rate_limiting import get_rate_limit_manager
@@ -631,7 +624,7 @@ async def admin_clear_rate_limit_cache(_: str = Depends(get_admin_key)):
 
 
 @router.get("/admin/trial/analytics", tags=["admin"])
-async def get_trial_analytics_admin(_: str = Depends(get_admin_key)):
+async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
     """Get trial analytics and conversion metrics for admin"""
     try:
         analytics = get_trial_analytics()
@@ -643,87 +636,162 @@ async def get_trial_analytics_admin(_: str = Depends(get_admin_key)):
 
 @router.get("/admin/users", tags=["admin"])
 async def get_all_users_info(
-    _: str = Depends(get_admin_key),
-    limit: int = Query(50, ge=1, le=1000, description="Number of users per page"),
-    offset: int = Query(0, ge=0, description="Number of users to skip"),
+    # Search filters
+    email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
+    api_key: str | None = Query(None, description="Filter by API key (case-insensitive partial match)"),
+    is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
+    # Pagination
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of users to return"),
+    offset: int = Query(0, ge=0, description="Number of users to skip (pagination)"),
+    # Auth
+    admin_user: dict = Depends(require_admin)
 ):
     """
-    Get paginated users information from users table (Admin only)
+    Get users information with search and pagination (Admin only)
 
-    Supports server-side pagination for efficient data loading.
+    **Search Parameters**:
+    - `email`: Case-insensitive partial match (e.g., "john" matches "john@example.com")
+    - `api_key`: Case-insensitive partial match (e.g., "gw_live" matches keys starting with "gw_live")
+    - `is_active`: Filter by active status (true = active only, false = inactive only, null = all)
 
-    Args:
-        limit: Number of users to return (1-1000, default 50)
-        offset: Number of users to skip (default 0)
+    **Pagination**:
+    - `limit`: Records per page (1-1000, default: 100)
+    - `offset`: Records to skip (default: 0)
 
-    Returns:
-        Paginated user data with total count and statistics
+    **Response**:
+    - `total_users`: Total matching the filters (not total in database)
+    - `has_more`: Whether more results exist beyond current page
+    - `users`: Current page of filtered users
+    - `statistics`: Stats calculated from **filtered results only**
     """
     try:
         from src.config.supabase_config import get_supabase_client
 
         client = get_supabase_client()
 
-        # Get total count of users (efficient - doesn't fetch data)
-        count_result = (
-            client.table("users")
-            .select("id", count="exact")
-            .execute()
-        )
-        total_users = count_result.count if count_result.count is not None else 0
-
-        # Get paginated users
-        result = (
-            client.table("users")
-            .select(
-                "id, username, email, api_key, credits, is_active, role, registration_date, "
-                "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
+        # Build base query for users data
+        # If searching by API key, we need to join with api_keys_new table
+        if api_key:
+            # Query with JOIN for API key search
+            data_query = (
+                client.table("users")
+                .select(
+                    "id, username, email, credits, is_active, role, registration_date, "
+                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at, "
+                    "api_keys_new!inner(api_key)",
+                    count="exact"
+                )
             )
-            .range(offset, offset + limit - 1)  # PostgREST uses inclusive range
-            .order("created_at", desc=True)  # Most recent users first
-            .execute()
+        else:
+            # Query without JOIN for better performance when not searching by API key
+            data_query = (
+                client.table("users")
+                .select(
+                    "id, username, email, credits, is_active, role, registration_date, "
+                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at",
+                    count="exact"
+                )
+            )
+
+        # Apply filters
+        if email:
+            # Case-insensitive partial match using ilike
+            data_query = data_query.ilike("email", f"%{email}%")
+
+        if api_key:
+            # Case-insensitive partial match for API key (already joined above)
+            data_query = data_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+
+        if is_active is not None:
+            # Exact match for boolean
+            data_query = data_query.eq("is_active", is_active)
+
+        # Apply sorting and pagination
+        data_query = data_query.order("created_at", desc=True).range(offset, offset + limit - 1)
+
+        # Execute query
+        result = data_query.execute()
+
+        # Get total count from result
+        total_users = result.count if result.count is not None else 0
+
+        # Get users data
+        users_data = result.data if result.data else []
+
+        # Clean up api_keys_new from response if it was included
+        users = []
+        for user in users_data:
+            # Remove the api_keys_new join data from response
+            user_clean = {k: v for k, v in user.items() if k != "api_keys_new"}
+            users.append(user_clean)
+
+        # Calculate has_more for pagination
+        has_more = (offset + limit) < total_users
+
+        # Build statistics query for ALL filtered users (not just current page)
+        # This ensures statistics reflect the filtered dataset
+        if api_key:
+            stats_query = (
+                client.table("users")
+                .select(
+                    "id, is_active, role, credits, subscription_status, "
+                    "api_keys_new!inner(api_key)"
+                )
+            )
+        else:
+            stats_query = (
+                client.table("users")
+                .select("id, is_active, role, credits, subscription_status")
+            )
+
+        # Apply same filters to statistics query
+        if email:
+            stats_query = stats_query.ilike("email", f"%{email}%")
+
+        if api_key:
+            stats_query = stats_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+
+        if is_active is not None:
+            stats_query = stats_query.eq("is_active", is_active)
+
+        # Execute statistics query
+        stats_result = stats_query.execute()
+        stats_data = stats_result.data if stats_result.data else []
+
+        # Calculate statistics from filtered results
+        active_users = sum(1 for u in stats_data if u.get("is_active", True))
+        inactive_users = total_users - active_users
+        admin_users = sum(1 for u in stats_data if u.get("role") == "admin")
+        developer_users = sum(1 for u in stats_data if u.get("role") == "developer")
+        regular_users = sum(
+            1 for u in stats_data if u.get("role") == "user" or u.get("role") is None
         )
 
-        if not result.data:
-            return {
-                "status": "success",
-                "total_users": total_users,
-                "users": [],
-                "limit": limit,
-                "offset": offset,
-                "has_more": False,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-
-        users = result.data
-        has_more = offset + len(users) < total_users
-
-        # Get global statistics (across all users, not just current page)
-        # Fetch all users for stats calculation (efficient - we cache this)
-        all_users_result = client.table("users").select("is_active, role, credits, subscription_status").execute()
-        all_users = all_users_result.data if all_users_result.data else []
-
-        active_users = len([u for u in all_users if u.get("is_active", True)])
-        admin_users = len([u for u in all_users if u.get("role") == "admin"])
-        developer_users = len([u for u in all_users if u.get("role") == "developer"])
-        regular_users = len([u for u in all_users if u.get("role") == "user" or u.get("role") is None])
-
-        # Calculate total credits across all users
-        total_credits = sum(float(u.get("credits", 0)) for u in all_users)
+        # Calculate total credits across filtered users
+        total_credits = sum(float(u.get("credits", 0)) for u in stats_data)
+        avg_credits = round(total_credits / total_users, 2) if total_users > 0 else 0
 
         # Get subscription status breakdown from filtered users
         subscription_stats = {}
-        for user in all_users:
+        for user in stats_data:
             status = user.get("subscription_status", "unknown")
             subscription_stats[status] = subscription_stats.get(status, 0) + 1
 
         return {
             "status": "success",
-            "total_users": total_users,
-            "limit": limit,
-            "offset": offset,
-            "has_more": has_more,
-            "returned_count": len(users),
+            "total_users": total_users,  # Total matching filters
+            "has_more": has_more,  # Whether more results exist
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "current_page": (offset // limit) + 1,
+                "total_pages": (total_users + limit - 1) // limit if total_users > 0 else 0,
+            },
+            "filters_applied": {
+                "email": email,
+                "api_key": api_key,
+                "is_active": is_active,
+            },
             "statistics": {
                 "active_users": active_users,
                 "inactive_users": inactive_users,
@@ -766,7 +834,7 @@ async def get_all_credit_transactions_admin(
     ),
     sort_order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
     include_summary: bool = Query(False, description="Include summary analytics in response"),
-    _: str = Depends(get_admin_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get all credit transactions across all users (Admin only)
@@ -889,7 +957,7 @@ async def get_all_credit_transactions_admin(
 
 
 @router.get("/admin/users/{user_id}", tags=["admin"])
-async def get_user_info_by_id(user_id: int, _: str = Depends(get_admin_key)):
+async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_admin)):
     """Get detailed information for a specific user (Admin only)"""
     try:
         from src.config.supabase_config import get_supabase_client
@@ -950,549 +1018,3 @@ async def get_user_info_by_id(user_id: int, _: str = Depends(get_admin_key)):
     except Exception as e:
         logger.error(f"Error getting user info for ID {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user information") from e
-
-
-@router.put("/admin/users/{user_id}", tags=["admin"])
-async def update_user(
-    user_id: int,
-    username: str | None = None,
-    email: str | None = None,
-    is_active: bool | None = None,
-    _: str = Depends(get_admin_key),
-):
-    """
-    Update user details (Admin only)
-
-    Update basic user information such as username, email, and active status.
-    At least one field must be provided.
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-        from src.db.users import invalidate_user_cache_by_id
-
-        client = get_supabase_client()
-
-        # Verify user exists
-        user_result = client.table("users").select("id").eq("id", user_id).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        # Build update data
-        update_data = {}
-        if username is not None:
-            update_data["username"] = username
-        if email is not None:
-            update_data["email"] = email
-        if is_active is not None:
-            update_data["is_active"] = is_active
-
-        if not update_data:
-            raise HTTPException(
-                status_code=400, detail="At least one field must be provided to update"
-            )
-
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-        # Update user
-        result = client.table("users").update(update_data).eq("id", user_id).execute()
-
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to update user")
-
-        # Invalidate cache
-        invalidate_user_cache_by_id(user_id)
-
-        updated_user = result.data[0]
-
-        return {
-            "status": "success",
-            "message": f"User {user_id} updated successfully",
-            "user": updated_user,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update user") from e
-
-
-@router.put("/admin/users/{user_id}/tier", tags=["admin"])
-async def update_user_tier(
-    user_id: int,
-    tier: str,
-    _: str = Depends(get_admin_key),
-):
-    """
-    Update user's subscription tier (Admin only)
-
-    Valid tiers: basic, pro, max
-    This updates the user's tier and can optionally assign a corresponding plan.
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-        from src.db.users import invalidate_user_cache_by_id
-
-        # Validate tier
-        valid_tiers = ["basic", "pro", "max"]
-        if tier.lower() not in valid_tiers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid tier. Must be one of: {', '.join(valid_tiers)}",
-            )
-
-        client = get_supabase_client()
-
-        # Verify user exists
-        user_result = client.table("users").select("id").eq("id", user_id).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        # Update tier
-        update_data = {
-            "tier": tier.lower(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        result = client.table("users").update(update_data).eq("id", user_id).execute()
-
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to update user tier")
-
-        # Invalidate cache
-        invalidate_user_cache_by_id(user_id)
-
-        return {
-            "status": "success",
-            "message": f"User {user_id} tier updated to {tier}",
-            "user_id": user_id,
-            "new_tier": tier.lower(),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating user tier for {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update user tier") from e
-
-
-@router.put("/admin/users/{user_id}/credits", tags=["admin"])
-async def set_user_credits(
-    user_id: int,
-    credits: float,
-    _: str = Depends(get_admin_key),
-):
-    """
-    Set user's credit balance (Admin only)
-
-    This sets the absolute credit balance (not adding to existing balance).
-    Use /admin/add_credits to add credits instead.
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-        from src.db.credit_transactions import log_credit_transaction
-        from src.db.users import invalidate_user_cache_by_id
-
-        if credits < 0:
-            raise HTTPException(status_code=400, detail="Credits cannot be negative")
-
-        client = get_supabase_client()
-
-        # Get current balance
-        user_result = client.table("users").select("id, credits").eq("id", user_id).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        balance_before = user_result.data[0]["credits"]
-
-        # Set new balance
-        update_data = {
-            "credits": credits,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        result = client.table("users").update(update_data).eq("id", user_id).execute()
-
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to set user credits")
-
-        # Log transaction
-        amount_diff = credits - balance_before
-        log_credit_transaction(
-            user_id=user_id,
-            amount=amount_diff,
-            transaction_type="admin_credit" if amount_diff > 0 else "admin_debit",
-            description=f"Admin set credits to {credits} (was {balance_before})",
-            balance_before=balance_before,
-            balance_after=credits,
-            metadata={"action": "set_credits", "method": "admin_api_key"},
-        )
-
-        # Invalidate cache
-        invalidate_user_cache_by_id(user_id)
-
-        return {
-            "status": "success",
-            "message": f"User {user_id} credits set to {credits}",
-            "user_id": user_id,
-            "balance_before": balance_before,
-            "balance_after": credits,
-            "difference": amount_diff,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error setting user credits for {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to set user credits") from e
-
-
-@router.patch("/admin/users/{user_id}/status", tags=["admin"])
-async def update_user_status(
-    user_id: int,
-    is_active: bool,
-    _: str = Depends(get_admin_key),
-):
-    """
-    Activate or deactivate a user (Admin only)
-
-    When deactivated, the user cannot use their API keys.
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-        from src.db.users import invalidate_user_cache_by_id
-
-        client = get_supabase_client()
-
-        # Verify user exists
-        user_result = client.table("users").select("id, is_active").eq("id", user_id).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        current_status = user_result.data[0].get("is_active", True)
-
-        # Update status
-        update_data = {
-            "is_active": is_active,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        result = client.table("users").update(update_data).eq("id", user_id).execute()
-
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to update user status")
-
-        # Invalidate cache
-        invalidate_user_cache_by_id(user_id)
-
-        status_text = "activated" if is_active else "deactivated"
-
-        return {
-            "status": "success",
-            "message": f"User {user_id} {status_text}",
-            "user_id": user_id,
-            "is_active": is_active,
-            "previous_status": current_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating user status for {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update user status") from e
-
-
-@router.delete("/admin/users/{user_id}", tags=["admin"])
-async def delete_user_by_id(
-    user_id: int,
-    confirm: bool = Query(False, description="Must be true to confirm deletion"),
-    _: str = Depends(get_admin_key),
-):
-    """
-    Delete a user and all associated data (Admin only)
-
-    This is a permanent action that cannot be undone. Requires confirmation.
-    Deletes:
-    - User account
-    - API keys
-    - Usage records
-    - Credit transactions
-    - All other associated data (via CASCADE)
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-        from src.db.users import invalidate_user_cache_by_id
-
-        if not confirm:
-            raise HTTPException(
-                status_code=400,
-                detail="Deletion must be confirmed. Set confirm=true in query parameters.",
-            )
-
-        client = get_supabase_client()
-
-        # Verify user exists and get their info before deletion
-        user_result = client.table("users").select("id, username, email").eq("id", user_id).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        user_info = user_result.data[0]
-
-        # Delete user (CASCADE will handle related records)
-        delete_result = client.table("users").delete().eq("id", user_id).execute()
-
-        if not delete_result.data:
-            raise HTTPException(status_code=500, detail="Failed to delete user")
-
-        # Invalidate cache
-        invalidate_user_cache_by_id(user_id)
-
-        logger.info(
-            f"Admin deleted user {user_id} ({user_info.get('username')}, {user_info.get('email')})"
-        )
-
-        return {
-            "status": "success",
-            "message": f"User {user_id} deleted successfully",
-            "deleted_user": {
-                "id": user_id,
-                "username": user_info.get("username"),
-                "email": user_info.get("email"),
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete user") from e
-
-
-@router.get("/admin/plans", tags=["admin"])
-async def get_all_plans(_: str = Depends(get_admin_key)):
-    """
-    Get all available subscription plans (Admin only)
-
-    Returns:
-        List of all active plans with their details
-    """
-    try:
-        from src.db.plans import get_all_plans
-
-        plans = get_all_plans()
-
-        return {
-            "status": "success",
-            "total_plans": len(plans),
-            "plans": plans,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Error getting all plans: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get plans") from e
-
-
-@router.post("/admin/users/{user_id}/assign-plan", tags=["admin"])
-async def assign_plan_to_user(
-    user_id: int,
-    plan_id: int = Query(..., description="Plan ID to assign"),
-    duration_months: int = Query(1, ge=1, le=120, description="Duration in months (1-120)"),
-    _: str = Depends(get_admin_key),
-):
-    """
-    Assign or update a user's subscription plan (Admin only)
-
-    This will:
-    - Deactivate any existing active plans for the user
-    - Create a new plan assignment with the specified duration
-    - Update user's subscription status to 'active'
-
-    Args:
-        user_id: User ID to assign plan to
-        plan_id: Plan ID to assign
-        duration_months: Duration of the plan in months (default: 1)
-
-    Returns:
-        Plan assignment details
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-        from src.db.plans import assign_user_plan, get_plan_by_id
-
-        # Verify user exists
-        client = get_supabase_client()
-        user_result = client.table("users").select("id, username, email").eq("id", user_id).execute()
-
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-
-        user_info = user_result.data[0]
-
-        # Verify plan exists
-        plan = get_plan_by_id(plan_id)
-        if not plan:
-            raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found")
-
-        # Assign the plan
-        success = assign_user_plan(user_id, plan_id, duration_months)
-
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to assign plan")
-
-        # Get the newly created plan assignment
-        new_plan_result = (
-            client.table("user_plans")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .execute()
-        )
-
-        user_plan = new_plan_result.data[0] if new_plan_result.data else None
-
-        return {
-            "status": "success",
-            "message": f"Plan '{plan['name']}' assigned to user {user_info['username']} for {duration_months} month(s)",
-            "user": {
-                "id": user_id,
-                "username": user_info["username"],
-                "email": user_info["email"],
-            },
-            "plan": {
-                "id": plan["id"],
-                "name": plan["name"],
-                "description": plan.get("description", ""),
-                "price_per_month": plan.get("price_per_month", 0),
-            },
-            "assignment": {
-                "started_at": user_plan["started_at"] if user_plan else None,
-                "expires_at": user_plan["expires_at"] if user_plan else None,
-                "duration_months": duration_months,
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error assigning plan {plan_id} to user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to assign plan: {str(e)}") from e
-
-
-@router.post("/admin/disable-trial", tags=["admin"])
-async def admin_disable_trial(req: DisableTrialRequest, _: str = Depends(get_admin_key)):
-    """
-    Disable trial status for a user
-
-    This endpoint converts a trial user to a regular user by:
-    1. Setting is_trial = FALSE in api_keys_new table
-    2. Updating subscription_status in users table
-    3. Clearing trial limits and usage tracking
-
-    Args:
-        req: DisableTrialRequest with user_id
-
-    Returns:
-        Success message with updated user status
-
-    Raises:
-        HTTPException: 404 if user not found, 500 on error
-    """
-    try:
-        client = get_supabase_client()
-        user_id = req.user_id
-
-        # Get user info first to verify they exist
-        user_result = client.table("users").select("id, username, email, subscription_status").eq("id", user_id).execute()
-
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
-
-        user_info = user_result.data[0]
-
-        # Update all API keys for this user in api_keys_new table
-        api_keys_update = (
-            client.table("api_keys_new")
-            .update({
-                "is_trial": False,
-                "trial_end_date": None,
-                "trial_used_tokens": 0,
-                "trial_used_requests": 0,
-                "trial_used_credits": 0.0,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            })
-            .eq("user_id", user_id)
-            .execute()
-        )
-
-        # Update subscription status in users table to 'active' (not 'trial')
-        users_update = (
-            client.table("users")
-            .update({
-                "subscription_status": "active",
-                "trial_expires_at": None,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            })
-            .eq("id", user_id)
-            .execute()
-        )
-
-        # Get count of updated API keys
-        updated_keys_count = len(api_keys_update.data) if api_keys_update.data else 0
-
-        # Invalidate trial cache for all user's API keys to ensure immediate effect
-        try:
-            from src.services.trial_validation import clear_trial_cache
-            from src.db.users import invalidate_user_cache_by_id
-
-            # Clear trial cache for all API keys belonging to this user
-            if api_keys_update.data:
-                for key_data in api_keys_update.data:
-                    api_key = key_data.get("api_key")
-                    if api_key:
-                        clear_trial_cache(api_key)
-
-            # Also invalidate user cache
-            invalidate_user_cache_by_id(user_id)
-            logger.info(f"Invalidated caches for user {user_id}")
-        except Exception as cache_error:
-            logger.warning(f"Failed to invalidate caches for user {user_id}: {cache_error}")
-
-        # Get updated user info
-        updated_user_result = client.table("users").select("*").eq("id", user_id).execute()
-        updated_user = updated_user_result.data[0] if updated_user_result.data else user_info
-
-        logger.info(
-            f"Trial disabled for user {user_id} ({user_info.get('username', 'unknown')}). "
-            f"Updated {updated_keys_count} API key(s)."
-        )
-
-        return {
-            "status": "success",
-            "message": f"Trial disabled for user {user_info.get('username', user_id)}",
-            "user": {
-                "id": user_id,
-                "username": user_info.get("username"),
-                "email": user_info.get("email"),
-                "previous_status": user_info.get("subscription_status"),
-                "new_status": updated_user.get("subscription_status"),
-            },
-            "updates": {
-                "api_keys_updated": updated_keys_count,
-                "trial_status_cleared": True,
-                "trial_limits_reset": True,
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error disabling trial for user {req.user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to disable trial: {str(e)}") from e
