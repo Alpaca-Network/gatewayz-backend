@@ -450,7 +450,8 @@ def transform_google_vertex_model_id(model_id: str) -> str:
     The full URL path is constructed in the API call functions.
 
     Args:
-        model_id: Model identifier (e.g., 'gemini-2.0-flash', 'gemini-1.5-pro')
+        model_id: Model identifier (e.g., 'gemini-2.0-flash', 'gemini-1.5-pro',
+                  'google/gemini-2.0-flash')
 
     Returns:
         Simple model name (e.g., 'gemini-2.5-flash-lite')
@@ -459,6 +460,10 @@ def transform_google_vertex_model_id(model_id: str) -> str:
     if model_id.startswith("projects/"):
         # Extract model name from projects/.../models/{model}
         return model_id.split("/models/")[-1]
+
+    # Strip provider prefix (e.g., 'google/gemini-2.0-flash' -> 'gemini-2.0-flash')
+    if model_id.startswith("google/"):
+        return model_id[7:]  # len("google/") == 7
 
     # Otherwise, return as-is
     return model_id
