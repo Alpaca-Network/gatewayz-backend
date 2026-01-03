@@ -128,6 +128,14 @@ MODEL_ID_ALIASES = {
     "xai/grok-beta": "x-ai/grok-3",
     "grok-vision-beta": "x-ai/grok-3",
     "xai/grok-vision-beta": "x-ai/grok-3",
+    # Zhipu AI GLM models - z-ai/ prefix aliases (OpenRouter format)
+    # GLM-4.7 doesn't exist, map to closest available version GLM-4-flash
+    "z-ai/glm-4.7": "z-ai/glm-4-flash",
+    "z-ai/glm-4-7": "z-ai/glm-4-flash",
+    "z-ai/glm4.7": "z-ai/glm-4-flash",
+    # Map z-ai/ prefixed GLM models to canonical OpenRouter IDs
+    "z-ai/glm-4.5": "z-ai/glm-4-flash",
+    "z-ai/glm-4.6": "z-ai/glm-4-flash",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
@@ -1395,6 +1403,12 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # OneRouter models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
         if org == "onerouter":
             return "onerouter"
+
+        # Z-AI / Zhipu AI GLM models (e.g., "z-ai/glm-4-flash", "z-ai/glm-4.6")
+        # These are hosted on OpenRouter with the z-ai/ prefix
+        if org == "z-ai" or org == "zai":
+            logger.info(f"Detected OpenRouter provider for Zhipu AI model '{model_id}'")
+            return "openrouter"
 
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
