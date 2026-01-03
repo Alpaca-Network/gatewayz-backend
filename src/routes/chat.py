@@ -1753,6 +1753,21 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "fal":
+                        # FAL models are for image/video generation, not chat completions
+                        # Return a clear error message directing users to the correct endpoint
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": {
+                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                    "and is not available through the chat completions endpoint. "
+                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                    "type": "invalid_request_error",
+                                    "code": "model_not_supported_for_chat",
+                                }
+                            },
+                        )
                     else:
                         # PERF: Use async streaming for OpenRouter (default provider)
                         # This is the most impactful optimization - prevents event loop blocking
@@ -2093,6 +2108,21 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_onerouter_response, resp_raw)
+                elif attempt_provider == "fal":
+                    # FAL models are for image/video generation, not chat completions
+                    # Return a clear error message directing users to the correct endpoint
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                "and is not available through the chat completions endpoint. "
+                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                "type": "invalid_request_error",
+                                "code": "model_not_supported_for_chat",
+                            }
+                        },
+                    )
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -2845,6 +2875,21 @@ async def unified_responses(
                         stream = await _to_thread(
                             make_groq_request_openai_stream, messages, request_model, **optional
                         )
+                    elif attempt_provider == "fal":
+                        # FAL models are for image/video generation, not chat completions
+                        # Return a clear error message directing users to the correct endpoint
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": {
+                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                    "and is not available through the chat completions endpoint. "
+                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                    "type": "invalid_request_error",
+                                    "code": "model_not_supported_for_chat",
+                                }
+                            },
+                        )
                     else:
                         stream = await _to_thread(
                             make_openrouter_request_openai_stream,
@@ -3228,6 +3273,21 @@ async def unified_responses(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_groq_response, resp_raw)
+                elif attempt_provider == "fal":
+                    # FAL models are for image/video generation, not chat completions
+                    # Return a clear error message directing users to the correct endpoint
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                "and is not available through the chat completions endpoint. "
+                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                "type": "invalid_request_error",
+                                "code": "model_not_supported_for_chat",
+                            }
+                        },
+                    )
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
