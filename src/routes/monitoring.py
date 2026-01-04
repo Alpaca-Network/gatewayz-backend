@@ -1296,3 +1296,162 @@ async def get_chat_completion_requests(
             status_code=500,
             detail=f"Failed to get chat completion requests: {str(e)}"
         )
+
+
+@router.get("/chat-requests/plot-data")
+async def get_chat_requests_plot_data(
+    model_id: int | None = Query(None, description="Filter by model ID"),
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
+    end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
+    api_key: str | None = Depends(get_optional_api_key)
+):
+    """
+    Get optimized chat completion request data for plotting.
+    
+    Returns:
+    - recent_requests: Last 10 full requests for display
+    - plot_data: ALL requests but only tokens and latency (compressed arrays)
+    
+    This is highly optimized for frontend plotting:
+    - Minimal data transfer (only what's needed for graphs)
+    - Compressed format (arrays instead of objects)
+    - Fast response time
+    
+    Examples:
+    - /api/monitoring/chat-requests/plot-data?model_id=123
+    - /api/monitoring/chat-requests/plot-data?provider_id=5
+    
+    Authentication: Optional. Provide API key for authenticated access.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        
+        client = get_supabase_client()
+        
+        # Build base query
+        base_filters = []
+        
+        if model_id is not None:
+            base_filters.append(("model_id", "eq", model_id))
+        
+        # Step 1: Get last 10 full requests for display
+        recent_query = client.table("chat_completion_requests").select(
+            """
+            id,
+            request_id,
+            model_id,
+            input_tokens,
+            output_tokens,
+            processing_time_ms,
+            status,
+            error_message,
+            created_at,
+            models!inner(
+                id,
+                model_id,
+                model_name,
+                provider_model_id,
+                providers!inner(
+                    id,
+                    name,
+                    slug
+                )
+            )
+            """
+        )
+        
+        # Apply filters
+        if model_id is not None:
+            recent_query = recent_query.eq("model_id", model_id)
+        
+        if provider_id is not None:
+            # Note: provider_id filter requires checking through models table
+            # We'll filter in Python after fetching
+            pass
+        
+        if start_date is not None:
+            recent_query = recent_query.gte("created_at", start_date)
+        
+        if end_date is not None:
+            recent_query = recent_query.lte("created_at", end_date)
+        
+        recent_query = recent_query.order("created_at", desc=True).limit(10)
+        recent_result = recent_query.execute()
+        
+        recent_requests = recent_result.data or []
+        
+        # Filter by provider_id if specified (post-fetch filtering)
+        if provider_id is not None:
+            recent_requests = [
+                r for r in recent_requests
+                if r.get("models", {}).get("providers", {}).get("id") == provider_id
+            ]
+        
+        # Add total_tokens to each recent request
+        for req in recent_requests:
+            req["total_tokens"] = req.get("input_tokens", 0) + req.get("output_tokens", 0)
+        
+        # Step 2: Get ALL requests but only tokens and latency for plotting
+        # This is much lighter - we only fetch 3 fields instead of all
+        plot_query = client.table("chat_completion_requests").select(
+            "input_tokens,output_tokens,processing_time_ms,created_at"
+        )
+        
+        # Apply same filters
+        if model_id is not None:
+            plot_query = plot_query.eq("model_id", model_id)
+        
+        if start_date is not None:
+            plot_query = plot_query.gte("created_at", start_date)
+        
+        if end_date is not None:
+            plot_query = plot_query.lte("created_at", end_date)
+        
+        # Order by created_at for chronological plotting
+        plot_query = plot_query.order("created_at", desc=False)
+        
+        plot_result = plot_query.execute()
+        all_requests = plot_result.data or []
+        
+        # Step 3: Compress into arrays for efficient transfer and plotting
+        # Instead of sending [{tokens: 100, latency: 50}, ...] we send [[100, 50], ...]
+        tokens_array = []
+        latency_array = []
+        timestamps_array = []
+        
+        for req in all_requests:
+            input_tokens = req.get("input_tokens", 0)
+            output_tokens = req.get("output_tokens", 0)
+            total_tokens = input_tokens + output_tokens
+            latency = req.get("processing_time_ms", 0)
+            timestamp = req.get("created_at")
+            
+            tokens_array.append(total_tokens)
+            latency_array.append(latency)
+            timestamps_array.append(timestamp)
+        
+        # Return compressed format
+        return {
+            "success": True,
+            "recent_requests": recent_requests[:10],  # Last 10 for display
+            "plot_data": {
+                "tokens": tokens_array,           # All total_tokens as array
+                "latency": latency_array,         # All latency_ms as array
+                "timestamps": timestamps_array    # All timestamps for x-axis
+            },
+            "metadata": {
+                "recent_count": len(recent_requests[:10]),
+                "total_count": len(all_requests),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "compression": "arrays",
+                "format_version": "1.0"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get plot data: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get plot data: {str(e)}"
+        )
