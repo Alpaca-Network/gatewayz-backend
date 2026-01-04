@@ -5,17 +5,16 @@ This middleware protects the staging environment by requiring admin authenticati
 for all routes except health checks and documentation.
 
 Only applies when APP_ENV=staging.
+
+This is a pure ASGI middleware (not BaseHTTPMiddleware) to properly support
+streaming responses without the "No response returned" error.
 """
 
 import asyncio
+import json
 import logging
-import os
-import secrets
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette import status
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.config.config import Config
 from src.services.user_lookup_cache import get_user
@@ -23,7 +22,7 @@ from src.services.user_lookup_cache import get_user
 logger = logging.getLogger(__name__)
 
 
-class StagingSecurityMiddleware(BaseHTTPMiddleware):
+class StagingSecurityMiddleware:
     """
     Security middleware for staging environment.
 
@@ -31,6 +30,8 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
     - ALL routes except /health require an admin user API key
     - Validates that the provided API key belongs to a user with admin privileges
     - Same API key is used for both staging access and endpoint authentication
+
+    This is a pure ASGI middleware to properly support streaming responses.
 
     Usage:
         # All endpoints require admin user API key to access staging
@@ -45,8 +46,8 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
         "/health",
     }
 
-    def __init__(self, app):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
         # Log security configuration on startup
         if Config.APP_ENV == "staging":
@@ -55,28 +56,40 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
                 "(all routes require admin user API key except /health)"
             )
 
-    async def dispatch(self, request: Request, call_next):
-        """Process request and enforce admin-only staging security."""
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Only process HTTP requests
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
         # Only apply in staging environment
         if Config.APP_ENV != "staging":
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
+
+        path = scope["path"]
 
         # Skip authentication for allowed paths (health checks, docs)
-        if request.url.path in self.ALLOWED_PATHS:
-            return await call_next(request)
+        if path in self.ALLOWED_PATHS:
+            await self.app(scope, receive, send)
+            return
 
-        # Extract Authorization header
-        auth_header = request.headers.get("Authorization", "")
+        # Extract headers from scope
+        headers = dict(scope.get("headers", []))
+        auth_header = headers.get(b"authorization", b"").decode()
 
         if not auth_header.startswith("Bearer "):
-            return self._access_denied_response("Missing or invalid Authorization header")
+            await self._send_access_denied(
+                send, "Missing or invalid Authorization header", scope
+            )
+            return
 
         # Extract the API key
         api_key = auth_header.replace("Bearer ", "").strip()
 
         if not api_key:
-            return self._access_denied_response("Empty API key")
+            await self._send_access_denied(send, "Empty API key", scope)
+            return
 
         # Validate that the API key belongs to an admin user
         try:
@@ -87,14 +100,18 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
                 logger.warning(
                     "Staging access denied: Invalid API key",
                     extra={
-                        "path": request.url.path,
-                        "ip": self._get_client_ip(request),
+                        "path": path,
+                        "ip": self._get_client_ip(scope),
                     },
                 )
-                return self._access_denied_response("Invalid API key")
+                await self._send_access_denied(send, "Invalid API key", scope)
+                return
 
             # Check if user has admin privileges
-            is_admin = user.get("is_admin", False) or user.get("role") in ["admin", "superadmin"]
+            is_admin = user.get("is_admin", False) or user.get("role") in [
+                "admin",
+                "superadmin",
+            ]
 
             if not is_admin:
                 logger.warning(
@@ -102,55 +119,73 @@ class StagingSecurityMiddleware(BaseHTTPMiddleware):
                     extra={
                         "user_id": user.get("id"),
                         "role": user.get("role"),
-                        "path": request.url.path,
-                        "ip": self._get_client_ip(request),
+                        "path": path,
+                        "ip": self._get_client_ip(scope),
                     },
                 )
-                return self._access_denied_response("Admin privileges required")
+                await self._send_access_denied(send, "Admin privileges required", scope)
+                return
 
             # User is admin - allow request
-            logger.debug(
-                f"Admin user {user.get('id')} accessing staging: {request.url.path}"
-            )
-            return await call_next(request)
+            logger.debug(f"Admin user {user.get('id')} accessing staging: {path}")
+            await self.app(scope, receive, send)
 
         except Exception as e:
             logger.error(
                 f"Error validating admin access: {e}",
                 extra={
-                    "path": request.url.path,
-                    "ip": self._get_client_ip(request),
+                    "path": path,
+                    "ip": self._get_client_ip(scope),
                 },
             )
-            return self._access_denied_response("Authentication error")
+            await self._send_access_denied(send, "Authentication error", scope)
 
-    def _get_client_ip(self, request: Request) -> str:
+    def _get_client_ip(self, scope: Scope) -> str:
         """
         Get the real client IP address.
 
         Checks X-Forwarded-For header first (for proxied requests),
         then falls back to direct connection IP.
         """
+        headers = dict(scope.get("headers", []))
+
         # Check X-Forwarded-For header (Railway/proxy sets this)
-        forwarded_for = request.headers.get("X-Forwarded-For")
+        forwarded_for = headers.get(b"x-forwarded-for", b"").decode()
         if forwarded_for:
             # X-Forwarded-For can be comma-separated, take the first IP
             return forwarded_for.split(",")[0].strip()
 
         # Fall back to direct connection IP
-        return request.client.host if request.client else "unknown"
+        client = scope.get("client")
+        return client[0] if client else "unknown"
 
-    def _access_denied_response(self, reason: str) -> JSONResponse:
-        """Return access denied response."""
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
+    async def _send_access_denied(
+        self, send: Send, reason: str, scope: Scope
+    ) -> None:
+        """Send access denied response."""
+        body = json.dumps(
+            {
                 "error": "Authentication Required",
                 "message": f"Staging environment requires admin user authentication: {reason}",
                 "hint": "Use 'Authorization: Bearer <ADMIN_USER_API_KEY>' header with an API key from a user with admin privileges.",
-            },
-            headers={
-                "WWW-Authenticate": "Bearer",
-                "X-Environment": "staging",
-            },
+            }
+        ).encode()
+
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"www-authenticate", b"Bearer"),
+                    (b"x-environment", b"staging"),
+                ],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body,
+            }
         )

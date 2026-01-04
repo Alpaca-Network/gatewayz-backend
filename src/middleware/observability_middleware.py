@@ -5,6 +5,9 @@ This middleware automatically tracks HTTP request metrics for all endpoints
 without requiring manual instrumentation. It exposes metrics compatible with
 the Grafana FastAPI Observability Dashboard (ID: 16110).
 
+This is a pure ASGI middleware (not BaseHTTPMiddleware) to properly support
+streaming responses without the "No response returned" error.
+
 Metrics exposed:
 - fastapi_requests_in_progress: Gauge of concurrent requests by method and endpoint
 - fastapi_request_size_bytes: Histogram of request body sizes by method and endpoint
@@ -15,11 +18,7 @@ Metrics exposed:
 
 import logging
 import time
-from collections.abc import Callable
-
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.services.prometheus_metrics import (
     APP_NAME,
@@ -34,7 +33,7 @@ from src.services.prometheus_metrics import (
 logger = logging.getLogger(__name__)
 
 
-class ObservabilityMiddleware(BaseHTTPMiddleware):
+class ObservabilityMiddleware:
     """
     Middleware for automatic request/response observability.
 
@@ -46,35 +45,34 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 
     This middleware should be added early in the middleware stack to capture
     accurate timing for all requests.
+
+    This is a pure ASGI middleware to properly support streaming responses.
     """
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """
-        Process request and track observability metrics.
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-        Args:
-            request: The incoming HTTP request
-            call_next: The next middleware/handler in the chain
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Only process HTTP requests
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        Returns:
-            The HTTP response from downstream handlers
-        """
-        # Extract method and path
-        method = request.method
-        path = request.url.path
+        method = scope["method"]
+        path = scope["path"]
 
         # Skip metrics collection for metrics endpoint to avoid recursion
         if path == "/metrics":
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         # Normalize path for metrics (group dynamic segments)
         endpoint = self._normalize_path(path)
 
         # Track request body size using Content-Length header
-        # We use the header instead of reading the body to avoid consuming the stream,
-        # which would prevent downstream handlers from accessing the request body
+        headers = dict(scope.get("headers", []))
         try:
-            request_content_length = request.headers.get("content-length")
+            request_content_length = headers.get(b"content-length", b"").decode()
             request_size = int(request_content_length) if request_content_length else 0
             fastapi_request_size_bytes.labels(
                 app_name=APP_NAME, method=method, path=endpoint
@@ -84,82 +82,80 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             request_size = 0
 
         # Increment in-progress requests gauge
-        fastapi_requests_in_progress.labels(app_name=APP_NAME, method=method, path=endpoint).inc()
+        fastapi_requests_in_progress.labels(
+            app_name=APP_NAME, method=method, path=endpoint
+        ).inc()
 
         # Record start time
         start_time = time.time()
 
-        try:
-            # Call the next middleware/handler
-            response = await call_next(request)
+        # Track status code and response size from response
+        status_code = 500  # Default to 500 if we don't get a response
+        response_size = 0
+        is_streaming = False
 
-            # Track response body size from Content-Length header if available
-            try:
+        async def send_with_metrics(message: Message) -> None:
+            nonlocal status_code, response_size, is_streaming
+
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 500)
+
                 # Try to get content length from response headers
-                response_content_length = response.headers.get("content-length")
+                response_headers = dict(message.get("headers", []))
+                response_content_length = response_headers.get(
+                    b"content-length", b""
+                ).decode()
+                content_type = response_headers.get(b"content-type", b"").decode().lower()
+
                 if response_content_length:
                     response_size = int(response_content_length)
                 else:
-                    # For streaming responses (SSE, chunked), we can't measure size
-                    # Check for body_iterator (StreamingResponse) or streaming content types
-                    content_type = response.headers.get("content-type", "").lower()
+                    # Check if this is a streaming response
                     is_streaming = (
-                        hasattr(response, "body_iterator")
-                        or "text/event-stream" in content_type
-                        or response.headers.get("x-accel-buffering", "").lower() == "no"
+                        "text/event-stream" in content_type
+                        or response_headers.get(b"x-accel-buffering", b"").decode().lower()
+                        == "no"
                     )
-                    if is_streaming:
-                        response_size = 0
-                    else:
-                        # Fallback: try to get body size if directly accessible
-                        # Note: We avoid accessing response.body for streaming responses
-                        # as it would consume the iterator
-                        response_size = len(response.body) if hasattr(response, "body") else 0
 
-                fastapi_response_size_bytes.labels(
-                    app_name=APP_NAME, method=method, path=endpoint
-                ).observe(response_size)
-            except (ValueError, TypeError, AttributeError) as e:
-                logger.debug(f"Could not determine response size: {e}")
-                # Record 0 if we can't determine size
-                fastapi_response_size_bytes.labels(
-                    app_name=APP_NAME, method=method, path=endpoint
-                ).observe(0)
+            elif message["type"] == "http.response.body":
+                # Accumulate body size for non-streaming responses
+                if not is_streaming:
+                    body = message.get("body", b"")
+                    if body:
+                        response_size += len(body)
 
-            # Record metrics
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_metrics)
+
+            # Record response size metric
+            fastapi_response_size_bytes.labels(
+                app_name=APP_NAME, method=method, path=endpoint
+            ).observe(response_size)
+
+        except Exception as e:
+            # Record error metrics for any unhandled exception
+            logger.error(f"Error processing request {method} {endpoint}: {e}")
+            status_code = 500
+            raise
+
+        finally:
+            # Always record duration and decrement in-progress gauge
             duration = time.time() - start_time
-            status_code = response.status_code
 
             # Record HTTP metrics (both new and legacy)
             fastapi_requests_duration_seconds.labels(
                 app_name=APP_NAME, method=method, path=endpoint
             ).observe(duration)
-            http_request_duration.labels(method=method, endpoint=endpoint).observe(duration)
+            http_request_duration.labels(method=method, endpoint=endpoint).observe(
+                duration
+            )
             record_http_response(
                 method=method, endpoint=endpoint, status_code=status_code, app_name=APP_NAME
             )
 
-            return response
-
-        except Exception as e:  # noqa: BLE001 - Broad exception catch needed for metrics
-            # Record error metrics for any unhandled exception
-            logger.error(f"Error processing request {method} {endpoint}: {e}")
-            duration = time.time() - start_time
-
-            # Record error response with 500 status
-            fastapi_requests_duration_seconds.labels(
-                app_name=APP_NAME, method=method, path=endpoint
-            ).observe(duration)
-            http_request_duration.labels(method=method, endpoint=endpoint).observe(duration)
-            record_http_response(
-                method=method, endpoint=endpoint, status_code=500, app_name=APP_NAME
-            )
-
-            # Re-raise the exception to be handled by FastAPI exception handlers
-            raise
-
-        finally:
-            # Always decrement in-progress requests gauge
+            # Decrement in-progress requests gauge
             fastapi_requests_in_progress.labels(
                 app_name=APP_NAME, method=method, path=endpoint
             ).dec()
@@ -200,7 +196,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 # Replace numeric segments with {id}
                 normalized_parts.append("{id}")
             # Check if this looks like a UUID (36 chars: 8-4-4-4-12 hex with hyphens)
-            elif len(part) == 36 and all(c in "0123456789abcdef-" for c in part.lower()):
+            elif len(part) == 36 and all(
+                c in "0123456789abcdef-" for c in part.lower()
+            ):
                 # UUID format detected, replace with {id}
                 normalized_parts.append("{id}")
             # Check if this looks like a hex string ID (hex characters without hyphens)
