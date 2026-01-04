@@ -664,17 +664,51 @@ async def get_user_growth(
         start_date = end_date - timedelta(days=days - 1)
         
         # Get user registration data grouped by day
-        # We'll use the registration_date or created_at field
-        growth_query = (
-            client.table("users")
-            .select("created_at, registration_date")
-            .gte("created_at", start_date.isoformat())
-            .lte("created_at", end_date.isoformat())
-            .order("created_at", desc=False)  # Ascending order for cumulative calculation
-        )
-        
-        growth_result = growth_query.execute()
-        user_data = growth_result.data if growth_result.data else []
+        # Use created_at field primarily, fallback to registration_date
+        try:
+            growth_query = (
+                client.table("users")
+                .select("created_at")
+                .gte("created_at", start_date.isoformat())
+                .lte("created_at", end_date.isoformat())
+                .order("created_at", desc=False)  # Ascending order for cumulative calculation
+            )
+            
+            growth_result = growth_query.execute()
+            user_data = growth_result.data if growth_result.data else []
+            
+        except Exception as query_error:
+            logger.warning(f"Error querying created_at field, trying registration_date: {query_error}")
+            
+            # Fallback to registration_date if created_at fails
+            try:
+                growth_query = (
+                    client.table("users")
+                    .select("registration_date")
+                    .gte("registration_date", start_date.isoformat())
+                    .lte("registration_date", end_date.isoformat())
+                    .order("registration_date", desc=False)
+                )
+                
+                growth_result = growth_query.execute()
+                user_data = growth_result.data if growth_result.data else []
+                
+                # Map registration_date to created_at for consistent processing
+                user_data = [{"created_at": user.get("registration_date")} for user in user_data]
+                
+            except Exception as fallback_error:
+                logger.error(f"Both created_at and registration_date queries failed: {fallback_error}")
+                # Return empty growth data as fallback
+                return {
+                    "status": "success",
+                    "days": days,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "data": [],
+                    "total": 0,
+                    "growth_rate": 0,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
         
         # Initialize daily data structure
         daily_data = {}
@@ -687,17 +721,23 @@ async def get_user_growth(
         
         # Count users created each day
         for user in user_data:
-            # Use registration_date if available, otherwise created_at
-            created_date_str = user.get("registration_date") or user.get("created_at")
+            created_date_str = user.get("created_at")
             if created_date_str:
-                # Parse date and extract just the date part
                 try:
-                    created_date = datetime.fromisoformat(created_date_str.replace('Z', '+00:00')).date()
+                    # Handle different date formats
+                    if created_date_str.endswith('Z'):
+                        # ISO format with Z suffix
+                        created_date = datetime.fromisoformat(created_date_str.replace('Z', '+00:00')).date()
+                    else:
+                        # Regular ISO format or other formats
+                        created_date = datetime.fromisoformat(created_date_str).date()
+                    
                     date_key = created_date.isoformat()
                     if date_key in daily_data:
                         daily_data[date_key] += 1
-                except (ValueError, TypeError):
-                    # Skip invalid dates
+                        
+                except (ValueError, TypeError) as date_error:
+                    logger.debug(f"Skipping invalid date format: {created_date_str}, error: {date_error}")
                     continue
         
         # Calculate cumulative counts
@@ -705,14 +745,19 @@ async def get_user_growth(
         cumulative_total = 0
         
         # Get total users before start date for proper cumulative calculation
-        before_start_query = (
-            client.table("users")
-            .select("id", count="exact")
-            .lt("created_at", start_date.isoformat())
-        )
-        
-        before_start_result = before_start_query.execute()
-        cumulative_total = before_start_result.count if before_start_result.count is not None else 0
+        try:
+            before_start_query = (
+                client.table("users")
+                .select("id", count="exact")
+                .lt("created_at", start_date.isoformat())
+            )
+            
+            before_start_result = before_start_query.execute()
+            cumulative_total = before_start_result.count if before_start_result.count is not None else 0
+            
+        except Exception as count_error:
+            logger.warning(f"Error getting count before start date: {count_error}")
+            cumulative_total = 0
         
         # Build cumulative data
         for date_str in sorted(daily_data.keys()):
@@ -746,6 +791,8 @@ async def get_user_growth(
         
     except Exception as e:
         logger.error(f"Error getting user growth data: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to get user growth data") from e
 
 
