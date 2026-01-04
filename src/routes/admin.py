@@ -775,8 +775,40 @@ async def get_all_users_info(
 
         client = get_supabase_client()
 
-        # Build base query for users data
-        # If searching by API key, we need to join with api_keys_new table
+        # Build count query first (without pagination, just filters)
+        # This ensures we get accurate total_users count for filtered results
+        if api_key:
+            count_query = (
+                client.table("users")
+                .select("id, api_keys_new!inner(api_key)", count="exact")
+            )
+        else:
+            count_query = (
+                client.table("users")
+                .select("id", count="exact")
+            )
+
+        # Apply filters to count query
+        if email:
+            count_query = count_query.ilike("email", f"%{email}%")
+
+        if api_key:
+            count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+
+        if is_active is not None:
+            count_query = count_query.eq("is_active", is_active)
+
+        # Execute count query
+        try:
+            count_result = count_query.execute()
+            total_users = count_result.count if count_result.count is not None else 0
+        except Exception as count_err:
+            logger.error(f"Error getting user count: {count_err}")
+            logger.error(f"Filters - email: {email}, api_key: {api_key}, is_active: {is_active}")
+            # Fallback to 0 if count fails
+            total_users = 0
+
+        # Build data query for actual user records
         if api_key:
             # Query with JOIN for API key search
             data_query = (
@@ -784,8 +816,7 @@ async def get_all_users_info(
                 .select(
                     "id, username, email, credits, is_active, role, registration_date, "
                     "auth_method, subscription_status, trial_expires_at, created_at, updated_at, "
-                    "api_keys_new!inner(api_key)",
-                    count="exact"
+                    "api_keys_new!inner(api_key)"
                 )
             )
         else:
@@ -794,35 +825,34 @@ async def get_all_users_info(
                 client.table("users")
                 .select(
                     "id, username, email, credits, is_active, role, registration_date, "
-                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at",
-                    count="exact"
+                    "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
                 )
             )
 
-        # Apply filters
+        # Apply filters to data query
         if email:
-            # Case-insensitive partial match using ilike
             data_query = data_query.ilike("email", f"%{email}%")
 
         if api_key:
-            # Case-insensitive partial match for API key (already joined above)
             data_query = data_query.ilike("api_keys_new.api_key", f"%{api_key}%")
 
         if is_active is not None:
-            # Exact match for boolean
             data_query = data_query.eq("is_active", is_active)
 
         # Apply sorting and pagination
         data_query = data_query.order("created_at", desc=True).range(offset, offset + limit - 1)
 
-        # Execute query
-        result = data_query.execute()
-
-        # Get total count from result
-        total_users = result.count if result.count is not None else 0
-
-        # Get users data
-        users_data = result.data if result.data else []
+        # Execute data query
+        try:
+            result = data_query.execute()
+            users_data = result.data if result.data else []
+        except Exception as data_err:
+            logger.error(f"Error fetching user data: {data_err}")
+            logger.error(f"Filters - email: {email}, api_key: {api_key}, is_active: {is_active}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch users: {str(data_err)}"
+            ) from data_err
 
         # Clean up api_keys_new from response if it was included
         users = []
@@ -912,9 +942,19 @@ async def get_all_users_info(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like the one from data_err above)
+        raise
     except Exception as e:
         logger.error(f"Error getting all users info: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get users information") from e
+        logger.error(f"Filters used - email: {email}, api_key: {api_key}, is_active: {is_active}")
+        logger.error(f"Pagination - limit: {limit}, offset: {offset}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get users information: {str(e)}"
+        ) from e
 
 
 @router.get("/admin/credit-transactions", tags=["admin"])
