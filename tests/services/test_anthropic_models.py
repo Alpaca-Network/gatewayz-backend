@@ -4,8 +4,7 @@ Tests the fetch_models_from_anthropic and normalize_anthropic_model functions
 which use the Anthropic Models API: https://docs.anthropic.com/en/api/models-list
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import httpx
 
 from src.services.models import (
@@ -68,7 +67,7 @@ class TestFetchModelsFromAnthropic:
         page1_response.status_code = 200
         page1_response.json.return_value = {
             "data": [
-                {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "type": "model"}
+                {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "created_at": "2024-10-22T00:00:00Z", "type": "model"}
             ],
             "has_more": True,
             "last_id": "claude-3-5-sonnet-20241022"
@@ -79,7 +78,7 @@ class TestFetchModelsFromAnthropic:
         page2_response.status_code = 200
         page2_response.json.return_value = {
             "data": [
-                {"id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "type": "model"}
+                {"id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "created_at": "2024-02-29T00:00:00Z", "type": "model"}
             ],
             "has_more": False,
             "last_id": "claude-3-opus-20240229"
@@ -102,8 +101,8 @@ class TestFetchModelsFromAnthropic:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
-                {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "type": "model"},
-                {"id": "some-other-model", "display_name": "Other Model", "type": "model"},
+                {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "created_at": "2024-10-22T00:00:00Z", "type": "model"},
+                {"id": "some-other-model", "display_name": "Other Model", "created_at": "2024-01-01T00:00:00Z", "type": "model"},
             ],
             "has_more": False
         }
