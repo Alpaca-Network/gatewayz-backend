@@ -711,7 +711,7 @@ async def get_all_users_info(
         # Calculate total credits across all users
         total_credits = sum(float(u.get("credits", 0)) for u in all_users)
 
-        # Get subscription status breakdown
+        # Get subscription status breakdown from filtered users
         subscription_stats = {}
         for user in all_users:
             status = user.get("subscription_status", "unknown")
@@ -726,15 +726,15 @@ async def get_all_users_info(
             "returned_count": len(users),
             "statistics": {
                 "active_users": active_users,
-                "inactive_users": total_users - active_users,
+                "inactive_users": inactive_users,
                 "admin_users": admin_users,
                 "developer_users": developer_users,
                 "regular_users": regular_users,
                 "total_credits": round(total_credits, 2),
-                "average_credits": round(total_credits / total_users, 2) if total_users > 0 else 0,
+                "average_credits": avg_credits,
                 "subscription_breakdown": subscription_stats,
             },
-            "users": users,
+            "users": users,  # Current page of users
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
