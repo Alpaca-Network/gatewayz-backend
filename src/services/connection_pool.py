@@ -485,6 +485,39 @@ def get_morpheus_pooled_client() -> OpenAI:
     )
 
 
+def get_openai_pooled_client() -> OpenAI:
+    """Get pooled client for OpenAI direct API.
+
+    OpenAI provides the official API for GPT models.
+    See: https://platform.openai.com/docs/api-reference
+    """
+    if not Config.OPENAI_API_KEY:
+        raise ValueError("OpenAI API key not configured")
+
+    return get_pooled_client(
+        provider="openai",
+        base_url="https://api.openai.com/v1",
+        api_key=Config.OPENAI_API_KEY,
+    )
+
+
+def get_anthropic_pooled_client() -> OpenAI:
+    """Get pooled client for Anthropic direct API (OpenAI-compatible endpoint).
+
+    Anthropic provides an OpenAI-compatible API endpoint for Claude models.
+    Note: For native Anthropic API, use the anthropic SDK directly.
+    See: https://docs.anthropic.com/en/api/openai-sdk
+    """
+    if not Config.ANTHROPIC_API_KEY:
+        raise ValueError("Anthropic API key not configured")
+
+    return get_pooled_client(
+        provider="anthropic",
+        base_url="https://api.anthropic.com/v1",
+        api_key=Config.ANTHROPIC_API_KEY,
+    )
+
+
 # =============================================================================
 # CONNECTION PRE-WARMING
 # =============================================================================
@@ -506,6 +539,8 @@ def warmup_provider_connections() -> dict[str, str]:
     """
     # Providers to pre-warm, ordered by typical traffic volume
     providers_to_warm = [
+        ("openai", get_openai_pooled_client),
+        ("anthropic", get_anthropic_pooled_client),
         ("openrouter", get_openrouter_pooled_client),
         ("fireworks", get_fireworks_pooled_client),
         ("together", get_together_pooled_client),
