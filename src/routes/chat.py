@@ -1084,7 +1084,8 @@ async def stream_generator(
     completion_tokens = 0
     total_tokens = 0
     start_time = time.monotonic()
-    rate_limit_mgr is not None and not trial.get("is_trial", False)
+    # NOTE: Previously had dead code: `rate_limit_mgr is not None and not trial.get("is_trial", False)`
+    # This expression evaluated but was never assigned or used - removed as no-op
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
@@ -2470,6 +2471,10 @@ async def chat_completions(
                 bt_output = " ".join(t for t in texts if t)
             else:
                 bt_output = str(bt_content)
+            # Safely get user_id and environment for anonymous users (user=None)
+            bt_user_id = user["id"] if user else "anonymous"
+            bt_environment = user.get("environment_tag", "live") if user else "live"
+            bt_is_trial = trial.get("is_trial", False) if trial else False
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -2478,15 +2483,15 @@ async def chat_completions(
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
                     "latency_ms": int(elapsed * 1000),
-                    "cost_usd": cost if not trial.get("is_trial", False) else 0.0,
+                    "cost_usd": cost if not bt_is_trial else 0.0,
                 },
                 metadata={
                     "model": model,
                     "provider": provider,
-                    "user_id": user["id"],
+                    "user_id": bt_user_id,
                     "session_id": session_id,
-                    "is_trial": trial.get("is_trial", False),
-                    "environment": user.get("environment_tag", "live"),
+                    "is_trial": bt_is_trial,
+                    "environment": bt_environment,
                 },
             )
             span.end()
@@ -3679,6 +3684,10 @@ async def unified_responses(
                     else:
                         bt_output = str(bt_content)
 
+            # Safely get user_id and environment for anonymous users (user=None)
+            bt_user_id = user["id"] if user else "anonymous"
+            bt_environment = user.get("environment_tag", "live") if user else "live"
+            bt_is_trial = trial.get("is_trial", False) if trial else False
             span.log(
                 input=input_messages,
                 output=bt_output,
@@ -3687,15 +3696,15 @@ async def unified_responses(
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
                     "latency_ms": int(elapsed * 1000),
-                    "cost_usd": cost if not trial.get("is_trial", False) else 0.0,
+                    "cost_usd": cost if not bt_is_trial else 0.0,
                 },
                 metadata={
                     "model": model,
                     "provider": provider,
-                    "user_id": user["id"],
+                    "user_id": bt_user_id,
                     "session_id": session_id,
-                    "is_trial": trial.get("is_trial", False),
-                    "environment": user.get("environment_tag", "live"),
+                    "is_trial": bt_is_trial,
+                    "environment": bt_environment,
                     "endpoint": "/v1/responses",
                 },
             )
