@@ -1,4 +1,9 @@
-"""Tests for Anthropic client"""
+"""Tests for Anthropic client.
+
+NOTE: The Anthropic client uses Anthropic's OpenAI-compatible API endpoint
+(https://docs.anthropic.com/en/api/openai-sdk), not the native Messages API.
+Therefore, tests mock `chat.completions.create` as per the OpenAI SDK interface.
+"""
 
 import pytest
 from unittest.mock import Mock, patch

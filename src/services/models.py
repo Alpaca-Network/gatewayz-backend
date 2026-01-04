@@ -474,6 +474,8 @@ def get_all_models_parallel():
             "google-vertex",
             "cloudflare-workers-ai",
             "clarifai",
+            "openai",
+            "anthropic",
         ]
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -555,6 +557,8 @@ def get_all_models_sequential():
     google_vertex_models = get_cached_models("google-vertex") or []
     cloudflare_workers_ai_models = get_cached_models("cloudflare-workers-ai") or []
     clarifai_models = get_cached_models("clarifai") or []
+    openai_models = get_cached_models("openai") or []
+    anthropic_models = get_cached_models("anthropic") or []
     return (
         openrouter_models
         + featherless_models
@@ -579,6 +583,8 @@ def get_all_models_sequential():
         + google_vertex_models
         + cloudflare_workers_ai_models
         + clarifai_models
+        + openai_models
+        + anthropic_models
     )
 
 
@@ -3999,16 +4005,29 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         display_name = display_name.replace("O1 ", "o1-")
         display_name = display_name.replace("O3 ", "o3-")
 
-        owned_by = openai_model.get("owned_by", "openai")
         description = f"OpenAI {model_id} model."
 
         # Determine context length based on model
-        context_length = 128000  # Default for most GPT-4 models
+        # Context lengths are aligned with manual_pricing.json values
         if "gpt-3.5" in model_id:
             context_length = 16385
         elif "gpt-4-32k" in model_id:
             context_length = 32768
-        elif "gpt-4o" in model_id or "o1" in model_id or "o3" in model_id:
+        elif "gpt-4o" in model_id:
+            context_length = 128000
+        elif model_id in ("o1", "o1-2024-12-17", "o3-mini"):
+            # Latest o1 and o3-mini have 200k context
+            context_length = 200000
+        elif "o1" in model_id or "o3" in model_id:
+            # o1-preview, o1-mini have 128k context
+            context_length = 128000
+        elif "gpt-4-turbo" in model_id:
+            context_length = 128000
+        elif "gpt-4" in model_id:
+            # Base gpt-4 models have 8k context
+            context_length = 8192
+        else:
+            # Default fallback
             context_length = 128000
 
         # Determine modality
