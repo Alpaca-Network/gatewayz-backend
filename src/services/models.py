@@ -474,6 +474,8 @@ def get_all_models_parallel():
             "google-vertex",
             "cloudflare-workers-ai",
             "clarifai",
+            "openai",
+            "anthropic",
         ]
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -555,6 +557,8 @@ def get_all_models_sequential():
     google_vertex_models = get_cached_models("google-vertex") or []
     cloudflare_workers_ai_models = get_cached_models("cloudflare-workers-ai") or []
     clarifai_models = get_cached_models("clarifai") or []
+    openai_models = get_cached_models("openai") or []
+    anthropic_models = get_cached_models("anthropic") or []
     return (
         openrouter_models
         + featherless_models
@@ -579,6 +583,8 @@ def get_all_models_sequential():
         + google_vertex_models
         + cloudflare_workers_ai_models
         + clarifai_models
+        + openai_models
+        + anthropic_models
     )
 
 
@@ -860,6 +866,24 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_clarifai()
             _register_canonical_records("clarifai", result)
+            return result if result is not None else []
+
+        if gateway == "openai":
+            from src.cache import _openai_models_cache
+            cached = _get_fresh_or_stale_cached_models(_openai_models_cache, "openai")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_openai()
+            _register_canonical_records("openai", result)
+            return result if result is not None else []
+
+        if gateway == "anthropic":
+            from src.cache import _anthropic_models_cache
+            cached = _get_fresh_or_stale_cached_models(_anthropic_models_cache, "anthropic")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_anthropic()
+            _register_canonical_records("anthropic", result)
             return result if result is not None else []
 
         if gateway == "all":
@@ -3899,4 +3923,315 @@ def normalize_alibaba_model(model) -> dict | None:
         return enrich_model_with_pricing(normalized, "alibaba-cloud")
     except Exception as e:
         logger.error("Failed to normalize Alibaba Cloud model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+# =============================================================================
+# OpenAI Direct Provider
+# =============================================================================
+
+
+def fetch_models_from_openai():
+    """Fetch models from OpenAI API and normalize to the catalog schema"""
+    try:
+        if not Config.OPENAI_API_KEY:
+            logger.error("OpenAI API key not configured")
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {Config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = httpx.get(
+            "https://api.openai.com/v1/models",
+            headers=headers,
+            timeout=20.0,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        raw_models = payload.get("data", [])
+
+        # Filter to only include chat models (GPT models)
+        chat_models = [
+            model for model in raw_models
+            if model and model.get("id", "").startswith(("gpt-", "o1-", "o3-", "chatgpt-"))
+        ]
+
+        normalized_models = [
+            norm_model
+            for model in chat_models
+            if model
+            for norm_model in [normalize_openai_model(model)]
+            if norm_model is not None
+        ]
+
+        from src.cache import _openai_models_cache
+        _openai_models_cache["data"] = normalized_models
+        _openai_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        # Clear error state on successful fetch
+        clear_gateway_error("openai")
+
+        logger.info(f"Fetched {len(normalized_models)} OpenAI models")
+        return _openai_models_cache["data"]
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("OpenAI HTTP error: %s", error_msg)
+        set_gateway_error("openai", error_msg)
+        return None
+    except Exception as e:
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from OpenAI: %s", error_msg)
+        set_gateway_error("openai", error_msg)
+        return None
+
+
+def normalize_openai_model(openai_model: dict) -> dict | None:
+    """Normalize OpenAI model entries to resemble OpenRouter model shape"""
+    try:
+        model_id = openai_model.get("id")
+        if not model_id:
+            return None
+
+        slug = f"openai/{model_id}"
+        provider_slug = "openai"
+
+        # Generate display name
+        display_name = model_id.replace("-", " ").replace("_", " ").title()
+        # Clean up common patterns
+        display_name = display_name.replace("Gpt ", "GPT-")
+        display_name = display_name.replace("O1 ", "o1-")
+        display_name = display_name.replace("O3 ", "o3-")
+
+        description = f"OpenAI {model_id} model."
+
+        # Determine context length based on model
+        # Context lengths are aligned with manual_pricing.json values
+        if "gpt-3.5" in model_id:
+            context_length = 16385
+        elif "gpt-4-32k" in model_id:
+            context_length = 32768
+        elif "gpt-4o" in model_id:
+            context_length = 128000
+        elif model_id in ("o1", "o1-2024-12-17", "o3-mini"):
+            # Latest o1 and o3-mini have 200k context
+            context_length = 200000
+        elif "o1" in model_id or "o3" in model_id:
+            # o1-preview, o1-mini have 128k context
+            context_length = 128000
+        elif "gpt-4-turbo" in model_id:
+            context_length = 128000
+        elif "gpt-4" in model_id:
+            # Base gpt-4 models have 8k context
+            context_length = 8192
+        else:
+            # Default fallback
+            context_length = 128000
+
+        # Determine modality
+        modality = MODALITY_TEXT_TO_TEXT
+        input_modalities = ["text"]
+        output_modalities = ["text"]
+        if "vision" in model_id or "gpt-4o" in model_id or "gpt-4-turbo" in model_id:
+            modality = "text+image->text"
+            input_modalities = ["text", "image"]
+
+        # Pricing will be enriched from manual pricing data
+        pricing = {
+            "prompt": None,
+            "completion": None,
+            "request": None,
+            "image": None,
+            "web_search": None,
+            "internal_reasoning": None,
+        }
+
+        architecture = {
+            "modality": modality,
+            "input_modalities": input_modalities,
+            "output_modalities": output_modalities,
+            "tokenizer": "tiktoken",
+            "instruct_type": "chat",
+        }
+
+        normalized = {
+            "id": slug,
+            "slug": slug,
+            "canonical_slug": slug,
+            "hugging_face_id": None,
+            "name": display_name,
+            "created": openai_model.get("created"),
+            "description": description,
+            "context_length": context_length,
+            "architecture": architecture,
+            "pricing": pricing,
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": ["temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty", "stop"],
+            "default_parameters": {},
+            "provider_slug": provider_slug,
+            "provider_site_url": "https://openai.com",
+            "model_logo_url": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/openai.svg",
+            "source_gateway": "openai",
+            "raw_openai": openai_model,
+        }
+
+        return enrich_model_with_pricing(normalized, "openai")
+    except Exception as e:
+        logger.error("Failed to normalize OpenAI model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+# =============================================================================
+# Anthropic Direct Provider
+# =============================================================================
+
+
+def fetch_models_from_anthropic():
+    """Fetch models from Anthropic API and normalize to the catalog schema
+
+    Note: Anthropic doesn't have a public models endpoint like OpenAI.
+    We use a static list of known models with their specifications.
+    """
+    try:
+        if not Config.ANTHROPIC_API_KEY:
+            logger.error("Anthropic API key not configured")
+            return None
+
+        # Anthropic doesn't have a public /models endpoint
+        # Define known models with their specifications
+        known_models = [
+            {
+                "id": "claude-3-5-sonnet-20241022",
+                "name": "Claude 3.5 Sonnet",
+                "description": "Most intelligent model, combining top-tier performance with improved speed.",
+                "context_length": 200000,
+                "max_output": 8192,
+                "vision": True,
+            },
+            {
+                "id": "claude-3-5-haiku-20241022",
+                "name": "Claude 3.5 Haiku",
+                "description": "Fastest and most cost-effective model for quick tasks.",
+                "context_length": 200000,
+                "max_output": 8192,
+                "vision": True,
+            },
+            {
+                "id": "claude-3-opus-20240229",
+                "name": "Claude 3 Opus",
+                "description": "Powerful model for highly complex tasks requiring deep analysis.",
+                "context_length": 200000,
+                "max_output": 4096,
+                "vision": True,
+            },
+            {
+                "id": "claude-3-sonnet-20240229",
+                "name": "Claude 3 Sonnet",
+                "description": "Balanced model offering strong performance and efficiency.",
+                "context_length": 200000,
+                "max_output": 4096,
+                "vision": True,
+            },
+            {
+                "id": "claude-3-haiku-20240307",
+                "name": "Claude 3 Haiku",
+                "description": "Fast and cost-effective model for routine tasks.",
+                "context_length": 200000,
+                "max_output": 4096,
+                "vision": True,
+            },
+        ]
+
+        normalized_models = [
+            norm_model
+            for model in known_models
+            if model
+            for norm_model in [normalize_anthropic_model(model)]
+            if norm_model is not None
+        ]
+
+        from src.cache import _anthropic_models_cache
+        _anthropic_models_cache["data"] = normalized_models
+        _anthropic_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        # Clear error state on successful fetch
+        clear_gateway_error("anthropic")
+
+        logger.info(f"Loaded {len(normalized_models)} Anthropic models")
+        return _anthropic_models_cache["data"]
+    except Exception as e:
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to load Anthropic models: %s", error_msg)
+        set_gateway_error("anthropic", error_msg)
+        return None
+
+
+def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
+    """Normalize Anthropic model entries to resemble OpenRouter model shape"""
+    try:
+        model_id = anthropic_model.get("id")
+        if not model_id:
+            return None
+
+        slug = f"anthropic/{model_id}"
+        provider_slug = "anthropic"
+
+        display_name = anthropic_model.get("name", model_id)
+        description = anthropic_model.get("description", f"Anthropic {model_id} model.")
+        context_length = anthropic_model.get("context_length", 200000)
+        max_output = anthropic_model.get("max_output", 4096)
+        has_vision = anthropic_model.get("vision", False)
+
+        # Determine modality
+        modality = "text+image->text" if has_vision else MODALITY_TEXT_TO_TEXT
+        input_modalities = ["text", "image"] if has_vision else ["text"]
+        output_modalities = ["text"]
+
+        # Pricing will be enriched from manual pricing data
+        pricing = {
+            "prompt": None,
+            "completion": None,
+            "request": None,
+            "image": None,
+            "web_search": None,
+            "internal_reasoning": None,
+        }
+
+        architecture = {
+            "modality": modality,
+            "input_modalities": input_modalities,
+            "output_modalities": output_modalities,
+            "tokenizer": "claude",
+            "instruct_type": "chat",
+            "max_output": max_output,
+        }
+
+        normalized = {
+            "id": slug,
+            "slug": slug,
+            "canonical_slug": slug,
+            "hugging_face_id": None,
+            "name": display_name,
+            "created": None,
+            "description": description,
+            "context_length": context_length,
+            "architecture": architecture,
+            "pricing": pricing,
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": ["temperature", "max_tokens", "top_p", "top_k", "stop_sequences"],
+            "default_parameters": {},
+            "provider_slug": provider_slug,
+            "provider_site_url": "https://anthropic.com",
+            "model_logo_url": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/anthropic.svg",
+            "source_gateway": "anthropic",
+            "raw_anthropic": anthropic_model,
+        }
+
+        return enrich_model_with_pricing(normalized, "anthropic")
+    except Exception as e:
+        logger.error("Failed to normalize Anthropic model: %s", sanitize_for_logging(str(e)))
         return None

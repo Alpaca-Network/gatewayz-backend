@@ -147,7 +147,10 @@ class Config:
     # Featherless.ai Configuration
     FEATHERLESS_API_KEY = os.environ.get("FEATHERLESS_API_KEY")
 
-    # Anthropic / Autonomous Monitoring
+    # OpenAI Direct API Configuration
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+    # Anthropic Direct API / Autonomous Monitoring
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
     # Chutes.ai Configuration
