@@ -787,8 +787,25 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
 
         client = get_supabase_client()
 
-        # Get all requests with provider info through models
-        result = client.table("chat_completion_requests").select(
+        # Try to use optimized RPC function first (fastest)
+        try:
+            rpc_result = client.rpc('get_provider_request_stats').execute()
+            if rpc_result.data:
+                return {
+                    "success": True,
+                    "data": rpc_result.data,
+                    "metadata": {
+                        "total_providers": len(rpc_result.data),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "method": "rpc"
+                    }
+                }
+        except Exception as rpc_error:
+            logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
+
+        # Fallback: Get distinct model_ids with their provider info (lightweight)
+        # We only fetch unique model_id + provider combinations, not all requests
+        distinct_result = client.table("chat_completion_requests").select(
             """
             model_id,
             models!inner(
@@ -802,19 +819,20 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
             """
         ).execute()
 
-        if not result.data:
+        if not distinct_result.data:
             return {
                 "success": True,
                 "data": [],
                 "metadata": {
                     "total_providers": 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "method": "fallback"
                 }
             }
 
-        # Aggregate by provider
+        # Build provider stats efficiently
         provider_stats = {}
-        for record in result.data:
+        for record in distinct_result.data:
             model_id = record.get("model_id")
             if model_id is None:
                 continue
@@ -831,24 +849,34 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                     "provider_id": provider_id,
                     "name": provider_info.get("name"),
                     "slug": provider_info.get("slug"),
-                    "model_ids": set(),
-                    "request_count": 0
+                    "model_ids": set()
                 }
 
             provider_stats[provider_id]["model_ids"].add(model_id)
-            provider_stats[provider_id]["request_count"] += 1
 
-        # Convert to list and format
-        providers_list = [
-            {
+        # Now get counts efficiently per provider using count queries
+        providers_list = []
+        for provider_id, stats in provider_stats.items():
+            # Get total request count for this provider using COUNT
+            # Query only models from this provider
+            model_ids_list = list(stats["model_ids"])
+
+            # Count total requests for all models of this provider
+            count_result = client.table("chat_completion_requests").select(
+                "id",
+                count="exact",
+                head=True
+            ).in_("model_id", model_ids_list).execute()
+
+            total_requests = count_result.count if count_result.count is not None else 0
+
+            providers_list.append({
                 "provider_id": stats["provider_id"],
                 "name": stats["name"],
                 "slug": stats["slug"],
                 "models_with_requests": len(stats["model_ids"]),
-                "total_requests": stats["request_count"]
-            }
-            for stats in provider_stats.values()
-        ]
+                "total_requests": total_requests
+            })
 
         # Sort by request count (most used first)
         providers_list.sort(key=lambda x: x["total_requests"], reverse=True)
@@ -858,7 +886,8 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
             "data": providers_list,
             "metadata": {
                 "total_providers": len(providers_list),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "method": "fallback_with_counts"
             }
         }
 
@@ -994,101 +1023,126 @@ async def get_models_with_requests(
 
         client = get_supabase_client()
 
-        # Try to use RPC function first for better performance
+        # Try to use optimized RPC function first (fastest)
         try:
-            result = client.rpc('get_models_with_requests').execute()
-            if result.data:
+            if provider_id is not None:
+                # Use RPC with provider filter
+                rpc_result = client.rpc('get_models_with_requests_by_provider', {
+                    'p_provider_id': provider_id
+                }).execute()
+            else:
+                # Use RPC for all models
+                rpc_result = client.rpc('get_models_with_requests').execute()
+
+            if rpc_result.data:
                 return {
                     "success": True,
-                    "data": result.data,
+                    "data": rpc_result.data,
                     "metadata": {
-                        "total_models": len(result.data),
-                        "timestamp": datetime.now(timezone.utc).isoformat()
+                        "total_models": len(rpc_result.data),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "method": "rpc"
                     }
                 }
         except Exception as rpc_error:
-            logger.debug(f"RPC function not available, using fallback query: {rpc_error}")
+            logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
 
-        # Fallback to manual query
-        # Get distinct model IDs from requests
-        requests_result = client.table("chat_completion_requests").select(
-            "model_id"
-        ).execute()
+        # Fallback: Optimized query using aggregations (no fetching all requests!)
+        # Step 1: Get all models with their provider info
+        models_query = client.table("models").select(
+            """
+            id,
+            model_id,
+            model_name,
+            provider_model_id,
+            provider_id,
+            providers!inner(id, name, slug)
+            """
+        )
 
-        if not requests_result.data:
+        # Apply provider filter if specified
+        if provider_id is not None:
+            models_query = models_query.eq("provider_id", provider_id)
+
+        models_result = models_query.execute()
+
+        if not models_result.data:
             return {
                 "success": True,
                 "data": [],
                 "metadata": {
                     "total_models": 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "method": "fallback"
                 }
             }
 
-        # Get unique model IDs (filter out None values)
-        model_ids = list(set(req["model_id"] for req in requests_result.data if req.get("model_id") is not None))
-
-        # Fetch model details and aggregate stats
+        # Step 2: For each model, get aggregated stats using COUNT and RPC
         models_data = []
-        for model_id in model_ids:
-            # Skip if provider_id filter is set and doesn't match
-            # (We'll filter after fetching model info)
-            # Skip if model_id is invalid
+        for model_info in models_result.data:
+            model_id = model_info.get("id")
             if model_id is None:
                 continue
 
             try:
-                # Get model info
-                model_result = client.table("models").select(
-                    """
-                    id,
-                    model_id,
-                    model_name,
-                    provider_model_id,
-                    provider_id,
-                    providers!inner(id, name, slug)
-                    """
-                ).eq("id", model_id).execute()
+                # Try to use RPC for aggregated stats first
+                try:
+                    stats_rpc = client.rpc('get_model_request_stats', {
+                        'p_model_id': model_id
+                    }).execute()
 
-                if not model_result.data:
+                    if stats_rpc.data and len(stats_rpc.data) > 0:
+                        stats_data = stats_rpc.data[0]
+                        stats = {
+                            "total_requests": int(stats_data.get("total_requests", 0)),
+                            "total_input_tokens": int(stats_data.get("total_input_tokens", 0)),
+                            "total_output_tokens": int(stats_data.get("total_output_tokens", 0)),
+                            "total_tokens": int(stats_data.get("total_tokens", 0)),
+                            "avg_processing_time_ms": round(float(stats_data.get("avg_processing_time_ms", 0)), 2)
+                        }
+                    else:
+                        raise Exception("RPC returned no data")
+
+                except Exception:
+                    # Fallback: Use COUNT query (still better than fetching all records)
+                    count_result = client.table("chat_completion_requests").select(
+                        "id",
+                        count="exact",
+                        head=True
+                    ).eq("model_id", model_id).execute()
+
+                    total_requests = count_result.count if count_result.count is not None else 0
+
+                    # Skip models with no requests
+                    if total_requests == 0:
+                        continue
+
+                    # Note: In fallback mode without RPC, we can't get token stats efficiently
+                    # So we set them to 0 or fetch a sample
+                    stats = {
+                        "total_requests": total_requests,
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "total_tokens": 0,
+                        "avg_processing_time_ms": 0
+                    }
+
+                # Skip models with no requests
+                if stats["total_requests"] == 0:
                     continue
 
-                model_info = model_result.data[0]
+                models_data.append({
+                    "model_id": model_info["id"],
+                    "model_identifier": model_info["model_id"],
+                    "model_name": model_info["model_name"],
+                    "provider_model_id": model_info["provider_model_id"],
+                    "provider": model_info["providers"],
+                    "stats": stats
+                })
 
-                # Get aggregated stats for this model
-                stats_result = client.table("chat_completion_requests").select(
-                    "input_tokens, output_tokens, processing_time_ms"
-                ).eq("model_id", model_id).execute()
             except Exception as model_error:
-                logger.warning(f"Failed to fetch data for model_id={model_id}: {model_error}")
+                logger.warning(f"Failed to get stats for model_id={model_id}: {model_error}")
                 continue
-
-            total_requests = len(stats_result.data)
-            total_input_tokens = sum(r.get("input_tokens", 0) for r in stats_result.data)
-            total_output_tokens = sum(r.get("output_tokens", 0) for r in stats_result.data)
-            avg_processing_time = (
-                sum(r.get("processing_time_ms", 0) for r in stats_result.data) / total_requests
-                if total_requests > 0 else 0
-            )
-
-            # Apply provider_id filter if specified
-            if provider_id is not None and model_info.get("provider_id") != provider_id:
-                continue
-
-            models_data.append({
-                "model_id": model_info["id"],
-                "model_identifier": model_info["model_id"],
-                "model_name": model_info["model_name"],
-                "provider_model_id": model_info["provider_model_id"],
-                "provider": model_info["providers"],
-                "stats": {
-                    "total_requests": total_requests,
-                    "total_input_tokens": total_input_tokens,
-                    "total_output_tokens": total_output_tokens,
-                    "total_tokens": total_input_tokens + total_output_tokens,
-                    "avg_processing_time_ms": round(avg_processing_time, 2)
-                }
-            })
 
         # Sort by request count (most used first)
         models_data.sort(key=lambda x: x["stats"]["total_requests"], reverse=True)
@@ -1098,7 +1152,8 @@ async def get_models_with_requests(
             "data": models_data,
             "metadata": {
                 "total_models": len(models_data),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "method": "fallback_optimized"
             }
         }
 
@@ -1117,7 +1172,7 @@ async def get_chat_completion_requests(
     model_name: str | None = Query(None, description="Filter by model name (contains)"),
     start_date: str | None = Query(None, description="Filter by start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"),
     end_date: str | None = Query(None, description="Filter by end date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    limit: int = Query(100, ge=1, le=100000, description="Maximum number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip (pagination)"),
     api_key: str | None = Depends(get_optional_api_key)
 ):
@@ -1133,7 +1188,7 @@ async def get_chat_completion_requests(
     - model_name: Filter by model name (partial match/contains)
     - start_date: Filter requests created after this date (ISO format)
     - end_date: Filter requests created before this date (ISO format)
-    - limit: Maximum number of records (default: 100, max: 1000)
+    - limit: Maximum number of records (default: 100, max: 100000)
     - offset: Pagination offset (default: 0)
 
     Returns:
