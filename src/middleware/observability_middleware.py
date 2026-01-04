@@ -101,20 +101,35 @@ class ObservabilityMiddleware:
                 status_code = message.get("status", 500)
 
                 # Try to get content length from response headers
+                # Use safe decoding to handle potentially malformed headers
                 response_headers = dict(message.get("headers", []))
-                response_content_length = response_headers.get(
-                    b"content-length", b""
-                ).decode()
-                content_type = response_headers.get(b"content-type", b"").decode().lower()
+                try:
+                    response_content_length = response_headers.get(
+                        b"content-length", b""
+                    ).decode("utf-8", errors="replace")
+                    content_type = response_headers.get(
+                        b"content-type", b""
+                    ).decode("utf-8", errors="replace").lower()
+                except (AttributeError, UnicodeDecodeError):
+                    response_content_length = ""
+                    content_type = ""
 
                 if response_content_length:
-                    response_size = int(response_content_length)
+                    try:
+                        response_size = int(response_content_length)
+                    except ValueError:
+                        response_size = 0
                 else:
                     # Check if this is a streaming response
+                    try:
+                        x_accel = response_headers.get(
+                            b"x-accel-buffering", b""
+                        ).decode("utf-8", errors="replace").lower()
+                    except (AttributeError, UnicodeDecodeError):
+                        x_accel = ""
                     is_streaming = (
                         "text/event-stream" in content_type
-                        or response_headers.get(b"x-accel-buffering", b"").decode().lower()
-                        == "no"
+                        or x_accel == "no"
                     )
 
             elif message["type"] == "http.response.body":

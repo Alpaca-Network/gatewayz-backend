@@ -220,13 +220,24 @@ class AutoSentryMiddleware:
         user_context = {}
 
         # Try to get user from scope state (set by auth middleware)
-        state = scope.get("state", {})
-        if hasattr(state, "user_id"):
-            user_context["id"] = state.user_id
-        if hasattr(state, "email"):
-            user_context["email"] = state.email
-        if hasattr(state, "api_key_id"):
-            user_context["api_key_id"] = state.api_key_id
+        # State can be either a Starlette State object (with attributes) or a dict
+        state = scope.get("state")
+        if state is not None:
+            # Handle both object-style (State) and dict-style access
+            if hasattr(state, "user_id"):
+                user_context["id"] = state.user_id
+            elif isinstance(state, dict) and "user_id" in state:
+                user_context["id"] = state["user_id"]
+
+            if hasattr(state, "email"):
+                user_context["email"] = state.email
+            elif isinstance(state, dict) and "email" in state:
+                user_context["email"] = state["email"]
+
+            if hasattr(state, "api_key_id"):
+                user_context["api_key_id"] = state.api_key_id
+            elif isinstance(state, dict) and "api_key_id" in state:
+                user_context["api_key_id"] = state["api_key_id"]
 
         # Try to get user from authorization header (hash it for privacy)
         headers = dict(scope.get("headers", []))

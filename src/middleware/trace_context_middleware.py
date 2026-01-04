@@ -57,11 +57,17 @@ class TraceContextMiddleware:
         span_id = get_current_span_id()
 
         # Create log context with trace IDs
+        # Safely extract client host - client is a (host, port) tuple or None
         client = scope.get("client")
+        try:
+            client_host = client[0] if client and len(client) > 0 else None
+        except (TypeError, IndexError):
+            client_host = None
+
         log_extra = {
             "path": path,
             "method": method,
-            "client_host": client[0] if client else None,
+            "client_host": client_host,
         }
 
         if trace_id:

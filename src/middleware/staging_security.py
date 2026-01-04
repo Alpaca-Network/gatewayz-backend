@@ -14,7 +14,7 @@ import asyncio
 import json
 import logging
 
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.config.config import Config
 from src.services.user_lookup_cache import get_user
@@ -126,10 +126,6 @@ class StagingSecurityMiddleware:
                 await self._send_access_denied(send, "Admin privileges required", scope)
                 return
 
-            # User is admin - allow request
-            logger.debug(f"Admin user {user.get('id')} accessing staging: {path}")
-            await self.app(scope, receive, send)
-
         except Exception as e:
             logger.error(
                 f"Error validating admin access: {e}",
@@ -139,6 +135,13 @@ class StagingSecurityMiddleware:
                 },
             )
             await self._send_access_denied(send, "Authentication error", scope)
+            return
+
+        # User is admin - allow request
+        # NOTE: We call the app outside the try/except to avoid sending a duplicate
+        # http.response.start if the downstream app raises after starting a response
+        logger.debug(f"Admin user {user.get('id')} accessing staging: {path}")
+        await self.app(scope, receive, send)
 
     def _get_client_ip(self, scope: Scope) -> str:
         """
