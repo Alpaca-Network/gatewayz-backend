@@ -4092,62 +4092,55 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
 def fetch_models_from_anthropic():
     """Fetch models from Anthropic API and normalize to the catalog schema
 
-    Note: Anthropic doesn't have a public models endpoint like OpenAI.
-    We use a static list of known models with their specifications.
+    Uses the Anthropic Models API: https://docs.anthropic.com/en/api/models-list
     """
     try:
         if not Config.ANTHROPIC_API_KEY:
             logger.error("Anthropic API key not configured")
             return None
 
-        # Anthropic doesn't have a public /models endpoint
-        # Define known models with their specifications
-        known_models = [
-            {
-                "id": "claude-3-5-sonnet-20241022",
-                "name": "Claude 3.5 Sonnet",
-                "description": "Most intelligent model, combining top-tier performance with improved speed.",
-                "context_length": 200000,
-                "max_output": 8192,
-                "vision": True,
-            },
-            {
-                "id": "claude-3-5-haiku-20241022",
-                "name": "Claude 3.5 Haiku",
-                "description": "Fastest and most cost-effective model for quick tasks.",
-                "context_length": 200000,
-                "max_output": 8192,
-                "vision": True,
-            },
-            {
-                "id": "claude-3-opus-20240229",
-                "name": "Claude 3 Opus",
-                "description": "Powerful model for highly complex tasks requiring deep analysis.",
-                "context_length": 200000,
-                "max_output": 4096,
-                "vision": True,
-            },
-            {
-                "id": "claude-3-sonnet-20240229",
-                "name": "Claude 3 Sonnet",
-                "description": "Balanced model offering strong performance and efficiency.",
-                "context_length": 200000,
-                "max_output": 4096,
-                "vision": True,
-            },
-            {
-                "id": "claude-3-haiku-20240307",
-                "name": "Claude 3 Haiku",
-                "description": "Fast and cost-effective model for routine tasks.",
-                "context_length": 200000,
-                "max_output": 4096,
-                "vision": True,
-            },
+        headers = {
+            "x-api-key": Config.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+
+        all_models = []
+        after_id = None
+
+        # Paginate through all models
+        while True:
+            url = "https://api.anthropic.com/v1/models"
+            params = {"limit": 100}
+            if after_id:
+                params["after_id"] = after_id
+
+            response = httpx.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=20.0,
+            )
+            response.raise_for_status()
+
+            payload = response.json()
+            models_data = payload.get("data", [])
+            all_models.extend(models_data)
+
+            # Check if there are more pages
+            if not payload.get("has_more", False):
+                break
+            after_id = payload.get("last_id")
+
+        # Filter to only include Claude models (exclude any non-chat models)
+        chat_models = [
+            model for model in all_models
+            if model and model.get("id", "").startswith("claude-")
         ]
 
         normalized_models = [
             norm_model
-            for model in known_models
+            for model in chat_models
             if model
             for norm_model in [normalize_anthropic_model(model)]
             if norm_model is not None
@@ -4160,17 +4153,31 @@ def fetch_models_from_anthropic():
         # Clear error state on successful fetch
         clear_gateway_error("anthropic")
 
-        logger.info(f"Loaded {len(normalized_models)} Anthropic models")
+        logger.info(f"Fetched {len(normalized_models)} Anthropic models from API")
         return _anthropic_models_cache["data"]
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("Anthropic HTTP error: %s", error_msg)
+        set_gateway_error("anthropic", error_msg)
+        return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
-        logger.error("Failed to load Anthropic models: %s", error_msg)
+        logger.error("Failed to fetch models from Anthropic: %s", error_msg)
         set_gateway_error("anthropic", error_msg)
         return None
 
 
 def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
-    """Normalize Anthropic model entries to resemble OpenRouter model shape"""
+    """Normalize Anthropic model entries to resemble OpenRouter model shape
+
+    API response format:
+    {
+        "id": "claude-3-5-sonnet-20241022",
+        "display_name": "Claude 3.5 Sonnet",
+        "created_at": "2024-10-22T00:00:00Z",
+        "type": "model"
+    }
+    """
     try:
         model_id = anthropic_model.get("id")
         if not model_id:
@@ -4179,11 +4186,26 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
         slug = f"anthropic/{model_id}"
         provider_slug = "anthropic"
 
-        display_name = anthropic_model.get("name", model_id)
-        description = anthropic_model.get("description", f"Anthropic {model_id} model.")
-        context_length = anthropic_model.get("context_length", 200000)
-        max_output = anthropic_model.get("max_output", 4096)
-        has_vision = anthropic_model.get("vision", False)
+        # Use display_name from API, fall back to formatted model_id
+        display_name = anthropic_model.get("display_name") or anthropic_model.get("name", model_id)
+        created_at = anthropic_model.get("created_at")
+
+        # Generate description based on model
+        description = f"Anthropic {display_name} model."
+
+        # Determine context length based on model generation
+        # Claude 3.x models all have 200k context
+        context_length = 200000
+
+        # Determine max output based on model
+        # Claude 3.5 models have 8192 max output, older models have 4096
+        if "3-5" in model_id or "3.5" in model_id:
+            max_output = 8192
+        else:
+            max_output = 4096
+
+        # All Claude 3+ models support vision
+        has_vision = model_id.startswith("claude-3")
 
         # Determine modality
         modality = "text+image->text" if has_vision else MODALITY_TEXT_TO_TEXT
@@ -4215,7 +4237,7 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
             "canonical_slug": slug,
             "hugging_face_id": None,
             "name": display_name,
-            "created": None,
+            "created": created_at,
             "description": description,
             "context_length": context_length,
             "architecture": architecture,
