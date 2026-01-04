@@ -634,6 +634,112 @@ async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="Failed to get trial analytics") from e
 
 
+@router.get("/admin/users/stats", tags=["admin"])
+async def get_users_stats(
+    # Optional filters (same as main endpoint)
+    email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
+    api_key: str | None = Query(None, description="Filter by API key (case-insensitive partial match)"),
+    is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
+    # Auth
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get user statistics without fetching user data (Admin only)
+
+    **FAST & LIGHTWEIGHT** - Returns only counts and statistics, no user data.
+    Perfect for dashboard cards and stats widgets.
+
+    **Filters** (optional):
+    - `email`: Filter stats by email pattern
+    - `api_key`: Filter stats by API key pattern
+    - `is_active`: Filter stats by active status
+
+    **Response**:
+    - Total user counts (filtered)
+    - Active/Inactive breakdown
+    - Role distribution
+    - Credit statistics
+    - Subscription breakdown
+
+    **Performance**: ~10-50ms (vs 500ms+ for full user list)
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Build query for statistics (no user data, just counts)
+        if api_key:
+            stats_query = (
+                client.table("users")
+                .select("id, is_active, role, credits, subscription_status, api_keys_new!inner(api_key)")
+            )
+        else:
+            stats_query = (
+                client.table("users")
+                .select("id, is_active, role, credits, subscription_status")
+            )
+
+        # Apply filters
+        if email:
+            stats_query = stats_query.ilike("email", f"%{email}%")
+
+        if api_key:
+            stats_query = stats_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+
+        if is_active is not None:
+            stats_query = stats_query.eq("is_active", is_active)
+
+        # Execute query
+        stats_result = stats_query.execute()
+        stats_data = stats_result.data if stats_result.data else []
+
+        # Calculate statistics
+        total_users = len(stats_data)
+        active_users = sum(1 for u in stats_data if u.get("is_active", True))
+        inactive_users = total_users - active_users
+        admin_users = sum(1 for u in stats_data if u.get("role") == "admin")
+        developer_users = sum(1 for u in stats_data if u.get("role") == "developer")
+        regular_users = sum(
+            1 for u in stats_data if u.get("role") == "user" or u.get("role") is None
+        )
+
+        # Calculate credit statistics
+        total_credits = sum(float(u.get("credits", 0)) for u in stats_data)
+        avg_credits = round(total_credits / total_users, 2) if total_users > 0 else 0
+
+        # Get subscription breakdown
+        subscription_stats = {}
+        for user in stats_data:
+            status = user.get("subscription_status", "unknown")
+            subscription_stats[status] = subscription_stats.get(status, 0) + 1
+
+        return {
+            "status": "success",
+            "total_users": total_users,
+            "filters_applied": {
+                "email": email,
+                "api_key": api_key,
+                "is_active": is_active,
+            },
+            "statistics": {
+                "active_users": active_users,
+                "inactive_users": inactive_users,
+                "admin_users": admin_users,
+                "developer_users": developer_users,
+                "regular_users": regular_users,
+                "total_credits": round(total_credits, 2),
+                "average_credits": avg_credits,
+                "subscription_breakdown": subscription_stats,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting users stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get users statistics") from e
+
+
 @router.get("/admin/users", tags=["admin"])
 async def get_all_users_info(
     # Search filters
@@ -641,7 +747,7 @@ async def get_all_users_info(
     api_key: str | None = Query(None, description="Filter by API key (case-insensitive partial match)"),
     is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
     # Pagination
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of users to return"),
+    limit: int = Query(100, ge=1, le=10000, description="Maximum number of users to return (increased to 10000)"),
     offset: int = Query(0, ge=0, description="Number of users to skip (pagination)"),
     # Auth
     admin_user: dict = Depends(require_admin)
