@@ -1,7 +1,9 @@
 import logging
 import os
 import time
+import threading
 import httpx
+from httpx import RemoteProtocolError
 
 from src.config.config import Config
 from supabase import Client, create_client
@@ -13,33 +15,49 @@ logger = logging.getLogger(__name__)
 _supabase_client: Client | None = None
 _last_error: Exception | None = None  # Track last initialization error
 _last_error_time: float = 0  # Timestamp of last error
+_client_lock = threading.Lock()  # Thread-safe client access
 ERROR_CACHE_TTL = 60.0  # Retry after 60 seconds
+
+# Connection error types that indicate the connection needs to be refreshed
+CONNECTION_ERROR_TYPES = (
+    RemoteProtocolError,
+    ConnectionError,
+    ConnectionResetError,
+    BrokenPipeError,
+)
 
 
 def get_supabase_client() -> Client:
     global _supabase_client, _last_error, _last_error_time
 
+    # Fast path: return cached client if available
     if _supabase_client is not None:
         return _supabase_client
 
-    # Check if error is stale (>60s old), retry if so
-    if _last_error is not None:
-        time_since_error = time.time() - _last_error_time
-        if time_since_error < ERROR_CACHE_TTL:
-            # Error is still fresh, don't retry yet
-            retry_in = int(ERROR_CACHE_TTL - time_since_error)
-            logger.debug(
-                f"Supabase client unavailable (retry in {retry_in}s). "
-                f"Last error: {_last_error}"
-            )
-            raise RuntimeError(
-                f"Supabase unavailable (retry in {retry_in}s): {_last_error}"
-            ) from _last_error
-        else:
-            # Error is stale, clear it and retry
-            logger.info("Error cache expired, retrying Supabase initialization...")
-            _last_error = None
-            _last_error_time = 0
+    # Slow path: initialize client with thread safety
+    with _client_lock:
+        # Double-check after acquiring lock
+        if _supabase_client is not None:
+            return _supabase_client
+
+        # Check if error is stale (>60s old), retry if so
+        if _last_error is not None:
+            time_since_error = time.time() - _last_error_time
+            if time_since_error < ERROR_CACHE_TTL:
+                # Error is still fresh, don't retry yet
+                retry_in = int(ERROR_CACHE_TTL - time_since_error)
+                logger.debug(
+                    f"Supabase client unavailable (retry in {retry_in}s). "
+                    f"Last error: {_last_error}"
+                )
+                raise RuntimeError(
+                    f"Supabase unavailable (retry in {retry_in}s): {_last_error}"
+                ) from _last_error
+            else:
+                # Error is stale, clear it and retry
+                logger.info("Error cache expired, retrying Supabase initialization...")
+                _last_error = None
+                _last_error_time = 0
 
     try:
         Config.validate()
@@ -86,6 +104,13 @@ def get_supabase_client() -> Client:
             max_conn, keepalive_conn = 100, 30
             logger.info("Using container-optimized connection pool settings")
 
+        # Configure transport with retry for transient connection errors
+        # Use shorter keepalive to prevent stale HTTP/2 connections causing SSL EOF errors
+        transport = httpx.HTTPTransport(
+            retries=2,  # Retry transient network errors
+            http2=True,  # Enable HTTP/2 for connection multiplexing
+        )
+
         httpx_client = httpx.Client(
             base_url=postgrest_base_url,
             headers={
@@ -96,9 +121,9 @@ def get_supabase_client() -> Client:
             limits=httpx.Limits(
                 max_connections=max_conn,
                 max_keepalive_connections=keepalive_conn,
-                keepalive_expiry=60.0,  # 60s to reduce connection churn
+                keepalive_expiry=30.0,  # Reduced from 60s to 30s to avoid stale HTTP/2 connections
             ),
-            http2=True,  # Enable HTTP/2 for connection multiplexing
+            transport=transport,
         )
 
         _supabase_client = create_client(
@@ -272,18 +297,168 @@ def cleanup_supabase_client():
     global _supabase_client
 
     try:
-        if _supabase_client is not None:
-            # Close httpx client if it was injected
-            if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
-                session = _supabase_client.postgrest.session
-                if hasattr(session, 'close'):
-                    session.close()
-                    logger.info("✅ Supabase httpx client closed successfully")
+        with _client_lock:
+            if _supabase_client is not None:
+                # Close httpx client if it was injected
+                if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+                    session = _supabase_client.postgrest.session
+                    if hasattr(session, 'close'):
+                        session.close()
+                        logger.info("✅ Supabase httpx client closed successfully")
 
-            _supabase_client = None
-            logger.info("✅ Supabase client cleanup completed")
+                _supabase_client = None
+                logger.info("✅ Supabase client cleanup completed")
     except Exception as e:
         logger.warning(f"Error during Supabase client cleanup: {e}")
+
+
+def refresh_supabase_client() -> Client:
+    """
+    Force refresh the Supabase client by closing existing connections
+    and creating a new client.
+
+    This is useful when the HTTP/2 connection has been terminated
+    by the server (e.g., after handling many requests) and needs
+    to be re-established.
+
+    Returns:
+        A fresh Supabase client instance
+
+    Thread-safe: Uses locking to prevent race conditions during refresh.
+    """
+    global _supabase_client, _last_error, _last_error_time
+
+    logger.info("🔄 Refreshing Supabase client due to connection issue...")
+
+    with _client_lock:
+        # Cleanup existing client
+        if _supabase_client is not None:
+            try:
+                if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+                    session = _supabase_client.postgrest.session
+                    if hasattr(session, 'close'):
+                        session.close()
+                        logger.debug("Closed existing httpx session during refresh")
+            except Exception as e:
+                logger.warning(f"Error closing existing session during refresh: {e}")
+
+            _supabase_client = None
+
+        # Clear any cached errors to allow fresh initialization
+        _last_error = None
+        _last_error_time = 0
+
+    # Get a fresh client (this will create a new one since we cleared the cached client)
+    return get_supabase_client()
+
+
+def is_connection_error(error: Exception) -> bool:
+    """
+    Check if an exception is a connection-related error that can be
+    recovered by refreshing the client.
+
+    This includes HTTP/2 connection termination, connection resets,
+    and other network-related errors.
+
+    Args:
+        error: The exception to check
+
+    Returns:
+        True if this is a recoverable connection error
+    """
+    # Check direct instance match
+    if isinstance(error, CONNECTION_ERROR_TYPES):
+        return True
+
+    # Check error message for common connection termination patterns
+    error_message = str(error).lower()
+    connection_indicators = [
+        "connectionterminated",
+        "connection terminated",
+        "connection reset",
+        "connection refused",
+        "broken pipe",
+        "remotedisconnected",
+        "remote disconnected",
+        "connection closed",
+        "http2 connection",
+        "stream reset",
+        "goaway",
+    ]
+
+    return any(indicator in error_message for indicator in connection_indicators)
+
+
+def execute_with_retry(
+    operation: callable,
+    max_retries: int = 2,
+    retry_delay: float = 0.5,
+    operation_name: str = "database operation",
+) -> any:
+    """
+    Execute a database operation with automatic retry on connection errors.
+
+    This function wraps database operations and automatically retries them
+    if a connection error occurs (e.g., HTTP/2 connection terminated).
+    On connection errors, it refreshes the Supabase client before retrying.
+
+    Args:
+        operation: A callable that performs the database operation.
+                   Should accept a Supabase client as its first argument.
+        max_retries: Maximum number of retry attempts (default: 2)
+        retry_delay: Delay in seconds between retries (default: 0.5)
+        operation_name: Name of the operation for logging purposes
+
+    Returns:
+        The result of the successful operation
+
+    Raises:
+        The last exception if all retries fail
+
+    Example:
+        def do_insert(client):
+            return client.table("users").insert({"name": "test"}).execute()
+
+        result = execute_with_retry(do_insert, operation_name="insert user")
+    """
+    last_exception = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            client = get_supabase_client()
+            return operation(client)
+
+        except Exception as e:
+            last_exception = e
+
+            # Check if this is a connection error that can be recovered
+            if is_connection_error(e):
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Connection error during {operation_name} (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                        f"Refreshing client and retrying in {retry_delay}s..."
+                    )
+                    # Refresh the client to get a new connection
+                    try:
+                        refresh_supabase_client()
+                    except Exception as refresh_error:
+                        logger.error(f"Failed to refresh client: {refresh_error}")
+
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error(
+                        f"Connection error during {operation_name} after {max_retries + 1} attempts: {e}. "
+                        f"All retries exhausted."
+                    )
+            else:
+                # Non-connection error, don't retry
+                logger.error(f"Error during {operation_name}: {e}")
+                raise
+
+    # All retries exhausted
+    if last_exception:
+        raise last_exception
 
 
 class _LazySupabaseClient:

@@ -7,6 +7,7 @@ import logging
 from typing import Any, Optional
 
 from src.config.supabase_config import get_supabase_client
+from src.utils.db_safety import safe_get_first, DatabaseResultError
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,12 @@ def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -
                 .or_(f"slug.ilike.{provider_name},name.ilike.{provider_name}")
                 .execute()
             )
-            if provider_result.data:
-                provider_id = provider_result.data[0].get("id")
+            try:
+                provider_data = safe_get_first(provider_result, error_message="Provider not found")
+                provider_id = provider_data.get("id")
                 logger.debug(f"Found provider_id={provider_id} for provider={provider_name}")
+            except DatabaseResultError:
+                logger.debug(f"Provider not found: {provider_name}")
 
         # Step 2: Search models with provider filter
         if provider_id:
@@ -80,11 +84,15 @@ def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -
                         return row.get("id")
 
                 # Return first case-insensitive match
-                logger.debug(
-                    f"Found model_id={result.data[0].get('id')} for model={model_name}, "
-                    f"provider={provider_name} (fuzzy match)"
-                )
-                return result.data[0].get("id")
+                try:
+                    first_model = safe_get_first(result, error_message="Model not found")
+                    logger.debug(
+                        f"Found model_id={first_model.get('id')} for model={model_name}, "
+                        f"provider={provider_name} (fuzzy match)"
+                    )
+                    return first_model.get("id")
+                except DatabaseResultError:
+                    pass  # Fall through to next strategy
 
         # Step 3: Fallback to search without provider filter (less reliable)
         # Use prefix wildcard for "ends with" matching
@@ -100,12 +108,15 @@ def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -
             .execute()
         )
 
-        if result.data:
+        try:
+            first_model = safe_get_first(result, error_message="Model not found")
             logger.debug(
-                f"Found model_id={result.data[0].get('id')} for model={model_name} "
+                f"Found model_id={first_model.get('id')} for model={model_name} "
                 f"(no provider filter)"
             )
-            return result.data[0].get("id")
+            return first_model.get("id")
+        except DatabaseResultError:
+            pass  # Return None below
 
         logger.warning(
             f"Model not found in database: model_name={model_name}, provider={provider_name}, "
@@ -190,7 +201,14 @@ def save_chat_completion_request(
                 f"model={model_name}, tokens={input_tokens}+{output_tokens}, "
                 f"time={processing_time_ms}ms"
             )
-            return result.data[0]
+            try:
+                return safe_get_first(result, error_message="Insert returned no data")
+            except DatabaseResultError as e:
+                logger.error(
+                    f"Failed to save chat completion request: {e}. "
+                    f"Request ID: {request_id}, Model: {model_name}"
+                )
+                return None
         else:
             logger.error(
                 f"Failed to save chat completion request: insert returned no data. "
@@ -674,9 +692,10 @@ def calculate_tokens_per_second(
         model_name = "Unknown"
         provider = "unknown"
         if model_result.data and len(model_result.data) > 0:
-            model_name = model_result.data[0].get('model_name', 'Unknown')
-            if isinstance(model_result.data[0].get('providers'), dict):
-                provider = model_result.data[0]['providers'].get('slug', 'unknown')
+            model_data = model_result.data[0]  # Already checked length > 0
+            model_name = model_data.get('model_name', 'Unknown')
+            if isinstance(model_data.get('providers'), dict):
+                provider = model_data['providers'].get('slug', 'unknown')
 
         # Calculate tokens per second
         if requests:

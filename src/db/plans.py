@@ -13,10 +13,19 @@ DEFAULT_DAILY_TOKEN_LIMIT = 500_000
 DEFAULT_MONTHLY_TOKEN_LIMIT = 15_000_000
 DEFAULT_TRIAL_FEATURES = ["basic_models"]
 
+# Admin tier constants
+ADMIN_PLAN_TYPE = "admin"
+ADMIN_BYPASS_LIMITS = True  # Flag to enable admin bypass of all checks
+
 # PERF: In-memory cache for usage data to reduce database queries
 # Short TTL since usage data changes frequently and is billing-critical
 _usage_cache: dict[str, dict[str, Any]] = {}
 _usage_cache_ttl = 10  # 10 seconds TTL - short to minimize over-usage window
+
+# PERF: In-memory cache for user plan data to prevent concurrent calls
+# that can trigger Cloudflare rate limiting (400 Bad Request with HTML response)
+_user_plan_cache: dict[str, dict[str, Any]] = {}
+_user_plan_cache_ttl = 30  # 30 seconds TTL - user plans change infrequently
 
 
 def clear_usage_cache(user_id: int | None = None) -> None:
@@ -32,6 +41,19 @@ def clear_usage_cache(user_id: int | None = None) -> None:
         logger.info("Cleared entire usage cache")
 
 
+def clear_user_plan_cache(user_id: int | None = None) -> None:
+    """Clear user plan cache (for testing or explicit invalidation)"""
+    global _user_plan_cache
+    if user_id:
+        cache_key = f"user_plan:{user_id}"
+        if cache_key in _user_plan_cache:
+            del _user_plan_cache[cache_key]
+            logger.debug(f"Cleared user plan cache for user {user_id}")
+    else:
+        _user_plan_cache.clear()
+        logger.info("Cleared entire user plan cache")
+
+
 def get_usage_cache_stats() -> dict[str, Any]:
     """Get cache statistics for monitoring"""
     return {
@@ -40,10 +62,24 @@ def get_usage_cache_stats() -> dict[str, Any]:
     }
 
 
+def get_user_plan_cache_stats() -> dict[str, Any]:
+    """Get user plan cache statistics for monitoring"""
+    return {
+        "cached_users": len(_user_plan_cache),
+        "ttl_seconds": _user_plan_cache_ttl,
+    }
+
+
 def invalidate_usage_cache(user_id: int) -> None:
     """Invalidate cache for a specific user (e.g., after usage recorded)"""
     clear_usage_cache(user_id)
     logger.debug(f"Invalidated usage cache for user {user_id}")
+
+
+def invalidate_user_plan_cache(user_id: int) -> None:
+    """Invalidate user plan cache for a specific user (e.g., after plan change)"""
+    clear_user_plan_cache(user_id)
+    logger.debug(f"Invalidated user plan cache for user {user_id}")
 
 
 def get_all_plans() -> list[dict[str, Any]]:
@@ -126,8 +162,8 @@ def get_plan_id_by_tier(tier: str) -> int | None:
         return None
 
 
-def get_user_plan(user_id: int) -> dict[str, Any] | None:
-    """Get current active plan for user (robust: never silently falls back to trial)"""
+def _get_user_plan_uncached(user_id: int) -> dict[str, Any] | None:
+    """Internal function: Get user plan from database (no caching)"""
     try:
         client = get_supabase_client()
 
@@ -197,6 +233,42 @@ def get_user_plan(user_id: int) -> dict[str, Any] | None:
         return None
 
 
+def get_user_plan(user_id: int) -> dict[str, Any] | None:
+    """Get current active plan for user with caching.
+
+    Caching prevents concurrent Supabase calls that can trigger Cloudflare
+    rate limiting (400 Bad Request with HTML response instead of JSON).
+    """
+    cache_key = f"user_plan:{user_id}"
+
+    # PERF: Check cache first to avoid database queries and rate limiting
+    if cache_key in _user_plan_cache:
+        entry = _user_plan_cache[cache_key]
+        cache_time = entry["timestamp"]
+        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=_user_plan_cache_ttl):
+            logger.debug(
+                f"User plan cache hit for user {user_id} "
+                f"(age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)"
+            )
+            return entry["data"]
+        else:
+            # Cache expired, remove it
+            del _user_plan_cache[cache_key]
+            logger.debug(f"User plan cache expired for user {user_id}")
+
+    # Cache miss - fetch from database
+    logger.debug(f"User plan cache miss for user {user_id} - fetching from database")
+    result = _get_user_plan_uncached(user_id)
+
+    # Cache the result (even if None, to avoid repeated DB queries for users without plans)
+    _user_plan_cache[cache_key] = {
+        "data": result,
+        "timestamp": datetime.now(timezone.utc),
+    }
+
+    return result
+
+
 def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bool:
     """Assign a plan to a user"""
     try:
@@ -232,6 +304,9 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
             {"subscription_status": "active", "updated_at": datetime.now(timezone.utc).isoformat()}
         ).eq("id", user_id).execute()
 
+        # Invalidate user plan cache since we just changed the plan
+        invalidate_user_plan_cache(user_id)
+
         return True
 
     except Exception as e:
@@ -242,6 +317,21 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
 def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[str, Any]:
     """Check if user's current plan allows certain usage"""
     try:
+        # ADMIN BYPASS: Admin tier users have unlimited entitlements
+        if is_admin_tier_user(user_id):
+            logger.debug(f"Admin tier user {user_id} - returning unlimited entitlements")
+            return {
+                "has_plan": True,
+                "plan_name": "Admin",
+                "daily_request_limit": 2147483647,  # Max int
+                "monthly_request_limit": 2147483647,
+                "daily_token_limit": 2147483647,
+                "monthly_token_limit": 2147483647,
+                "features": ["unlimited_access", "priority_support", "admin_features", "all_models"],
+                "can_access_feature": True,  # Admin can access any feature
+                "plan_expires": None,  # Admin plans don't expire
+            }
+
         user_plan = get_user_plan(user_id)
 
         # If get_user_plan() failed, inspect user_plans directly to avoid dropping to trial by mistake
@@ -275,6 +365,8 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
                     client.table("users").update({"subscription_status": "expired"}).eq(
                         "id", user_id
                     ).execute()
+                    # Invalidate cache since plan status changed
+                    invalidate_user_plan_cache(user_id)
                     return {
                         "has_plan": False,
                         "plan_expired": True,
@@ -352,6 +444,8 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
                 client.table("users").update({"subscription_status": "expired"}).eq(
                     "id", user_id
                 ).execute()
+                # Invalidate cache since plan status changed
+                invalidate_user_plan_cache(user_id)
                 return {
                     "has_plan": False,
                     "plan_expired": True,
@@ -503,6 +597,11 @@ def enforce_plan_limits(
 ) -> dict[str, Any]:
     """Check if user can make a request within their plan limits"""
     try:
+        # ADMIN BYPASS: Admin tier users have unlimited access
+        if is_admin_tier_user(user_id):
+            logger.debug(f"Admin tier user {user_id} - bypassing plan limit checks")
+            return {"allowed": True, "reason": "Admin tier - unlimited access"}
+
         usage_data = get_user_usage_within_plan_limits(user_id)
         if not usage_data:
             return {"allowed": False, "reason": "Unable to check plan limits"}
@@ -575,3 +674,44 @@ def get_subscription_plans() -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting subscription plans: {e}")
         return []
+
+
+def is_admin_tier_user(user_id: int) -> bool:
+    """
+    Check if a user has an active admin tier plan
+
+    Admin tier users bypass all resource limits, credit checks, and rate limiting.
+
+    Args:
+        user_id: The user ID to check
+
+    Returns:
+        True if user has active admin plan, False otherwise
+    """
+    if not ADMIN_BYPASS_LIMITS:
+        return False
+
+    try:
+        client = get_supabase_client()
+
+        # Check if user has an active admin plan
+        result = (
+            client.table("user_plans")
+            .select("plans!inner(plan_type)")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
+
+        if result.data:
+            for row in result.data:
+                plan = row.get("plans", {})
+                if isinstance(plan, dict) and plan.get("plan_type") == ADMIN_PLAN_TYPE:
+                    logger.info(f"User {user_id} has active admin tier - bypassing all limits")
+                    return True
+
+        return False
+
+    except Exception as e:
+        logger.error(f"Error checking admin tier for user {user_id}: {e}")
+        return False

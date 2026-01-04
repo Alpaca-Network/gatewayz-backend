@@ -227,6 +227,162 @@ def _sanitize_system_content(content: Any) -> str:
     return str(content)
 
 
+def _translate_openai_tools_to_vertex(tools: list[dict]) -> list[dict]:
+    """Translate OpenAI tools format to Google Vertex AI functionDeclarations format.
+
+    OpenAI format:
+    [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get weather for a location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string", "description": "City name"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+    ]
+
+    Vertex AI format:
+    [
+        {
+            "functionDeclarations": [
+                {
+                    "name": "get_weather",
+                    "description": "Get weather for a location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string", "description": "City name"}
+                        },
+                        "required": ["location"]
+                    }
+                }
+            ]
+        }
+    ]
+
+    Args:
+        tools: List of OpenAI-format tool definitions
+
+    Returns:
+        List containing a single dict with functionDeclarations for Vertex AI
+    """
+    if not tools:
+        return []
+
+    function_declarations = []
+
+    for tool in tools:
+        # Only process function-type tools
+        if tool.get("type") != "function":
+            logger.warning(
+                f"Skipping non-function tool type: {tool.get('type')}. "
+                "Only 'function' type tools are supported for Vertex AI."
+            )
+            continue
+
+        function_def = tool.get("function", {})
+        if not function_def:
+            logger.warning("Skipping tool with missing 'function' definition")
+            continue
+
+        name = function_def.get("name")
+        if not name:
+            logger.warning("Skipping function with missing 'name' field")
+            continue
+
+        # Build Vertex AI function declaration
+        vertex_function = {
+            "name": name,
+        }
+
+        # Add description if present
+        if function_def.get("description"):
+            vertex_function["description"] = function_def["description"]
+
+        # Add parameters if present
+        # Vertex AI uses OpenAPI 3.0.3 schema format which is compatible with OpenAI's JSON Schema
+        if function_def.get("parameters"):
+            vertex_function["parameters"] = function_def["parameters"]
+
+        function_declarations.append(vertex_function)
+
+    if not function_declarations:
+        logger.warning("No valid function declarations found after translation")
+        return []
+
+    logger.info(
+        f"Translated {len(function_declarations)} OpenAI tool(s) to Vertex AI functionDeclarations"
+    )
+
+    # Vertex AI expects tools as: [{"functionDeclarations": [...]}]
+    return [{"functionDeclarations": function_declarations}]
+
+
+def _translate_tool_choice_to_vertex(tool_choice: str | dict | None) -> dict | None:
+    """Translate OpenAI tool_choice to Vertex AI toolConfig.
+
+    OpenAI tool_choice values:
+    - "none": Model will not call any tools
+    - "auto": Model decides whether to call tools (default)
+    - "required": Model must call at least one tool
+    - {"type": "function", "function": {"name": "..."}}:  Model must call the specific function
+
+    Vertex AI toolConfig format:
+    {
+        "functionCallingConfig": {
+            "mode": "NONE" | "AUTO" | "ANY",
+            "allowedFunctionNames": ["..."]  # Only for ANY mode
+        }
+    }
+
+    Args:
+        tool_choice: OpenAI tool_choice value
+
+    Returns:
+        Vertex AI toolConfig dict, or None if no translation needed
+    """
+    if tool_choice is None:
+        return None
+
+    # String values
+    if isinstance(tool_choice, str):
+        if tool_choice == "none":
+            return {"functionCallingConfig": {"mode": "NONE"}}
+        elif tool_choice == "auto":
+            return {"functionCallingConfig": {"mode": "AUTO"}}
+        elif tool_choice == "required":
+            return {"functionCallingConfig": {"mode": "ANY"}}
+        else:
+            logger.warning(f"Unknown tool_choice value: {tool_choice}. Using AUTO mode.")
+            return {"functionCallingConfig": {"mode": "AUTO"}}
+
+    # Object value: force specific function
+    if isinstance(tool_choice, dict):
+        if tool_choice.get("type") == "function":
+            function_obj = tool_choice.get("function")
+            function_name = function_obj.get("name") if function_obj else None
+            if function_name:
+                return {
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": [function_name],
+                    }
+                }
+            else:
+                logger.warning("tool_choice function object missing 'name'. Using ANY mode.")
+                return {"functionCallingConfig": {"mode": "ANY"}}
+
+    logger.warning(f"Unrecognized tool_choice format: {tool_choice}. Using AUTO mode.")
+    return {"functionCallingConfig": {"mode": "AUTO"}}
+
+
 def _prepare_vertex_contents(messages: list) -> tuple[list, str | None]:
     """Split OpenAI messages into conversational content and system instruction."""
     system_messages = []
@@ -294,7 +450,8 @@ def transform_google_vertex_model_id(model_id: str) -> str:
     The full URL path is constructed in the API call functions.
 
     Args:
-        model_id: Model identifier (e.g., 'gemini-2.0-flash', 'gemini-1.5-pro')
+        model_id: Model identifier (e.g., 'gemini-2.0-flash', 'gemini-1.5-pro',
+                  'google/gemini-2.0-flash')
 
     Returns:
         Simple model name (e.g., 'gemini-2.5-flash-lite')
@@ -303,6 +460,10 @@ def transform_google_vertex_model_id(model_id: str) -> str:
     if model_id.startswith("projects/"):
         # Extract model name from projects/.../models/{model}
         return model_id.split("/models/")[-1]
+
+    # Strip provider prefix (e.g., 'google/gemini-2.0-flash' -> 'gemini-2.0-flash')
+    if model_id.startswith("google/"):
+        return model_id[7:]  # len("google/") == 7
 
     # Otherwise, return as-is
     return model_id
@@ -462,23 +623,33 @@ def _make_google_vertex_request_rest(
         model_name = transform_google_vertex_model_id(model)
         logger.info(f"Using REST model name: {model_name}")
 
-        tools = kwargs.get("tools")
-        if tools:
-            logger.info(
-                "Tools parameter detected for Vertex REST call (count=%s). "
-                "Tool/function calling translation is not yet implemented.",
-                len(tools) if isinstance(tools, list) else 0,
-            )
-            logger.warning(
-                "Function calling is not currently supported for Vertex REST transport. "
-                "Requests will proceed without tool definitions."
-            )
-
         contents, system_instruction = _prepare_vertex_contents(messages)
         request_body: dict[str, Any] = {"contents": contents}
 
         if system_instruction:
             request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        # Translate OpenAI tools to Vertex AI functionDeclarations
+        tools = kwargs.get("tools")
+        if tools:
+            logger.info(
+                f"Tools parameter detected for Vertex REST call (count={len(tools) if isinstance(tools, list) else 0}). "
+                "Translating to Vertex AI functionDeclarations format."
+            )
+            vertex_tools = _translate_openai_tools_to_vertex(tools)
+            if vertex_tools:
+                request_body["tools"] = vertex_tools
+                logger.debug(f"Added tools to request: {vertex_tools}")
+
+        # Translate tool_choice to toolConfig if provided
+        # This is handled separately from tools because tool_choice="none" is valid
+        # even when no tools are provided (explicitly disabling tool calling)
+        tool_choice = kwargs.get("tool_choice")
+        if tool_choice:
+            tool_config = _translate_tool_choice_to_vertex(tool_choice)
+            if tool_config:
+                request_body["toolConfig"] = tool_config
+                logger.debug(f"Added toolConfig to request: {tool_config}")
 
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
@@ -1016,8 +1187,42 @@ def _process_google_vertex_rest_response(response_data: dict, model: str) -> dic
         logger.debug(f"Candidates count: {len(candidates)}")
 
         if not candidates:
-            logger.error(f"No candidates in Vertex AI response. Full response: {response_data}")
-            raise ValueError("No candidates in Vertex AI response")
+            # Check for promptFeedback which indicates why the prompt was blocked
+            prompt_feedback = response_data.get("promptFeedback", {})
+            block_reason = prompt_feedback.get("blockReason", "")
+            safety_ratings = prompt_feedback.get("safetyRatings", [])
+
+            # Build a descriptive error message
+            error_details = []
+            if block_reason:
+                error_details.append(f"Block reason: {block_reason}")
+            if safety_ratings:
+                blocked_categories = [
+                    f"{r.get('category', 'UNKNOWN')}: {r.get('probability', 'UNKNOWN')}"
+                    for r in safety_ratings
+                    if r.get("blocked", False) or r.get("probability") in ["HIGH", "MEDIUM"]
+                ]
+                if blocked_categories:
+                    error_details.append(f"Safety issues: {', '.join(blocked_categories)}")
+
+            # If no promptFeedback, check for other response indicators
+            # Some Gemini 3 preview models may return empty candidates without promptFeedback
+            # This can happen due to model overload or transient issues
+            usage_metadata = response_data.get("usageMetadata", {})
+            model_version = response_data.get("modelVersion", "")
+
+            if not error_details:
+                # No explicit block reason - likely a transient/model issue
+                error_details.append(
+                    f"Model '{model_version or model}' returned no candidates without explicit block reason. "
+                    "This may be a transient issue with preview models or rate limiting."
+                )
+                if usage_metadata.get("promptTokenCount"):
+                    error_details.append(f"Prompt tokens: {usage_metadata.get('promptTokenCount')}")
+
+            error_msg = "Vertex AI returned no candidates. " + " | ".join(error_details)
+            logger.error(f"{error_msg}. Full response: {response_data}")
+            raise ValueError(error_msg)
 
         # Get the first candidate
         candidate = candidates[0]
@@ -1162,97 +1367,330 @@ def diagnose_google_vertex_credentials() -> dict:
     return result
 
 
-def fetch_models_from_google_vertex():
-    """Fetch models from Google Vertex AI API
+def _fetch_models_from_vertex_api() -> list[dict] | None:
+    """Fetch available models dynamically from Google Vertex AI API.
 
-    Google Vertex AI does not provide a public API to list available models.
-    Returns a static list of known Google/Gemini models from the config.
+    Uses the publishers/google/models endpoint to list all available Gemini models.
+    Returns None if the API call fails, allowing fallback to static config.
+    """
+    try:
+        _prepare_vertex_environment()
+        access_token = _get_google_vertex_access_token()
+
+        # Use the Vertex AI discovery endpoint to list publisher models
+        # This endpoint lists all Google-published models available in Vertex AI
+        location = Config.GOOGLE_VERTEX_LOCATION
+        project_id = Config.GOOGLE_PROJECT_ID
+
+        # The publishers/google/models endpoint lists all available Gemini models
+        url = f"https://{location}-aiplatform.googleapis.com/v1/publishers/google/models"
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+
+        logger.info(f"Fetching models from Vertex AI API: {url}")
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, headers=headers)
+
+            if response.status_code != 200:
+                logger.warning(
+                    f"Vertex AI models API returned {response.status_code}: {response.text[:500]}"
+                )
+                return None
+
+            data = response.json()
+            models = data.get("publisherModels", [])
+            logger.info(f"Fetched {len(models)} models from Vertex AI API")
+            return models
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from Vertex AI API: {e}")
+        return None
+
+
+def _normalize_vertex_api_model(api_model: dict) -> dict | None:
+    """Convert a Vertex AI API model response to our normalized format.
+
+    Args:
+        api_model: Raw model data from the Vertex AI publishers/google/models API
+
+    Returns:
+        Normalized model dict or None if the model should be skipped
+    """
+    try:
+        # Extract model name from the full resource name
+        # Format: publishers/google/models/gemini-2.0-flash
+        name = api_model.get("name", "")
+        model_id = name.split("/")[-1] if "/" in name else name
+
+        if not model_id:
+            return None
+
+        # Skip non-generative models (embeddings handled separately, imagen, etc.)
+        # We want chat/text generation models
+        supported_actions = api_model.get("supportedActions", {})
+        if not supported_actions.get("generateContent") and not supported_actions.get("streamGenerateContent"):
+            # Check if it's an embedding model we want to include
+            if not supported_actions.get("computeTokens") and "embedding" not in model_id.lower():
+                return None
+
+        # Get version info
+        version_info = api_model.get("versionId", "")
+        display_name = api_model.get("openSourceCategory", "") or model_id
+
+        # Extract from publisherModelTemplate if available
+        template = api_model.get("publisherModelTemplate", {})
+
+        # Get context length from inputTokenLimit or default
+        input_token_limit = None
+        output_token_limit = None
+
+        # Try to get limits from various possible locations in the API response
+        if "inputTokenLimit" in api_model:
+            input_token_limit = api_model.get("inputTokenLimit")
+        if "outputTokenLimit" in api_model:
+            output_token_limit = api_model.get("outputTokenLimit")
+
+        # Default context lengths based on model family
+        if input_token_limit is None:
+            if "gemini-3" in model_id or "gemini-2.5" in model_id or "gemini-2.0" in model_id:
+                input_token_limit = 1000000  # 1M context for newer models
+            elif "gemini-1.5" in model_id:
+                input_token_limit = 1000000
+            elif "gemma" in model_id:
+                input_token_limit = 8192
+            else:
+                input_token_limit = 32768  # Safe default
+
+        # Determine modalities
+        input_modalities = ["text"]
+        output_modalities = ["text"]
+
+        # Gemini models support multimodal input
+        if "gemini" in model_id.lower():
+            input_modalities = ["text", "image", "audio", "video"]
+
+        # Check for image generation models
+        if "imagen" in model_id.lower() or "image" in model_id.lower():
+            output_modalities = ["image"]
+
+        # Determine features based on model capabilities
+        features = ["streaming"]
+        if "gemini" in model_id.lower():
+            features.extend(["multimodal", "function_calling"])
+            if "pro" in model_id.lower() or "flash" in model_id.lower():
+                features.append("thinking")
+
+        if "embedding" in model_id.lower():
+            features = ["embeddings"]
+            input_modalities = ["text"]
+            output_modalities = ["embedding"]
+
+        # Build description
+        description = api_model.get("description", "") or f"Google {model_id} model"
+
+        # Create display name
+        name_display = api_model.get("displayName", "") or model_id.replace("-", " ").title()
+
+        prefixed_slug = f"google-vertex/{model_id}"
+
+        return {
+            "id": model_id,
+            "slug": prefixed_slug,
+            "canonical_slug": prefixed_slug,
+            "hugging_face_id": None,
+            "name": name_display,
+            "created": None,
+            "description": description,
+            "context_length": input_token_limit,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": input_modalities,
+                "output_modalities": output_modalities,
+                "tokenizer": None,
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": None,  # Dynamic pricing not available from API
+                "completion": None,
+                "request": None,
+                "image": None,
+                "web_search": None,
+                "internal_reasoning": None,
+            },
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": [
+                "max_tokens",
+                "temperature",
+                "top_p",
+                "top_k",
+                "stream",
+            ],
+            "default_parameters": {},
+            "provider_slug": "google",
+            "provider_site_url": "https://cloud.google.com/vertex-ai",
+            "model_logo_url": None,
+            "source_gateway": "google-vertex",
+            "tags": features,
+            "raw_google_vertex": {
+                "id": model_id,
+                "name": name_display,
+                "version": version_info,
+                "api_response": api_model,
+            },
+        }
+
+    except Exception as e:
+        logger.warning(f"Failed to normalize Vertex AI model: {e}")
+        return None
+
+
+def _get_static_model_config() -> list[dict]:
+    """Get static model configurations with pricing info.
+
+    Returns models from google_models_config.py which contains
+    accurate pricing and feature information.
+    """
+    from src.services.google_models_config import get_google_models
+
+    multi_provider_models = get_google_models()
+    normalized_models = []
+
+    for model in multi_provider_models:
+        vertex_provider = next(
+            (p for p in model.providers if p.name == "google-vertex"), None
+        )
+
+        pricing = {}
+        features = []
+        if vertex_provider:
+            pricing = {
+                "prompt": str(vertex_provider.cost_per_1k_input),
+                "completion": str(vertex_provider.cost_per_1k_output),
+                "request": None,
+                "image": None,
+                "web_search": None,
+                "internal_reasoning": None,
+            }
+            features = vertex_provider.features
+
+        input_modalities = model.modalities if model.modalities else ["text"]
+        output_modalities = ["text"]
+
+        prefixed_slug = f"google-vertex/{model.id}"
+        normalized = {
+            "id": model.id,
+            "slug": prefixed_slug,
+            "canonical_slug": prefixed_slug,
+            "hugging_face_id": None,
+            "name": model.name,
+            "created": None,
+            "description": model.description,
+            "context_length": model.context_length,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": input_modalities,
+                "output_modalities": output_modalities,
+                "tokenizer": None,
+                "instruct_type": "chat",
+            },
+            "pricing": pricing,
+            "top_provider": None,
+            "per_request_limits": None,
+            "supported_parameters": [
+                "max_tokens",
+                "temperature",
+                "top_p",
+                "top_k",
+                "stream",
+            ],
+            "default_parameters": {},
+            "provider_slug": "google",
+            "provider_site_url": "https://cloud.google.com/vertex-ai",
+            "model_logo_url": None,
+            "source_gateway": "google-vertex",
+            "tags": features,
+            "raw_google_vertex": {
+                "id": model.id,
+                "name": model.name,
+                "modalities": model.modalities,
+                "context_length": model.context_length,
+            },
+        }
+        normalized_models.append(normalized)
+
+    return normalized_models
+
+
+def fetch_models_from_google_vertex():
+    """Fetch models from Google Vertex AI API.
+
+    Attempts to fetch models dynamically from the Vertex AI API.
+    Falls back to static configuration if the API call fails.
+    Merges dynamic models with static config to get accurate pricing.
     """
     from datetime import timezone, datetime
 
     from src.cache import _google_vertex_models_cache
-    from src.services.google_models_config import get_google_models
 
-    logger.info("Loading static Google Vertex AI model catalog")
+    logger.info("Fetching Google Vertex AI model catalog")
 
     try:
-        multi_provider_models = get_google_models()
-        normalized_models = []
+        # Get static config for pricing and known models
+        static_models = _get_static_model_config()
+        static_by_id = {m["id"]: m for m in static_models}
 
-        for model in multi_provider_models:
-            # Find the google-vertex provider config for pricing info
-            vertex_provider = next(
-                (p for p in model.providers if p.name == "google-vertex"), None
+        # Try to fetch dynamic models from API
+        api_models = _fetch_models_from_vertex_api()
+
+        if api_models is not None:
+            # Merge API models with static config
+            normalized_models = []
+            seen_ids = set()
+
+            for api_model in api_models:
+                normalized = _normalize_vertex_api_model(api_model)
+                if normalized is None:
+                    continue
+
+                model_id = normalized["id"]
+
+                # If we have static config for this model, use its pricing
+                if model_id in static_by_id:
+                    static = static_by_id[model_id]
+                    normalized["pricing"] = static["pricing"]
+                    normalized["tags"] = static["tags"]
+                    normalized["name"] = static["name"]
+                    normalized["description"] = static["description"]
+
+                normalized_models.append(normalized)
+                seen_ids.add(model_id)
+
+            # Add any static models not returned by API (e.g., embeddings, special models)
+            for model_id, static_model in static_by_id.items():
+                if model_id not in seen_ids:
+                    normalized_models.append(static_model)
+                    logger.debug(f"Added static model not in API: {model_id}")
+
+            logger.info(
+                f"Loaded {len(normalized_models)} Google Vertex AI models "
+                f"({len(api_models)} from API, merged with static config)"
             )
-
-            pricing = {}
-            features = []
-            if vertex_provider:
-                pricing = {
-                    "prompt": str(vertex_provider.cost_per_1k_input),
-                    "completion": str(vertex_provider.cost_per_1k_output),
-                    "request": None,
-                    "image": None,
-                    "web_search": None,
-                    "internal_reasoning": None,
-                }
-                features = vertex_provider.features
-
-            # Build architecture based on modalities
-            input_modalities = model.modalities if model.modalities else ["text"]
-            output_modalities = ["text"]  # Google models output text
-
-            # Use google-vertex/ prefix for slug and canonical_slug to avoid
-            # deduplication conflicts with other gateways (e.g., onerouter) that
-            # have models with the same base name. The id stays unchanged since
-            # it's used for actual API calls to Google Vertex AI.
-            prefixed_slug = f"google-vertex/{model.id}"
-            normalized = {
-                "id": model.id,
-                "slug": prefixed_slug,
-                "canonical_slug": prefixed_slug,
-                "hugging_face_id": None,
-                "name": model.name,
-                "created": None,
-                "description": model.description,
-                "context_length": model.context_length,
-                "architecture": {
-                    "modality": "text->text",
-                    "input_modalities": input_modalities,
-                    "output_modalities": output_modalities,
-                    "tokenizer": None,
-                    "instruct_type": "chat",
-                },
-                "pricing": pricing,
-                "top_provider": None,
-                "per_request_limits": None,
-                "supported_parameters": [
-                    "max_tokens",
-                    "temperature",
-                    "top_p",
-                    "top_k",
-                    "stream",
-                ],
-                "default_parameters": {},
-                "provider_slug": "google",
-                "provider_site_url": "https://cloud.google.com/vertex-ai",
-                "model_logo_url": None,
-                "source_gateway": "google-vertex",
-                "tags": features,
-                "raw_google_vertex": {
-                    "id": model.id,
-                    "name": model.name,
-                    "modalities": model.modalities,
-                    "context_length": model.context_length,
-                },
-            }
-            normalized_models.append(normalized)
+        else:
+            # Fallback to static config only
+            normalized_models = static_models
+            logger.info(
+                f"Loaded {len(normalized_models)} Google Vertex AI models from static config (API unavailable)"
+            )
 
         # Update cache
         _google_vertex_models_cache["data"] = normalized_models
         _google_vertex_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Loaded {len(normalized_models)} Google Vertex AI models from static catalog")
         return normalized_models
 
     except Exception as e:

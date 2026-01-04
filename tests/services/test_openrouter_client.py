@@ -50,7 +50,7 @@ def test_get_openrouter_client_success(monkeypatch, mod):
         api_key="sk-or-123",
         default_headers={
             "HTTP-Referer": "https://gatewayz.example",
-            "X-TitleSection": "Gatewayz"
+            "X-Title": "Gatewayz"
         }
     )
 
@@ -68,7 +68,7 @@ def test_get_openrouter_client_success(monkeypatch, mod):
     # headers
     hdrs = client.default_headers
     assert hdrs["HTTP-Referer"] == "https://gatewayz.example"
-    assert hdrs["X-TitleSection"] == "Gatewayz"
+    assert hdrs["X-Title"] == "Gatewayz"
 
 
 def test_get_openrouter_client_missing_key_raises(monkeypatch, mod):
@@ -114,6 +114,9 @@ def test_make_openrouter_request_openai_forwards_args(monkeypatch, mod):
     assert call["messages"] == messages
     for k, v in kwargs.items():
         assert call[k] == v
+    # Verify extra_body with provider settings is always included
+    assert "extra_body" in call
+    assert call["extra_body"]["provider"]["data_collection"] == "allow"
 
 
 def test_process_openrouter_response_happy(monkeypatch, mod):
@@ -185,3 +188,42 @@ def test_process_openrouter_response_no_usage(monkeypatch, mod):
 
     out = mod.process_openrouter_response(_Resp)
     assert out["usage"] == {}
+
+
+# Tests for _merge_extra_body helper function
+class TestMergeExtraBody:
+    """Tests for the _merge_extra_body helper that ensures data_collection: allow is set."""
+
+    def test_merge_empty_kwargs(self, mod):
+        """Empty kwargs should get extra_body with provider settings."""
+        result = mod._merge_extra_body({})
+        assert result == {"extra_body": {"provider": {"data_collection": "allow"}}}
+
+    def test_merge_preserves_other_kwargs(self, mod):
+        """Other kwargs like temperature should be preserved."""
+        result = mod._merge_extra_body({"temperature": 0.7, "max_tokens": 100})
+        assert result["temperature"] == 0.7
+        assert result["max_tokens"] == 100
+        assert result["extra_body"]["provider"]["data_collection"] == "allow"
+
+    def test_merge_preserves_existing_extra_body(self, mod):
+        """Existing extra_body values should be preserved."""
+        result = mod._merge_extra_body({"extra_body": {"other_field": "value"}})
+        assert result["extra_body"]["other_field"] == "value"
+        assert result["extra_body"]["provider"]["data_collection"] == "allow"
+
+    def test_merge_preserves_existing_provider_settings(self, mod):
+        """Existing provider settings should be preserved and merged."""
+        result = mod._merge_extra_body({
+            "extra_body": {"provider": {"order": ["anthropic", "openai"]}}
+        })
+        assert result["extra_body"]["provider"]["order"] == ["anthropic", "openai"]
+        assert result["extra_body"]["provider"]["data_collection"] == "allow"
+
+    def test_user_can_override_data_collection(self, mod):
+        """User-provided data_collection should override the default."""
+        result = mod._merge_extra_body({
+            "extra_body": {"provider": {"data_collection": "deny"}}
+        })
+        # User's explicit setting takes precedence
+        assert result["extra_body"]["provider"]["data_collection"] == "deny"

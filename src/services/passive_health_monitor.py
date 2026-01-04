@@ -101,8 +101,8 @@ def extract_provider_from_request(
             parts = request_model.split(separator, 1)
             return parts[0]
 
-    # Default to 'openrouter' if no provider prefix found
-    return "openrouter"
+    # Default to 'onerouter' if no provider prefix found
+    return "onerouter"
 
 
 def normalize_model_name(model: str) -> str:

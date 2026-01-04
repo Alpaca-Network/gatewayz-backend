@@ -19,6 +19,7 @@ from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 from src.services.connection_pool import get_pooled_async_client
+from src.utils.provider_safety import safe_get_choices, safe_get_usage, ProviderError
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -143,25 +144,33 @@ def process_ai_sdk_response(response):
         dict: Processed response with 'choices' and 'usage' keys
     """
     try:
+        # Safely extract choices with validation
+        choices = safe_get_choices(response)
+        if not choices:
+            raise ProviderError("AI SDK returned empty choices")
+
+        first_choice = choices[0]
+
+        # Safely extract usage information
+        usage = safe_get_usage(response)
+
         return {
             "choices": [
                 {
                     "message": {
-                        "role": response.choices[0].message.role,
-                        "content": response.choices[0].message.content,
+                        "role": first_choice.message.role if hasattr(first_choice.message, 'role') else "assistant",
+                        "content": first_choice.message.content if hasattr(first_choice.message, 'content') else "",
                     },
-                    "finish_reason": response.choices[0].finish_reason,
+                    "finish_reason": first_choice.finish_reason if hasattr(first_choice, 'finish_reason') else "stop",
                 }
             ],
-            "usage": {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            },
+            "usage": usage,
         }
+    except ProviderError:
+        raise
     except Exception as e:
         logger.error(f"Failed to process AI SDK response: {e}")
-        raise
+        raise ProviderError(f"AI SDK response processing failed: {e}")
 
 
 def get_ai_sdk_async_client() -> AsyncOpenAI:

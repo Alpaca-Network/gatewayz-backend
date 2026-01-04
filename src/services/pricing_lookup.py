@@ -12,10 +12,21 @@ logger = logging.getLogger(__name__)
 
 # Gateway providers that route to underlying providers (OpenAI, Anthropic, etc.)
 # These need cross-reference pricing from OpenRouter if no manual pricing exists
-# Note: AiHubMix is NOT included here because their API exposes pricing directly
+# Models without valid pricing will be filtered out to avoid appearing as "free"
 GATEWAY_PROVIDERS = {
+    "aihubmix",
+    "akash",
+    "alibaba-cloud",
     "anannas",
+    "clarifai",
+    "cloudflare-workers-ai",
+    "deepinfra",
+    "featherless",
+    "fireworks",
+    "groq",
     "helicone",
+    "onerouter",
+    "together",
     "vercel-ai-gateway",
 }
 
@@ -213,6 +224,11 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
     gateway_lower = gateway.lower()
     is_gateway_provider = gateway_lower in GATEWAY_PROVIDERS
 
+    # Only OpenRouter has legitimately free models (those with :free suffix)
+    # All other providers/gateways should not be marked as free
+    if gateway_lower != "openrouter":
+        model_data["is_free"] = False
+
     try:
         # Skip if pricing already exists and has non-zero values
         # (Zero pricing means no real pricing was set, so we should try to enrich)
@@ -244,10 +260,19 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
         if is_gateway_provider:
             cross_ref_pricing = _get_cross_reference_pricing(model_id)
             if cross_ref_pricing:
-                model_data["pricing"] = cross_ref_pricing
-                model_data["pricing_source"] = "cross-reference"
-                logger.debug(f"Enriched {model_id} with cross-reference pricing from OpenRouter")
-                return model_data
+                # Verify cross-reference pricing has non-zero values
+                # Models with zero pricing from OpenRouter should still be filtered out
+                has_valid_pricing = any(
+                    is_non_zero(v) for k, v in cross_ref_pricing.items()
+                    if k in ("prompt", "completion")
+                )
+                if has_valid_pricing:
+                    model_data["pricing"] = cross_ref_pricing
+                    model_data["pricing_source"] = "cross-reference"
+                    logger.debug(f"Enriched {model_id} with cross-reference pricing from OpenRouter")
+                    return model_data
+                else:
+                    logger.debug(f"Cross-reference pricing for {model_id} is zero, filtering out")
 
             # During catalog build, return the model with zero pricing instead of filtering
             # This prevents models from disappearing during initial build. They'll get

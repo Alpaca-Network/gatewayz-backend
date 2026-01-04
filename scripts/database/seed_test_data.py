@@ -152,7 +152,6 @@ class TestDataSeeder:
         print(f"Creating {count} test users...")
 
         users = []
-        roles = ["user"] * 15 + ["developer"] * 4 + ["admin"]
         subscription_statuses = ["active"] * 10 + ["trial"] * 7 + ["expired"] * 2 + ["cancelled"]
 
         for i in range(count):
@@ -161,7 +160,6 @@ class TestDataSeeder:
             username = f"{first_name.lower()}_{last_name.lower()}_{i}"
             email = f"{username}@test.example.com"
 
-            role = roles[i % len(roles)]
             status = subscription_statuses[i % len(subscription_statuses)]
 
             # Vary credits based on subscription status
@@ -179,10 +177,8 @@ class TestDataSeeder:
                 "is_active": status != "cancelled",
                 "auth_method": random.choice(["email", "google", "github"]),
                 "subscription_status": status,
-                "role": role,
                 "welcome_email_sent": True,
                 "privy_user_id": f"privy_{secrets.token_hex(8)}",
-                "role_metadata": json.dumps({"source": "test_seed"}),
                 "created_at": self._random_date(90, 1),
             }
 

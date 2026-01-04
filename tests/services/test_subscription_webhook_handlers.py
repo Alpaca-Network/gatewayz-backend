@@ -373,3 +373,317 @@ class TestSubscriptionUpdatedWebhook:
         # Verify user tier was updated
         users = fake_supabase.table("users").select("*").eq("id", 42).execute().data
         assert users[0]["tier"] == "max"
+
+
+class TestTierResolutionFromSubscriptionItems:
+    """Test tier resolution from subscription items when metadata is missing/basic"""
+
+    def test_resolve_tier_from_subscription_metadata_present(self, stripe_service_with_mock_db):
+        """Test that tier from metadata is used when present"""
+        mock_subscription = MagicMock()
+        mock_subscription.status = "active"
+
+        tier, product_id = stripe_service_with_mock_db._resolve_tier_from_subscription(
+            mock_subscription, "pro"
+        )
+
+        assert tier == "pro"
+        assert product_id is None
+
+    def test_resolve_tier_from_subscription_metadata_missing_defaults_to_pro_for_active(self, stripe_service_with_mock_db):
+        """Test that active subscriptions default to 'pro' when tier can't be determined"""
+        mock_subscription = MagicMock()
+        mock_subscription.status = "active"
+        mock_subscription.id = "sub_test_123"
+        mock_subscription.items = None
+
+        tier, product_id = stripe_service_with_mock_db._resolve_tier_from_subscription(
+            mock_subscription, None
+        )
+
+        assert tier == "pro"
+        assert product_id is None
+
+    def test_resolve_tier_from_subscription_metadata_basic_defaults_to_pro_for_active(self, stripe_service_with_mock_db):
+        """Test that 'basic' metadata is upgraded to 'pro' for active subscriptions"""
+        mock_subscription = MagicMock()
+        mock_subscription.status = "active"
+        mock_subscription.id = "sub_test_123"
+        mock_subscription.items = None
+
+        tier, product_id = stripe_service_with_mock_db._resolve_tier_from_subscription(
+            mock_subscription, "basic"
+        )
+
+        assert tier == "pro"
+        assert product_id is None
+
+    def test_resolve_tier_from_subscription_items_with_product_lookup(self, stripe_service_with_mock_db, monkeypatch):
+        """Test tier resolution from subscription items when product_id is mapped"""
+        # Mock get_tier_from_product_id to return 'max' for our test product
+        monkeypatch.setattr(
+            "src.services.payments.get_tier_from_product_id",
+            lambda product_id: "max" if product_id == "prod_max_123" else "basic"
+        )
+
+        mock_subscription = MagicMock()
+        mock_subscription.status = "active"
+        mock_subscription.id = "sub_test_123"
+
+        # Create mock subscription items structure
+        mock_price = MagicMock()
+        mock_price.product = "prod_max_123"
+
+        mock_item = MagicMock()
+        mock_item.price = mock_price
+
+        mock_items = MagicMock()
+        mock_items.data = [mock_item]
+
+        mock_subscription.items = mock_items
+
+        tier, product_id = stripe_service_with_mock_db._resolve_tier_from_subscription(
+            mock_subscription, None
+        )
+
+        assert tier == "max"
+        assert product_id == "prod_max_123"
+
+    def test_subscription_created_with_missing_tier_defaults_to_pro(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.created with missing tier metadata defaults to 'pro'"""
+        fake_supabase.clear_all()
+
+        # Setup: create plan and user
+        fake_supabase.table("plans").insert({
+            "id": 1,
+            "name": "Pro",
+            "is_active": True
+        }).execute()
+
+        fake_supabase.table("users").insert({
+            "id": 42,
+            "email": "user@example.com",
+            "subscription_status": "trial"
+        }).execute()
+
+        # Create mock subscription with NO tier in metadata
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_test_no_tier"
+        mock_subscription.status = "active"
+        mock_subscription.metadata = {
+            "user_id": "42",
+            # No "tier" key - simulating missing tier
+            "product_id": "prod_unmapped"
+        }
+        mock_subscription.customer = "cust_test_123"
+        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.items = None
+
+        # Call the handler
+        stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
+
+        # Verify user was updated with 'pro' (default fallback)
+        users = fake_supabase.table("users").select("*").eq("id", 42).execute().data
+        assert len(users) == 1
+        assert users[0]["tier"] == "pro"  # Should default to pro, not basic
+        assert users[0]["subscription_status"] == "active"
+
+    def test_subscription_created_with_basic_tier_defaults_to_pro(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.created with tier='basic' upgrades to 'pro'"""
+        fake_supabase.clear_all()
+
+        # Setup: create plan and user
+        fake_supabase.table("plans").insert({
+            "id": 1,
+            "name": "Pro",
+            "is_active": True
+        }).execute()
+
+        fake_supabase.table("users").insert({
+            "id": 42,
+            "email": "user@example.com",
+            "subscription_status": "trial"
+        }).execute()
+
+        # Create mock subscription with tier='basic' in metadata
+        # This simulates the case where product_id lookup failed
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_test_basic_tier"
+        mock_subscription.status = "active"
+        mock_subscription.metadata = {
+            "user_id": "42",
+            "tier": "basic",  # This shouldn't happen for a paid subscription
+            "product_id": "prod_unmapped"
+        }
+        mock_subscription.customer = "cust_test_123"
+        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.items = None
+
+        # Call the handler
+        stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
+
+        # Verify user was updated with 'pro' (default fallback)
+        users = fake_supabase.table("users").select("*").eq("id", 42).execute().data
+        assert len(users) == 1
+        assert users[0]["tier"] == "pro"  # Should upgrade to pro
+        assert users[0]["subscription_status"] == "active"
+
+
+class TestCheckoutCompletedTrialStatusClearing:
+    """Test that checkout completed webhook clears trial status"""
+
+    def test_checkout_completed_clears_trial_status(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that checkout.session.completed clears trial status for users"""
+        fake_supabase.clear_all()
+
+        # Setup: create a trial user with trial API key
+        fake_supabase.table("users").insert({
+            "id": 42,
+            "email": "trial_user@example.com",
+            "subscription_status": "trial",
+            "credits": 5.0
+        }).execute()
+
+        fake_supabase.table("api_keys_new").insert({
+            "id": 1,
+            "user_id": 42,
+            "api_key": "test_key_123",
+            "is_trial": True,
+            "trial_converted": False,
+            "subscription_status": "trial"
+        }).execute()
+
+        # Create mock checkout session
+        mock_session = MagicMock()
+        mock_session.id = "cs_test_trial_clear"
+        mock_session.payment_intent = "pi_test_123"
+        mock_session.metadata = {
+            "user_id": "42",
+            "payment_id": "100",
+            "credits_cents": "1000"  # $10
+        }
+        mock_session.amount_total = 1000
+        mock_session.currency = "usd"
+
+        # Mock the necessary dependencies
+        with patch('src.services.payments.get_payment_by_stripe_intent', return_value=None), \
+             patch('src.services.payments.create_payment', return_value={"id": 100}), \
+             patch('src.services.payments.add_credits_to_user') as mock_add_credits, \
+             patch('src.services.payments.update_payment_status'):
+
+            # Call the handler
+            stripe_service_with_mock_db._handle_checkout_completed(mock_session)
+
+            # Verify add_credits_to_user was called
+            mock_add_credits.assert_called_once()
+
+        # Verify user's subscription_status was updated
+        users = fake_supabase.table("users").select("*").eq("id", 42).execute().data
+        assert len(users) == 1
+        assert users[0]["subscription_status"] == "active"
+
+        # Verify API key trial status was cleared
+        api_keys = fake_supabase.table("api_keys_new").select("*").eq("user_id", 42).execute().data
+        assert len(api_keys) == 1
+        assert api_keys[0]["is_trial"] is False
+        assert api_keys[0]["trial_converted"] is True
+        assert api_keys[0]["subscription_status"] == "active"
+
+    def test_checkout_completed_clears_multiple_api_keys(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that checkout.session.completed clears trial status for all user's API keys"""
+        fake_supabase.clear_all()
+
+        # Setup: create a trial user with multiple API keys
+        fake_supabase.table("users").insert({
+            "id": 42,
+            "email": "trial_user@example.com",
+            "subscription_status": "trial",
+            "credits": 5.0
+        }).execute()
+
+        # Create multiple trial API keys
+        fake_supabase.table("api_keys_new").insert([
+            {
+                "id": 1,
+                "user_id": 42,
+                "api_key": "test_key_1",
+                "is_trial": True,
+                "trial_converted": False,
+                "subscription_status": "trial"
+            },
+            {
+                "id": 2,
+                "user_id": 42,
+                "api_key": "test_key_2",
+                "is_trial": True,
+                "trial_converted": False,
+                "subscription_status": "trial"
+            }
+        ]).execute()
+
+        # Create mock checkout session
+        mock_session = MagicMock()
+        mock_session.id = "cs_test_multi_key"
+        mock_session.payment_intent = "pi_test_456"
+        mock_session.metadata = {
+            "user_id": "42",
+            "payment_id": "101",
+            "credits_cents": "2000"  # $20
+        }
+        mock_session.amount_total = 2000
+        mock_session.currency = "usd"
+
+        # Mock the necessary dependencies
+        with patch('src.services.payments.get_payment_by_stripe_intent', return_value=None), \
+             patch('src.services.payments.create_payment', return_value={"id": 101}), \
+             patch('src.services.payments.add_credits_to_user'), \
+             patch('src.services.payments.update_payment_status'):
+
+            # Call the handler
+            stripe_service_with_mock_db._handle_checkout_completed(mock_session)
+
+        # Verify all API keys had trial status cleared
+        api_keys = fake_supabase.table("api_keys_new").select("*").eq("user_id", 42).execute().data
+        assert len(api_keys) == 2
+        for key in api_keys:
+            assert key["is_trial"] is False
+            assert key["trial_converted"] is True
+            assert key["subscription_status"] == "active"
+
+    def test_checkout_completed_does_not_fail_if_no_api_keys(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that checkout completed doesn't fail if user has no API keys"""
+        fake_supabase.clear_all()
+
+        # Setup: create a user without API keys
+        fake_supabase.table("users").insert({
+            "id": 42,
+            "email": "no_keys_user@example.com",
+            "subscription_status": "trial",
+            "credits": 0
+        }).execute()
+
+        # Create mock checkout session
+        mock_session = MagicMock()
+        mock_session.id = "cs_test_no_keys"
+        mock_session.payment_intent = "pi_test_789"
+        mock_session.metadata = {
+            "user_id": "42",
+            "payment_id": "102",
+            "credits_cents": "500"  # $5
+        }
+        mock_session.amount_total = 500
+        mock_session.currency = "usd"
+
+        # Mock the necessary dependencies
+        with patch('src.services.payments.get_payment_by_stripe_intent', return_value=None), \
+             patch('src.services.payments.create_payment', return_value={"id": 102}), \
+             patch('src.services.payments.add_credits_to_user'), \
+             patch('src.services.payments.update_payment_status'):
+
+            # Should not raise an exception
+            stripe_service_with_mock_db._handle_checkout_completed(mock_session)
+
+        # Verify user's subscription_status was still updated
+        users = fake_supabase.table("users").select("*").eq("id", 42).execute().data
+        assert len(users) == 1
+        assert users[0]["subscription_status"] == "active"

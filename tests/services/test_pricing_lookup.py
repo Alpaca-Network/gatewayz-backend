@@ -312,14 +312,26 @@ class TestGatewayProviders:
     def test_gateway_providers_contains_expected_providers(self):
         """Test that GATEWAY_PROVIDERS contains all expected gateway providers
 
-        Note: AiHubMix is NOT a gateway provider because their API exposes pricing directly
+        Gateway providers route to underlying providers (OpenAI, Anthropic, etc.)
+        and need cross-reference pricing from OpenRouter. Models without valid
+        pricing will be filtered out to avoid appearing as "free".
         """
         from src.services.pricing_lookup import GATEWAY_PROVIDERS
 
-        # AiHubMix has direct pricing API, so it's not in GATEWAY_PROVIDERS
-        assert "aihubmix" not in GATEWAY_PROVIDERS
+        # All gateway providers that don't expose reliable pricing directly
+        assert "aihubmix" in GATEWAY_PROVIDERS
+        assert "akash" in GATEWAY_PROVIDERS
+        assert "alibaba-cloud" in GATEWAY_PROVIDERS
         assert "anannas" in GATEWAY_PROVIDERS
+        assert "clarifai" in GATEWAY_PROVIDERS
+        assert "cloudflare-workers-ai" in GATEWAY_PROVIDERS
+        assert "deepinfra" in GATEWAY_PROVIDERS
+        assert "featherless" in GATEWAY_PROVIDERS
+        assert "fireworks" in GATEWAY_PROVIDERS
+        assert "groq" in GATEWAY_PROVIDERS
         assert "helicone" in GATEWAY_PROVIDERS
+        assert "onerouter" in GATEWAY_PROVIDERS
+        assert "together" in GATEWAY_PROVIDERS
         assert "vercel-ai-gateway" in GATEWAY_PROVIDERS
 
     def test_gateway_providers_is_set(self):
@@ -542,8 +554,8 @@ class TestEnrichModelWithPricingGatewayProviders:
                 "src.services.pricing_lookup._get_cross_reference_pricing",
                 return_value=mock_cross_ref,
             ):
-                # Use anannas as gateway provider since aihubmix now has direct pricing API
-                result = enrich_model_with_pricing(model_data, "anannas")
+                # Test with aihubmix as a gateway provider
+                result = enrich_model_with_pricing(model_data, "aihubmix")
                 assert result is not None
                 assert result["pricing"] == mock_cross_ref
                 assert result["pricing_source"] == "cross-reference"
@@ -612,7 +624,8 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
-            result = enrich_model_with_pricing(model_data, "deepinfra")
+            # Use openrouter as non-gateway provider (primary source, not a gateway)
+            result = enrich_model_with_pricing(model_data, "openrouter")
             assert result is not None
             assert result == model_data
             assert "pricing_source" not in result
@@ -628,8 +641,8 @@ class TestEnrichModelWithPricingGatewayProviders:
             with patch(
                 "src.services.pricing_lookup._get_cross_reference_pricing"
             ) as mock_cross:
-                # Use anannas as gateway provider since aihubmix now has direct pricing API
-                result = enrich_model_with_pricing(model_data, "anannas")
+                # Test with alibaba-cloud as a gateway provider
+                result = enrich_model_with_pricing(model_data, "alibaba-cloud")
                 assert result is not None
                 assert result["pricing"]["prompt"] == "0.001"
                 mock_manual.assert_not_called()
@@ -643,8 +656,8 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
-            # Use anannas as gateway provider since aihubmix now has direct pricing API
-            result = enrich_model_with_pricing(model_data, "anannas")
+            # Test with aihubmix as a gateway provider
+            result = enrich_model_with_pricing(model_data, "aihubmix")
             # Gateway provider should be filtered out on error
             assert result is None
 
@@ -656,10 +669,293 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
-            result = enrich_model_with_pricing(model_data, "deepinfra")
+            # Use openrouter as non-gateway provider (primary source, not a gateway)
+            result = enrich_model_with_pricing(model_data, "openrouter")
             # Non-gateway provider should return model data even on error
             assert result is not None
             assert result["id"] == "test-model"
+
+
+class TestGatewayProviderZeroPricingFiltering:
+    """Test that gateway providers filter out models with zero cross-reference pricing"""
+
+    def test_gateway_provider_filters_zero_cross_reference_pricing(self):
+        """Gateway provider should filter out models with zero cross-reference pricing"""
+        model_data = {
+            "id": "some-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Cross-reference returns zero pricing (model is free on OpenRouter)
+        zero_cross_ref = {"prompt": "0", "completion": "0", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=zero_cross_ref,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    # Test with aihubmix as a gateway provider
+                    result = enrich_model_with_pricing(model_data, "aihubmix")
+                    # Should be filtered out because cross-reference pricing is zero
+                    assert result is None
+
+    def test_gateway_provider_accepts_nonzero_cross_reference_pricing(self):
+        """Gateway provider should accept models with non-zero cross-reference pricing"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Cross-reference returns non-zero pricing
+        nonzero_cross_ref = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=nonzero_cross_ref,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "helicone")
+                    assert result is not None
+                    assert result["pricing"] == nonzero_cross_ref
+                    assert result["pricing_source"] == "cross-reference"
+
+    def test_gateway_provider_filters_zero_string_variants(self):
+        """Gateway provider should filter zero pricing in various formats"""
+        model_data = {
+            "id": "some-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Various zero formats
+        zero_variants = {"prompt": "0.0", "completion": "0.00", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=zero_variants,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "anannas")
+                    # Should be filtered out because all pricing values are zero
+                    assert result is None
+
+    def test_gateway_provider_accepts_partial_nonzero_pricing(self):
+        """Gateway provider should accept models with at least one non-zero prompt/completion"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        # Only completion is non-zero
+        partial_pricing = {"prompt": "0", "completion": "0.000015", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=partial_pricing,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "vercel-ai-gateway")
+                    assert result is not None
+                    assert result["pricing"]["completion"] == "0.000015"
+
+    def test_clarifai_in_gateway_providers(self):
+        """Test that clarifai is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "clarifai" in GATEWAY_PROVIDERS
+
+    def test_onerouter_in_gateway_providers(self):
+        """Test that onerouter is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "onerouter" in GATEWAY_PROVIDERS
+
+    def test_deepinfra_in_gateway_providers(self):
+        """Test that deepinfra is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "deepinfra" in GATEWAY_PROVIDERS
+
+    def test_featherless_in_gateway_providers(self):
+        """Test that featherless is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "featherless" in GATEWAY_PROVIDERS
+
+    def test_deepinfra_filters_models_without_pricing(self):
+        """Test that deepinfra filters out models without valid pricing"""
+        model_data = {
+            "id": "unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "deepinfra")
+                    # Should be filtered out because no pricing found
+                    assert result is None
+
+    def test_featherless_filters_models_without_pricing(self):
+        """Test that featherless filters out models without valid pricing"""
+        model_data = {
+            "id": "unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "featherless")
+                    # Should be filtered out because no pricing found
+                    assert result is None
+
+    def test_deepinfra_accepts_models_with_manual_pricing(self):
+        """Test that deepinfra accepts models with manual pricing"""
+        model_data = {
+            "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.055", "completion": "0.055", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "deepinfra")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
+
+    def test_featherless_accepts_models_with_manual_pricing(self):
+        """Test that featherless accepts models with manual pricing"""
+        model_data = {
+            "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.05", "completion": "0.05", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "featherless")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
+
+    def test_groq_in_gateway_providers(self):
+        """Test that groq is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "groq" in GATEWAY_PROVIDERS
+
+    def test_fireworks_in_gateway_providers(self):
+        """Test that fireworks is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "fireworks" in GATEWAY_PROVIDERS
+
+    def test_together_in_gateway_providers(self):
+        """Test that together is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "together" in GATEWAY_PROVIDERS
+
+    def test_akash_in_gateway_providers(self):
+        """Test that akash is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "akash" in GATEWAY_PROVIDERS
+
+    def test_cloudflare_workers_ai_in_gateway_providers(self):
+        """Test that cloudflare-workers-ai is now in GATEWAY_PROVIDERS"""
+        from src.services.pricing_lookup import GATEWAY_PROVIDERS
+
+        assert "cloudflare-workers-ai" in GATEWAY_PROVIDERS
+
+    def test_groq_filters_models_without_pricing(self):
+        """Test that groq filters out models without valid pricing"""
+        model_data = {
+            "id": "groq/unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "groq")
+                    assert result is None
+
+    def test_fireworks_filters_models_without_pricing(self):
+        """Test that fireworks filters out models without valid pricing"""
+        model_data = {
+            "id": "accounts/fireworks/models/unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "fireworks")
+                    assert result is None
+
+    def test_together_filters_models_without_pricing(self):
+        """Test that together filters out models without valid pricing"""
+        model_data = {
+            "id": "unknown/unknown-model",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
+            with patch(
+                "src.services.pricing_lookup._get_cross_reference_pricing",
+                return_value=None,
+            ):
+                with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
+                    result = enrich_model_with_pricing(model_data, "together")
+                    assert result is None
+
+    def test_groq_accepts_models_with_manual_pricing(self):
+        """Test that groq accepts models with manual pricing"""
+        model_data = {
+            "id": "groq/llama-3.3-70b-versatile",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.59", "completion": "0.79", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "groq")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
+
+    def test_fireworks_accepts_models_with_manual_pricing(self):
+        """Test that fireworks accepts models with manual pricing"""
+        model_data = {
+            "id": "accounts/fireworks/models/deepseek-v3",
+            "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
+        }
+
+        manual_pricing = {"prompt": "0.56", "completion": "1.68", "request": "0", "image": "0"}
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
+            result = enrich_model_with_pricing(model_data, "fireworks")
+            assert result is not None
+            assert result["pricing"] == manual_pricing
+            assert result["pricing_source"] == "manual"
 
 
 class TestCrossReferencePricingNullHandling:
@@ -725,3 +1021,107 @@ class TestCrossReferencePricingNullHandling:
                 # Empty string should be converted to "0"
                 assert result["prompt"] == "0"
                 assert result["completion"] == "0.000015"
+
+
+class TestIsFreeField:
+    """Test is_free field is set correctly for models"""
+
+    def test_non_openrouter_gateway_sets_is_free_false(self):
+        """Non-OpenRouter gateways should have is_free set to False"""
+        model_data = {
+            "id": "groq/llama-3.3-70b-versatile",
+            "pricing": {"prompt": "0.59", "completion": "0.79"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "groq")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_deepinfra_sets_is_free_false(self):
+        """DeepInfra models should have is_free set to False"""
+        model_data = {
+            "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0.06", "completion": "0.06"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "deepinfra")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_featherless_sets_is_free_false(self):
+        """Featherless models should have is_free set to False"""
+        model_data = {
+            "id": "meta-llama/Llama-3.1-8B-Instruct",
+            "pricing": {"prompt": "0.10", "completion": "0.10"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "featherless")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_together_sets_is_free_false(self):
+        """Together models should have is_free set to False"""
+        model_data = {
+            "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "pricing": {"prompt": "0.88", "completion": "0.88"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "together")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_fireworks_sets_is_free_false(self):
+        """Fireworks models should have is_free set to False"""
+        model_data = {
+            "id": "accounts/fireworks/models/deepseek-v3",
+            "pricing": {"prompt": "0.56", "completion": "1.68"},
+        }
+
+        with patch("src.services.pricing_lookup.get_model_pricing", return_value={"prompt": "0.56", "completion": "1.68"}):
+            result = enrich_model_with_pricing(model_data, "fireworks")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_openrouter_does_not_set_is_free(self):
+        """OpenRouter models should not have is_free set by enrich_model_with_pricing
+        (it's set by fetch_models_from_openrouter based on :free suffix)"""
+        model_data = {
+            "id": "openai/gpt-4o",
+            "pricing": {"prompt": "2.50", "completion": "10.00"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "openrouter")
+
+        assert result is not None
+        # OpenRouter models don't get is_free set by enrich_model_with_pricing
+        # because is_free is set by fetch_models_from_openrouter based on :free suffix
+        assert "is_free" not in result
+
+    def test_aihubmix_sets_is_free_false(self):
+        """AiHubMix gateway models should have is_free set to False"""
+        model_data = {
+            "id": "gpt-4o",
+            "pricing": {"prompt": "2.50", "completion": "10.00"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "aihubmix")
+
+        assert result is not None
+        assert result["is_free"] is False
+
+    def test_helicone_sets_is_free_false(self):
+        """Helicone gateway models should have is_free set to False"""
+        model_data = {
+            "id": "claude-3-opus",
+            "pricing": {"prompt": "15.00", "completion": "75.00"},
+        }
+
+        result = enrich_model_with_pricing(model_data, "helicone")
+
+        assert result is not None
+        assert result["is_free"] is False

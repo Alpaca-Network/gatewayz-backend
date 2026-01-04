@@ -233,6 +233,13 @@ active_api_keys = get_or_create_metric(Gauge,
 )
 
 # ==================== Business Metrics ====================
+# Free model usage tracking for expired trials
+free_model_usage = get_or_create_metric(Counter,
+    "free_model_usage_total",
+    "Total free model requests by user status (expired_trial, active_trial, paid)",
+    ["user_status", "model"],
+)
+
 user_credit_balance = get_or_create_metric(Gauge,
     "user_credit_balance",
     "Total user credit balance aggregated by plan type",
@@ -575,6 +582,16 @@ def set_user_credit_balance(user_id: str, plan_type: str, balance: float):
 def set_trial_count(status: str, count: int):
     """Set trial count by status."""
     trial_status.labels(status=status).set(count)
+
+
+def record_free_model_usage(user_status: str, model: str):
+    """Record free model usage by user status.
+
+    Args:
+        user_status: One of "expired_trial", "active_trial", "paid", "anonymous"
+        model: The model identifier (e.g., "google/gemini-2.0-flash-exp:free")
+    """
+    free_model_usage.labels(user_status=user_status, model=model).inc()
 
 
 def set_subscription_count(plan_type: str, billing_cycle: str, count: int):

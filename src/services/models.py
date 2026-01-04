@@ -938,6 +938,13 @@ def fetch_models_from_openrouter():
                     )
                     continue
                 model["pricing"] = sanitized_pricing
+
+            # Mark OpenRouter free models (those with :free suffix)
+            # Only OpenRouter has legitimately free models
+            # Use `or ""` to handle both missing keys and null values
+            model_id = model.get("id") or ""
+            model["is_free"] = model_id.endswith(":free")
+
             filtered_models.append(model)
 
         logger.info(
@@ -1001,7 +1008,14 @@ def fetch_models_from_deepinfra():
 
         logger.info(f"Fetched {len(raw_models)} models from DeepInfra")
 
-        normalized_models = [normalize_deepinfra_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_deepinfra_model(model)]
+            if norm_model is not None
+        ]
 
         _deepinfra_models_cache["data"] = normalized_models
         _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1053,7 +1067,14 @@ def fetch_models_from_featherless():
 
         logger.info(f"Fetched {len(all_models)} total models from Featherless")
 
-        normalized_models = [normalize_featherless_model(model) for model in all_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in all_models
+            if model
+            for norm_model in [normalize_featherless_model(model)]
+            if norm_model is not None
+        ]
 
         if len(normalized_models) < 6000:
             logger.warning(
@@ -1061,9 +1082,17 @@ def fetch_models_from_featherless():
             )
             export_models = load_featherless_catalog_export()
             if export_models:
+                # Filter models that have a valid id (normalize functions may return models without id)
                 combined = {model["id"]: model for model in normalized_models if model.get("id")}
                 for export_model in export_models:
-                    combined[export_model["id"]] = export_model
+                    # Run export models through pricing enrichment to filter those without valid pricing.
+                    # Note: During catalog build (_is_building_catalog=True), models are kept even without
+                    # pricing to bootstrap the catalog. During regular operation, only models with valid
+                    # pricing (from manual_pricing.json or cross-reference) are kept. This intentionally
+                    # filters out export models without pricing to prevent them appearing as "free".
+                    enriched = enrich_model_with_pricing(export_model, "featherless")
+                    if enriched and enriched.get("id"):
+                        combined[enriched["id"]] = enriched
                 normalized_models = list(combined.values())
                 logger.info(
                     f"Combined Featherless catalog now includes {len(normalized_models)} models from API + export"
@@ -1220,7 +1249,14 @@ def fetch_models_from_groq():
 
         payload = response.json()
         raw_models = payload.get("data", [])
-        normalized_models = [normalize_groq_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_groq_model(model)]
+            if norm_model is not None
+        ]
 
         _groq_models_cache["data"] = normalized_models
         _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1412,7 +1448,14 @@ def fetch_models_from_fireworks():
 
         payload = response.json()
         raw_models = payload.get("data", [])
-        normalized_models = [normalize_fireworks_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_fireworks_model(model)]
+            if norm_model is not None
+        ]
 
         _fireworks_models_cache["data"] = normalized_models
         _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1560,7 +1603,14 @@ def fetch_models_from_together():
         payload = response.json()
         # Together API returns a list directly, not wrapped in {"data": [...]}
         raw_models = payload if isinstance(payload, list) else payload.get("data", [])
-        normalized_models = [normalize_together_model(model) for model in raw_models if model]
+        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        normalized_models = [
+            norm_model
+            for model in raw_models
+            if model
+            for norm_model in [normalize_together_model(model)]
+            if norm_model is not None
+        ]
 
         _together_models_cache["data"] = normalized_models
         _together_models_cache["timestamp"] = datetime.now(timezone.utc)
@@ -1982,14 +2032,8 @@ def fetch_models_from_near():
                 "outputCostPerToken": {"amount": 2.0, "scale": -6},  # $2.00 per million tokens
                 "metadata": {"contextLength": 200000},
             },
-            {
-                "id": "moonshotai/Kimi-K2-Thinking",
-                "modelId": "moonshotai/Kimi-K2-Thinking",
-                "owned_by": "Moonshot AI",
-                "inputCostPerToken": {"amount": 0.6, "scale": -6},  # $0.60 per million tokens
-                "outputCostPerToken": {"amount": 2.4, "scale": -6},  # $2.40 per million tokens
-                "metadata": {"contextLength": 128000},
-            },
+            # Note: moonshotai/Kimi-K2-Thinking was removed - model is NOT available on Near AI
+            # Near AI only supports DeepSeek, Qwen, GLM, and GPT-OSS models currently
         ]
 
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
@@ -2817,11 +2861,11 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
                     if model.get("id", "").lower() == model_id:
                         return "huggingface" if gateway in ("hug", "huggingface") else gateway
 
-        # Default to openrouter if not found
-        return "openrouter"
+        # Default to onerouter if not found
+        return "onerouter"
     except Exception as e:
         logger.error(f"Error detecting gateway for model {provider_name}/{model_name}: {e}")
-        return "openrouter"
+        return "onerouter"
 
 
 def fetch_specific_model(provider_name: str, model_name: str, gateway: str = None):

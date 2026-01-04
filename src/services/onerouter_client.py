@@ -7,6 +7,7 @@ from src.cache import _onerouter_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_onerouter_pooled_client
+from src.services.pricing_lookup import enrich_model_with_pricing, get_model_pricing
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
@@ -263,6 +264,8 @@ def fetch_models_from_onerouter():
         # id, object, created, owned_by
         transformed_models = []
         enriched_count = 0
+        manual_pricing_count = 0
+        filtered_count = 0
         for model in models:
             # Use the model id directly (this is what's used for API calls)
             model_id = model.get("id", "")
@@ -272,12 +275,37 @@ def fetch_models_from_onerouter():
             # Get pricing/context info from display_models if available
             # Note: We assume the 'id' from /v1/models matches 'invoke_name' from display_models
             pricing_info = pricing_map.get(model_id, {})
+            pricing_source = "api"
             if pricing_info:
                 enriched_count += 1
+                prompt_price = pricing_info.get("prompt", "0")
+                completion_price = pricing_info.get("completion", "0")
+            else:
+                # Fallback to manual_pricing.json for models not in display_models API
+                manual_pricing = get_model_pricing("onerouter", model_id)
+                if manual_pricing:
+                    prompt_price = manual_pricing.get("prompt", "0")
+                    completion_price = manual_pricing.get("completion", "0")
+                    pricing_source = "manual"
+                    manual_pricing_count += 1
+                else:
+                    # Filter out models without valid pricing to prevent them appearing as free
+                    logger.debug(f"Filtering out OneRouter model {model_id} - no pricing available")
+                    filtered_count += 1
+                    continue
+
+            # Validate we have non-zero pricing (don't show free models)
+            try:
+                if float(prompt_price) == 0 and float(completion_price) == 0:
+                    logger.debug(f"Filtering out OneRouter model {model_id} - zero pricing")
+                    filtered_count += 1
+                    continue
+            except (ValueError, TypeError):
+                # Keep model if we can't parse pricing (assume it's valid)
+                pass
+
             context_length = pricing_info.get("context_length", 128000)
             max_completion_tokens = pricing_info.get("max_completion_tokens", 4096)
-            prompt_price = pricing_info.get("prompt", "0")
-            completion_price = pricing_info.get("completion", "0")
             modality = pricing_info.get("modality", "text->text")
             input_modalities = pricing_info.get("input_modalities", ["text"])
             output_modalities = pricing_info.get("output_modalities", ["text"])
@@ -308,6 +336,7 @@ def fetch_models_from_onerouter():
                     "request": "0",
                     "image": "0",
                 },
+                "pricing_source": pricing_source,
                 "provider_slug": "onerouter",
                 "source_gateway": "onerouter",
             }
@@ -315,7 +344,8 @@ def fetch_models_from_onerouter():
 
         logger.info(
             f"Successfully fetched {len(transformed_models)} models from OneRouter "
-            f"({enriched_count} enriched with pricing data)"
+            f"({enriched_count} from API, {manual_pricing_count} from manual pricing, "
+            f"{filtered_count} filtered for zero/missing pricing)"
         )
         return _cache_and_return(transformed_models)
 

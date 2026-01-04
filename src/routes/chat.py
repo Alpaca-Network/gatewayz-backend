@@ -17,6 +17,7 @@ import importlib
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
 import src.db.chat_history as chat_history_module
+import src.db.chat_completion_requests as chat_completion_requests_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
@@ -31,6 +32,7 @@ from src.services.prometheus_metrics import (
     tokens_used,
     credits_used,
     track_time_to_first_chunk,
+    record_free_model_usage,
 )
 from src.services.redis_metrics import get_redis_metrics
 from src.services.stream_normalizer import (
@@ -528,6 +530,111 @@ def mask_key(k: str) -> str:
     return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
 
 
+def is_free_model(model_id: str) -> bool:
+    """Check if the model is a free model (OpenRouter free models end with :free suffix).
+
+    Args:
+        model_id: The model identifier (e.g., "google/gemini-2.0-flash-exp:free")
+
+    Returns:
+        True if the model is free, False otherwise
+    """
+    if not model_id:
+        return False
+    return model_id.endswith(":free")
+
+
+def validate_trial_with_free_model_bypass(
+    trial: dict,
+    model_id: str,
+    request_id: str,
+    api_key: str | None,
+    logger_instance,
+) -> dict:
+    """Validate trial access with free model bypass logic.
+
+    Allows expired trials and trials with exceeded limits to access free models.
+    Records metrics and logs for free model access.
+
+    Args:
+        trial: Trial validation result from validate_trial_access()
+        model_id: The requested model identifier
+        request_id: Request correlation ID for logging
+        api_key: The API key (will be masked in logs)
+        logger_instance: Logger to use for logging
+
+    Returns:
+        Updated trial dict with is_valid=True if free model bypass applies
+
+    Raises:
+        HTTPException: If trial is invalid and model is not free
+    """
+    model_is_free = is_free_model(model_id)
+
+    # IMPORTANT: Work with a copy to avoid mutating the cached trial dict.
+    # The trial dict may be cached in _trial_cache and mutating it would corrupt
+    # the cache, potentially allowing expired trials to access premium models.
+    trial = trial.copy()
+
+    if not trial.get("is_valid", False):
+        if trial.get("is_trial") and trial.get("is_expired"):
+            if model_is_free:
+                # Allow expired trial to use free model - log and track this access
+                logger_instance.info(
+                    "Expired trial accessing free model (request_id=%s, api_key=%s, model=%s, trial_end_date=%s)",
+                    request_id,
+                    mask_key(api_key) if api_key else "unknown",
+                    model_id,
+                    trial.get("trial_end_date", "unknown"),
+                    extra={"request_id": request_id, "free_model_bypass": True},
+                )
+                record_free_model_usage("expired_trial", model_id)
+                # Mark trial as valid for this request (free model access)
+                trial["is_valid"] = True
+                trial["free_model_bypass"] = True
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail=trial["error"],
+                    headers={
+                        "X-Trial-Expired": "true",
+                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
+                    },
+                )
+        elif trial.get("is_trial"):
+            # Trial limits exceeded (tokens/requests/credits)
+            if model_is_free:
+                # Allow trial with exceeded limits to use free model
+                logger_instance.info(
+                    "Trial with exceeded limits accessing free model (request_id=%s, api_key=%s, model=%s, error=%s)",
+                    request_id,
+                    mask_key(api_key) if api_key else "unknown",
+                    model_id,
+                    trial.get("error", "unknown"),
+                    extra={"request_id": request_id, "free_model_bypass": True},
+                )
+                record_free_model_usage("active_trial", model_id)
+                # Mark trial as valid for this request (free model access)
+                trial["is_valid"] = True
+                trial["free_model_bypass"] = True
+            else:
+                headers = {}
+                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
+                    if k in trial:
+                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
+                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
+        else:
+            raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+    elif model_is_free:
+        # Track free model usage for valid trials and paid users too
+        if trial.get("is_trial"):
+            record_free_model_usage("active_trial", model_id)
+        else:
+            record_free_model_usage("paid", model_id)
+
+    return trial
+
+
 async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
@@ -682,6 +789,7 @@ async def _process_stream_completion_background(
     elapsed,
     provider,
     is_anonymous=False,
+    request_id=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -925,6 +1033,25 @@ async def _process_stream_completion_background(
         except Exception as e:
             logger.debug(f"Failed to capture health metric: {e}")
 
+        # Save chat completion request metadata to database
+        if request_id:
+            try:
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    processing_time_ms=int(elapsed * 1000),
+                    status="completed",
+                    error_message=None,
+                    user_id=user["id"] if user else None,
+                    provider_name=provider,
+                    model_id=None,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to save chat completion request: {e}")
+
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
@@ -943,6 +1070,7 @@ async def stream_generator(
     tracker=None,
     is_anonymous=False,
     is_async_stream=False,  # PERF: Flag to indicate if stream is async
+    request_id=None,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -1121,6 +1249,7 @@ async def stream_generator(
                 elapsed=elapsed,
                 provider=provider,
                 is_anonymous=is_anonymous,
+                request_id=request_id,
             )
         )
 
@@ -1241,25 +1370,15 @@ async def chat_completions(
                 # Step 2: Only validate trial access (plan limits checked after token usage known)
                 trial = await _to_thread(validate_trial_access, api_key)
 
-        # Validate trial access (only for authenticated users)
-        if not is_anonymous and not trial.get("is_valid", False):
-            if trial.get("is_trial") and trial.get("is_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=trial["error"],
-                    headers={
-                        "X-Trial-Expired": "true",
-                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
-                    },
-                )
-            elif trial.get("is_trial"):
-                headers = {}
-                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
-                    if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
-                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
-            else:
-                raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+        # Validate trial access with free model bypass (only for authenticated users)
+        if not is_anonymous:
+            trial = validate_trial_with_free_model_bypass(
+                trial=trial,
+                model_id=req.model,
+                request_id=request_id,
+                api_key=api_key,
+                logger_instance=logger,
+            )
 
         # Fast-fail requests that would exceed plan limits before hitting any upstream provider
         # (only for authenticated users)
@@ -1413,7 +1532,7 @@ async def chat_completions(
             req_provider_missing = req.provider is None or (
                 isinstance(req.provider, str) and not req.provider
             )
-            provider = (req.provider or "openrouter").lower()
+            provider = (req.provider or "onerouter").lower()
 
             # Normalize provider aliases
             if provider == "hug":
@@ -1426,6 +1545,23 @@ async def chat_completions(
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
                     override_provider = "huggingface"
+                # FAL models are for image/video generation only, not chat completions
+                if override_provider == "fal":
+                    logger.warning(
+                        "FAL model '%s' requested via chat completions endpoint - "
+                        "FAL models only support image/video generation",
+                        sanitize_for_logging(original_model),
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Model '{original_model}' is a FAL image/video generation model and "
+                            "does not support chat completions. Please use the /v1/images/generations "
+                            "endpoint for image generation, or choose a chat-compatible model. "
+                            "FAL models support: text-to-image, text-to-video, image-to-video, and "
+                            "other media generation tasks. See https://fal.ai/models for details."
+                        ),
+                    )
                 if provider_locked and override_provider != provider:
                     logger.info(
                         "Skipping provider override for model %s: request locked provider to '%s'",
@@ -1475,7 +1611,7 @@ async def chat_completions(
                                 f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
                             )
                             break
-                    # Otherwise default to openrouter (already set)
+                    # Otherwise default to onerouter (already set)
 
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(original_model, provider_chain)
@@ -1634,6 +1770,21 @@ async def chat_completions(
                             request_model,
                             **optional,
                         )
+                    elif attempt_provider == "fal":
+                        # FAL models are for image/video generation, not chat completions
+                        # Return a clear error message directing users to the correct endpoint
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": {
+                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                    "and is not available through the chat completions endpoint. "
+                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                    "type": "invalid_request_error",
+                                    "code": "model_not_supported_for_chat",
+                                }
+                            },
+                        )
                     else:
                         # PERF: Use async streaming for OpenRouter (default provider)
                         # This is the most impactful optimization - prevents event loop blocking
@@ -1692,6 +1843,7 @@ async def chat_completions(
                             tracker,
                             is_anonymous,
                             is_async_stream=is_async_stream,
+                            request_id=request_id,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -1973,6 +2125,21 @@ async def chat_completions(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_onerouter_response, resp_raw)
+                elif attempt_provider == "fal":
+                    # FAL models are for image/video generation, not chat completions
+                    # Return a clear error message directing users to the correct endpoint
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                "and is not available through the chat completions endpoint. "
+                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                "type": "invalid_request_error",
+                                "code": "model_not_supported_for_chat",
+                            }
+                        },
+                    )
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -2246,14 +2413,48 @@ async def chat_completions(
 
         # === 7) Log to Braintrust ===
         try:
-            messages_for_log = [
-                m.model_dump() if hasattr(m, "model_dump") else m for m in req.messages
-            ]
+            # Safely convert messages to dicts, filtering out None values and sanitizing content
+            messages_for_log = []
+            for m in req.messages:
+                if m is None:
+                    continue
+                msg_dict = m.model_dump() if hasattr(m, "model_dump") else m
+                if msg_dict is None:
+                    continue
+                # Sanitize content to avoid NoneType subscript errors in Braintrust SDK
+                if isinstance(msg_dict, dict) and "content" in msg_dict:
+                    content = msg_dict.get("content")
+                    if content is None:
+                        msg_dict["content"] = ""
+                    elif isinstance(content, list):
+                        # Filter out None items from content list
+                        msg_dict["content"] = [item for item in content if item is not None]
+                messages_for_log.append(msg_dict)
             # Safely extract output content for Braintrust logging
-            bt_choices = processed.get("choices") or [{}]
-            bt_first_choice = bt_choices[0] if bt_choices else {}
-            bt_message = bt_first_choice.get("message") or {}
-            bt_output = bt_message.get("content", "")
+            bt_choices = processed.get("choices") or []
+            bt_first_choice = bt_choices[0] if bt_choices else None
+            bt_message = bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
+            bt_content = bt_message.get("content") if isinstance(bt_message, dict) else None
+            # Handle case where content is None, a string, or a list (multimodal)
+            if bt_content is None:
+                bt_output = ""
+            elif isinstance(bt_content, str):
+                bt_output = bt_content
+            elif isinstance(bt_content, list):
+                # Extract text from multimodal content, filtering empty strings
+                texts = []
+                for item in bt_content:
+                    if item is None:
+                        continue
+                    if isinstance(item, dict):
+                        text = item.get("text")
+                        if text is not None:
+                            texts.append(str(text))
+                    else:
+                        texts.append(str(item))
+                bt_output = " ".join(t for t in texts if t)
+            else:
+                bt_output = str(bt_content)
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -2289,6 +2490,21 @@ async def chat_completions(
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
             },
+        )
+
+        # Save chat completion request metadata to database - run as background task
+        background_tasks.add_task(
+            chat_completion_requests_module.save_chat_completion_request,
+            request_id=request_id,
+            model_name=model,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            processing_time_ms=int(elapsed * 1000),
+            status="completed",
+            error_message=None,
+            user_id=user["id"] if not is_anonymous else None,
+            provider_name=provider,
+            model_id=None,
         )
 
         # Prepare headers including rate limit information
@@ -2330,12 +2546,22 @@ async def unified_responses(
     - Supports response_format for structured JSON output
     - Future-ready for multimodal input/output
     """
+    # Generate request correlation ID for distributed tracing
+    request_id = str(uuid.uuid4())
+    request_id_var.set(request_id)
+
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             api_key = auth_header.split(" ", 1)[1].strip()
 
-    logger.info("unified_responses start (api_key=%s, model=%s)", mask_key(api_key), req.model)
+    logger.info(
+        "unified_responses start (request_id=%s, api_key=%s, model=%s)",
+        request_id,
+        mask_key(api_key),
+        req.model,
+        extra={"request_id": request_id},
+    )
 
     # Start Braintrust span for this request
     span = start_span(name=f"responses_{req.model}", type="llm")
@@ -2357,24 +2583,15 @@ async def unified_responses(
         environment_tag = user.get("environment_tag", "live")
 
         trial = await _to_thread(validate_trial_access, api_key)
-        if not trial.get("is_valid", False):
-            if trial.get("is_trial") and trial.get("is_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=trial["error"],
-                    headers={
-                        "X-Trial-Expired": "true",
-                        "X-Trial-End-Date": trial.get("trial_end_date", ""),
-                    },
-                )
-            elif trial.get("is_trial"):
-                headers = {}
-                for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
-                    if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
-                raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
-            else:
-                raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
+
+        # Validate trial access with free model bypass
+        trial = validate_trial_with_free_model_bypass(
+            trial=trial,
+            model_id=req.model,
+            request_id=request_id,
+            api_key=api_key,
+            logger_instance=logger,
+        )
 
         rate_limit_mgr = get_rate_limit_manager()
 
@@ -2552,6 +2769,23 @@ async def unified_responses(
             override_provider = override_provider.lower()
             if override_provider == "hug":
                 override_provider = "huggingface"
+            # FAL models are for image/video generation only, not chat completions
+            if override_provider == "fal":
+                logger.warning(
+                    "FAL model '%s' requested via responses endpoint - "
+                    "FAL models only support image/video generation",
+                    sanitize_for_logging(original_model),
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Model '{original_model}' is a FAL image/video generation model and "
+                        "does not support chat completions. Please use the /v1/images/generations "
+                        "endpoint for image generation, or choose a chat-compatible model. "
+                        "FAL models support: text-to-image, text-to-video, image-to-video, and "
+                        "other media generation tasks. See https://fal.ai/models for details."
+                    ),
+                )
             if provider_locked and override_provider != provider:
                 logger.info(
                     "Skipping provider override for model %s: request locked provider to '%s'",
@@ -2674,6 +2908,21 @@ async def unified_responses(
                     elif attempt_provider == "groq":
                         stream = await _to_thread(
                             make_groq_request_openai_stream, messages, request_model, **optional
+                        )
+                    elif attempt_provider == "fal":
+                        # FAL models are for image/video generation, not chat completions
+                        # Return a clear error message directing users to the correct endpoint
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": {
+                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                    "and is not available through the chat completions endpoint. "
+                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                    "type": "invalid_request_error",
+                                    "code": "model_not_supported_for_chat",
+                                }
+                            },
                         )
                     else:
                         stream = await _to_thread(
@@ -3058,6 +3307,21 @@ async def unified_responses(
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_groq_response, resp_raw)
+                elif attempt_provider == "fal":
+                    # FAL models are for image/video generation, not chat completions
+                    # Return a clear error message directing users to the correct endpoint
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                "and is not available through the chat completions endpoint. "
+                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                "type": "invalid_request_error",
+                                "code": "model_not_supported_for_chat",
+                            }
+                        },
+                    )
                 else:
                     resp_raw = await asyncio.wait_for(
                         _to_thread(
@@ -3263,13 +3527,15 @@ async def unified_responses(
                         # Extract text content from multimodal content if needed
                         user_content = last_user.get("content", "")
                         if isinstance(user_content, list):
-                            # Extract text from multimodal content
+                            # Extract text from multimodal content, filtering empty strings
                             text_parts = []
                             for item in user_content:
                                 if isinstance(item, dict) and item.get("type") == "text":
-                                    text_parts.append(item.get("text", ""))
+                                    text = item.get("text")
+                                    if text is not None:
+                                        text_parts.append(str(text))
                             user_content = (
-                                " ".join(text_parts) if text_parts else "[multimodal content]"
+                                " ".join(t for t in text_parts if t) if text_parts else "[multimodal content]"
                             )
 
                         await _to_thread(
@@ -3344,17 +3610,53 @@ async def unified_responses(
 
         # === 7) Log to Braintrust ===
         try:
-            # Convert input messages to loggable format
+            # Convert input messages to loggable format, safely handling None values
             input_messages = []
             for inp_msg in req.input:
-                if isinstance(inp_msg.content, str):
-                    input_messages.append({"role": inp_msg.role, "content": inp_msg.content})
-                else:
-                    input_messages.append({"role": inp_msg.role, "content": str(inp_msg.content)})
+                if inp_msg is None:
+                    continue
+                content = inp_msg.content
+                if content is None:
+                    content = ""
+                elif isinstance(content, list):
+                    # Filter out None items from content list
+                    content = [item for item in content if item is not None]
+                    content = str(content) if content else ""
+                elif not isinstance(content, str):
+                    content = str(content)
+                input_messages.append({"role": inp_msg.role, "content": content})
+
+            # Safely extract output content for Braintrust logging
+            bt_output = ""
+            output_list = response.get("output")
+            if isinstance(output_list, list) and len(output_list) > 0:
+                first_output = output_list[0]
+                if isinstance(first_output, dict):
+                    bt_content = first_output.get("content")
+                    # Handle case where content is None, a string, or a list (multimodal)
+                    if bt_content is None:
+                        bt_output = ""
+                    elif isinstance(bt_content, str):
+                        bt_output = bt_content
+                    elif isinstance(bt_content, list):
+                        # Extract text from multimodal content, filtering empty strings
+                        texts = []
+                        for item in bt_content:
+                            if item is None:
+                                continue
+                            if isinstance(item, dict):
+                                text = item.get("text")
+                                if text is not None:
+                                    texts.append(str(text))
+                            else:
+                                texts.append(str(item))
+                        bt_output = " ".join(t for t in texts if t)
+                    else:
+                        bt_output = str(bt_content)
 
             span.log(
                 input=input_messages,
-                output=response["output"][0].get("content", "") if response["output"] else "",
+                output=bt_output,
                 metrics={
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
@@ -3375,6 +3677,21 @@ async def unified_responses(
             span.end()
         except Exception as e:
             logger.warning(f"Failed to log to Braintrust: {e}")
+
+        # Save chat completion request metadata to database - run as background task
+        background_tasks.add_task(
+            chat_completion_requests_module.save_chat_completion_request,
+            request_id=request_id,
+            model_name=model,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            processing_time_ms=int(elapsed * 1000),
+            status="completed",
+            error_message=None,
+            user_id=user["id"],
+            provider_name=provider,
+            model_id=None,
+        )
 
         return response
 

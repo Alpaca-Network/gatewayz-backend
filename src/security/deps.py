@@ -4,6 +4,8 @@ Dependency injection functions for authentication and authorization
 """
 
 import logging
+import os
+import secrets
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request
@@ -11,11 +13,61 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.services.user_lookup_cache import get_user
 from src.security.security import audit_logger, validate_api_key_security
+from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 logger = logging.getLogger(__name__)
 
 # HTTP Bearer security scheme with auto_error=False to allow custom error handling
 security = HTTPBearer(auto_error=False)
+
+# Constants
+ERROR_INVALID_ADMIN_API_KEY = "Invalid admin API key"
+
+
+async def get_admin_key(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())) -> str:
+    """
+    Validate admin API key with security improvements
+
+    This function validates that the provided API key matches the configured
+    ADMIN_API_KEY environment variable using constant-time comparison to
+    prevent timing attacks.
+
+    Args:
+        credentials: HTTP Authorization credentials containing the bearer token
+
+    Returns:
+        The validated admin API key string
+
+    Raises:
+        HTTPException: 401 if the admin key is invalid, missing, or doesn't match
+    """
+    admin_key = credentials.credentials
+
+    # Input validation
+    try:
+        ensure_non_empty_string(admin_key, "admin API key")
+        ensure_api_key_like(admin_key, field_name="admin API key", min_length=10)
+    except ValueError:
+        # Do not leak details; preserve current response contract
+        raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY) from None
+
+    # Get expected key from environment
+    expected_key = os.environ.get("ADMIN_API_KEY")
+
+    # Ensure admin key is configured
+    if not expected_key:
+        logger.error("ADMIN_API_KEY environment variable is not configured")
+        raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY)
+
+    # Use constant-time comparison to prevent timing attacks
+    if not secrets.compare_digest(admin_key, expected_key):
+        audit_logger.log_security_violation(
+            violation_type="INVALID_ADMIN_KEY_ATTEMPT",
+            details=f"Invalid admin key attempt with key prefix: {admin_key[:10]}...",
+        )
+        raise HTTPException(status_code=401, detail=ERROR_INVALID_ADMIN_API_KEY)
+
+    return admin_key
 
 
 async def get_api_key(

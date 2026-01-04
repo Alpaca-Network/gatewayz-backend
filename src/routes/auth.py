@@ -3,8 +3,14 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from postgrest import APIError
+
+from src.services.auth_rate_limiting import (
+    AuthRateLimitType,
+    check_auth_rate_limit,
+    get_client_ip,
+)
 
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
@@ -86,6 +92,7 @@ def _handle_existing_user(
     auth_method: AuthMethod,
     display_name: str | None,
     email: str | None,
+    phone_number: str | None = None,
     auto_create_api_key: bool = True,
 ) -> PrivyAuthResponse:
     """Build a consistent response for existing users."""
@@ -296,6 +303,7 @@ def _handle_existing_user(
         is_new_user=False,
         display_name=existing_user.get("username") or display_name,
         email=user_email,
+        phone_number=phone_number or existing_user.get("phone_number"),
         credits=user_credits,
         timestamp=datetime.now(timezone.utc),
         subscription_status=subscription_status_value,
@@ -553,8 +561,26 @@ def _process_referral_code_background(
 
 
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
-async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTasks):
+async def privy_auth(
+    request: PrivyAuthRequest,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+):
     """Authenticate user via Privy and return API key"""
+    # Rate limit check - 10 attempts per 15 minutes per IP
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.LOGIN)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many login attempts. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         logger.info(f"Privy auth request for user: {request.user.id}")
         if request.referral_code:
@@ -573,41 +599,48 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             request.user.linked_accounts = []
 
         # Extract user info from Privy linked accounts
-        # Priority: 1) Top-level email from request, 2) Email from linked accounts, 3) Fallback
+        # Priority: 1) Top-level email from request, 2) Email from linked accounts, 3) Phone from linked accounts, 4) Fallback
         email = request.email  # Start with top-level email if provided by frontend
+        phone_number = None  # Phone number for SMS auth
         display_name = None
         auth_method = AuthMethod.EMAIL  # Default
 
         # Try to extract from linked accounts if not provided at top level
-        if not email and request.user.linked_accounts:
-            for account in request.user.linked_accounts:
-                try:
-                    account_email = _resolve_account_email(account)
-                    if account.type == "email" and account_email:
-                        email = account_email
-                        auth_method = AuthMethod.EMAIL
-                        logger.debug(f"Extracted email from email account: {email}")
-                        break
-                    elif account.type == "google_oauth" and account_email:
-                        email = account_email
-                        display_name = account.name
-                        auth_method = AuthMethod.GOOGLE
-                        logger.debug(
-                            f"Extracted email from Google OAuth: {email}, "
-                            f"display_name: {display_name}"
-                        )
-                        break
-                    elif account.type == "github" and account.name:
-                        display_name = account.name
-                        auth_method = AuthMethod.GITHUB
-                        logger.debug(f"Extracted GitHub username: {display_name}")
-                        # GitHub doesn't provide email in this field, will use fallback
-                except Exception as account_error:
-                    logger.warning(
-                        f"Error processing linked account for user {request.user.id}: "
-                        f"{account_error}"
+        for account in request.user.linked_accounts or []:
+            try:
+                account_email = _resolve_account_email(account)
+                if account.type == "phone" and account.phone_number:
+                    # Phone authentication - extract phone number
+                    phone_number = account.phone_number
+                    if not email:  # Only set auth method if email wasn't found first
+                        auth_method = AuthMethod.PHONE
+                    logger.debug(f"Extracted phone number from phone account: {phone_number}")
+                elif account.type == "email" and account_email and not email:
+                    email = account_email
+                    auth_method = AuthMethod.EMAIL
+                    logger.debug(f"Extracted email from email account: {email}")
+                elif account.type == "google_oauth" and account_email and not email:
+                    email = account_email
+                    display_name = account.name
+                    auth_method = AuthMethod.GOOGLE
+                    logger.debug(
+                        f"Extracted email from Google OAuth: {email}, "
+                        f"display_name: {display_name}"
                     )
-                    continue
+                elif account.type == "github" and account.name and not display_name:
+                    display_name = account.name
+                    # Only set auth method to GITHUB if no email AND no phone auth
+                    # Phone auth (priority 3) takes precedence over GitHub (priority 4)
+                    if not email and auth_method != AuthMethod.PHONE:
+                        auth_method = AuthMethod.GITHUB
+                    logger.debug(f"Extracted GitHub username: {display_name}")
+                    # GitHub doesn't provide email in this field, will use fallback
+            except Exception as account_error:
+                logger.warning(
+                    f"Error processing linked account for user {request.user.id}: "
+                    f"{account_error}"
+                )
+                continue
 
         # ISSUE FIX #3: Improved email extraction with better logging
         # NOTE: We no longer generate fallback emails from Privy IDs because they contain
@@ -624,13 +657,21 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             email = None
 
         logger.info(
-            f"Email extraction completed for user {request.user.id}: {email}, "
-            f"auth_method: {auth_method}"
+            f"Auth info extraction completed for user {request.user.id}: "
+            f"email={email}, phone={phone_number}, auth_method={auth_method}"
         )
 
-        # Generate username from email or privy ID (for fallback check)
-        username = email.split("@")[0] if email else f"user_{request.user.id[:8]}"
-        logger.debug(f"Generated username for user {request.user.id}: {username}")
+        # Generate base username from email, phone number, or privy ID
+        # Note: This is just the base - uniqueness is ensured later via _generate_unique_username
+        if email:
+            username = email.split("@")[0]
+        elif phone_number:
+            # Use last 4 digits of phone number as base for username
+            clean_phone = "".join(filter(str.isdigit, phone_number))
+            username = f"user_{clean_phone[-4:]}" if len(clean_phone) >= 4 else f"user_{request.user.id[:8]}"
+        else:
+            username = f"user_{request.user.id[:8]}"
+        logger.debug(f"Generated base username for user {request.user.id}: {username}")
 
         # Check if user already exists by privy_user_id (with cache + timeout)
         existing_user = None
@@ -720,6 +761,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 auth_method=auth_method,
                 display_name=display_name,
                 email=email,
+                phone_number=phone_number,
                 auto_create_api_key=request.auto_create_api_key
                 if request.auto_create_api_key is not None
                 else True,
@@ -728,7 +770,14 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
             # New user - create account
             logger.info(f"Creating new Privy user: {request.user.id}")
 
-            # Create user with Privy ID (username already generated above)
+            # Ensure username is unique before attempting to create user
+            # This prevents duplicate username errors, especially for phone auth
+            # where multiple users might have phone numbers ending in the same 4 digits
+            client = supabase_config.get_supabase_client()
+            username = _generate_unique_username(client, username)
+            logger.debug(f"Resolved unique username for new user: {username}")
+
+            # Create user with Privy ID
             try:
                 # Convert auth_method enum to string for create_enhanced_user
                 auth_method_str = (
@@ -772,6 +821,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                         auth_method=auth_method,
                         display_name=display_name,
                         email=email,
+                        phone_number=phone_number,
                         auto_create_api_key=request.auto_create_api_key
                         if request.auto_create_api_key is not None
                         else True,
@@ -1067,6 +1117,7 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
                 is_new_user=True,
                 display_name=display_name or user_data["username"],
                 email=email,
+                phone_number=phone_number,
                 credits=new_user_credits,
                 timestamp=datetime.now(timezone.utc),
                 subscription_status=user_data.get("subscription_status", "trial"),
@@ -1098,8 +1149,26 @@ async def privy_auth(request: PrivyAuthRequest, background_tasks: BackgroundTask
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])
-async def register_user(request: UserRegistrationRequest, background_tasks: BackgroundTasks):
+async def register_user(
+    request: UserRegistrationRequest,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+):
     """Register a new user with username and email"""
+    # Rate limit check - 3 attempts per hour per IP (prevent mass account creation)
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.REGISTER)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many registration attempts. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         logger.info(f"Registration request for user: {request.username}")
 
@@ -1297,8 +1366,22 @@ async def register_user(request: UserRegistrationRequest, background_tasks: Back
 
 
 @router.post("/auth/password-reset", tags=["authentication"])
-async def request_password_reset(email: str):
+async def request_password_reset(email: str, raw_request: Request):
     """Request password reset email"""
+    # Rate limit check - 3 attempts per hour per IP (prevent email bombing)
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.PASSWORD_RESET)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many password reset requests. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         # Find the user by email
         client = supabase_config.get_supabase_client()
@@ -1332,8 +1415,22 @@ async def request_password_reset(email: str):
 
 
 @router.post("/auth/reset-password", tags=["authentication"])
-async def reset_password(token: str):
+async def reset_password(token: str, raw_request: Request):
     """Reset password using token"""
+    # Rate limit check - 3 attempts per hour per IP (prevent token enumeration)
+    client_ip = get_client_ip(raw_request)
+    rate_limit_result = await check_auth_rate_limit(client_ip, AuthRateLimitType.PASSWORD_RESET)
+    if not rate_limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "message": f"Too many password reset attempts. Please try again in {rate_limit_result.retry_after} seconds.",
+                "retry_after": rate_limit_result.retry_after,
+            },
+            headers={"Retry-After": str(rate_limit_result.retry_after)},
+        )
+
     try:
         client = supabase_config.get_supabase_client()
 

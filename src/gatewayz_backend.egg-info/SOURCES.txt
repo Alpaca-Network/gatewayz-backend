@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 src/__init__.py
 src/backfill_legacy_keys.py
@@ -12,12 +13,8 @@ src/config/__init__.py
 src/config/arize_config.py
 src/config/config.py
 src/config/db_config.py
-src/config/gateway_registry 2.py
-src/config/gateway_registry.py
 src/config/logging_config.py
 src/config/opentelemetry_config.py
-src/config/providers 2.py
-src/config/providers.py
 src/config/redis_config.py
 src/config/supabase_config.py
 src/db/__init__.py
@@ -32,7 +29,6 @@ src/db/feedback.py
 src/db/gateway_analytics.py
 src/db/model_health.py
 src/db/models_catalog_db.py
-src/db/models_requests_search.py
 src/db/payments.py
 src/db/ping.py
 src/db/plans.py
@@ -57,7 +53,6 @@ src/middleware/deprecation.py
 src/middleware/observability_middleware.py
 src/middleware/request_timeout_middleware.py
 src/middleware/selective_gzip_middleware.py
-src/middleware/staging_security 2.py
 src/middleware/staging_security.py
 src/middleware/trace_context_middleware.py
 src/models/__init__.py
@@ -76,12 +71,13 @@ src/routes/availability.py
 src/routes/catalog.py
 src/routes/chat.py
 src/routes/chat_history.py
+src/routes/chat_metrics.py
 src/routes/coupons.py
+src/routes/credits.py
 src/routes/error_monitor.py
 src/routes/grafana_metrics.py
 src/routes/health.py
 src/routes/images.py
-src/routes/instrumentation 2.py
 src/routes/instrumentation.py
 src/routes/messages.py
 src/routes/metrics.py
@@ -105,12 +101,9 @@ src/routes/roles.py
 src/routes/root.py
 src/routes/status_page.py
 src/routes/system.py
+src/routes/tools.py
 src/routes/transaction_analytics.py
-src/routes/unified_chat.py
 src/routes/users.py
-src/routes/helpers/__init__.py
-src/routes/helpers/catalog.py
-src/routes/helpers/chat.py
 src/schemas/__init__.py
 src/schemas/admin.py
 src/schemas/api_keys.py
@@ -125,7 +118,6 @@ src/schemas/plans.py
 src/schemas/providers.py
 src/schemas/proxy.py
 src/schemas/trials.py
-src/schemas/unified_chat.py
 src/schemas/users.py
 src/security/__init__.py
 src/security/deps.py
@@ -141,11 +133,13 @@ src/services/analytics.py
 src/services/anannas_client.py
 src/services/anthropic_transformer.py
 src/services/auth_cache.py
+src/services/auth_rate_limiting.py
 src/services/autonomous_monitor.py
 src/services/background_tasks.py
 src/services/bug_fix_generator.py
 src/services/canonical_registry.py
 src/services/cerebras_client.py
+src/services/chatterbox_tts_client.py
 src/services/chutes_client.py
 src/services/clarifai_client.py
 src/services/cloudflare_workers_ai_client.py
@@ -158,10 +152,6 @@ src/services/failover_service.py
 src/services/fal_image_client.py
 src/services/featherless_client.py
 src/services/fireworks_client.py
-src/services/format_detection.py
-src/services/format_transformers.py
-src/services/gateway_aggregator 2.py
-src/services/gateway_aggregator.py
 src/services/gateway_health_service.py
 src/services/google_models_config.py
 src/services/google_oauth2_jwt.py
@@ -208,10 +198,6 @@ src/services/prometheus_metrics.py
 src/services/prometheus_pb2.py
 src/services/prometheus_remote_write.py
 src/services/provider_failover.py
-src/services/provider_loader 2.py
-src/services/provider_loader.py
-src/services/provider_registry 2.py
-src/services/provider_registry.py
 src/services/provider_selector.py
 src/services/providers.py
 src/services/query_timeout.py
@@ -221,29 +207,28 @@ src/services/redis_metrics.py
 src/services/referral.py
 src/services/request_prioritization.py
 src/services/response_cache.py
-src/services/response_formatters.py
 src/services/roles.py
 src/services/simple_health_cache.py
 src/services/startup.py
 src/services/statsig_service.py
-src/services/stream_helpers 2.py
-src/services/stream_helpers.py
 src/services/stream_normalizer.py
 src/services/tempo_otlp.py
 src/services/together_client.py
 src/services/trial_service.py
 src/services/trial_validation.py
-src/services/unified_chat_handler.py
 src/services/user_lookup_cache.py
 src/services/vercel_ai_gateway_client.py
 src/services/xai_client.py
+src/services/tools/__init__.py
+src/services/tools/base.py
+src/services/tools/text_to_speech.py
 src/utils/auto_sentry.py
 src/utils/braintrust_tracing.py
 src/utils/crypto.py
+src/utils/db_safety.py
 src/utils/dependency_utils.py
-src/utils/logging_utils 2.py
-src/utils/logging_utils.py
 src/utils/performance_tracker.py
+src/utils/provider_safety.py
 src/utils/rate_limit_headers.py
 src/utils/release_tracking.py
 src/utils/reset_welcome_emails.py
@@ -260,7 +245,6 @@ tests/test_health_alerting.py
 tests/test_huggingface_hub_integration.py
 tests/test_intelligent_health_monitor.py
 tests/test_jwt_id_token_unit.py
-tests/test_loki_logging_performance.py
 tests/test_metrics_parser.py
 tests/test_observability_middleware.py
 tests/test_prometheus_metrics.py

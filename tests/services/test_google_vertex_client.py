@@ -68,6 +68,20 @@ class TestTransformGoogleVertexModelId:
         result = transform_google_vertex_model_id(model_id)
         assert result == "gemini-2.0-flash"
 
+    def test_transform_google_prefix(self):
+        """Test that google/ prefix is stripped from model IDs"""
+        # This is the case that caused the 404 error - model IDs coming from
+        # the routing layer with the provider prefix need to be stripped
+        test_cases = [
+            ("google/gemini-2.0-flash", "gemini-2.0-flash"),
+            ("google/gemini-3-pro-preview", "gemini-3-pro-preview"),
+            ("google/gemini-1.5-pro", "gemini-1.5-pro"),
+            ("google/gemini-2.5-flash-lite", "gemini-2.5-flash-lite"),
+        ]
+        for model_id, expected in test_cases:
+            result = transform_google_vertex_model_id(model_id)
+            assert result == expected, f"Expected {expected} for {model_id}, got {result}"
+
     def test_transform_various_models(self):
         """Test transforming various model IDs"""
         models = [
@@ -387,9 +401,23 @@ class TestMakeGoogleVertexRequest:
         # Collect all chunks
         chunks = list(gen)
 
-        assert len(chunks) >= 2  # At least a content chunk and a DONE chunk
-        assert any("Streaming response" in chunk for chunk in chunks)
-        assert any("[DONE]" in chunk for chunk in chunks)
+        # Streaming now yields dict objects, not SSE strings
+        assert len(chunks) >= 2  # At least a content chunk and a finish chunk
+
+        # Check that we have content in the chunks
+        content_found = False
+        finish_found = False
+        for chunk in chunks:
+            if isinstance(chunk, dict):
+                choices = chunk.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    if delta.get("content"):
+                        content_found = True
+                    if choices[0].get("finish_reason"):
+                        finish_found = True
+        assert content_found, "Should find content in streaming chunks"
+        assert finish_found, "Should find finish_reason in streaming chunks"
 
     @patch("src.services.google_vertex_client.initialize_vertex_ai")
     @patch("src.services.google_vertex_client._ensure_vertex_imports")
@@ -524,10 +552,12 @@ class TestGoogleVertexModelIntegration:
         """Test that gemini models are properly detected when credentials are available"""
         from src.services.model_transformations import detect_provider_from_model_id
 
+        # Note: Gemini 1.5 models were retired by Google in April-September 2025
+        # They now default to OpenRouter as Vertex AI returns 404 for them
         models = [
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "google/gemini-1.5-flash",
+            "gemini-2.5-flash",
+            "google/gemini-3-flash",
         ]
 
         for model in models:
@@ -566,12 +596,14 @@ class TestFetchModelsFromGoogleVertex:
         model_ids = [m["id"] for m in models]
 
         # Check for expected Gemini models
+        # Note: Gemini 1.5 models were retired by Google in April-September 2025
+        # and are no longer included in the static config
         expected_models = [
+            "gemini-3-pro",
+            "gemini-3-flash",
             "gemini-2.5-flash",
             "gemini-2.5-pro",
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
         ]
 
         for expected in expected_models:
@@ -767,6 +799,52 @@ class TestModelLocationRouting:
         assert "us-central1-aiplatform.googleapis.com" in request_url, f"URL should use regional endpoint: {request_url}"
         assert "locations/us-central1/" in request_url, f"URL should use regional location: {request_url}"
 
+    @pytest.mark.usefixtures("force_rest_transport")
+    def test_rest_request_strips_google_prefix_from_model_id(self, monkeypatch):
+        """Ensure google/ prefix is stripped from model ID to prevent 404 errors.
+
+        This tests the fix for the issue where model IDs like 'google/gemini-3-pro-preview'
+        were not having their prefix stripped, resulting in malformed URLs like:
+        publishers/google/models/google/gemini-3-pro-preview
+        """
+        monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
+        monkeypatch.setattr(Config, "GOOGLE_PROJECT_ID", "test-project")
+        monkeypatch.setattr(
+            "src.services.google_vertex_client._get_google_vertex_access_token",
+            lambda force_refresh=False: "token-123",
+        )
+
+        payload = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "Response from prefixed model"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10},
+        }
+
+        client_factory = DummyHttpxClientFactory([DummyHttpxResponse(200, payload)])
+        monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
+
+        # Use model ID with google/ prefix (as it comes from the routing layer)
+        result = make_google_vertex_request_openai(
+            messages=[{"role": "user", "content": "test"}],
+            model="google/gemini-3-pro-preview"
+        )
+
+        # Verify the request was successful
+        assert result["choices"][0]["message"]["content"] == "Response from prefixed model"
+
+        # Verify the URL does NOT contain a duplicated google/ prefix
+        assert client_factory.calls == 1
+        request_url = client_factory.payloads[0]["url"]
+
+        # The URL should have publishers/google/models/gemini-3-pro-preview
+        # NOT publishers/google/models/google/gemini-3-pro-preview
+        assert "models/gemini-3-pro-preview" in request_url, f"URL should have stripped model name: {request_url}"
+        assert "models/google/gemini-3-pro-preview" not in request_url, f"URL should NOT have duplicated google/ prefix: {request_url}"
+
     @patch("src.services.google_vertex_client.initialize_vertex_ai")
     @patch("src.services.google_vertex_client._ensure_vertex_imports")
     def test_sdk_request_uses_global_for_gemini_3(self, mock_ensure_imports, mock_init_vertex, monkeypatch):
@@ -917,6 +995,73 @@ class TestMaxOutputTokensValidation:
         request_body = client_factory.payloads[0]["json"]
         assert "generationConfig" in request_body
         assert request_body["generationConfig"]["maxOutputTokens"] == 4096
+
+
+@pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
+class TestNoCandidatesErrorHandling:
+    """Tests for handling 'no candidates' responses from Vertex AI"""
+
+    def test_no_candidates_without_prompt_feedback(self):
+        """Test that 'no candidates' error includes model version when no promptFeedback is present"""
+        # This response mimics what Gemini 3 preview returns when it fails silently
+        response_data = {
+            "usageMetadata": {
+                "promptTokenCount": 12456,
+                "totalTokenCount": 12456,
+                "cachedContentTokenCount": 12251,
+                "trafficType": "ON_DEMAND",
+            },
+            "modelVersion": "gemini-3-flash-preview",
+            "createTime": "2025-12-31T08:01:02.219993Z",
+            "responseId": "test-response-id",
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            _process_google_vertex_rest_response(response_data, "gemini-3-flash-preview")
+
+        error_msg = str(exc_info.value).lower()
+        assert "no candidates" in error_msg
+        assert "gemini-3-flash-preview" in error_msg
+        assert "transient" in error_msg or "preview" in error_msg
+
+    def test_no_candidates_with_block_reason(self):
+        """Test that 'no candidates' error includes block reason when promptFeedback is present"""
+        response_data = {
+            "promptFeedback": {
+                "blockReason": "SAFETY",
+                "safetyRatings": [
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "probability": "HIGH", "blocked": True}
+                ]
+            },
+            "usageMetadata": {"promptTokenCount": 100},
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            _process_google_vertex_rest_response(response_data, "gemini-2.5-flash")
+
+        error_msg = str(exc_info.value)
+        assert "no candidates" in error_msg.lower()
+        assert "SAFETY" in error_msg or "Block reason" in error_msg
+
+    def test_no_candidates_with_safety_ratings(self):
+        """Test that safety rating details are included in error when blocked"""
+        response_data = {
+            "promptFeedback": {
+                "safetyRatings": [
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "HIGH", "blocked": True},
+                    {"category": "HARM_CATEGORY_VIOLENCE", "probability": "LOW", "blocked": False}
+                ]
+            },
+            "usageMetadata": {"promptTokenCount": 50},
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            _process_google_vertex_rest_response(response_data, "gemini-2.5-flash")
+
+        error_msg = str(exc_info.value)
+        assert "HARM_CATEGORY_HATE_SPEECH" in error_msg
+        # LOW probability items should not be included
+        assert "HARM_CATEGORY_VIOLENCE" not in error_msg or "LOW" not in error_msg
 
 
 if __name__ == "__main__":

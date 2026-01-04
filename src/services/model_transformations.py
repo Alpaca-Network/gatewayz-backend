@@ -128,6 +128,14 @@ MODEL_ID_ALIASES = {
     "xai/grok-beta": "x-ai/grok-3",
     "grok-vision-beta": "x-ai/grok-3",
     "xai/grok-vision-beta": "x-ai/grok-3",
+    # Zhipu AI GLM models - z-ai/ prefix aliases (OpenRouter format)
+    # GLM-4.7 doesn't exist, map to closest available version GLM-4-flash
+    "z-ai/glm-4.7": "z-ai/glm-4-flash",
+    "z-ai/glm-4-7": "z-ai/glm-4-flash",
+    "z-ai/glm4.7": "z-ai/glm-4-flash",
+    # Map z-ai/ prefixed GLM models to canonical OpenRouter IDs
+    "z-ai/glm-4.5": "z-ai/glm-4-flash",
+    "z-ai/glm-4.6": "z-ai/glm-4-flash",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
@@ -753,10 +761,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "glm-4.6-fp8": "zai-org/GLM-4.6",
             "glm-4.6": "zai-org/GLM-4.6",
 
-            # Moonshot AI Kimi models (thinking/reasoning)
-            "moonshotai/kimi-k2-thinking": "moonshotai/Kimi-K2-Thinking",
-            "kimi-k2-thinking": "moonshotai/Kimi-K2-Thinking",
-            "kimi-k2": "moonshotai/Kimi-K2-Thinking",
+            # Note: Kimi-K2-Thinking model is NOT available on Near AI
+            # Users requesting moonshotai/kimi-k2-thinking should use OpenRouter instead
+            # Near AI only has DeepSeek, Qwen, and GLM models currently
         },
         "alpaca-network": {
             # Alpaca Network uses Anyscale infrastructure with DeepSeek models
@@ -803,6 +810,22 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             # Qwen Coder models
             "qwen/qwen-coder": "qwen-coder",
             "qwen-coder": "qwen-coder",
+            # Qwen 2.5 Coder models (specific versions)
+            "qwen/qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen/qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+            "qwen/qwen-2.5-coder-32b": "qwen2.5-coder-32b-instruct",
+            "qwen/qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen/qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+            "qwen/qwen-2.5-coder-7b": "qwen2.5-coder-7b-instruct",
+            "qwen/qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen/qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+            "qwen/qwen-2.5-coder-14b": "qwen2.5-coder-14b-instruct",
 
             # Qwen reasoning models
             "qwen/qwq-32b-preview": "qwq-32b-preview",
@@ -1298,12 +1321,6 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.warning(f"⚠️ Routing {model_id} to openrouter (no Vertex credentials found)")
             return "openrouter"
 
-    # Check for Cloudflare Workers AI models (use @cf/ prefix)
-    # IMPORTANT: This must come before the general @ prefix check below
-    if model_id.startswith("@cf/"):
-        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
-        return "cloudflare-workers-ai"
-
     # Note: @ prefix used to indicate Portkey format, but Portkey has been removed
     # After Portkey removal, @ prefix models are now routed through OpenRouter
     # which supports multi-provider model format
@@ -1386,6 +1403,12 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         # OneRouter models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
         if org == "onerouter":
             return "onerouter"
+
+        # Z-AI / Zhipu AI GLM models (e.g., "z-ai/glm-4-flash", "z-ai/glm-4.6")
+        # These are hosted on OpenRouter with the z-ai/ prefix
+        if org == "z-ai" or org == "zai":
+            logger.info(f"Detected OpenRouter provider for Zhipu AI model '{model_id}'")
+            return "openrouter"
 
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
