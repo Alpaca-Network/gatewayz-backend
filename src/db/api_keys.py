@@ -207,35 +207,33 @@ def create_api_key(
                 "subscription_plan": "free_trial",
             }
 
-        # Prepare encrypted fields (non-breaking: we still store plaintext api_key for now)
+        # KEY_HASH_SALT is required - always validate it first (outside try-except)
+        # This ensures the mandatory hash check cannot be bypassed by encryption failures
         try:
-            encrypted_token, key_version = encrypt_api_key(api_key)
             api_key_hash = sha256_key_hash(api_key)
             api_key_last4 = last4(api_key)
         except RuntimeError as hash_error:
-            # KEY_HASH_SALT is required - fail fast with clear error message
-            if "KEY_HASH_SALT" in str(hash_error):
-                error_msg = (
-                    "API key creation requires KEY_HASH_SALT environment variable. "
-                    "Generate a 16+ character random salt:\n"
-                    "  python -c \"import secrets; print('KEY_HASH_SALT=' + secrets.token_hex(32))\"\n"
-                    "Then set it in your environment variables."
-                )
-                logger.error(error_msg)
-                raise ValueError(error_msg) from hash_error
+            error_msg = (
+                "API key creation requires KEY_HASH_SALT environment variable. "
+                "Generate a 16+ character random salt:\n"
+                "  python -c \"import secrets; print('KEY_HASH_SALT=' + secrets.token_hex(32))\"\n"
+                "Then set it in your environment variables."
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg) from hash_error
+
+        # Encryption is optional - try to encrypt but continue if it fails
+        try:
+            encrypted_token, key_version = encrypt_api_key(api_key)
+        except RuntimeError as enc_error:
             # Encryption keys are optional - log warning once and continue
             if not _encryption_warning_logged:
                 logger.warning(
                     "Encryption unavailable; proceeding without encrypted fields: %s",
-                    sanitize_for_logging(str(hash_error)),
+                    sanitize_for_logging(str(enc_error)),
                 )
                 _encryption_warning_logged = True
-            encrypted_token, key_version, api_key_hash, api_key_last4 = (
-                None,
-                None,
-                None,
-                (api_key[-4:] if api_key else None),
-            )
+            encrypted_token, key_version = None, None
         except Exception as enc_e:
             # Log encryption failures once to reduce noise
             if not _encryption_warning_logged:
@@ -244,12 +242,7 @@ def create_api_key(
                     sanitize_for_logging(str(enc_e)),
                 )
                 _encryption_warning_logged = True
-            encrypted_token, key_version, api_key_hash, api_key_last4 = (
-                None,
-                None,
-                None,
-                (api_key[-4:] if api_key else None),
-            )
+            encrypted_token, key_version = None, None
 
         # Combine base data with trial data
         base_api_key_data = {

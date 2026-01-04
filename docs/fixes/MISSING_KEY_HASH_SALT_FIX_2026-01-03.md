@@ -59,7 +59,7 @@ The code requires `KEY_HASH_SALT` to be at least 16 characters for secure hashin
 
 2. Added `KEY_HASH_SALT` environment variable to Railway production:
    - **Variable**: `KEY_HASH_SALT`
-   - **Value**: `984dc3dd058846cbddee04bca47d9e0bcdc34465d0e161c7bd7e7e6a66a9ecd2`
+   - **Value**: `[REDACTED - 64-character hex string generated via secrets.token_hex(32)]`
    - **Service**: gatewayz-backend/api (production)
 
 3. Restarted the Railway service to apply the new environment variable
