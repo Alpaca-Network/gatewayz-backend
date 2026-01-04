@@ -634,6 +634,121 @@ async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="Failed to get trial analytics") from e
 
 
+@router.get("/admin/users/growth", tags=["admin"])
+async def get_user_growth(
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze (1-365)"),
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get user growth data over time (Admin only)
+    
+    **Purpose**: Provide timeseries data for user growth charts
+    **Performance**: Optimized for chart rendering, not full user export
+    **Returns**: Daily cumulative user counts over specified period
+    
+    **Parameters**:
+    - `days`: Number of days to analyze (1-365, default: 30)
+    
+    **Response**:
+    - Daily data points with cumulative user counts
+    - Growth rate calculation
+    - Total users at end of period
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        
+        client = get_supabase_client()
+        
+        # Calculate date range
+        end_date = datetime.now(timezone.utc).date()
+        start_date = end_date - timedelta(days=days - 1)
+        
+        # Get user registration data grouped by day
+        # We'll use the registration_date or created_at field
+        growth_query = (
+            client.table("users")
+            .select("created_at, registration_date")
+            .gte("created_at", start_date.isoformat())
+            .lte("created_at", end_date.isoformat())
+            .order("created_at", desc=False)  # Ascending order for cumulative calculation
+        )
+        
+        growth_result = growth_query.execute()
+        user_data = growth_result.data if growth_result.data else []
+        
+        # Initialize daily data structure
+        daily_data = {}
+        current_date = start_date
+        
+        # Create entry for each day in the range
+        while current_date <= end_date:
+            daily_data[current_date.isoformat()] = 0
+            current_date += timedelta(days=1)
+        
+        # Count users created each day
+        for user in user_data:
+            # Use registration_date if available, otherwise created_at
+            created_date_str = user.get("registration_date") or user.get("created_at")
+            if created_date_str:
+                # Parse date and extract just the date part
+                try:
+                    created_date = datetime.fromisoformat(created_date_str.replace('Z', '+00:00')).date()
+                    date_key = created_date.isoformat()
+                    if date_key in daily_data:
+                        daily_data[date_key] += 1
+                except (ValueError, TypeError):
+                    # Skip invalid dates
+                    continue
+        
+        # Calculate cumulative counts
+        cumulative_data = []
+        cumulative_total = 0
+        
+        # Get total users before start date for proper cumulative calculation
+        before_start_query = (
+            client.table("users")
+            .select("id", count="exact")
+            .lt("created_at", start_date.isoformat())
+        )
+        
+        before_start_result = before_start_query.execute()
+        cumulative_total = before_start_result.count if before_start_result.count is not None else 0
+        
+        # Build cumulative data
+        for date_str in sorted(daily_data.keys()):
+            new_users_today = daily_data[date_str]
+            cumulative_total += new_users_today
+            
+            cumulative_data.append({
+                "date": date_str,
+                "value": cumulative_total,
+                "new_users": new_users_today
+            })
+        
+        # Calculate growth rate
+        if len(cumulative_data) >= 2:
+            start_value = cumulative_data[0]["value"]
+            end_value = cumulative_data[-1]["value"]
+            growth_rate = ((end_value - start_value) / start_value * 100) if start_value > 0 else 0
+        else:
+            growth_rate = 0
+        
+        return {
+            "status": "success",
+            "days": days,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "data": cumulative_data,
+            "total": cumulative_total,
+            "growth_rate": round(growth_rate, 2),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user growth data: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user growth data") from e
+
+
 @router.get("/admin/users/stats", tags=["admin"])
 async def get_users_stats(
     # Optional filters (same as main endpoint)
@@ -668,49 +783,117 @@ async def get_users_stats(
 
         client = get_supabase_client()
 
-        # Build query for statistics (no user data, just counts)
+        # Build base count query
         if api_key:
-            stats_query = (
+            count_query = (
                 client.table("users")
-                .select("id, is_active, role, credits, subscription_status, api_keys_new!inner(api_key)")
+                .select("id, api_keys_new!inner(api_key)", count="exact")
             )
         else:
-            stats_query = (
+            count_query = (
                 client.table("users")
-                .select("id, is_active, role, credits, subscription_status")
+                .select("id", count="exact")
             )
 
-        # Apply filters
+        # Apply filters to count query
         if email:
-            stats_query = stats_query.ilike("email", f"%{email}%")
+            count_query = count_query.ilike("email", f"%{email}%")
 
         if api_key:
-            stats_query = stats_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
 
         if is_active is not None:
-            stats_query = stats_query.eq("is_active", is_active)
+            count_query = count_query.eq("is_active", is_active)
 
-        # Execute query
-        stats_result = stats_query.execute()
-        stats_data = stats_result.data if stats_result.data else []
+        # Execute count query to get total users
+        count_result = count_query.execute()
+        total_users = count_result.count if count_result.count is not None else 0
 
-        # Calculate statistics
-        total_users = len(stats_data)
-        active_users = sum(1 for u in stats_data if u.get("is_active", True))
-        inactive_users = total_users - active_users
-        admin_users = sum(1 for u in stats_data if u.get("role") == "admin")
-        developer_users = sum(1 for u in stats_data if u.get("role") == "developer")
-        regular_users = sum(
-            1 for u in stats_data if u.get("role") == "user" or u.get("role") is None
+        # Build separate queries for role and subscription statistics
+        # Role distribution
+        role_query = (
+            client.table("users")
+            .select("role", count="exact")
         )
+        
+        # Apply same filters to role query
+        if email:
+            role_query = role_query.ilike("email", f"%{email}%")
+        if api_key:
+            role_query = role_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+        if is_active is not None:
+            role_query = role_query.eq("is_active", is_active)
+        
+        role_result = role_query.execute()
+        role_data = role_result.data if role_result.data else []
+        
+        # Count roles
+        admin_users = sum(1 for u in role_data if u.get("role") == "admin")
+        developer_users = sum(1 for u in role_data if u.get("role") == "developer")
+        regular_users = sum(1 for u in role_data if u.get("role") == "user" or u.get("role") is None)
 
+        # Active/Inactive status (we need this for the breakdown)
+        status_query = (
+            client.table("users")
+            .select("is_active", count="exact")
+        )
+        
+        # Apply same filters to status query
+        if email:
+            status_query = status_query.ilike("email", f"%{email}%")
+        if api_key:
+            status_query = status_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+        if is_active is not None:
+            status_query = status_query.eq("is_active", is_active)
+        
+        status_result = status_query.execute()
+        status_data = status_result.data if status_result.data else []
+        
+        # Count active/inactive
+        active_users = sum(1 for u in status_data if u.get("is_active", True))
+        inactive_users = total_users - active_users
+
+        # Credit statistics - use aggregation query to avoid fetching all rows
+        credits_query = (
+            client.table("users")
+            .select("credits", count="exact")
+        )
+        
+        # Apply same filters to credits query
+        if email:
+            credits_query = credits_query.ilike("email", f"%{email}%")
+        if api_key:
+            credits_query = credits_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+        if is_active is not None:
+            credits_query = credits_query.eq("is_active", is_active)
+        
+        credits_result = credits_query.execute()
+        credits_data = credits_result.data if credits_result.data else []
+        
         # Calculate credit statistics
-        total_credits = sum(float(u.get("credits", 0)) for u in stats_data)
+        total_credits = sum(float(u.get("credits", 0)) for u in credits_data)
         avg_credits = round(total_credits / total_users, 2) if total_users > 0 else 0
 
+        # Subscription breakdown
+        subscription_query = (
+            client.table("users")
+            .select("subscription_status", count="exact")
+        )
+        
+        # Apply same filters to subscription query
+        if email:
+            subscription_query = subscription_query.ilike("email", f"%{email}%")
+        if api_key:
+            subscription_query = subscription_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+        if is_active is not None:
+            subscription_query = subscription_query.eq("is_active", is_active)
+        
+        subscription_result = subscription_query.execute()
+        subscription_data = subscription_result.data if subscription_result.data else []
+        
         # Get subscription breakdown
         subscription_stats = {}
-        for user in stats_data:
+        for user in subscription_data:
             status = user.get("subscription_status", "unknown")
             subscription_stats[status] = subscription_stats.get(status, 0) + 1
 
