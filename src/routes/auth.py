@@ -38,7 +38,7 @@ from src.services.query_timeout import (
     QueryTimeoutError,
     safe_query_with_timeout,
 )
-from src.utils.security_validators import is_valid_email, sanitize_for_logging
+from src.utils.security_validators import is_valid_email, is_temporary_email_domain, sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -770,6 +770,17 @@ async def privy_auth(
             # New user - create account
             logger.info(f"Creating new Privy user: {request.user.id}")
 
+            # Block new registrations with temporary/disposable email addresses
+            if email and is_temporary_email_domain(email):
+                logger.warning(
+                    f"Registration blocked for temporary email domain: {sanitize_for_logging(email)} "
+                    f"(privy_user_id={request.user.id})"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="Temporary or disposable email addresses are not allowed. Please use a permanent email address.",
+                )
+
             # Ensure username is unique before attempting to create user
             # This prevents duplicate username errors, especially for phone auth
             # where multiple users might have phone numbers ending in the same 4 digits
@@ -1171,6 +1182,16 @@ async def register_user(
 
     try:
         logger.info(f"Registration request for user: {request.username}")
+
+        # Block temporary/disposable email addresses to prevent abuse
+        if is_temporary_email_domain(request.email):
+            logger.warning(
+                f"Registration blocked for temporary email domain: {sanitize_for_logging(request.email)}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Temporary or disposable email addresses are not allowed. Please use a permanent email address.",
+            )
 
         client = supabase_config.get_supabase_client()
 
