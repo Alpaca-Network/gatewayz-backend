@@ -1711,13 +1711,23 @@ def fetch_models_from_aimo():
     - Optional HTTP fallback for HTTPS failures
     - Stale-while-revalidate caching to serve cached data on failure
     - Non-blocking: failures don't block the thread pool during parallel catalog builds
+    - Circuit breaker: skip fetch attempts when gateway is in error state
 
     Note: AIMO is a decentralized AI marketplace with OpenAI-compatible API.
     Models are fetched from the marketplace endpoint if available.
     """
     if not Config.AIMO_API_KEY:
-        logger.error("AIMO API key not configured")
+        logger.debug("AIMO API key not configured, using cached data if available")
         return _aimo_models_cache.get("data", [])
+
+    # Circuit breaker: skip fetch if gateway is in error state (exponential backoff)
+    if is_gateway_in_error_state("aimo"):
+        cached_data = _aimo_models_cache.get("data", [])
+        if cached_data:
+            logger.debug("AIMO gateway in error state, returning cached data (%d models)", len(cached_data))
+            return cached_data
+        logger.debug("AIMO gateway in error state, no cached data available")
+        return []
 
     headers = {
         "Authorization": f"Bearer {Config.AIMO_API_KEY}",
@@ -1796,22 +1806,38 @@ def fetch_models_from_aimo():
 
             except httpx.TimeoutException:
                 last_error = f"Timeout at {url} after {Config.AIMO_FETCH_TIMEOUT}s"
-                logger.warning("AIMO timeout: %s (attempt %d)", last_error, attempt + 1)
+                # Use debug for intermediate retries, warning only on final attempt
+                if attempt == Config.AIMO_MAX_RETRIES:
+                    logger.warning("AIMO timeout: %s (final attempt)", last_error)
+                else:
+                    logger.debug("AIMO timeout: %s (attempt %d)", last_error, attempt + 1)
                 continue
 
             except httpx.HTTPStatusError as e:
                 last_error = f"HTTP {e.response.status_code} at {url}"
-                logger.warning(
-                    "AIMO HTTP error: %s - %s (attempt %d)",
-                    last_error,
-                    sanitize_for_logging(e.response.text[:200]),
-                    attempt + 1,
-                )
+                # Use debug for intermediate retries, warning only on final attempt
+                if attempt == Config.AIMO_MAX_RETRIES:
+                    logger.warning(
+                        "AIMO HTTP error: %s - %s (final attempt)",
+                        last_error,
+                        sanitize_for_logging(e.response.text[:200]),
+                    )
+                else:
+                    logger.debug(
+                        "AIMO HTTP error: %s - %s (attempt %d)",
+                        last_error,
+                        sanitize_for_logging(e.response.text[:200]),
+                        attempt + 1,
+                    )
                 continue
 
             except Exception as e:
                 last_error = f"Error at {url}: {sanitize_for_logging(str(e))}"
-                logger.warning("AIMO fetch error: %s (attempt %d)", last_error, attempt + 1)
+                # Use debug for intermediate retries, warning only on final attempt
+                if attempt == Config.AIMO_MAX_RETRIES:
+                    logger.warning("AIMO fetch error: %s (final attempt)", last_error)
+                else:
+                    logger.debug("AIMO fetch error: %s (attempt %d)", last_error, attempt + 1)
                 continue
 
     # All retries exhausted - use stale cache if available (stale-while-revalidate)
