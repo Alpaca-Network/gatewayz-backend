@@ -579,6 +579,37 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                             sanitize_for_logging(str(date_error)),
                         )
 
+                # EARLY TRIAL EXPIRATION CHECK: Reject expired trials immediately
+                # This prevents unnecessary database queries for bot requests with expired trial keys
+                if key_data.get("is_trial", False) and key_data.get("trial_end_date"):
+                    try:
+                        trial_end_str = key_data["trial_end_date"]
+                        if trial_end_str:
+                            # Parse trial end date
+                            if "Z" in trial_end_str:
+                                trial_end_str = trial_end_str.replace("Z", "+00:00")
+                            elif "+" not in trial_end_str and "-" not in trial_end_str[-6:]:
+                                trial_end_str = trial_end_str + "+00:00"
+
+                            trial_end = datetime.fromisoformat(trial_end_str)
+                            now = datetime.now(timezone.utc)
+                            if trial_end.tzinfo is None:
+                                trial_end = trial_end.replace(tzinfo=timezone.utc)
+
+                            if trial_end < now:
+                                logger.warning(
+                                    "Trial expired for API key %s (expired: %s)",
+                                    sanitize_for_logging(api_key[:20] + "..."),
+                                    trial_end_str,
+                                )
+                                return None
+                    except Exception as trial_date_error:
+                        logger.warning(
+                            "Error checking trial expiration for key %s: %s",
+                            sanitize_for_logging(api_key[:20] + "..."),
+                            sanitize_for_logging(str(trial_date_error)),
+                        )
+
                 # Check request limits
                 if key_data.get("max_requests"):
                     if key_data["requests_used"] >= key_data["max_requests"]:
