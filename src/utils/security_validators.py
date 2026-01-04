@@ -405,8 +405,6 @@ TEMPORARY_EMAIL_DOMAINS = frozenset({
     "poofy.org",
     "pookmail.com",
     "privacy.net",
-    "privy.user",
-    "privy.placeholder",
     "privatdemail.net",
     "proxymail.eu",
     "prtnx.com",

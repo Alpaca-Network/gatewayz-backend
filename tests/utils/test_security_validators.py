@@ -78,10 +78,15 @@ class TestIsTemporaryEmailDomain:
         assert is_temporary_email_domain("@") is False
         assert is_temporary_email_domain("user@") is False
 
-    def test_privy_placeholder_domains_are_blocked(self):
-        """Test that Privy placeholder domains are blocked"""
-        assert is_temporary_email_domain("noemail+abc123@privy.placeholder") is True
-        assert is_temporary_email_domain("user@privy.user") is True
+    def test_privy_placeholder_domains_are_allowed(self):
+        """Test that Privy placeholder domains are NOT blocked.
+
+        These are internal placeholder domains used by the Privy authentication
+        service when no real email is available (e.g., phone auth). They should
+        be allowed since they're not user-provided temporary email addresses.
+        """
+        assert is_temporary_email_domain("noemail+abc123@privy.placeholder") is False
+        assert is_temporary_email_domain("user@privy.user") is False
 
     def test_whitespace_handling(self):
         """Test that whitespace is handled correctly"""
