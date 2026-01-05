@@ -1057,13 +1057,58 @@ async def get_all_users_info(
 
         client = get_supabase_client()
 
-        # Simple partial match - searches anywhere in email address
-        # This matches the intuitive behavior users expect
-        email_pattern = f"%{email}%" if email else None
-        logger.info(f"Email search pattern: {email_pattern}")
+        # OPTIMIZATION: Use PostgreSQL RPC function for email search to avoid PostgREST edge function issues
+        if email and not api_key and is_active is None:
+            # Use optimized RPC function for simple email-only searches
+            logger.info(f"Using RPC function for email search: {email}")
+            try:
+                result = client.rpc(
+                    "search_users_by_email",
+                    {
+                        "search_term": email,
+                        "result_limit": limit,
+                        "result_offset": offset
+                    }
+                ).execute()
 
+                users_data = result.data if result.data else []
+
+                # Extract total count from first row (all rows have same total_count)
+                total_users = users_data[0]["total_count"] if users_data else 0
+
+                # Clean up total_count from user objects
+                users = []
+                for user in users_data:
+                    user_clean = {k: v for k, v in user.items() if k != "total_count"}
+                    users.append(user_clean)
+
+                # Calculate has_more for pagination
+                has_more = (offset + limit) < total_users
+
+                return {
+                    "status": "success",
+                    "total_users": total_users,
+                    "has_more": has_more,
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "current_page": (offset // limit) + 1,
+                        "total_pages": (total_users + limit - 1) // limit if total_users > 0 else 0,
+                    },
+                    "filters_applied": {
+                        "email": email,
+                        "api_key": api_key,
+                        "is_active": is_active,
+                    },
+                    "users": users,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            except Exception as rpc_err:
+                logger.warning(f"RPC function failed, falling back to standard query: {rpc_err}")
+                # Fall through to standard query method below
+
+        # Standard query method (for complex filters or RPC fallback)
         # Build count query first (without pagination, just filters)
-        # This ensures we get accurate total_users count for filtered results
         if api_key:
             count_query = (
                 client.table("users")
@@ -1076,8 +1121,9 @@ async def get_all_users_info(
             )
 
         # Apply filters to count query
-        if email_pattern:
-            count_query = count_query.ilike("email", email_pattern)
+        if email:
+            logger.info(f"Searching for email containing: {email}")
+            count_query = count_query.ilike("email", f"%{email}%")
 
         if api_key:
             count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
@@ -1117,8 +1163,8 @@ async def get_all_users_info(
             )
 
         # Apply filters to data query
-        if email_pattern:
-            data_query = data_query.ilike("email", email_pattern)
+        if email:
+            data_query = data_query.ilike("email", f"%{email}%")
 
         if api_key:
             data_query = data_query.ilike("api_keys_new.api_key", f"%{api_key}%")
