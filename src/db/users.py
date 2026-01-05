@@ -183,10 +183,10 @@ def create_enhanced_user(
     username: str,
     email: str,
     auth_method: str,
-    credits: int = 5,
+    credits: float = 1.0,
     privy_user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $5 credits"""
+    """Create a new user with automatic 3-day trial and $1 credits"""
     try:
         client = get_supabase_client()
 
@@ -197,7 +197,7 @@ def create_enhanced_user(
         user_data = {
             "username": username,
             "email": email,
-            "credits": credits,  # $5 trial credits
+            "credits": credits,  # $1 trial credits (reduced from $5 to $1 for fraud prevention)
             "is_active": True,
             "registration_date": trial_start.isoformat(),
             "auth_method": auth_method,
@@ -665,6 +665,7 @@ def deduct_credits(
 
     try:
         from src.db.credit_transactions import TransactionType, log_credit_transaction
+        from src.services.daily_usage_limiter import enforce_daily_usage_limit, DailyUsageLimitExceeded
 
         client = get_supabase_client()
 
@@ -699,6 +700,14 @@ def deduct_credits(
                 return
         except Exception as e:
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
+
+        # CHECK DAILY USAGE LIMIT (NEW - 2026-01-05)
+        # Enforce $1/day usage limit for all users (except admins who already bypassed above)
+        try:
+            enforce_daily_usage_limit(user_id, tokens)
+        except DailyUsageLimitExceeded as e:
+            logger.warning(f"Daily usage limit exceeded for user {user_id}: {e}")
+            raise ValueError(str(e)) from e
 
         balance_before = user_lookup.data[0]["credits"]
 
