@@ -1409,65 +1409,59 @@ async def get_user_by_api_key(
 
         client = get_supabase_client()
 
-        # First, look up the API key in api_keys_new table
-        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+        # Use PostgreSQL RPC function for fast, indexed lookup
+        logger.info(f"Looking up user by API key: {api_key[:20]}...")
 
-        if key_result.data and len(key_result.data) > 0:
-            # Found in api_keys_new table
-            key_data = key_result.data[0]
-            user_id = key_data["user_id"]
+        result = client.rpc(
+            "search_user_by_api_key",
+            {"search_api_key": api_key}
+        ).execute()
 
-            # Get full user information
-            user_result = client.table("users").select("*").eq("id", user_id).execute()
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No user found with API key: {api_key[:20]}..."
+            )
 
-            if not user_result.data:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"User not found for API key (orphaned key entry)"
-                )
+        # Extract user and key info from function result
+        user_data = result.data[0]
 
-            user = user_result.data[0]
+        # Build user object
+        user = {
+            "id": user_data["user_id"],
+            "username": user_data["username"],
+            "email": user_data["email"],
+            "credits": user_data["credits"],
+            "is_active": user_data["is_active"],
+            "role": user_data["role"],
+            "subscription_status": user_data["subscription_status"],
+            "created_at": user_data["created_at"],
+        }
 
-            # Get all API keys for this user
-            all_keys_result = client.table("api_keys_new").select("*").eq("user_id", user_id).execute()
-            all_api_keys = all_keys_result.data if all_keys_result.data else []
+        # Build API key info object
+        api_key_info = {
+            "id": user_data["key_id"],
+            "api_key": user_data["api_key"],
+            "key_name": user_data["key_name"],
+            "environment_tag": user_data["environment_tag"],
+            "is_primary": user_data["is_primary"],
+            "is_active": user_data["key_is_active"],
+            "created_at": user_data["key_created_at"],
+            "source": user_data["source"],
+        }
 
-            return {
-                "status": "success",
-                "user": user,
-                "api_key_info": key_data,
-                "all_api_keys": all_api_keys,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+        # Get all API keys for this user
+        user_id = user_data["user_id"]
+        all_keys_result = client.table("api_keys_new").select("*").eq("user_id", user_id).execute()
+        all_api_keys = all_keys_result.data if all_keys_result.data else []
 
-        # Fallback: Check legacy users.api_key column
-        legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
-
-        if legacy_result.data and len(legacy_result.data) > 0:
-            user = legacy_result.data[0]
-            user_id = user["id"]
-
-            # Try to get API keys from api_keys_new (might exist from migration)
-            all_keys_result = client.table("api_keys_new").select("*").eq("user_id", user_id).execute()
-            all_api_keys = all_keys_result.data if all_keys_result.data else []
-
-            return {
-                "status": "success",
-                "user": user,
-                "api_key_info": {
-                    "api_key": api_key,
-                    "is_legacy": True,
-                    "note": "This API key is stored in legacy users.api_key column"
-                },
-                "all_api_keys": all_api_keys,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-
-        # API key not found in either location
-        raise HTTPException(
-            status_code=404,
-            detail=f"No user found with API key: {api_key[:20]}..."
-        )
+        return {
+            "status": "success",
+            "user": user,
+            "api_key_info": api_key_info,
+            "all_api_keys": all_api_keys,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     except HTTPException:
         raise
@@ -1475,7 +1469,7 @@ async def get_user_by_api_key(
         logger.error(f"Error looking up user by API key: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="Failed to lookup user by API key"
+            detail=f"Failed to lookup user by API key: {str(e)}"
         ) from e
 
 
