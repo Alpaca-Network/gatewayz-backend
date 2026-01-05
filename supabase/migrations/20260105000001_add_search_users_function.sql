@@ -31,7 +31,7 @@ BEGIN
     WITH counted AS (
         SELECT COUNT(*) as total
         FROM users
-        WHERE email ILIKE '%' || search_term || '%'
+        WHERE users.email ILIKE '%' || search_term || '%'
     )
     SELECT
         u.id,
