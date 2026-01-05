@@ -35,7 +35,7 @@ class TestDailyResetTime:
             # Mock current time as 1 AM UTC
             mock_now = datetime(2026, 1, 5, 1, 0, 0, tzinfo=timezone.utc)
             mock_datetime.now.return_value = mock_now
-            mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+            mock_datetime.side_effect = datetime
 
             reset_time = get_daily_reset_time()
 

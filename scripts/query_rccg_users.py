@@ -93,7 +93,7 @@ def query_rccg_users():
 
         # Get activity logs for this user
         try:
-            activity = client.table("activity").select("*").eq("user_id", user_id).execute()
+            activity = client.table("activity_log").select("*").eq("user_id", user_id).execute()
             if activity.data:
                 print(f"   Total Activity Logs: {len(activity.data)}")
 

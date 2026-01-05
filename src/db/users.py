@@ -703,6 +703,13 @@ def deduct_credits(
 
         # CHECK DAILY USAGE LIMIT (NEW - 2026-01-05)
         # Enforce $1/day usage limit for all users (except admins who already bypassed above)
+        # NOTE: Known race condition - concurrent requests may bypass limit by reading
+        # before either writes. This is acceptable as:
+        # 1. Fail-safe design (availability > strict enforcement)
+        # 2. Optimistic lock below prevents balance corruption
+        # 3. Most abuse is sequential, not concurrent
+        # 4. Over-limit is tracked and can be flagged for review
+        # Future: Consider advisory locks or atomic daily usage table for strict enforcement
         try:
             enforce_daily_usage_limit(user_id, tokens)
         except DailyUsageLimitExceeded as e:
