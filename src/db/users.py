@@ -183,10 +183,10 @@ def create_enhanced_user(
     username: str,
     email: str,
     auth_method: str,
-    credits: float = 1.0,
+    credits: float = 5.0,
     privy_user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $1 credits"""
+    """Create a new user with automatic 3-day trial and $5 credits (limited to $1/day usage)"""
     try:
         client = get_supabase_client()
 
@@ -197,7 +197,7 @@ def create_enhanced_user(
         user_data = {
             "username": username,
             "email": email,
-            "credits": credits,  # $1 trial credits (reduced from $5 to $1 for fraud prevention)
+            "credits": credits,  # $5 trial credits with $1/day usage limit enforced
             "is_active": True,
             "registration_date": trial_start.isoformat(),
             "auth_method": auth_method,

@@ -1,5 +1,5 @@
 """
-Tests for User Credit Updates (Trial Credit Reduction to $1)
+Tests for User Credit Updates (Trial Credit: $5 total, $1/day usage limit)
 """
 
 import pytest
@@ -11,12 +11,12 @@ from src.services.daily_usage_limiter import DailyUsageLimitExceeded
 
 
 class TestReducedTrialCredits:
-    """Test that new users receive $1 trial credits instead of $5"""
+    """Test that new users receive $5 trial credits with $1/day usage limit"""
 
     @patch('src.db.users.get_supabase_client')
     @patch('src.db.users.create_api_key')
     def test_create_enhanced_user_default_credits(self, mock_create_key, mock_client):
-        """Test that default credits are $1"""
+        """Test that default credits are $5 with $1/day limit enforced"""
         # Mock Supabase responses
         mock_insert_result = Mock()
         mock_insert_result.data = [{"id": 123}]
@@ -38,9 +38,9 @@ class TestReducedTrialCredits:
             auth_method="email"
         )
 
-        # Verify insert was called with credits=1.0
+        # Verify insert was called with credits=5.0 (total credits with $1/day limit)
         insert_call = mock_table.insert.call_args[0][0]
-        assert insert_call["credits"] == 1.0
+        assert insert_call["credits"] == 5.0
 
     @patch('src.db.users.get_supabase_client')
     @patch('src.db.users.create_api_key')

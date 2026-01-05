@@ -4,8 +4,9 @@ Centralized configuration for trial credits and daily usage limits.
 """
 
 # Trial Credit Configuration
-TRIAL_CREDITS_AMOUNT = 1.0  # $1 trial credits for new users
 TRIAL_DURATION_DAYS = 3  # Trial period in days
+TRIAL_DAILY_LIMIT = 1.0  # $1 per day during trial
+TRIAL_CREDITS_AMOUNT = 5.0  # $5 total credits, with $1/day limit during trial
 
 # Daily Usage Limits
 DAILY_USAGE_LIMIT = 1.0  # $1 maximum usage per day for all users
