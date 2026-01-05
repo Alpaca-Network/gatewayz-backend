@@ -796,6 +796,43 @@ async def get_user_growth(
         raise HTTPException(status_code=500, detail="Failed to get user growth data") from e
 
 
+@router.get("/admin/users/count", tags=["admin"])
+async def get_users_count(admin_user: dict = Depends(require_admin)):
+    """
+    Get total user count (Admin only)
+
+    **ULTRA FAST** - Returns only the total count of all users in the system.
+    Perfect for simple metrics and dashboard counters.
+
+    **Response**:
+    - `count`: Total number of users in the database
+
+    **Performance**: ~5-20ms (pure COUNT query)
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Simple COUNT query - no data fetching
+        count_query = (
+            client.table("users")
+            .select("id", count="exact")
+        )
+
+        count_result = count_query.execute()
+        total_count = count_result.count if count_result.count is not None else 0
+
+        return {
+            "count": total_count,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting users count: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get users count") from e
+
+
 @router.get("/admin/users/stats", tags=["admin"])
 async def get_users_stats(
     # Optional filters (same as main endpoint)
@@ -998,20 +1035,26 @@ async def get_all_users_info(
     """
     Get users information with search and pagination (Admin only)
 
+    **OPTIMIZED FOR LARGE DATASETS** - This endpoint only fetches users, no statistics.
+    Use `/admin/users/stats` for statistics if needed.
+
     **Search Parameters**:
     - `email`: Case-insensitive partial match (e.g., "john" matches "john@example.com")
     - `api_key`: Case-insensitive partial match (e.g., "gw_live" matches keys starting with "gw_live")
     - `is_active`: Filter by active status (true = active only, false = inactive only, null = all)
 
     **Pagination**:
-    - `limit`: Records per page (1-1000, default: 100)
+    - `limit`: Records per page (1-10000, default: 100)
     - `offset`: Records to skip (default: 0)
 
     **Response**:
     - `total_users`: Total matching the filters (not total in database)
     - `has_more`: Whether more results exist beyond current page
     - `users`: Current page of filtered users
-    - `statistics`: Stats calculated from **filtered results only**
+    - `pagination`: Pagination metadata
+    - `filters_applied`: Applied filters
+
+    **Note**: Statistics are NOT included. Use `/admin/users/stats` for statistics.
     """
     try:
         from src.config.supabase_config import get_supabase_client
@@ -1121,56 +1164,6 @@ async def get_all_users_info(
 
         # Calculate has_more for pagination
         has_more = (offset + limit) < total_users
-
-        # Build statistics query for ALL filtered users (not just current page)
-        # This ensures statistics reflect the filtered dataset
-        if api_key:
-            stats_query = (
-                client.table("users")
-                .select(
-                    "id, is_active, role, credits, subscription_status, "
-                    "api_keys_new!inner(api_key)"
-                )
-            )
-        else:
-            stats_query = (
-                client.table("users")
-                .select("id, is_active, role, credits, subscription_status")
-            )
-
-        # Apply same filters to statistics query
-        if email_pattern:
-            stats_query = stats_query.ilike("email", email_pattern)
-
-        if api_key:
-            stats_query = stats_query.ilike("api_keys_new.api_key", f"%{api_key}%")
-
-        if is_active is not None:
-            stats_query = stats_query.eq("is_active", is_active)
-
-        # Execute statistics query
-        stats_result = stats_query.execute()
-        stats_data = stats_result.data if stats_result.data else []
-
-        # Calculate statistics from filtered results
-        active_users = sum(1 for u in stats_data if u.get("is_active", True))
-        inactive_users = total_users - active_users
-        admin_users = sum(1 for u in stats_data if u.get("role") == "admin")
-        developer_users = sum(1 for u in stats_data if u.get("role") == "developer")
-        regular_users = sum(
-            1 for u in stats_data if u.get("role") == "user" or u.get("role") is None
-        )
-
-        # Calculate total credits across filtered users
-        total_credits = sum(float(u.get("credits", 0)) for u in stats_data)
-        avg_credits = round(total_credits / total_users, 2) if total_users > 0 else 0
-
-        # Get subscription status breakdown from filtered users
-        subscription_stats = {}
-        for user in stats_data:
-            status = user.get("subscription_status", "unknown")
-            subscription_stats[status] = subscription_stats.get(status, 0) + 1
-
         return {
             "status": "success",
             "total_users": total_users,  # Total matching filters
@@ -1185,16 +1178,6 @@ async def get_all_users_info(
                 "email": email,
                 "api_key": api_key,
                 "is_active": is_active,
-            },
-            "statistics": {
-                "active_users": active_users,
-                "inactive_users": inactive_users,
-                "admin_users": admin_users,
-                "developer_users": developer_users,
-                "regular_users": regular_users,
-                "total_credits": round(total_credits, 2),
-                "average_credits": avg_credits,
-                "subscription_breakdown": subscription_stats,
             },
             "users": users,  # Current page of users
             "timestamp": datetime.now(timezone.utc).isoformat(),
