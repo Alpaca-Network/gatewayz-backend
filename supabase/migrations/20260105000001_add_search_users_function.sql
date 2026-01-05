@@ -34,19 +34,19 @@ BEGIN
         WHERE users.email ILIKE '%' || search_term || '%'
     )
     SELECT
-        u.id,
-        u.username,
-        u.email,
-        u.credits,
-        u.is_active,
-        u.role,
-        u.registration_date,
-        u.auth_method,
-        u.subscription_status,
-        u.trial_expires_at,
-        u.created_at,
-        u.updated_at,
-        c.total as total_count
+        u.id::BIGINT,
+        u.username::TEXT,
+        u.email::TEXT,
+        u.credits::NUMERIC,
+        u.is_active::BOOLEAN,
+        u.role::TEXT,
+        u.registration_date::TIMESTAMP WITH TIME ZONE,
+        u.auth_method::TEXT,
+        u.subscription_status::TEXT,
+        u.trial_expires_at::TIMESTAMP WITH TIME ZONE,
+        u.created_at::TIMESTAMP WITH TIME ZONE,
+        u.updated_at::TIMESTAMP WITH TIME ZONE,
+        c.total::BIGINT as total_count
     FROM users u
     CROSS JOIN counted c
     WHERE u.email ILIKE '%' || search_term || '%'
