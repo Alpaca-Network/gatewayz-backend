@@ -1394,3 +1394,123 @@ async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_a
     except Exception as e:
         logger.error(f"Error getting user info for ID {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user information") from e
+
+
+@router.delete("/admin/users/by-domain/{domain}", tags=["admin"])
+async def delete_users_by_domain(
+    domain: str,
+    dry_run: bool = Query(True, description="If true, only list users that would be deleted without actually deleting"),
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Delete all users with emails from a specific domain (Admin only)
+
+    **Purpose**: Remove accounts created from abusive or blocked email domains
+
+    **Parameters**:
+    - `domain`: Email domain to match (e.g., "spam-domain.org")
+    - `dry_run`: If true (default), only shows users that would be deleted without deleting
+
+    **Response**:
+    - List of affected user IDs and emails
+    - Count of users deleted (or would be deleted in dry_run mode)
+
+    **Safety**:
+    - Requires admin authentication
+    - dry_run=true by default to prevent accidental deletion
+    - Logs all deletions for audit trail
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Normalize domain
+        domain = domain.lower().strip()
+
+        # Prevent deleting users from common legitimate domains
+        protected_domains = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "protonmail.com"}
+        if domain in protected_domains:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete users from protected domain: {domain}"
+            )
+
+        # Find all users with emails matching the domain
+        # Using ilike for case-insensitive matching with wildcard
+        users_query = (
+            client.table("users")
+            .select("id, email, username, created_at, credits")
+            .ilike("email", f"%@{domain}")
+        )
+
+        users_result = users_query.execute()
+        users_to_delete = users_result.data if users_result.data else []
+
+        if not users_to_delete:
+            return {
+                "status": "success",
+                "message": f"No users found with email domain: {domain}",
+                "dry_run": dry_run,
+                "count": 0,
+                "users": [],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Prepare user summary
+        user_summary = [
+            {
+                "id": u["id"],
+                "email": u.get("email"),
+                "username": u.get("username"),
+                "created_at": u.get("created_at"),
+                "credits": u.get("credits", 0),
+            }
+            for u in users_to_delete
+        ]
+
+        if dry_run:
+            logger.info(
+                f"DRY RUN: Would delete {len(users_to_delete)} users from domain {domain} "
+                f"(admin: {admin_user.get('id', 'unknown')})"
+            )
+            return {
+                "status": "success",
+                "message": f"DRY RUN: Would delete {len(users_to_delete)} users from domain: {domain}",
+                "dry_run": True,
+                "count": len(users_to_delete),
+                "users": user_summary,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Actually delete users
+        deleted_count = 0
+        failed_deletions = []
+
+        for user in users_to_delete:
+            try:
+                client.table("users").delete().eq("id", user["id"]).execute()
+                deleted_count += 1
+                logger.info(
+                    f"Deleted user {user['id']} (email: {user.get('email')}) "
+                    f"from domain {domain} (admin: {admin_user.get('id', 'unknown')})"
+                )
+            except Exception as e:
+                logger.error(f"Failed to delete user {user['id']}: {e}")
+                failed_deletions.append({"id": user["id"], "error": str(e)})
+
+        return {
+            "status": "success",
+            "message": f"Deleted {deleted_count} users from domain: {domain}",
+            "dry_run": False,
+            "count": deleted_count,
+            "failed": failed_deletions,
+            "users": user_summary,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting users by domain {domain}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete users by domain") from e

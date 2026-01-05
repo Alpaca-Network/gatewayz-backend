@@ -38,7 +38,7 @@ from src.services.query_timeout import (
     QueryTimeoutError,
     safe_query_with_timeout,
 )
-from src.utils.security_validators import is_valid_email, is_temporary_email_domain, sanitize_for_logging
+from src.utils.security_validators import is_valid_email, is_temporary_email_domain, is_blocked_email_domain, sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -781,6 +781,17 @@ async def privy_auth(
                     detail="Temporary or disposable email addresses are not allowed. Please use a permanent email address.",
                 )
 
+            # Block new registrations from domains identified as sources of abuse
+            if email and is_blocked_email_domain(email):
+                logger.warning(
+                    f"Registration blocked for abuse domain: {sanitize_for_logging(email)} "
+                    f"(privy_user_id={request.user.id})"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="Registration from this email domain is not allowed.",
+                )
+
             # Ensure username is unique before attempting to create user
             # This prevents duplicate username errors, especially for phone auth
             # where multiple users might have phone numbers ending in the same 4 digits
@@ -1191,6 +1202,16 @@ async def register_user(
             raise HTTPException(
                 status_code=400,
                 detail="Temporary or disposable email addresses are not allowed. Please use a permanent email address.",
+            )
+
+        # Block domains identified as sources of abuse
+        if is_blocked_email_domain(request.email):
+            logger.warning(
+                f"Registration blocked for abuse domain: {sanitize_for_logging(request.email)}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Registration from this email domain is not allowed.",
             )
 
         client = supabase_config.get_supabase_client()
