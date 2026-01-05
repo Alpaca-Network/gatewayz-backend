@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - handled in send_email_notifica
     resend = None
 
 import src.config.supabase_config as supabase_config
+from src.config.supabase_config import execute_with_retry
 from src.schemas.notification import (
     NotificationChannel,
     NotificationPreferences,
@@ -540,7 +541,7 @@ The {self.app_name} Team
             return False
 
     def create_notification(self, request: SendNotificationRequest) -> bool:
-        """Create notification record in database"""
+        """Create notification record in database with retry on connection errors"""
         try:
             notification_data = {
                 "user_id": request.user_id,
@@ -552,11 +553,23 @@ The {self.app_name} Team
                 "metadata": json.dumps(request.metadata) if request.metadata else None,
             }
 
-            client = self.supabase or supabase_config.get_supabase_client()
-            result = client.table("notifications").insert(notification_data).execute()
+            def do_insert(client):
+                return client.table("notifications").insert(notification_data).execute()
+
+            result = execute_with_retry(
+                do_insert,
+                max_retries=2,
+                retry_delay=0.3,
+                operation_name="create_notification",
+            )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Error creating notification: {e}")
+            # Downgrade to debug level for client-closed errors during shutdown
+            error_msg = str(e).lower()
+            if "client has been closed" in error_msg or "cannot send a request" in error_msg:
+                logger.debug(f"Notification record skipped (client closed): {e}")
+            else:
+                logger.error(f"Error creating notification: {e}")
             return False
 
     def get_user_preferences(self, user_id: int) -> NotificationPreferences | None:
