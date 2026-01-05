@@ -1104,8 +1104,12 @@ async def get_all_users_info(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             except Exception as rpc_err:
-                logger.warning(f"RPC function failed, falling back to standard query: {rpc_err}")
-                # Fall through to standard query method below
+                logger.error(f"RPC function failed for email search: {rpc_err}", exc_info=True)
+                # Don't fallback for email-only searches - the standard query crashes on Cloudflare
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Email search failed: {str(rpc_err)}. Please check if the search_users_by_email function exists in Supabase."
+                ) from rpc_err
 
         # Standard query method (for complex filters or RPC fallback)
         # Build count query first (without pagination, just filters)
