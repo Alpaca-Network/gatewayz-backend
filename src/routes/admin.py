@@ -1387,14 +1387,14 @@ async def get_user_by_api_key(
     """
     Get user information by exact API key match (Admin only)
 
-    **FAST EXACT MATCH** - Looks up user by their full API key.
+    **FAST EXACT MATCH** - Looks up which user owns a specific API key.
     Does NOT support partial matching - you must provide the complete API key.
 
     **Parameters**:
     - `api_key`: Complete API key (e.g., "gw_live_abc123...")
 
     **Response**:
-    - User information if found
+    - User information only (id, username, email, credits, status, etc.)
     - 404 if API key doesn't exist
 
     **Performance**: ~10-20ms (indexed lookup)
@@ -1402,6 +1402,24 @@ async def get_user_by_api_key(
     **Example**:
     ```
     GET /admin/users/by-api-key?api_key=gw_live_abc123xyz
+    ```
+
+    **Response format**:
+    ```json
+    {
+      "status": "success",
+      "user": {
+        "id": 123,
+        "username": "john_doe",
+        "email": "john@example.com",
+        "credits": 50.0,
+        "is_active": true,
+        "role": "user",
+        "subscription_status": "active",
+        "created_at": "2025-01-01T00:00:00Z"
+      },
+      "timestamp": "2026-01-05T10:30:00Z"
+    }
     ```
     """
     try:
@@ -1438,28 +1456,9 @@ async def get_user_by_api_key(
             "created_at": user_data["created_at"],
         }
 
-        # Build API key info object
-        api_key_info = {
-            "id": user_data["key_id"],
-            "api_key": user_data["api_key"],
-            "key_name": user_data["key_name"],
-            "environment_tag": user_data["environment_tag"],
-            "is_primary": user_data["is_primary"],
-            "is_active": user_data["key_is_active"],
-            "created_at": user_data["key_created_at"],
-            "source": user_data["source"],
-        }
-
-        # Get all API keys for this user
-        user_id = user_data["user_id"]
-        all_keys_result = client.table("api_keys_new").select("*").eq("user_id", user_id).execute()
-        all_api_keys = all_keys_result.data if all_keys_result.data else []
-
         return {
             "status": "success",
             "user": user,
-            "api_key_info": api_key_info,
-            "all_api_keys": all_api_keys,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
