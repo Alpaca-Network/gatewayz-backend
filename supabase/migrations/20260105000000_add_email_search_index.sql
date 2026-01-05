@@ -10,7 +10,8 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- Create a GIN (Generalized Inverted Index) on the email column
 -- This index specifically supports the ILIKE operator with wildcards on both sides
 -- e.g., email ILIKE '%radar%' will use this index
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_trgm
+-- Note: CONCURRENTLY removed to allow execution within migration transaction
+CREATE INDEX IF NOT EXISTS idx_users_email_trgm
 ON users USING gin (email gin_trgm_ops);
 
 -- Update table statistics to help the query planner make better decisions
