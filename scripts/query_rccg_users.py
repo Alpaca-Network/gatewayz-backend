@@ -28,7 +28,8 @@ def query_rccg_users():
         return
 
     # Sort by registration date (newest first)
-    users.sort(key=lambda x: x.get('registration_date', ''), reverse=True)
+    # Handle null registration dates by placing them at the end
+    users.sort(key=lambda x: x.get('registration_date') or '', reverse=True)
 
     total_credits_used = 0
     total_credits_remaining = 0
