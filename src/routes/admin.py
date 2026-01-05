@@ -867,18 +867,10 @@ async def get_users_stats(
 
         client = get_supabase_client()
 
-        # Smart email pattern helper (same as main endpoint)
-        def get_email_pattern(email_input: str | None) -> str | None:
-            if not email_input:
-                return None
-            if "@" not in email_input:
-                # Domain search: "gmail" → "%@gmail%"
-                return f"%@{email_input}%"
-            else:
-                # Partial match: "john@" → "%john@%"
-                return f"%{email_input}%"
-
-        email_pattern = get_email_pattern(email)
+        # Simple partial match - searches entire email address
+        # "manjesh" matches "manjeshprasad21@gmail.com"
+        # "gmail" matches "user@gmail.com"
+        email_pattern = f"%{email}%" if email else None
 
         # Build base count query
         if api_key:
@@ -1065,20 +1057,10 @@ async def get_all_users_info(
 
         client = get_supabase_client()
 
-        # Smart email pattern helper
-        # If no @ symbol, assume domain search (e.g., "gmail" → "@gmail")
-        # If has @, use as-is for partial match
-        def get_email_pattern(email_input: str | None) -> str | None:
-            if not email_input:
-                return None
-            if "@" not in email_input:
-                # Domain search: "gmail" → "%@gmail%"
-                return f"%@{email_input}%"
-            else:
-                # Partial match: "john@" or "john@gmail" → "%john@%" or "%john@gmail%"
-                return f"%{email_input}%"
-
-        email_pattern = get_email_pattern(email)
+        # Simple partial match - searches entire email address
+        # "manjesh" matches "manjeshprasad21@gmail.com"
+        # "gmail" matches "user@gmail.com"
+        email_pattern = f"%{email}%" if email else None
 
         # Build count query first (without pagination, just filters)
         # This ensures we get accurate total_users count for filtered results
