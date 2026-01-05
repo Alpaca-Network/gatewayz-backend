@@ -874,8 +874,9 @@ async def get_users_stats(
         role_query = (
             client.table("users")
             .select("role", count="exact")
+            .limit(100000)  # Set high limit to fetch all filtered users
         )
-        
+
         # Apply same filters to role query
         if email_pattern:
             role_query = role_query.ilike("email", email_pattern)
@@ -883,7 +884,7 @@ async def get_users_stats(
             role_query = role_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
             role_query = role_query.eq("is_active", is_active)
-        
+
         role_result = role_query.execute()
         role_data = role_result.data if role_result.data else []
         
@@ -896,8 +897,9 @@ async def get_users_stats(
         status_query = (
             client.table("users")
             .select("is_active", count="exact")
+            .limit(100000)  # Set high limit to fetch all filtered users
         )
-        
+
         # Apply same filters to status query
         if email_pattern:
             status_query = status_query.ilike("email", email_pattern)
@@ -905,7 +907,7 @@ async def get_users_stats(
             status_query = status_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
             status_query = status_query.eq("is_active", is_active)
-        
+
         status_result = status_query.execute()
         status_data = status_result.data if status_result.data else []
         
@@ -913,12 +915,13 @@ async def get_users_stats(
         active_users = sum(1 for u in status_data if u.get("is_active", True))
         inactive_users = total_users - active_users
 
-        # Credit statistics - use aggregation query to avoid fetching all rows
+        # Credit statistics - fetch all filtered users to calculate accurate totals
         credits_query = (
             client.table("users")
             .select("credits", count="exact")
+            .limit(100000)  # Set high limit to fetch all filtered users
         )
-        
+
         # Apply same filters to credits query
         if email_pattern:
             credits_query = credits_query.ilike("email", email_pattern)
@@ -926,7 +929,7 @@ async def get_users_stats(
             credits_query = credits_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
             credits_query = credits_query.eq("is_active", is_active)
-        
+
         credits_result = credits_query.execute()
         credits_data = credits_result.data if credits_result.data else []
         
@@ -938,8 +941,9 @@ async def get_users_stats(
         subscription_query = (
             client.table("users")
             .select("subscription_status", count="exact")
+            .limit(100000)  # Set high limit to fetch all filtered users
         )
-        
+
         # Apply same filters to subscription query
         if email_pattern:
             subscription_query = subscription_query.ilike("email", email_pattern)
@@ -947,7 +951,7 @@ async def get_users_stats(
             subscription_query = subscription_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
             subscription_query = subscription_query.eq("is_active", is_active)
-        
+
         subscription_result = subscription_query.execute()
         subscription_data = subscription_result.data if subscription_result.data else []
         
