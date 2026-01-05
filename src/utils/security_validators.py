@@ -726,6 +726,40 @@ TEMPORARY_EMAIL_DOMAINS = frozenset({
     "zzz.com",
 })
 
+# Domains blocked due to abuse, spam, or suspicious activity
+# These are legitimate email domains that have been identified as sources of abuse
+BLOCKED_EMAIL_DOMAINS = frozenset({
+    # Added 2026-01-05: Bulk automated account creation abuse
+    "rccg-clf.org",
+})
+
+
+def is_blocked_email_domain(email: str) -> bool:
+    """Check if email uses a domain that has been blocked due to abuse.
+
+    These are domains that have been explicitly blocked due to:
+    - Bulk automated account creation
+    - Credit abuse patterns
+    - Spam or malicious activity
+
+    Unlike temporary email domains, these may be legitimate email providers
+    that have been blocked due to specific abuse incidents.
+
+    Args:
+        email: Email address string to check
+
+    Returns:
+        True if email domain is blocked, False otherwise
+    """
+    if not email or "@" not in email:
+        return False
+
+    try:
+        domain = email.split("@")[-1].lower().strip()
+        return domain in BLOCKED_EMAIL_DOMAINS
+    except Exception:
+        return False
+
 
 def is_temporary_email_domain(email: str) -> bool:
     """Check if email uses a known temporary/disposable email domain.
