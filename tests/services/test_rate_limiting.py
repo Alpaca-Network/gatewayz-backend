@@ -289,3 +289,166 @@ async def test_concurrency_increment_decrement_helpers(mod, fake_fallback):
     assert limiter.concurrent_requests[key] == 1
     await limiter.decrement_concurrent_requests(key)
     assert limiter.concurrent_requests[key] == 0
+
+
+# -------------------- Severe Rate Limiting Tests --------------------
+
+
+@pytest.mark.anyio
+async def test_severe_rate_limit_configs_exist(mod):
+    """Test that SEVERE_RATE_LIMIT_CONFIG and BLOCKED_ACCOUNT_CONFIG exist and have correct values"""
+    # Verify SEVERE_RATE_LIMIT_CONFIG exists and has restrictive values
+    assert hasattr(mod, "SEVERE_RATE_LIMIT_CONFIG")
+    severe = mod.SEVERE_RATE_LIMIT_CONFIG
+    assert severe.requests_per_minute == 5
+    assert severe.requests_per_hour == 20
+    assert severe.requests_per_day == 50
+    assert severe.tokens_per_minute == 500
+    assert severe.burst_limit == 3
+    assert severe.concurrency_limit == 1
+
+    # Verify BLOCKED_ACCOUNT_CONFIG exists and has even more restrictive values
+    assert hasattr(mod, "BLOCKED_ACCOUNT_CONFIG")
+    blocked = mod.BLOCKED_ACCOUNT_CONFIG
+    assert blocked.requests_per_minute == 1
+    assert blocked.requests_per_hour == 5
+    assert blocked.requests_per_day == 10
+    assert blocked.tokens_per_minute == 100
+    assert blocked.burst_limit == 1
+    assert blocked.concurrency_limit == 1
+
+
+@pytest.mark.anyio
+async def test_severe_rate_limit_for_temporary_email(monkeypatch, mod, fake_fallback):
+    """Test that temporary email domains get SEVERE rate limiting"""
+    # Mock get_user to return a user with a temporary email
+    def mock_get_user(api_key):
+        return {"id": 1, "email": "test@tempmail.com"}
+
+    # Mock security validators
+    def mock_is_blocked(email):
+        return False
+
+    def mock_is_temporary(email):
+        return email.endswith("@tempmail.com")
+
+    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
+    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+
+    mgr = mod.RateLimitManager(redis_client=None)
+
+    # Check the severe config detection
+    severe_config = await mgr._get_severe_rate_limit_config("test_key")
+
+    assert severe_config is not None
+    assert severe_config == mod.SEVERE_RATE_LIMIT_CONFIG
+
+
+@pytest.mark.anyio
+async def test_blocked_rate_limit_for_blocked_email_domain(monkeypatch, mod, fake_fallback):
+    """Test that blocked email domains get BLOCKED rate limiting (most restrictive)"""
+    # Mock get_user to return a user with a blocked email domain
+    def mock_get_user(api_key):
+        return {"id": 1, "email": "test@rccg-clf.org"}
+
+    def mock_is_blocked(email):
+        return email.endswith("@rccg-clf.org")
+
+    def mock_is_temporary(email):
+        return False
+
+    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
+    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+
+    mgr = mod.RateLimitManager(redis_client=None)
+
+    # Check the severe config detection - should return BLOCKED config (most restrictive)
+    severe_config = await mgr._get_severe_rate_limit_config("test_key")
+
+    assert severe_config is not None
+    assert severe_config == mod.BLOCKED_ACCOUNT_CONFIG
+
+
+@pytest.mark.anyio
+async def test_no_severe_rate_limit_for_normal_user(monkeypatch, mod, fake_fallback):
+    """Test that normal users don't get severe rate limiting"""
+    # Mock get_user to return a user with a normal email
+    def mock_get_user(api_key):
+        return {"id": 1, "email": "user@gmail.com"}
+
+    def mock_is_blocked(email):
+        return False
+
+    def mock_is_temporary(email):
+        return False
+
+    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
+    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+
+    mgr = mod.RateLimitManager(redis_client=None)
+
+    # Check the severe config detection - should return None for normal users
+    severe_config = await mgr._get_severe_rate_limit_config("test_key")
+
+    assert severe_config is None
+
+
+@pytest.mark.anyio
+async def test_severe_rate_limit_graceful_on_missing_user(monkeypatch, mod, fake_fallback):
+    """Test that severe rate limit check handles missing user gracefully"""
+    def mock_get_user(api_key):
+        return None
+
+    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+
+    mgr = mod.RateLimitManager(redis_client=None)
+
+    # Should return None (no severe limiting) when user not found
+    severe_config = await mgr._get_severe_rate_limit_config("test_key")
+
+    assert severe_config is None
+
+
+@pytest.mark.anyio
+async def test_severe_rate_limit_graceful_on_exception(monkeypatch, mod, fake_fallback):
+    """Test that severe rate limit check handles exceptions gracefully"""
+    def mock_get_user(api_key):
+        raise Exception("Database error")
+
+    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+
+    mgr = mod.RateLimitManager(redis_client=None)
+
+    # Should return None (fail open) on exception
+    severe_config = await mgr._get_severe_rate_limit_config("test_key")
+
+    assert severe_config is None
+
+
+@pytest.mark.anyio
+async def test_blocked_email_domain_check_priority(monkeypatch, mod, fake_fallback):
+    """Test that blocked domains take priority over temporary domains"""
+    # Mock a domain that is both blocked AND temporary (edge case)
+    def mock_get_user(api_key):
+        return {"id": 1, "email": "test@blockedtemp.com"}
+
+    def mock_is_blocked(email):
+        return True  # Is blocked
+
+    def mock_is_temporary(email):
+        return True  # Also temporary
+
+    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
+    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+
+    mgr = mod.RateLimitManager(redis_client=None)
+
+    # Should return BLOCKED config (more restrictive) not SEVERE
+    severe_config = await mgr._get_severe_rate_limit_config("test_key")
+
+    assert severe_config is not None
+    assert severe_config == mod.BLOCKED_ACCOUNT_CONFIG  # Blocked takes priority

@@ -610,6 +610,17 @@ class RateLimitManager:
         except Exception as e:
             logger.debug(f"Error checking admin tier for rate limiting: {e}")
 
+        # SEVERE RATE LIMITING: Check for temporary/blocked email domains
+        severe_config = await self._get_severe_rate_limit_config(api_key)
+        if severe_config is not None:
+            # Apply severe rate limiting for suspicious accounts
+            result = await self.rate_limiter.check_rate_limit(api_key, severe_config, tokens_used)
+            if not result.allowed:
+                logger.warning(
+                    f"Severe rate limit exceeded for suspicious account {api_key[:10]}...: {result.reason}"
+                )
+            return result
+
         # OPTIMIZATION: Check cache first (saves 15-30ms on cache hits)
         now = time.time()
         cache_key = f"{api_key}:{tokens_used}"
@@ -644,6 +655,55 @@ class RateLimitManager:
         self.key_configs[api_key] = config
         # Also update in database
         await self._save_key_config_to_db(api_key, config)
+
+    async def _get_severe_rate_limit_config(self, api_key: str) -> RateLimitConfig | None:
+        """Check if user should have severe rate limiting applied.
+
+        Returns:
+            BLOCKED_ACCOUNT_CONFIG for blocked email domains
+            SEVERE_RATE_LIMIT_CONFIG for temporary email domains
+            None for normal accounts (no severe limiting)
+        """
+        try:
+            from src.services.user_lookup_cache import get_user
+            from src.utils.security_validators import (
+                is_blocked_email_domain,
+                is_temporary_email_domain,
+            )
+
+            user = get_user(api_key)
+            if not user:
+                return None
+
+            email = user.get("email", "")
+            if not email:
+                return None
+
+            # Check for blocked email domains (most restrictive)
+            if is_blocked_email_domain(email):
+                logger.warning(
+                    f"Applying BLOCKED rate limits for user with blocked domain: "
+                    f"{email[:3]}***@{email.split('@')[-1] if '@' in email else 'unknown'}"
+                )
+                return BLOCKED_ACCOUNT_CONFIG
+
+            # Check for temporary/disposable email domains (severe limiting)
+            if is_temporary_email_domain(email):
+                logger.info(
+                    f"Applying SEVERE rate limits for user with temporary email: "
+                    f"{email[:3]}***@{email.split('@')[-1] if '@' in email else 'unknown'}"
+                )
+                return SEVERE_RATE_LIMIT_CONFIG
+
+            # Check for flagged/suspicious accounts (future: could check a database flag)
+            # if user.get("is_flagged") or user.get("is_suspicious"):
+            #     return SEVERE_RATE_LIMIT_CONFIG
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error checking for severe rate limiting: {e}")
+            return None
 
     async def release_concurrency(self, api_key: str):
         """Release concurrency slot for a key"""
@@ -736,6 +796,33 @@ ENTERPRISE_CONFIG = RateLimitConfig(
     tokens_per_day=20000000,
     burst_limit=100,
     concurrency_limit=50,
+)
+
+# Severe rate limiting for suspicious/abusive accounts
+# Applied to: temporary email domains, blocked email domains, flagged accounts
+SEVERE_RATE_LIMIT_CONFIG = RateLimitConfig(
+    requests_per_minute=5,      # 5 requests per minute (vs 250 default)
+    requests_per_hour=20,       # 20 requests per hour (vs 1000 default)
+    requests_per_day=50,        # 50 requests per day (vs 10000 default)
+    tokens_per_minute=500,      # 500 tokens per minute (vs 10000 default)
+    tokens_per_hour=2000,       # 2000 tokens per hour (vs 100000 default)
+    tokens_per_day=5000,        # 5000 tokens per day (vs 1000000 default)
+    burst_limit=3,              # 3 burst requests (vs 100 default)
+    concurrency_limit=1,        # 1 concurrent request (vs 50 default)
+    window_size_seconds=60,
+)
+
+# Blocked accounts - even more restrictive (essentially read-only/denied)
+BLOCKED_ACCOUNT_CONFIG = RateLimitConfig(
+    requests_per_minute=1,      # 1 request per minute - essentially blocked
+    requests_per_hour=5,        # 5 requests per hour
+    requests_per_day=10,        # 10 requests per day
+    tokens_per_minute=100,      # 100 tokens per minute
+    tokens_per_hour=500,        # 500 tokens per hour
+    tokens_per_day=1000,        # 1000 tokens per day
+    burst_limit=1,              # 1 burst request
+    concurrency_limit=1,        # 1 concurrent request
+    window_size_seconds=60,
 )
 
 # Global rate limit manager instance
