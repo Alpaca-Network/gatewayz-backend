@@ -12,7 +12,7 @@ CREATE OR REPLACE FUNCTION search_users_by_email(
     result_offset INTEGER DEFAULT 0
 )
 RETURNS TABLE (
-    id INTEGER,
+    id BIGINT,
     username TEXT,
     email TEXT,
     credits NUMERIC,
