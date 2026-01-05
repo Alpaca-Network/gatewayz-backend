@@ -1084,7 +1084,8 @@ async def stream_generator(
     completion_tokens = 0
     total_tokens = 0
     start_time = time.monotonic()
-    rate_limit_mgr is not None and not trial.get("is_trial", False)
+    # NOTE: Previously had dead code: `rate_limit_mgr is not None and not trial.get("is_trial", False)`
+    # This expression evaluated but was never assigned or used - removed as no-op
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking

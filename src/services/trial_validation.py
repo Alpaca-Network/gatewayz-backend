@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Structure: {api_key: {"result": dict, "timestamp": datetime}}
 _trial_cache: dict[str, dict[str, Any]] = {}
 _trial_cache_ttl = 60  # 60 seconds TTL - shorter than user cache since trial usage changes frequently
+_trial_cache_ttl_expired = 3600  # 1 hour TTL for expired trials - they won't change, no need to recheck often
 
 
 def clear_trial_cache(api_key: str | None = None) -> None:
@@ -253,9 +254,19 @@ def validate_trial_access(api_key: str) -> dict[str, Any]:
     if api_key in _trial_cache:
         entry = _trial_cache[api_key]
         cache_time = entry["timestamp"]
-        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=_trial_cache_ttl):
-            logger.debug(f"Trial cache hit for API key {api_key[:10]}... (age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)")
-            return entry["result"]
+        cached_result = entry["result"]
+
+        # Use longer TTL for expired/invalid trials - they won't change
+        # This significantly reduces DB load from bot traffic with expired trials
+        is_expired_or_invalid = (
+            not cached_result.get("is_valid", False) or
+            cached_result.get("is_expired", False)
+        )
+        ttl = _trial_cache_ttl_expired if is_expired_or_invalid else _trial_cache_ttl
+
+        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=ttl):
+            logger.debug(f"Trial cache hit for API key {api_key[:10]}... (age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s, ttl: {ttl}s)")
+            return cached_result
         else:
             # Cache expired, remove it
             del _trial_cache[api_key]
