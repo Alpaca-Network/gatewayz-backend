@@ -25,7 +25,7 @@ MOCK_ADMIN_USER = {
 class TestAdminUsersStats:
     """Test the fixed /admin/users/stats endpoint"""
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_stats_returns_accurate_totals_not_limited(self, mock_client, mock_auth):
         """Test that stats endpoint returns accurate totals beyond 1,000 users"""
@@ -74,7 +74,7 @@ class TestAdminUsersStats:
         select_calls = mock_supabase.table.return_value.select.call_args_list
         assert any("count" in str(call) for call in select_calls)
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_stats_with_filters(self, mock_client, mock_auth):
         """Test stats endpoint with email filter applied"""
@@ -105,7 +105,7 @@ class TestAdminUsersStats:
         assert data["filters_applied"]["email"] == "gmail"
         assert data["filters_applied"]["is_active"] is None
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     def test_stats_unauthorized(self, mock_auth):
         """Test that stats endpoint requires admin authentication"""
         
@@ -118,7 +118,7 @@ class TestAdminUsersStats:
 class TestAdminUsersGrowth:
     """Test the new /admin/users/growth endpoint"""
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_growth_returns_correct_data_points(self, mock_client, mock_auth):
         """Test that growth endpoint returns correct number of data points"""
@@ -176,7 +176,7 @@ class TestAdminUsersGrowth:
         # Growth rate should be positive
         assert data["growth_rate"] > 0
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_growth_different_day_ranges(self, mock_client, mock_auth):
         """Test growth endpoint with different day ranges"""
@@ -205,7 +205,7 @@ class TestAdminUsersGrowth:
             assert data["days"] == days
             assert len(data["data"]) == days
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     def test_growth_unauthorized(self, mock_auth):
         """Test that growth endpoint requires admin authentication"""
         
@@ -214,7 +214,7 @@ class TestAdminUsersGrowth:
         response = client.get("/admin/users/growth")
         assert response.status_code in [401, 403]
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_growth_invalid_day_range(self, mock_client, mock_auth):
         """Test growth endpoint validation for day ranges"""
@@ -231,7 +231,7 @@ class TestAdminUsersGrowth:
 class TestRegressionPrevention:
     """Tests specifically to prevent the 1,000 user limit regression"""
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_no_1000_limit_regression_stats(self, mock_client, mock_auth):
         """Regression test: Ensure stats endpoint never returns exactly 1,000 due to row limits"""
@@ -259,7 +259,7 @@ class TestRegressionPrevention:
         assert data["total_users"] == 2500
         assert data["total_users"] != 1000
 
-    @patch('src.routes.admin.require_admin')
+    @patch('src.security.deps.require_admin')
     @patch('src.config.supabase_config.get_supabase_client')
     def test_no_1000_limit_regression_growth(self, mock_client, mock_auth):
         """Regression test: Ensure growth endpoint handles large user bases"""
@@ -290,3 +290,4 @@ class TestRegressionPrevention:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
