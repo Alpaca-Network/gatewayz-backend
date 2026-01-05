@@ -695,9 +695,8 @@ class RateLimitManager:
                 )
                 return SEVERE_RATE_LIMIT_CONFIG
 
-            # Check for flagged/suspicious accounts (future: could check a database flag)
-            # if user.get("is_flagged") or user.get("is_suspicious"):
-            #     return SEVERE_RATE_LIMIT_CONFIG
+            # Future enhancement: Apply SEVERE limits to accounts marked as flagged
+            # or suspicious in the database (e.g., user.is_flagged or user.is_suspicious)
 
             return None
 
