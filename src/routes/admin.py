@@ -830,6 +830,19 @@ async def get_users_stats(
 
         client = get_supabase_client()
 
+        # Smart email pattern helper (same as main endpoint)
+        def get_email_pattern(email_input: str | None) -> str | None:
+            if not email_input:
+                return None
+            if "@" not in email_input:
+                # Domain search: "gmail" → "%@gmail%"
+                return f"%@{email_input}%"
+            else:
+                # Partial match: "john@" → "%john@%"
+                return f"%{email_input}%"
+
+        email_pattern = get_email_pattern(email)
+
         # Build base count query
         if api_key:
             count_query = (
@@ -843,8 +856,8 @@ async def get_users_stats(
             )
 
         # Apply filters to count query
-        if email:
-            count_query = count_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            count_query = count_query.ilike("email", email_pattern)
 
         if api_key:
             count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
@@ -864,8 +877,8 @@ async def get_users_stats(
         )
         
         # Apply same filters to role query
-        if email:
-            role_query = role_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            role_query = role_query.ilike("email", email_pattern)
         if api_key:
             role_query = role_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
@@ -886,8 +899,8 @@ async def get_users_stats(
         )
         
         # Apply same filters to status query
-        if email:
-            status_query = status_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            status_query = status_query.ilike("email", email_pattern)
         if api_key:
             status_query = status_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
@@ -907,8 +920,8 @@ async def get_users_stats(
         )
         
         # Apply same filters to credits query
-        if email:
-            credits_query = credits_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            credits_query = credits_query.ilike("email", email_pattern)
         if api_key:
             credits_query = credits_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
@@ -928,8 +941,8 @@ async def get_users_stats(
         )
         
         # Apply same filters to subscription query
-        if email:
-            subscription_query = subscription_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            subscription_query = subscription_query.ilike("email", email_pattern)
         if api_key:
             subscription_query = subscription_query.ilike("api_keys_new.api_key", f"%{api_key}%")
         if is_active is not None:
@@ -1005,6 +1018,21 @@ async def get_all_users_info(
 
         client = get_supabase_client()
 
+        # Smart email pattern helper
+        # If no @ symbol, assume domain search (e.g., "gmail" → "@gmail")
+        # If has @, use as-is for partial match
+        def get_email_pattern(email_input: str | None) -> str | None:
+            if not email_input:
+                return None
+            if "@" not in email_input:
+                # Domain search: "gmail" → "%@gmail%"
+                return f"%@{email_input}%"
+            else:
+                # Partial match: "john@" or "john@gmail" → "%john@%" or "%john@gmail%"
+                return f"%{email_input}%"
+
+        email_pattern = get_email_pattern(email)
+
         # Build count query first (without pagination, just filters)
         # This ensures we get accurate total_users count for filtered results
         if api_key:
@@ -1019,8 +1047,8 @@ async def get_all_users_info(
             )
 
         # Apply filters to count query
-        if email:
-            count_query = count_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            count_query = count_query.ilike("email", email_pattern)
 
         if api_key:
             count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
@@ -1060,8 +1088,8 @@ async def get_all_users_info(
             )
 
         # Apply filters to data query
-        if email:
-            data_query = data_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            data_query = data_query.ilike("email", email_pattern)
 
         if api_key:
             data_query = data_query.ilike("api_keys_new.api_key", f"%{api_key}%")
@@ -1111,8 +1139,8 @@ async def get_all_users_info(
             )
 
         # Apply same filters to statistics query
-        if email:
-            stats_query = stats_query.ilike("email", f"%{email}%")
+        if email_pattern:
+            stats_query = stats_query.ilike("email", email_pattern)
 
         if api_key:
             stats_query = stats_query.ilike("api_keys_new.api_key", f"%{api_key}%")
