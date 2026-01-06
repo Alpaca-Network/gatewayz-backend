@@ -304,7 +304,7 @@ class TestFetchModelPricing:
         result = fetch_model_pricing_from_helicone("gpt-4o-mini")
         assert result is None
 
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.models._is_building_catalog")
     @patch("src.services.helicone_client.Config.HELICONE_API_KEY", "sk-helicone-test")
     def test_fetch_pricing_during_catalog_build(self, mock_is_building):
         """Test fetching pricing during catalog build returns None"""
@@ -316,7 +316,7 @@ class TestFetchModelPricing:
         assert result is None
 
     @patch("src.services.helicone_client.httpx.get")
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.models._is_building_catalog")
     @patch("src.services.helicone_client.Config.HELICONE_API_KEY", "sk-helicone-test")
     def test_fetch_pricing_from_api(self, mock_is_building, mock_get):
         """Test fetching pricing from Helicone API"""
@@ -337,7 +337,7 @@ class TestFetchModelPricing:
 
     @patch("src.services.helicone_client.httpx.get")
     @patch("src.services.helicone_client.get_provider_pricing_for_helicone_model")
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.models._is_building_catalog")
     @patch("src.services.helicone_client.Config.HELICONE_API_KEY", "sk-helicone-test")
     def test_fetch_pricing_fallback_to_provider(
         self, mock_is_building, mock_get_provider_pricing, mock_get
@@ -363,7 +363,7 @@ class TestFetchModelPricing:
 class TestGetProviderPricing:
     """Test get_provider_pricing_for_helicone_model function"""
 
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.models._is_building_catalog")
     def test_get_provider_pricing_during_catalog_build(self, mock_is_building):
         """Test getting provider pricing during catalog build returns None"""
         from src.services.helicone_client import get_provider_pricing_for_helicone_model
@@ -373,8 +373,8 @@ class TestGetProviderPricing:
         result = get_provider_pricing_for_helicone_model("gpt-4o-mini")
         assert result is None
 
-    @patch("src.services.helicone_client.get_model_pricing")
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.pricing.get_model_pricing")
+    @patch("src.services.models._is_building_catalog")
     def test_get_provider_pricing_found(self, mock_is_building, mock_get_pricing):
         """Test getting provider pricing when found"""
         from src.services.helicone_client import get_provider_pricing_for_helicone_model
@@ -390,8 +390,8 @@ class TestGetProviderPricing:
 
         assert result == {"prompt": "0.15", "completion": "0.60"}
 
-    @patch("src.services.helicone_client.get_model_pricing")
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.pricing.get_model_pricing")
+    @patch("src.services.models._is_building_catalog")
     def test_get_provider_pricing_not_found(self, mock_is_building, mock_get_pricing):
         """Test getting provider pricing when not found"""
         from src.services.helicone_client import get_provider_pricing_for_helicone_model
@@ -402,8 +402,8 @@ class TestGetProviderPricing:
         result = get_provider_pricing_for_helicone_model("unknown-model")
         assert result is None
 
-    @patch("src.services.helicone_client.get_model_pricing")
-    @patch("src.services.helicone_client._is_building_catalog")
+    @patch("src.services.pricing.get_model_pricing")
+    @patch("src.services.models._is_building_catalog")
     def test_get_provider_pricing_with_prefix(self, mock_is_building, mock_get_pricing):
         """Test getting provider pricing with provider prefix"""
         from src.services.helicone_client import get_provider_pricing_for_helicone_model
