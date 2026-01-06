@@ -3334,7 +3334,8 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     # Support both 'id' and 'model_id' field names for API compatibility
     model_id = model.get("id") or model.get("model_id")
     if not model_id:
-        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
+        # Use debug level to avoid excessive logging during catalog refresh
+        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
 
     try:
@@ -3425,7 +3426,8 @@ def normalize_aihubmix_model(model) -> dict | None:
         context_length = getattr(model, "context_length", 4096)
 
     if not model_id:
-        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
+        # Use debug level to avoid excessive logging during catalog refresh
+        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
 
     try:
