@@ -46,7 +46,7 @@ from src.utils.sentry_context import capture_payment_error, capture_provider_err
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Make braintrust optional for test environments
 try:
-    from braintrust import current_span, start_span, traced
+    from braintrust import current_span, start_span, traced, flush as braintrust_flush
 
     BRAINTRUST_AVAILABLE = True
 except ImportError:
@@ -71,6 +71,9 @@ except ImportError:
 
     def current_span():
         return MockSpan()
+
+    def braintrust_flush():
+        pass
 
 
 
@@ -2454,6 +2457,7 @@ async def chat_completions(
 
         # === 7) Log to Braintrust ===
         try:
+            logger.info(f"[Braintrust] Starting log for request_id={request_id}, model={model}, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}")
             # Safely convert messages to dicts, filtering out None values and sanitizing content
             messages_for_log = []
             for m in req.messages:
@@ -2515,6 +2519,7 @@ async def chat_completions(
             bt_user_id = user["id"] if user else "anonymous"
             bt_environment = user.get("environment_tag", "live") if user else "live"
             bt_is_trial = trial.get("is_trial", False) if trial else False
+            logger.info(f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}")
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -2535,8 +2540,11 @@ async def chat_completions(
                 },
             )
             span.end()
+            # Flush to ensure data is sent to Braintrust
+            braintrust_flush()
+            logger.info(f"[Braintrust] Successfully logged and flushed span for request_id={request_id}")
         except Exception as e:
-            logger.warning(f"Failed to log to Braintrust: {e}")
+            logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
 
         # Capture health metrics (passive monitoring) - run as background task
         background_tasks.add_task(
@@ -3710,6 +3718,7 @@ async def unified_responses(
 
         # === 7) Log to Braintrust ===
         try:
+            logger.info(f"[Braintrust] Starting log for request_id={request_id}, model={model}, endpoint=/v1/responses, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}")
             # Convert input messages to loggable format, safely handling None values
             input_messages = []
             for inp_msg in req.input:
@@ -3768,6 +3777,7 @@ async def unified_responses(
             bt_user_id = user["id"] if user else "anonymous"
             bt_environment = user.get("environment_tag", "live") if user else "live"
             bt_is_trial = trial.get("is_trial", False) if trial else False
+            logger.info(f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}")
             span.log(
                 input=input_messages,
                 output=bt_output,
@@ -3789,8 +3799,11 @@ async def unified_responses(
                 },
             )
             span.end()
+            # Flush to ensure data is sent to Braintrust
+            braintrust_flush()
+            logger.info(f"[Braintrust] Successfully logged and flushed span for request_id={request_id}")
         except Exception as e:
-            logger.warning(f"Failed to log to Braintrust: {e}")
+            logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
 
         # Save chat completion request metadata to database - run as background task
         background_tasks.add_task(
