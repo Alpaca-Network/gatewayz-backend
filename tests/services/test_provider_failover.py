@@ -196,6 +196,56 @@ class TestEnforceModelFailoverRules:
 
         assert filtered == chain
 
+    def test_payment_failover_bypasses_openrouter_lock(self):
+        """Test that allow_payment_failover=True bypasses provider lock for 402 scenarios"""
+        chain = ["openrouter", "cerebras", "huggingface"]
+        # Without payment failover, anthropic/ models are locked to openrouter
+        filtered = enforce_model_failover_rules("anthropic/claude-3.5-sonnet", chain)
+        assert filtered == ["openrouter"]
+
+        # With payment failover enabled, the full chain is returned
+        filtered = enforce_model_failover_rules(
+            "anthropic/claude-3.5-sonnet", chain, allow_payment_failover=True
+        )
+        assert filtered == chain
+
+    def test_payment_failover_bypasses_openai_lock(self):
+        """Test that allow_payment_failover=True bypasses openai/ provider lock"""
+        chain = ["openrouter", "cerebras", "huggingface"]
+        # Without payment failover
+        filtered = enforce_model_failover_rules("openai/gpt-5.1", chain)
+        assert filtered == ["openrouter"]
+
+        # With payment failover enabled
+        filtered = enforce_model_failover_rules(
+            "openai/gpt-5.1", chain, allow_payment_failover=True
+        )
+        assert filtered == chain
+
+    def test_payment_failover_bypasses_suffix_lock(self):
+        """Test that allow_payment_failover=True bypasses suffix-based provider lock"""
+        chain = ["openrouter", "cerebras", "huggingface"]
+        # Without payment failover
+        filtered = enforce_model_failover_rules("z-ai/glm-4.6:exacto", chain)
+        assert filtered == ["openrouter"]
+
+        # With payment failover enabled
+        filtered = enforce_model_failover_rules(
+            "z-ai/glm-4.6:exacto", chain, allow_payment_failover=True
+        )
+        assert filtered == chain
+
+    def test_payment_failover_no_effect_on_unlocked_models(self):
+        """Test that allow_payment_failover has no effect on models without provider lock"""
+        chain = ["openrouter", "cerebras", "huggingface"]
+        # Non-locked models return full chain regardless of payment failover flag
+        filtered_without = enforce_model_failover_rules("deepseek-ai/deepseek-v3", chain)
+        filtered_with = enforce_model_failover_rules(
+            "deepseek-ai/deepseek-v3", chain, allow_payment_failover=True
+        )
+        assert filtered_without == chain
+        assert filtered_with == chain
+
 
 # ============================================================
 # TEST CLASS: Failover Eligibility

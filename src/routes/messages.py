@@ -76,6 +76,7 @@ from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
+    filter_by_circuit_breaker,
     map_provider_error,
     should_failover,
 )
@@ -725,6 +726,26 @@ async def anthropic_messages(
                     next_provider,
                 )
                 continue
+
+            # If this is a 402 (Payment Required) error and we've exhausted the chain,
+            # rebuild the chain allowing payment failover to try alternative providers
+            if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
+                extended_chain = build_provider_failover_chain(provider)
+                extended_chain = enforce_model_failover_rules(
+                    original_model, extended_chain, allow_payment_failover=True
+                )
+                extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                # Find providers we haven't tried yet
+                new_providers = [p for p in extended_chain if p not in provider_chain]
+                if new_providers:
+                    logger.warning(
+                        "Provider '%s' returned 402 (Payment Required). "
+                        "Extending failover chain with: %s",
+                        attempt_provider,
+                        new_providers,
+                    )
+                    provider_chain.extend(new_providers)
+                    continue
 
             raise http_exc
 

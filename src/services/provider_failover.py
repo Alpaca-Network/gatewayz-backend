@@ -79,7 +79,11 @@ def should_failover(http_exc: HTTPException) -> bool:
     return http_exc.status_code in FAILOVER_STATUS_CODES
 
 
-def enforce_model_failover_rules(model_id: str | None, provider_chain: list[str]) -> list[str]:
+def enforce_model_failover_rules(
+    model_id: str | None,
+    provider_chain: list[str],
+    allow_payment_failover: bool = False,
+) -> list[str]:
     """
     Restrict the provider chain when a model is provider-specific.
 
@@ -88,8 +92,28 @@ def enforce_model_failover_rules(model_id: str | None, provider_chain: list[str]
     along with special OpenRouter suffixes (e.g. openrouter/auto, z-ai/glm-4.6:exacto).
     These identifiers are not recognized by other providers, so attempting failover only
     creates noisy upstream errors.
+
+    Args:
+        model_id: The model identifier being requested
+        provider_chain: List of providers to attempt
+        allow_payment_failover: If True, allow failover even for provider-locked models
+            when the primary provider returned a 402 (Payment Required) error.
+            This ensures users can still be served via alternative providers when
+            a provider's credits are exhausted.
+
+    Returns:
+        Filtered provider chain based on model restrictions
     """
     if not model_id:
+        return provider_chain
+
+    # If payment failover is allowed (e.g., after a 402 error), don't restrict the chain
+    # This allows the system to try alternative providers when credits are exhausted
+    if allow_payment_failover:
+        logger.info(
+            "Payment failover enabled for model '%s'; allowing alternative providers",
+            model_id,
+        )
         return provider_chain
 
     normalized = model_id.lower()
