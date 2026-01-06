@@ -275,6 +275,10 @@ async def anthropic_messages(
             logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
             raise HTTPException(status_code=401, detail="Invalid API key")
 
+        # Get API key ID for tracking (if available)
+        api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
+        api_key_id = api_key_record.get("id") if api_key_record else None
+
         environment_tag = user.get("environment_tag", "live")
 
         trial = await _to_thread(validate_trial_access, api_key)
@@ -980,6 +984,7 @@ async def anthropic_messages(
             user_id=user["id"],
             provider_name=provider,
             model_id=None,
+            api_key_id=api_key_id,
         )
 
         # Prepare headers including rate limit information

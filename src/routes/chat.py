@@ -956,7 +956,7 @@ async def _process_stream_completion_background(
                     user_id=user["id"] if user else None,
                     provider_name=provider,
                     model_id=None,
-                    api_key_id=user.get("key_id") if user else None,
+                    api_key_id=api_key_id,
                 )
             except Exception as e:
                 logger.debug(f"Failed to save chat completion request: {e}")
@@ -1261,6 +1261,7 @@ async def chat_completions(
             if is_anonymous:
                 # Anonymous user - skip user lookup, trial validation, plan limits
                 user = None
+                api_key_id = None
                 trial = {"is_valid": True, "is_trial": False}
                 environment_tag = "live"
                 logger.info("Processing anonymous chat request (request_id=%s)", request_id)
@@ -1274,6 +1275,10 @@ async def chat_completions(
                 if not user:
                     logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
                     raise APIExceptions.invalid_api_key()
+
+                # Get API key ID for tracking (if available)
+                api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
+                api_key_id = api_key_record.get("id") if api_key_record else None
 
                 environment_tag = user.get("environment_tag", "live")
 
@@ -2110,7 +2115,7 @@ async def chat_completions(
             user_id=user["id"] if not is_anonymous else None,
             provider_name=provider,
             model_id=None,
-            api_key_id=user.get("key_id") if user and not is_anonymous else None,
+            api_key_id=api_key_id,
         )
 
         # Prepare headers including rate limit information
@@ -2185,6 +2190,10 @@ async def unified_responses(
         if not user:
             logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
             raise APIExceptions.invalid_api_key()
+
+        # Get API key ID for tracking (if available)
+        api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
+        api_key_id = api_key_record.get("id") if api_key_record else None
 
         environment_tag = user.get("environment_tag", "live")
 
@@ -3204,7 +3213,7 @@ async def unified_responses(
             user_id=user["id"],
             provider_name=provider,
             model_id=None,
-            api_key_id=user.get("key_id"),
+            api_key_id=api_key_id,
         )
 
         return response
