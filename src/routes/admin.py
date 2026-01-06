@@ -1295,6 +1295,135 @@ async def get_user_by_api_key(
         ) from e
 
 
+@router.get("/admin/api-keys/{api_key_id}", tags=["admin", "api-keys"])
+async def get_api_key_details_by_id(
+    api_key_id: int,
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get complete API key details by ID including user information (Admin only).
+
+    This endpoint returns comprehensive information about an API key:
+    - Full API key details (including the actual key string)
+    - User information (email, name, username)
+    - Key metadata (name, environment, permissions, limits)
+    - Usage statistics
+
+    **Parameters**:
+    - `api_key_id`: The numeric ID of the API key
+
+    **Response**:
+    - Complete API key details with nested user information
+    - 404 if API key ID doesn't exist
+
+    **Security**: Admin-only endpoint - handles sensitive data
+
+    **Example**:
+    ```
+    GET /admin/api-keys/123
+    ```
+
+    **Response format**:
+    ```json
+    {
+      "status": "success",
+      "api_key": {
+        "id": 123,
+        "api_key": "gw_live_abc123xyz...",
+        "key_name": "Production Key",
+        "environment_tag": "live",
+        "is_active": true,
+        "is_primary": false,
+        "scope_permissions": {"read": ["*"], "write": ["*"]},
+        "max_requests": 10000,
+        "requests_used": 523,
+        "ip_allowlist": [],
+        "domain_referrers": [],
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-05T12:00:00Z",
+        "last_used_at": "2025-01-06T08:30:00Z",
+        "expiration_date": null,
+        "user": {
+          "id": 456,
+          "email": "user@example.com",
+          "username": "john_doe",
+          "credits": 50.0,
+          "is_active": true,
+          "role": "user",
+          "subscription_status": "active",
+          "created_at": "2024-12-01T00:00:00Z"
+        }
+      },
+      "timestamp": "2026-01-06T10:00:00Z"
+    }
+    ```
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        logger.info(f"Admin {admin_user.get('id')} fetching API key details for ID: {api_key_id}")
+
+        # Fetch API key with user information in a single query
+        result = client.table("api_keys_new").select(
+            "*, users!inner(id, email, username, credits, is_active, role, subscription_status, created_at)"
+        ).eq("id", api_key_id).execute()
+
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"API key with ID {api_key_id} not found"
+            )
+
+        api_key_data = result.data[0]
+        user_data = api_key_data.pop("users")  # Extract nested user data
+
+        # Build comprehensive response
+        response_data = {
+            "id": api_key_data.get("id"),
+            "api_key": api_key_data.get("api_key"),  # Full API key string
+            "key_name": api_key_data.get("key_name"),
+            "environment_tag": api_key_data.get("environment_tag", "live"),
+            "is_active": api_key_data.get("is_active", True),
+            "is_primary": api_key_data.get("is_primary", False),
+            "scope_permissions": api_key_data.get("scope_permissions", {}),
+            "max_requests": api_key_data.get("max_requests"),
+            "requests_used": api_key_data.get("requests_used", 0),
+            "ip_allowlist": api_key_data.get("ip_allowlist", []),
+            "domain_referrers": api_key_data.get("domain_referrers", []),
+            "created_at": api_key_data.get("created_at"),
+            "updated_at": api_key_data.get("updated_at"),
+            "last_used_at": api_key_data.get("last_used_at"),
+            "expiration_date": api_key_data.get("expiration_date"),
+            "user": {
+                "id": user_data.get("id"),
+                "email": user_data.get("email"),
+                "username": user_data.get("username"),
+                "credits": user_data.get("credits"),
+                "is_active": user_data.get("is_active"),
+                "role": user_data.get("role"),
+                "subscription_status": user_data.get("subscription_status"),
+                "created_at": user_data.get("created_at"),
+            }
+        }
+
+        return {
+            "status": "success",
+            "api_key": response_data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching API key details for ID {api_key_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch API key details: {str(e)}"
+        ) from e
+
+
 @router.get("/admin/users/{user_id}", tags=["admin"])
 async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_admin)):
     """Get detailed information for a specific user (Admin only)"""
