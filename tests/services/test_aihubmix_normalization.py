@@ -141,3 +141,48 @@ class TestAiHubMixNormalizationWithPricing:
 
         assert normalized is not None
         assert normalized["context_length"] == 4096  # Default value
+
+    def test_normalize_model_with_model_id_field(self):
+        """Test normalizing a model with 'model_id' instead of 'id' field"""
+        # Some AiHubMix API responses use 'model_id' instead of 'id'
+        aihubmix_model = {
+            "model_id": "llama-3.2-11b-vision-preview",
+            "developer_id": 11,
+            "desc": "Vision model from Meta",
+            "pricing": {
+                "input": 0.2,
+                "output": 0.2,
+            },
+            "input_modalities": "text,image",
+        }
+
+        normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
+
+        # Verify model is normalized correctly with model_id field
+        assert normalized is not None
+        assert normalized["id"] == "llama-3.2-11b-vision-preview"
+        assert normalized["slug"] == "aihubmix/llama-3.2-11b-vision-preview"
+        assert normalized["provider_slug"] == "aihubmix"
+        # $0.2 per 1K = $200 per 1M tokens
+        assert normalized["pricing"]["prompt"] == "200.0"
+        assert normalized["pricing"]["completion"] == "200.0"
+        # Description from 'desc' field
+        assert normalized["description"] == "Vision model from Meta"
+        # Input modalities should include image
+        assert "image" in normalized["architecture"]["input_modalities"]
+
+    def test_normalize_model_with_desc_field(self):
+        """Test normalizing a model with 'desc' instead of 'description' field"""
+        aihubmix_model = {
+            "id": "test-model",
+            "desc": "Short description",
+            "pricing": {
+                "input": 1.0,
+                "output": 2.0,
+            },
+        }
+
+        normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
+
+        assert normalized is not None
+        assert normalized["description"] == "Short description"
