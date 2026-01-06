@@ -2,7 +2,7 @@
 Comprehensive tests for Helicone Client service
 """
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 class TestHeliconeClient:
