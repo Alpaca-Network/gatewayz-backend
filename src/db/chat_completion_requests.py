@@ -233,21 +233,28 @@ def get_chat_completion_stats(
     model_id: Optional[int] = None,
     user_id: Optional[str] = None,
     limit: int = 100,
-) -> list[dict[str, Any]]:
+    offset: int = 0,
+) -> dict[str, Any]:
     """
-    Get chat completion request statistics.
+    Get chat completion request statistics with pagination.
 
     Args:
         model_id: Optional model ID to filter by
         user_id: Optional user ID to filter by
-        limit: Maximum number of records to return
+        limit: Maximum number of records to return (default: 100)
+        offset: Number of records to skip for pagination (default: 0)
 
     Returns:
-        List of chat completion request records
+        Dictionary containing:
+        - requests: List of chat completion request records
+        - total_count: Total number of requests matching filters
+        - limit: Applied limit
+        - offset: Applied offset
     """
     try:
         client = get_supabase_client()
 
+        # Build query for data retrieval
         query = client.table("chat_completion_requests").select("*")
 
         if model_id is not None:
@@ -255,14 +262,36 @@ def get_chat_completion_stats(
         if user_id is not None:
             query = query.eq("user_id", user_id)
 
-        query = query.order("created_at", desc=True).limit(limit)
+        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
 
         result = query.execute()
-        return result.data or []
+
+        # Get total count with filters applied
+        count_query = client.table("chat_completion_requests").select("id", count="exact", head=True)
+
+        if model_id is not None:
+            count_query = count_query.eq("model_id", model_id)
+        if user_id is not None:
+            count_query = count_query.eq("user_id", user_id)
+
+        count_result = count_query.execute()
+        total_count = count_result.count if count_result.count is not None else len(result.data or [])
+
+        return {
+            "requests": result.data or [],
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
 
     except Exception as e:
         logger.error(f"Failed to get chat completion stats: {e}", exc_info=True)
-        return []
+        return {
+            "requests": [],
+            "total_count": 0,
+            "limit": limit,
+            "offset": offset,
+        }
 
 
 def get_chat_completion_requests_by_api_key(

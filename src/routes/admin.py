@@ -1811,10 +1811,22 @@ async def get_chat_completion_requests_admin(
         query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
         result = query.execute()
 
-        # Get total count
-        count_query = client.table("chat_completion_requests").select("id", count="exact", head=True)
+        # Get total count with all filters applied
+        count_query = client.table("chat_completion_requests").select(
+            "id, models!inner(id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))",
+            count="exact",
+            head=True
+        )
         if model_id is not None:
             count_query = count_query.eq("model_id", model_id)
+        if provider_id is not None:
+            count_query = count_query.eq("models.provider_id", provider_id)
+        if model_name is not None:
+            count_query = count_query.ilike("models.model_name", f"%{model_name}%")
+        if start_date is not None:
+            count_query = count_query.gte("created_at", start_date)
+        if end_date is not None:
+            count_query = count_query.lte("created_at", end_date)
         count_result = count_query.execute()
         total_count = count_result.count if count_result.count is not None else len(result.data)
 
