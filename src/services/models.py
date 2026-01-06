@@ -3344,9 +3344,6 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         input_price_per_1k = pricing_data.get("input", 0)
         output_price_per_1k = pricing_data.get("output", 0)
 
-        # Also check for cache_read pricing
-        cache_read_per_1k = pricing_data.get("cache_read", 0)
-
         # Convert from per 1K to per 1M tokens (multiply by 1000)
         # Use round() to avoid floating point precision issues (e.g., 0.0003 * 1000 = 0.30000000000000004)
         input_price_per_1m = round(float(input_price_per_1k) * 1000, 10) if input_price_per_1k else 0
