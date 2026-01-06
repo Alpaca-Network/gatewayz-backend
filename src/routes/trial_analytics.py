@@ -123,14 +123,9 @@ async def get_trial_users(
         count_result = query.execute()
         total_count = count_result.count if count_result.count is not None else 0
 
-        # Sort mapping
-        sort_field_map = {
-            "requests": "api_keys_new.trial_used_requests",
-            "tokens": "api_keys_new.trial_used_tokens",
-            "credits": "api_keys_new.trial_used_credits",
-            "created_at": "api_keys_new.created_at",
-        }
-        sort_field = sort_field_map.get(sort_by, "api_keys_new.created_at")
+        # Note: PostgREST doesn't support sorting by nested fields in joins
+        # So we can only sort by users table fields (created_at, email)
+        # For sorting by usage metrics, we'll need to do client-side sorting
 
         # Execute data query with pagination
         data_query = (
@@ -158,8 +153,9 @@ async def get_trial_users(
         if domain_filter:
             data_query = data_query.ilike("email", f"%@{domain_filter}%")
 
-        # Apply sorting and pagination
-        data_query = data_query.order(sort_field, desc=(sort_order == "desc")).range(offset, offset + limit - 1)
+        # Apply sorting by users table field and pagination
+        # Note: Only sorting by created_at is supported due to PostgREST join limitations
+        data_query = data_query.order("created_at", desc=(sort_order == "desc")).range(offset, offset + limit - 1)
 
         result = data_query.execute()
 
@@ -252,6 +248,15 @@ async def get_trial_users(
                         last_request_at=last_used,
                     )
                 )
+
+        # Apply client-side sorting for usage metrics (since PostgREST can't sort by nested fields)
+        if sort_by == "requests":
+            users.sort(key=lambda u: u.trial_used_requests, reverse=(sort_order == "desc"))
+        elif sort_by == "tokens":
+            users.sort(key=lambda u: u.trial_used_tokens, reverse=(sort_order == "desc"))
+        elif sort_by == "credits":
+            users.sort(key=lambda u: u.trial_used_credits, reverse=(sort_order == "desc"))
+        # created_at is already sorted by the database query
 
         return TrialUsersResponse(
             success=True,
