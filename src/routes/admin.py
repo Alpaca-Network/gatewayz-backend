@@ -1624,46 +1624,102 @@ async def get_chat_completion_requests_by_api_key_admin(
     admin_user: dict = Depends(require_admin),
 ):
     """
-    Get all chat completion requests for a specific API key (Admin only).
-    
+    Get all chat completion requests for a specific API key with pagination (Admin only).
+
+    **PAGINATED ENDPOINT** - Fetch chat completion requests 100 at a time.
+
     This endpoint allows administrators to:
     - View all chat completion requests made with a specific API key
     - See detailed usage statistics (tokens, processing time, success rate)
     - Monitor API key activity and usage patterns
     - Track which models were used and when
-    
-    Query Parameters:
-    - api_key: Full API key string (exact match required)
-    - limit: Maximum number of requests to return (1-1000, default: 100)
-    - offset: Number of requests to skip for pagination (default: 0)
-    
-    Returns:
-    - requests: List of chat completion requests with model and user details
-    - total_count: Total number of requests for this API key
-    - summary: Aggregated statistics
-    - api_key_info: Information about the API key (if found)
+    - Paginate through results 100 at a time (or custom limit)
+
+    **Query Parameters:**
+    - `api_key`: Full API key string (exact match required) - e.g., "gw_live_abc123..."
+    - `limit`: Maximum number of requests to return (1-1000, default: 100)
+    - `offset`: Number of requests to skip for pagination (default: 0)
+
+    **Pagination Example:**
+    ```
+    # First 100 requests
+    GET /admin/monitoring/chat-requests/by-api-key?api_key=gw_live_xxx&limit=100&offset=0
+
+    # Next 100 requests (101-200)
+    GET /admin/monitoring/chat-requests/by-api-key?api_key=gw_live_xxx&limit=100&offset=100
+
+    # Next 100 requests (201-300)
+    GET /admin/monitoring/chat-requests/by-api-key?api_key=gw_live_xxx&limit=100&offset=200
+    ```
+
+    **Returns:**
+    - `requests`: List of chat completion requests with model and user details
+    - `total_count`: Total number of requests for this API key
+    - `summary`: Aggregated statistics (total tokens, avg time, success rate)
+    - `api_key_info`: Information about the API key (id, name, user_id, etc.)
+    - `pagination`: Pagination metadata (limit, offset, has_more, current_page, total_pages)
+
+    **Response Format:**
+    ```json
+    {
+      "requests": [...],
+      "total_count": 523,
+      "summary": {
+        "total_requests": 523,
+        "total_input_tokens": 125000,
+        "total_output_tokens": 85000,
+        "total_tokens": 210000,
+        "avg_processing_time_ms": 1250.5,
+        "completed_requests": 520,
+        "failed_requests": 3
+      },
+      "api_key_info": {...},
+      "limit": 100,
+      "offset": 0,
+      "pagination": {
+        "limit": 100,
+        "offset": 0,
+        "has_more": true,
+        "current_page": 1,
+        "total_pages": 6
+      }
+    }
+    ```
     """
     try:
         from src.db.api_keys import get_api_key_by_key
-        
+
+        # Look up API key by the actual key string
         api_key_data = get_api_key_by_key(api_key)
-        
+
         if not api_key_data:
             raise HTTPException(
                 status_code=404,
-                detail="API key not found. Please verify the key is correct."
+                detail=f"API key not found. Please verify the key is correct. Key preview: {api_key[:20]}..."
             )
-        
+
         api_key_id = api_key_data.get("id")
         if not api_key_id:
             raise HTTPException(status_code=500, detail="API key found but missing ID field")
-        
+
+        # Fetch paginated chat completion requests
         result = get_chat_completion_requests_by_api_key(
             api_key_id=api_key_id,
             limit=limit,
             offset=offset
         )
-        
+
+        # Extract data from result
+        requests = result.get("requests", [])
+        total_count = result.get("total_count", 0)
+        summary = result.get("summary", {})
+
+        # Calculate pagination metadata
+        has_more = (offset + limit) < total_count
+        current_page = (offset // limit) + 1
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+
+        # Build API key info
         api_key_info = {
             "id": api_key_data.get("id"),
             "key_name": api_key_data.get("key_name"),
@@ -1672,9 +1728,27 @@ async def get_chat_completion_requests_by_api_key_admin(
             "is_active": api_key_data.get("is_active", True),
             "created_at": api_key_data.get("created_at"),
         }
-        
-        return {**result, "api_key_info": api_key_info}
-        
+
+        # Return enhanced response with clear pagination info
+        return {
+            "requests": requests,
+            "total_count": total_count,
+            "summary": summary,
+            "api_key_info": api_key_info,
+            "limit": limit,
+            "offset": offset,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+                "current_page": current_page,
+                "total_pages": total_pages,
+                "next_offset": offset + limit if has_more else None,
+                "prev_offset": max(0, offset - limit) if offset > 0 else None,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     except HTTPException:
         raise
     except Exception as e:
