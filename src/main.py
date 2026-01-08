@@ -415,6 +415,7 @@ def create_app() -> FastAPI:
         ("rate_limits", "Rate Limiting"),
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
+        ("share", "Chat Share Links"),  # Shareable chat links
         ("ranking", "Model Ranking"),
         ("activity", "Activity Tracking"),
         ("coupons", "Coupon Management"),
