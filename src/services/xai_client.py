@@ -7,6 +7,75 @@ from src.services.connection_pool import get_xai_pooled_client
 # Initialize logging
 logger = logging.getLogger(__name__)
 
+# Grok models that support reasoning/thinking capabilities
+# These models can use the reasoning parameter to enable/disable extended thinking
+XAI_REASONING_MODELS = {
+    "grok-3-mini",
+    "grok-3-mini-beta",
+    "grok-4",
+    "grok-4-fast",
+    "grok-4.1-fast",
+    "grok-4-1-fast-reasoning",
+    "grok-4.1-fast-reasoning",
+}
+
+# Models that explicitly do NOT use reasoning (faster responses)
+XAI_NON_REASONING_MODELS = {
+    "grok-4-1-fast-non-reasoning",
+    "grok-4.1-fast-non-reasoning",
+    "grok-2",
+    "grok-2-1212",
+    "grok-beta",
+    "grok-vision-beta",
+}
+
+
+def is_xai_reasoning_model(model: str) -> bool:
+    """Check if a model supports reasoning capabilities.
+
+    Args:
+        model: Model name/ID
+
+    Returns:
+        True if the model supports reasoning, False otherwise
+    """
+    model_lower = model.lower()
+    # Check explicit reasoning models
+    for reasoning_model in XAI_REASONING_MODELS:
+        if reasoning_model in model_lower:
+            return True
+    # Check if explicitly non-reasoning
+    for non_reasoning_model in XAI_NON_REASONING_MODELS:
+        if non_reasoning_model in model_lower:
+            return False
+    # Default: newer grok-4+ models likely support reasoning
+    if "grok-4" in model_lower or "grok-3-mini" in model_lower:
+        return True
+    return False
+
+
+def get_xai_reasoning_params(model: str, enable_reasoning: bool | None = None) -> dict:
+    """Get reasoning parameters for xAI models.
+
+    Args:
+        model: Model name/ID
+        enable_reasoning: Override to enable/disable reasoning.
+                         If None, uses model default.
+
+    Returns:
+        Dict with reasoning parameters to pass to the API
+    """
+    if not is_xai_reasoning_model(model):
+        return {}
+
+    # If explicitly set, use that value
+    if enable_reasoning is not None:
+        return {"reasoning": {"enabled": enable_reasoning}}
+
+    # Default: enable reasoning for reasoning-capable models
+    # This ensures reasoning tokens are streamed to the client
+    return {"reasoning": {"enabled": True}}
+
 
 def get_xai_client():
     """Get xAI client with connection pooling for better performance
@@ -40,9 +109,20 @@ def make_xai_request_openai(messages, model, **kwargs):
         messages: List of message objects
         model: Model name (e.g., "grok-4", "grok-3", "grok-2", "grok-beta")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
+            - enable_reasoning: Optional bool to explicitly enable/disable reasoning
     """
     try:
         client = get_xai_client()
+
+        # Extract and handle reasoning parameter
+        enable_reasoning = kwargs.pop("enable_reasoning", None)
+        reasoning_params = get_xai_reasoning_params(model, enable_reasoning)
+
+        # Merge reasoning params with kwargs (kwargs takes precedence if reasoning already set)
+        if reasoning_params and "reasoning" not in kwargs:
+            kwargs.update(reasoning_params)
+            logger.debug(f"xAI request for {model} with reasoning params: {reasoning_params}")
+
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
         return response
     except Exception as e:
@@ -57,9 +137,20 @@ def make_xai_request_openai_stream(messages, model, **kwargs):
         messages: List of message objects
         model: Model name (e.g., "grok-4", "grok-3", "grok-2", "grok-beta")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
+            - enable_reasoning: Optional bool to explicitly enable/disable reasoning
     """
     try:
         client = get_xai_client()
+
+        # Extract and handle reasoning parameter
+        enable_reasoning = kwargs.pop("enable_reasoning", None)
+        reasoning_params = get_xai_reasoning_params(model, enable_reasoning)
+
+        # Merge reasoning params with kwargs (kwargs takes precedence if reasoning already set)
+        if reasoning_params and "reasoning" not in kwargs:
+            kwargs.update(reasoning_params)
+            logger.debug(f"xAI streaming request for {model} with reasoning params: {reasoning_params}")
+
         stream = client.chat.completions.create(
             model=model, messages=messages, stream=True, **kwargs
         )
