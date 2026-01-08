@@ -292,7 +292,7 @@ if __name__ == "__main__":
                 stream=True,
             )
             chunks = 0
-            for chunk in stream:
+            for _ in stream:
                 chunks += 1
             print(f"[OK] Streaming: {chunks} chunks received")
 
