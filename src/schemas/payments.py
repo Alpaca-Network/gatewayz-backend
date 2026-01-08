@@ -159,6 +159,10 @@ class CreateCheckoutSessionRequest(BaseModel):
     """Request to create a Stripe checkout session"""
 
     amount: int = Field(..., description="Amount in cents (e.g., 2999 for $29.99)", gt=0)
+    credit_value: float | None = Field(
+        None,
+        description="Credit value in dollars to add (for discounted packages). If not provided, amount/100 is used.",
+    )
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
     success_url: str | None = Field(None, description="URL to redirect on success")
     cancel_url: str | None = Field(None, description="URL to redirect on cancel")
