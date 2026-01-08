@@ -406,8 +406,23 @@ class StripeService:
             logger.info(f"Final cancel_url being sent to Stripe: {cancel_url}")
             logger.info("=== END URL DEBUG ===")
 
-            # Calculate credits (in cents, matching amount)
-            credits_cents = request.amount
+            # Calculate credits to add:
+            # - If credit_value is provided (for discounted packages), use that
+            # - Otherwise, fall back to amount/100 (converting cents to dollars)
+            # credit_value is in dollars, credits_cents is used for metadata (in cents)
+            if request.credit_value is not None:
+                # credit_value is in dollars, convert to cents for metadata
+                # Use round() to avoid floating-point precision errors
+                credits_cents = int(round(request.credit_value * 100))
+                credits_display = f"${request.credit_value:.0f}"
+                logger.info(
+                    f"Using discounted credit_value: ${request.credit_value} "
+                    f"(payment amount: ${request.amount / 100})"
+                )
+            else:
+                # Fall back to payment amount
+                credits_cents = request.amount
+                credits_display = f"${request.amount / 100:.0f}"
 
             checkout_metadata = {
                 "user_id": str(user_id),
@@ -427,7 +442,7 @@ class StripeService:
                             "unit_amount": request.amount,
                             "product_data": {
                                 "name": "Gatewayz Credits",
-                                "description": f"{credits_cents:,} credits for your account",
+                                "description": f"{credits_display} credits for your account",
                             },
                         },
                         "quantity": 1,
