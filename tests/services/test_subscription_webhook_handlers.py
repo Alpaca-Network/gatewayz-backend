@@ -687,3 +687,132 @@ class TestCheckoutCompletedTrialStatusClearing:
         users = fake_supabase.table("users").select("*").eq("id", 42).execute().data
         assert len(users) == 1
         assert users[0]["subscription_status"] == "active"
+
+
+class TestCacheInvalidationOnSubscriptionUpdates:
+    """Test that cache is invalidated when subscription status changes
+
+    These tests verify the fix for the bug where user's tier/credits page and header
+    wouldn't update after payment because the user cache wasn't being invalidated.
+    """
+
+    def test_subscription_created_invalidates_cache(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.created webhook invalidates user cache"""
+        fake_supabase.clear_all()
+
+        # Setup: create plan and user
+        fake_supabase.table("plans").insert({
+            "id": 1,
+            "name": "Pro",
+            "is_active": True
+        }).execute()
+
+        fake_supabase.table("users").insert({
+            "id": 42,
+            "email": "user@example.com",
+            "subscription_status": "trial"
+        }).execute()
+
+        # Create mock subscription object
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_test_cache_invalidation"
+        mock_subscription.metadata = {
+            "user_id": "42",
+            "tier": "pro",
+            "product_id": "prod_test"
+        }
+        mock_subscription.customer = "cust_test_123"
+        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+
+        # Mock invalidate_user_cache_by_id
+        with patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
+            stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
+
+            # Verify cache was invalidated for the correct user
+            mock_invalidate.assert_called_once_with(42)
+
+    def test_subscription_updated_invalidates_cache(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.updated webhook invalidates user cache"""
+        fake_supabase.clear_all()
+
+        # Setup: create plan and user
+        fake_supabase.table("plans").insert({
+            "id": 2,
+            "name": "Max",
+            "is_active": True
+        }).execute()
+
+        fake_supabase.table("users").insert({
+            "id": 99,
+            "email": "user@example.com",
+            "subscription_status": "active",
+            "tier": "pro"
+        }).execute()
+
+        # Create mock subscription
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_test_updated_cache"
+        mock_subscription.status = "active"
+        mock_subscription.metadata = {"user_id": "99", "tier": "max"}
+        mock_subscription.customer = "cust_test"
+        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+
+        # Mock invalidate_user_cache_by_id
+        with patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
+            stripe_service_with_mock_db._handle_subscription_updated(mock_subscription)
+
+            # Verify cache was invalidated for the correct user
+            mock_invalidate.assert_called_once_with(99)
+
+    def test_subscription_deleted_invalidates_cache(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.deleted webhook invalidates user cache"""
+        fake_supabase.clear_all()
+
+        # Setup: create user with active subscription
+        fake_supabase.table("users").insert({
+            "id": 77,
+            "email": "user@example.com",
+            "subscription_status": "active",
+            "tier": "pro"
+        }).execute()
+
+        # Create mock subscription for deletion
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_test_deleted"
+        mock_subscription.metadata = {"user_id": "77"}
+
+        # Mock invalidate_user_cache_by_id
+        with patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
+            stripe_service_with_mock_db._handle_subscription_deleted(mock_subscription)
+
+            # Verify cache was invalidated for the correct user
+            mock_invalidate.assert_called_once_with(77)
+
+    def test_invoice_payment_failed_invalidates_cache(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that invoice.payment_failed webhook invalidates user cache"""
+        fake_supabase.clear_all()
+
+        # Setup: create user with active subscription
+        fake_supabase.table("users").insert({
+            "id": 88,
+            "email": "user@example.com",
+            "subscription_status": "active",
+            "tier": "pro"
+        }).execute()
+
+        # Create mock invoice with subscription
+        mock_invoice = MagicMock()
+        mock_invoice.id = "inv_test_failed"
+        mock_invoice.subscription = "sub_test_88"
+
+        # Create mock subscription that will be retrieved
+        mock_subscription = MagicMock()
+        mock_subscription.metadata = {"user_id": "88"}
+
+        # Mock stripe.Subscription.retrieve and invalidate_user_cache_by_id
+        with patch('stripe.Subscription.retrieve', return_value=mock_subscription), \
+             patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
+            stripe_service_with_mock_db._handle_invoice_payment_failed(mock_invoice)
+
+            # Verify cache was invalidated for the correct user
+            mock_invalidate.assert_called_once_with(88)
