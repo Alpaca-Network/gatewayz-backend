@@ -160,3 +160,41 @@ class SaveConversionMetricsResponse(BaseModel):
     """Response for POST /admin/trial/save-conversion-metrics"""
     success: bool = True
     message: str = "Conversion metrics saved successfully"
+
+
+# ===========================
+# Cohort Analysis Schemas
+# ===========================
+
+class CohortData(BaseModel):
+    """Data for a single cohort period"""
+    cohort_label: str
+    cohort_start_date: str
+    cohort_end_date: str
+    total_trials: int
+    converted_trials: int
+    conversion_rate: float
+    avg_days_to_convert: float
+    avg_requests_at_signup: float
+    avg_tokens_at_signup: float
+
+
+class BestWorstCohort(BaseModel):
+    """Best or worst performing cohort"""
+    label: str
+    conversion_rate: float
+
+
+class CohortSummary(BaseModel):
+    """Summary statistics across all cohorts"""
+    total_cohorts: int
+    overall_conversion_rate: float
+    best_cohort: BestWorstCohort
+    worst_cohort: BestWorstCohort
+
+
+class CohortAnalysisResponse(BaseModel):
+    """Response for GET /admin/trial/cohort-analysis"""
+    success: bool = True
+    cohorts: list[CohortData]
+    summary: CohortSummary

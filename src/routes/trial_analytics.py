@@ -1,6 +1,6 @@
 """Trial Analytics Routes - Admin endpoints for monitoring trial usage and conversions"""
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Literal
 
@@ -17,6 +17,10 @@ from src.schemas.trial_analytics import (
     IPAnalysis,
     SaveConversionMetricsRequest,
     SaveConversionMetricsResponse,
+    CohortAnalysisResponse,
+    CohortData,
+    CohortSummary,
+    BestWorstCohort,
 )
 from src.security.deps import require_admin
 from src.config.supabase_config import get_supabase_client
@@ -582,3 +586,164 @@ async def save_conversion_metrics(
     except Exception as e:
         logger.error(f"Error saving conversion metrics: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save conversion metrics: {str(e)}") from e
+
+
+@router.get("/admin/trial/cohort-analysis", response_model=CohortAnalysisResponse, tags=["admin", "trial-analytics"])
+async def get_cohort_analysis(
+    period: Literal["week", "month"] = Query("week", description="Cohort period: week or month"),
+    lookback: int = Query(12, ge=1, le=52, description="Number of periods to look back"),
+    admin_user: dict = Depends(require_admin),
+):
+    """
+    Provide week-over-week or month-over-month cohort conversion analysis
+
+    **Purpose:** Track conversion rates and patterns across different signup cohorts
+    """
+    try:
+        client = get_supabase_client()
+        current_time = datetime.now(timezone.utc)
+
+        # Calculate cohort periods
+        cohorts = []
+        all_trials_count = 0
+        all_converted_count = 0
+
+        # Determine period length
+        if period == "week":
+            period_days = 7
+            period_label = "Week"
+        else:  # month
+            period_days = 30
+            period_label = "Month"
+
+        # Fetch all trial API keys with their creation dates and conversion data
+        all_trials_result = (
+            client.table("api_keys_new")
+            .select(
+                "id, created_at, is_trial, trial_converted, trial_start_date, "
+                "trial_used_requests, trial_used_tokens"
+            )
+            .eq("is_trial", True)
+            .execute()
+        )
+
+        all_trials_data = all_trials_result.data if all_trials_result.data else []
+
+        # Fetch conversion metrics for days_to_convert calculation
+        conversion_metrics_result = (
+            client.table("trial_conversion_metrics")
+            .select("api_key_id, conversion_date, trial_days_used")
+            .execute()
+        )
+
+        conversion_metrics_map = {}
+        for metric in conversion_metrics_result.data if conversion_metrics_result.data else []:
+            conversion_metrics_map[metric["api_key_id"]] = metric
+
+        # Group trials by cohort
+        for cohort_index in range(lookback):
+            # Calculate cohort period (going backwards from current time)
+            cohort_end = current_time - timedelta(days=cohort_index * period_days)
+            cohort_start = cohort_end - timedelta(days=period_days)
+
+            # Format dates
+            cohort_start_str = cohort_start.strftime("%Y-%m-%d")
+            cohort_end_str = cohort_end.strftime("%Y-%m-%d")
+
+            # Create label
+            if period == "week":
+                cohort_label = f"{period_label} {lookback - cohort_index} ({cohort_start.strftime('%b %d')}-{cohort_end.strftime('%b %d')})"
+            else:
+                cohort_label = f"{period_label} {lookback - cohort_index} ({cohort_start.strftime('%b %Y')})"
+
+            # Filter trials in this cohort
+            cohort_trials = []
+            for trial in all_trials_data:
+                created_at_str = trial.get("created_at")
+                if not created_at_str:
+                    continue
+
+                trial_created = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+
+                # Check if trial was created in this cohort period
+                if cohort_start <= trial_created < cohort_end:
+                    cohort_trials.append(trial)
+
+            # Calculate cohort metrics
+            total_trials_in_cohort = len(cohort_trials)
+            converted_trials_in_cohort = sum(1 for t in cohort_trials if t.get("trial_converted", False))
+            conversion_rate = (converted_trials_in_cohort / total_trials_in_cohort * 100) if total_trials_in_cohort > 0 else 0
+
+            # Calculate average days to convert for this cohort
+            days_to_convert_list = []
+            for trial in cohort_trials:
+                if trial.get("trial_converted") and trial["id"] in conversion_metrics_map:
+                    days_to_convert_list.append(conversion_metrics_map[trial["id"]].get("trial_days_used", 0))
+
+            avg_days_to_convert = sum(days_to_convert_list) / len(days_to_convert_list) if days_to_convert_list else 0
+
+            # Calculate average usage at signup
+            avg_requests = sum(t.get("trial_used_requests", 0) for t in cohort_trials) / total_trials_in_cohort if total_trials_in_cohort > 0 else 0
+            avg_tokens = sum(t.get("trial_used_tokens", 0) for t in cohort_trials) / total_trials_in_cohort if total_trials_in_cohort > 0 else 0
+
+            # Track totals for summary
+            all_trials_count += total_trials_in_cohort
+            all_converted_count += converted_trials_in_cohort
+
+            cohorts.append(
+                CohortData(
+                    cohort_label=cohort_label,
+                    cohort_start_date=cohort_start_str,
+                    cohort_end_date=cohort_end_str,
+                    total_trials=total_trials_in_cohort,
+                    converted_trials=converted_trials_in_cohort,
+                    conversion_rate=round(conversion_rate, 2),
+                    avg_days_to_convert=round(avg_days_to_convert, 1),
+                    avg_requests_at_signup=round(avg_requests, 1),
+                    avg_tokens_at_signup=round(avg_tokens, 1),
+                )
+            )
+
+        # Reverse to show oldest first
+        cohorts.reverse()
+
+        # Calculate summary statistics
+        overall_conversion_rate = (all_converted_count / all_trials_count * 100) if all_trials_count > 0 else 0
+
+        # Find best and worst cohorts (with at least 5 trials to avoid outliers)
+        cohorts_with_trials = [c for c in cohorts if c.total_trials >= 5]
+
+        if cohorts_with_trials:
+            best_cohort = max(cohorts_with_trials, key=lambda c: c.conversion_rate)
+            worst_cohort = min(cohorts_with_trials, key=lambda c: c.conversion_rate)
+        else:
+            # Fallback if no cohorts have 5+ trials
+            best_cohort = cohorts[0] if cohorts else CohortData(
+                cohort_label="N/A", cohort_start_date="", cohort_end_date="",
+                total_trials=0, converted_trials=0, conversion_rate=0,
+                avg_days_to_convert=0, avg_requests_at_signup=0, avg_tokens_at_signup=0
+            )
+            worst_cohort = best_cohort
+
+        summary = CohortSummary(
+            total_cohorts=len(cohorts),
+            overall_conversion_rate=round(overall_conversion_rate, 2),
+            best_cohort=BestWorstCohort(
+                label=best_cohort.cohort_label,
+                conversion_rate=best_cohort.conversion_rate,
+            ),
+            worst_cohort=BestWorstCohort(
+                label=worst_cohort.cohort_label,
+                conversion_rate=worst_cohort.conversion_rate,
+            ),
+        )
+
+        return CohortAnalysisResponse(
+            success=True,
+            cohorts=cohorts,
+            summary=summary,
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting cohort analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get cohort analysis: {str(e)}") from e
