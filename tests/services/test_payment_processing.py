@@ -233,14 +233,17 @@ class TestCheckoutSession:
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
-        # User pays $75 but gets $100 worth of credits (25% off)
+        # User pays $75 but gets $100 worth of credits (33% bonus)
         request = CreateCheckoutSessionRequest(
             amount=7500,  # $75.00 in cents
             credit_value=100.0,  # $100 worth of credits
             currency=StripeCurrency.USD,
         )
 
+        # Execute and verify response
         response = stripe_service.create_checkout_session(user_id=1, request=request)
+        assert response.session_id == 'cs_test_large_discount'
+        assert response.amount == 7500
 
         call_kwargs = mock_stripe_create.call_args[1]
         assert call_kwargs['line_items'][0]['price_data']['unit_amount'] == 7500

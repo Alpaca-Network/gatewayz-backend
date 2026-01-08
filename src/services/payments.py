@@ -412,7 +412,8 @@ class StripeService:
             # credit_value is in dollars, credits_cents is used for metadata (in cents)
             if request.credit_value is not None:
                 # credit_value is in dollars, convert to cents for metadata
-                credits_cents = int(request.credit_value * 100)
+                # Use round() to avoid floating-point precision errors
+                credits_cents = int(round(request.credit_value * 100))
                 credits_display = f"${request.credit_value:.0f}"
                 logger.info(
                     f"Using discounted credit_value: ${request.credit_value} "
