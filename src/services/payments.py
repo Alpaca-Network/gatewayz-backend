@@ -914,6 +914,14 @@ class StripeService:
                 # Don't fail the payment if referral bonus fails
                 logger.error(f"Error processing referral bonus: {referral_error}", exc_info=True)
 
+            # CRITICAL: Invalidate user cache AFTER all user data updates
+            # add_credits_to_user already invalidates cache, but subsequent updates
+            # (subscription_status, trial status) happen after that, so we need to
+            # invalidate again to ensure the cache reflects all changes
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+            logger.info(f"User {user_id} cache invalidated after checkout completion")
+
         except Exception as e:
             logger.error(f"Error handling checkout completed: {e}")
             raise
@@ -1205,8 +1213,13 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
+            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            # This ensures the credits page and header show updated tier immediately
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+
             logger.info(
-                f"User {user_id} subscription activated: tier={tier}, subscription_id={subscription.id}, trial status cleared"
+                f"User {user_id} subscription activated: tier={tier}, subscription_id={subscription.id}, trial status cleared, cache invalidated"
             )
 
         except Exception as e:
@@ -1295,7 +1308,12 @@ class StripeService:
                 ).eq("user_id", user_id).execute()
                 logger.info(f"User {user_id} trial status cleared on subscription update to active")
 
-            logger.info(f"User {user_id} subscription updated: status={status}, tier={tier}")
+            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            # This ensures the credits page and header show updated tier immediately
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+
+            logger.info(f"User {user_id} subscription updated: status={status}, tier={tier}, cache invalidated")
 
         except Exception as e:
             logger.error(f"Error handling subscription updated: {e}", exc_info=True)
@@ -1322,7 +1340,11 @@ class StripeService:
                 }
             ).eq("id", user_id).execute()
 
-            logger.info(f"User {user_id} subscription canceled, downgraded to basic tier")
+            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+
+            logger.info(f"User {user_id} subscription canceled, downgraded to basic tier, cache invalidated")
 
         except Exception as e:
             logger.error(f"Error handling subscription deleted: {e}", exc_info=True)
@@ -1404,8 +1426,12 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
+            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+
             logger.info(
-                f"User {user_id} subscription marked as past_due and downgraded to basic tier due to failed payment"
+                f"User {user_id} subscription marked as past_due and downgraded to basic tier due to failed payment, cache invalidated"
             )
 
         except Exception as e:
