@@ -914,12 +914,15 @@ class StripeService:
                 # Don't fail the payment if referral bonus fails
                 logger.error(f"Error processing referral bonus: {referral_error}", exc_info=True)
 
-            # CRITICAL: Invalidate user cache AFTER all user data updates
-            # add_credits_to_user already invalidates cache, but subsequent updates
+            # CRITICAL: Invalidate ALL user caches AFTER all user data updates
+            # add_credits_to_user already invalidates in-memory cache, but subsequent updates
             # (subscription_status, trial status) happen after that, so we need to
             # invalidate again to ensure the cache reflects all changes
+            # Must invalidate both in-memory cache and Redis cache
             from src.db.users import invalidate_user_cache_by_id
+            from src.services.auth_cache import invalidate_user_by_id as invalidate_redis_cache
             invalidate_user_cache_by_id(user_id)
+            invalidate_redis_cache(user_id)
             logger.info(f"User {user_id} cache invalidated after checkout completion")
 
         except Exception as e:
@@ -1213,10 +1216,13 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
-            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            # CRITICAL: Invalidate ALL user caches so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
+            # Must invalidate both in-memory cache and Redis cache
             from src.db.users import invalidate_user_cache_by_id
+            from src.services.auth_cache import invalidate_user_by_id as invalidate_redis_cache
             invalidate_user_cache_by_id(user_id)
+            invalidate_redis_cache(user_id)
 
             logger.info(
                 f"User {user_id} subscription activated: tier={tier}, subscription_id={subscription.id}, trial status cleared, cache invalidated"
@@ -1308,10 +1314,13 @@ class StripeService:
                 ).eq("user_id", user_id).execute()
                 logger.info(f"User {user_id} trial status cleared on subscription update to active")
 
-            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            # CRITICAL: Invalidate ALL user caches so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
+            # Must invalidate both in-memory cache and Redis cache
             from src.db.users import invalidate_user_cache_by_id
+            from src.services.auth_cache import invalidate_user_by_id as invalidate_redis_cache
             invalidate_user_cache_by_id(user_id)
+            invalidate_redis_cache(user_id)
 
             logger.info(f"User {user_id} subscription updated: status={status}, tier={tier}, cache invalidated")
 
@@ -1340,9 +1349,12 @@ class StripeService:
                 }
             ).eq("id", user_id).execute()
 
-            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            # CRITICAL: Invalidate ALL user caches so profile API returns fresh data
+            # Must invalidate both in-memory cache and Redis cache
             from src.db.users import invalidate_user_cache_by_id
+            from src.services.auth_cache import invalidate_user_by_id as invalidate_redis_cache
             invalidate_user_cache_by_id(user_id)
+            invalidate_redis_cache(user_id)
 
             logger.info(f"User {user_id} subscription canceled, downgraded to basic tier, cache invalidated")
 
@@ -1426,9 +1438,12 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
-            # CRITICAL: Invalidate user cache so profile API returns fresh data
+            # CRITICAL: Invalidate ALL user caches so profile API returns fresh data
+            # Must invalidate both in-memory cache and Redis cache
             from src.db.users import invalidate_user_cache_by_id
+            from src.services.auth_cache import invalidate_user_by_id as invalidate_redis_cache
             invalidate_user_cache_by_id(user_id)
+            invalidate_redis_cache(user_id)
 
             logger.info(
                 f"User {user_id} subscription marked as past_due and downgraded to basic tier due to failed payment, cache invalidated"
