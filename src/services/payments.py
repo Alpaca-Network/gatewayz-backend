@@ -914,6 +914,14 @@ class StripeService:
                 # Don't fail the payment if referral bonus fails
                 logger.error(f"Error processing referral bonus: {referral_error}", exc_info=True)
 
+            # CRITICAL: Invalidate user cache AFTER all user data updates
+            # add_credits_to_user already invalidates cache, but subsequent updates
+            # (subscription_status, trial status) happen after that, so we need to
+            # invalidate again to ensure the cache reflects all changes
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+            logger.info(f"User {user_id} cache invalidated after checkout completion")
+
         except Exception as e:
             logger.error(f"Error handling checkout completed: {e}")
             raise

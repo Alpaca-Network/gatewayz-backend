@@ -816,3 +816,53 @@ class TestCacheInvalidationOnSubscriptionUpdates:
 
             # Verify cache was invalidated for the correct user
             mock_invalidate.assert_called_once_with(88)
+
+    def test_checkout_completed_invalidates_cache_after_all_updates(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that checkout.session.completed invalidates cache AFTER all user updates
+
+        This is critical because add_credits_to_user invalidates cache early, but
+        subsequent updates (subscription_status, trial status) happen after that.
+        We need to ensure cache is invalidated again at the end.
+        """
+        fake_supabase.clear_all()
+
+        # Setup: create a trial user
+        fake_supabase.table("users").insert({
+            "id": 55,
+            "email": "checkout_user@example.com",
+            "subscription_status": "trial",
+            "credits": 5.0
+        }).execute()
+
+        fake_supabase.table("api_keys_new").insert({
+            "id": 1,
+            "user_id": 55,
+            "api_key": "test_key_checkout",
+            "is_trial": True,
+            "trial_converted": False,
+            "subscription_status": "trial"
+        }).execute()
+
+        # Create mock checkout session
+        mock_session = MagicMock()
+        mock_session.id = "cs_test_cache_final"
+        mock_session.payment_intent = "pi_test_cache"
+        mock_session.metadata = {
+            "user_id": "55",
+            "payment_id": "200",
+            "credits_cents": "1000"
+        }
+        mock_session.amount_total = 1000
+        mock_session.currency = "usd"
+
+        # Mock dependencies and track cache invalidation calls
+        with patch('src.services.payments.get_payment_by_stripe_intent', return_value=None), \
+             patch('src.services.payments.create_payment', return_value={"id": 200}), \
+             patch('src.services.payments.add_credits_to_user'), \
+             patch('src.services.payments.update_payment_status'), \
+             patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
+
+            stripe_service_with_mock_db._handle_checkout_completed(mock_session)
+
+            # Verify cache was invalidated for the correct user (at the end after all updates)
+            mock_invalidate.assert_called_with(55)
