@@ -6,8 +6,11 @@ Tests cover:
 - Model normalization with pricing from AiHubMix API
 - Price conversion from per 1K tokens to per 1M tokens
 - Filtering of zero-priced models
+- Logging behavior for models missing ID fields
 """
 
+import logging
+from unittest.mock import patch
 from src.services.models import normalize_aihubmix_model_with_pricing
 
 
@@ -141,3 +144,108 @@ class TestAiHubMixNormalizationWithPricing:
 
         assert normalized is not None
         assert normalized["context_length"] == 4096  # Default value
+
+    def test_normalize_model_with_model_id_field(self):
+        """Test normalizing a model with 'model_id' instead of 'id' field"""
+        # Some AiHubMix API responses use 'model_id' instead of 'id'
+        aihubmix_model = {
+            "model_id": "llama-3.2-11b-vision-preview",
+            "developer_id": 11,
+            "desc": "Vision model from Meta",
+            "pricing": {
+                "input": 0.2,
+                "output": 0.2,
+            },
+            "input_modalities": "text,image",
+        }
+
+        normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
+
+        # Verify model is normalized correctly with model_id field
+        assert normalized is not None
+        assert normalized["id"] == "llama-3.2-11b-vision-preview"
+        assert normalized["slug"] == "aihubmix/llama-3.2-11b-vision-preview"
+        assert normalized["provider_slug"] == "aihubmix"
+        # $0.2 per 1K = $200 per 1M tokens
+        assert normalized["pricing"]["prompt"] == "200.0"
+        assert normalized["pricing"]["completion"] == "200.0"
+        # Description from 'desc' field
+        assert normalized["description"] == "Vision model from Meta"
+        # Input modalities should include image
+        assert "image" in normalized["architecture"]["input_modalities"]
+
+    def test_normalize_model_with_desc_field(self):
+        """Test normalizing a model with 'desc' instead of 'description' field"""
+        aihubmix_model = {
+            "id": "test-model",
+            "desc": "Short description",
+            "pricing": {
+                "input": 1.0,
+                "output": 2.0,
+            },
+        }
+
+        normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
+
+        assert normalized is not None
+        assert normalized["description"] == "Short description"
+
+    def test_missing_id_logs_debug_not_warning(self, caplog):
+        """Test that models missing both 'id' and 'model_id' log at DEBUG level, not WARNING
+
+        This prevents excessive logging during catalog refresh and avoids hitting
+        Railway's 500 logs/second rate limit.
+        """
+        aihubmix_model = {
+            "name": "Model without ID",
+            "pricing": {
+                "input": 1.0,
+                "output": 2.0,
+            },
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
+
+        # Should return None
+        assert normalized is None
+
+        # Should log at DEBUG level, not WARNING
+        assert any(
+            "missing both 'id' and 'model_id' fields" in record.message
+            and record.levelname == "DEBUG"
+            for record in caplog.records
+        ), "Expected DEBUG log message about missing ID fields"
+
+        # Should NOT log at WARNING level
+        assert not any(
+            record.levelname == "WARNING"
+            for record in caplog.records
+        ), "Should not log at WARNING level to avoid excessive logging"
+
+    def test_model_id_field_works_without_warnings(self, caplog):
+        """Test that models with 'model_id' field are processed without warnings
+
+        Ensures the fix properly handles the common case where AiHubMix API
+        returns 'model_id' instead of 'id', which was causing hundreds of
+        warning logs during catalog refresh.
+        """
+        aihubmix_model = {
+            "model_id": "llama-3.1-405b-instruct",  # Using model_id, not id
+            "developer_id": 11,
+            "desc": "Meta's Llama model",
+            "pricing": {
+                "input": 4,
+                "output": 4,
+            },
+        }
+
+        with caplog.at_level(logging.WARNING):
+            normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
+
+        # Should successfully normalize
+        assert normalized is not None
+        assert normalized["id"] == "llama-3.1-405b-instruct"
+
+        # Should NOT produce any warnings
+        assert len(caplog.records) == 0, "Should not log warnings for valid model_id field"

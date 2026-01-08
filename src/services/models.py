@@ -3328,10 +3328,14 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     - output: cost per 1K output tokens
 
     We convert to per 1M tokens format for consistency.
+
+    Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
     """
-    model_id = model.get("id")
+    # Support both 'id' and 'model_id' field names for API compatibility
+    model_id = model.get("id") or model.get("model_id")
     if not model_id:
-        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
+        # Use debug level to avoid excessive logging during catalog refresh
+        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
 
     try:
@@ -3351,85 +3355,31 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
             logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
             return None
 
-        normalized = {
-            "id": model_id,
-            "slug": f"aihubmix/{model_id}",
-            "canonical_slug": f"aihubmix/{model_id}",
-            "hugging_face_id": None,
-            "name": model.get("name", model_id),
-            "created": model.get("created_at"),
-            "description": model.get("description", "Model from AiHubMix"),
-            "context_length": model.get("context_length", 4096),
-            "architecture": {
-                "modality": MODALITY_TEXT_TO_TEXT,
-                "input_modalities": ["text"],
-                "output_modalities": ["text"],
-                "instruct_type": "chat",
-            },
-            "pricing": {
-                "prompt": str(input_price_per_1m),
-                "completion": str(output_price_per_1m),
-                "request": "0",
-                "image": "0",
-            },
-            "top_provider": None,
-            "per_request_limits": None,
-            "supported_parameters": [],
-            "default_parameters": {},
-            "provider_slug": "aihubmix",
-            "provider_site_url": "https://aihubmix.com",
-            "model_logo_url": None,
-            "source_gateway": "aihubmix",
-            "pricing_source": "aihubmix-api",
-        }
-        return normalized
-    except Exception as e:
-        logger.error("Failed to normalize AiHubMix model: %s", sanitize_for_logging(str(e)))
-        return None
+        # Get model name, falling back to model_id
+        model_name = model.get("name") or model_id
 
+        # Get description from 'desc' or 'description' field
+        description = model.get("description") or model.get("desc") or "Model from AiHubMix"
 
-def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
-    """Normalize AiHubMix model with pricing data from their API
-
-    AiHubMix API returns pricing in USD per 1K tokens:
-    - input: cost per 1K input tokens
-    - output: cost per 1K output tokens
-
-    We convert to per 1M tokens format for consistency.
-    """
-    model_id = model.get("id")
-    if not model_id:
-        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
-        return None
-
-    try:
-        # Extract pricing from the API response
-        # AiHubMix returns pricing per 1K tokens, we need per 1M tokens
-        pricing_data = model.get("pricing", {})
-        input_price_per_1k = pricing_data.get("input", 0)
-        output_price_per_1k = pricing_data.get("output", 0)
-
-        # Convert from per 1K to per 1M tokens (multiply by 1000)
-        input_price_per_1m = float(input_price_per_1k) * 1000 if input_price_per_1k else 0
-        output_price_per_1m = float(output_price_per_1k) * 1000 if output_price_per_1k else 0
-
-        # Filter out models with zero pricing (free models can drain credits)
-        if input_price_per_1m == 0 and output_price_per_1m == 0:
-            logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
-            return None
+        # Determine input modalities from model data
+        input_modalities_str = model.get("input_modalities", "")
+        if input_modalities_str and "image" in input_modalities_str.lower():
+            input_modalities = ["text", "image"]
+        else:
+            input_modalities = ["text"]
 
         normalized = {
             "id": model_id,
             "slug": f"aihubmix/{model_id}",
             "canonical_slug": f"aihubmix/{model_id}",
             "hugging_face_id": None,
-            "name": model.get("name", model_id),
+            "name": model_name,
             "created": model.get("created_at"),
-            "description": model.get("description", "Model from AiHubMix"),
-            "context_length": model.get("context_length", 4096),
+            "description": description,
+            "context_length": model.get("context_length") or 4096,
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
-                "input_modalities": ["text"],
+                "input_modalities": input_modalities,
                 "output_modalities": ["text"],
                 "instruct_type": "chat",
             },
@@ -3459,10 +3409,25 @@ def normalize_aihubmix_model(model) -> dict | None:
     """Normalize AiHubMix model to catalog schema
 
     AiHubMix models use OpenAI-compatible naming conventions.
+    Supports both object-style (attributes) and dict-style models.
     """
-    model_id = getattr(model, "id", None)
+    # Support both attribute and dict access, and both 'id' and 'model_id' field names
+    if isinstance(model, dict):
+        model_id = model.get("id") or model.get("model_id")
+        model_name = model.get("name") or model_id
+        created_at = model.get("created_at")
+        description = model.get("description") or model.get("desc") or "Model from AiHubMix"
+        context_length = model.get("context_length") or 4096
+    else:
+        model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
+        model_name = getattr(model, "name", model_id)
+        created_at = getattr(model, "created_at", None)
+        description = getattr(model, "description", None) or getattr(model, "desc", None) or "Model from AiHubMix"
+        context_length = getattr(model, "context_length", 4096)
+
     if not model_id:
-        logger.warning("AiHubMix model missing 'id': %s", sanitize_for_logging(str(model)))
+        # Use debug level to avoid excessive logging during catalog refresh
+        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
 
     try:
@@ -3471,10 +3436,10 @@ def normalize_aihubmix_model(model) -> dict | None:
             "slug": f"aihubmix/{model_id}",
             "canonical_slug": f"aihubmix/{model_id}",
             "hugging_face_id": None,
-            "name": getattr(model, "name", model_id),
-            "created": getattr(model, "created_at", None),
-            "description": getattr(model, "description", "Model from AiHubMix"),
-            "context_length": getattr(model, "context_length", 4096),
+            "name": model_name,
+            "created": created_at,
+            "description": description,
+            "context_length": context_length,
             "architecture": {
                 "modality": MODALITY_TEXT_TO_TEXT,
                 "input_modalities": ["text"],

@@ -76,6 +76,7 @@ from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
+    filter_by_circuit_breaker,
     map_provider_error,
     should_failover,
 )
@@ -273,6 +274,10 @@ async def anthropic_messages(
         if not user:
             logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
             raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Get API key ID for tracking (if available)
+        api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
+        api_key_id = api_key_record.get("id") if api_key_record else None
 
         environment_tag = user.get("environment_tag", "live")
 
@@ -726,6 +731,26 @@ async def anthropic_messages(
                 )
                 continue
 
+            # If this is a 402 (Payment Required) error and we've exhausted the chain,
+            # rebuild the chain allowing payment failover to try alternative providers
+            if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
+                extended_chain = build_provider_failover_chain(provider)
+                extended_chain = enforce_model_failover_rules(
+                    original_model, extended_chain, allow_payment_failover=True
+                )
+                extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                # Find providers we haven't tried yet
+                new_providers = [p for p in extended_chain if p not in provider_chain]
+                if new_providers:
+                    logger.warning(
+                        "Provider '%s' returned 402 (Payment Required). "
+                        "Extending failover chain with: %s",
+                        attempt_provider,
+                        new_providers,
+                    )
+                    provider_chain.extend(new_providers)
+                    continue
+
             raise http_exc
 
         if processed is None:
@@ -959,6 +984,7 @@ async def anthropic_messages(
             user_id=user["id"],
             provider_name=provider,
             model_id=None,
+            api_key_id=api_key_id,
         )
 
         # Prepare headers including rate limit information

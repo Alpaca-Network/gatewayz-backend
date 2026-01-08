@@ -244,6 +244,7 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
                 user_id=None,  # AI SDK endpoint doesn't require authentication
                 provider_name="openrouter",
                 model_id=None,
+                api_key_id=None,  # AI SDK endpoint doesn't require authentication
             )
 
             return processed
@@ -286,6 +287,7 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
             user_id=None,  # AI SDK endpoint doesn't require authentication
             provider_name=provider_name,
             model_id=None,
+            api_key_id=None,  # AI SDK endpoint doesn't require authentication
         )
 
         return processed

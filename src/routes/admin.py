@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.cache import _huggingface_cache, _models_cache, _provider_cache
 from src.config import Config
+from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
 from src.db.trials import get_trial_analytics
@@ -1294,6 +1295,135 @@ async def get_user_by_api_key(
         ) from e
 
 
+@router.get("/admin/api-keys/{api_key_id}", tags=["admin", "api-keys"])
+async def get_api_key_details_by_id(
+    api_key_id: int,
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get complete API key details by ID including user information (Admin only).
+
+    This endpoint returns comprehensive information about an API key:
+    - Full API key details (including the actual key string)
+    - User information (email, name, username)
+    - Key metadata (name, environment, permissions, limits)
+    - Usage statistics
+
+    **Parameters**:
+    - `api_key_id`: The numeric ID of the API key
+
+    **Response**:
+    - Complete API key details with nested user information
+    - 404 if API key ID doesn't exist
+
+    **Security**: Admin-only endpoint - handles sensitive data
+
+    **Example**:
+    ```
+    GET /admin/api-keys/123
+    ```
+
+    **Response format**:
+    ```json
+    {
+      "status": "success",
+      "api_key": {
+        "id": 123,
+        "api_key": "gw_live_abc123xyz...",
+        "key_name": "Production Key",
+        "environment_tag": "live",
+        "is_active": true,
+        "is_primary": false,
+        "scope_permissions": {"read": ["*"], "write": ["*"]},
+        "max_requests": 10000,
+        "requests_used": 523,
+        "ip_allowlist": [],
+        "domain_referrers": [],
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-05T12:00:00Z",
+        "last_used_at": "2025-01-06T08:30:00Z",
+        "expiration_date": null,
+        "user": {
+          "id": 456,
+          "email": "user@example.com",
+          "username": "john_doe",
+          "credits": 50.0,
+          "is_active": true,
+          "role": "user",
+          "subscription_status": "active",
+          "created_at": "2024-12-01T00:00:00Z"
+        }
+      },
+      "timestamp": "2026-01-06T10:00:00Z"
+    }
+    ```
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        logger.info(f"Admin {admin_user.get('id')} fetching API key details for ID: {api_key_id}")
+
+        # Fetch API key with user information in a single query
+        result = client.table("api_keys_new").select(
+            "*, users!inner(id, email, username, credits, is_active, role, subscription_status, created_at)"
+        ).eq("id", api_key_id).execute()
+
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"API key with ID {api_key_id} not found"
+            )
+
+        api_key_data = result.data[0]
+        user_data = api_key_data.pop("users")  # Extract nested user data
+
+        # Build comprehensive response
+        response_data = {
+            "id": api_key_data.get("id"),
+            "api_key": api_key_data.get("api_key"),  # Full API key string
+            "key_name": api_key_data.get("key_name"),
+            "environment_tag": api_key_data.get("environment_tag", "live"),
+            "is_active": api_key_data.get("is_active", True),
+            "is_primary": api_key_data.get("is_primary", False),
+            "scope_permissions": api_key_data.get("scope_permissions", {}),
+            "max_requests": api_key_data.get("max_requests"),
+            "requests_used": api_key_data.get("requests_used", 0),
+            "ip_allowlist": api_key_data.get("ip_allowlist", []),
+            "domain_referrers": api_key_data.get("domain_referrers", []),
+            "created_at": api_key_data.get("created_at"),
+            "updated_at": api_key_data.get("updated_at"),
+            "last_used_at": api_key_data.get("last_used_at"),
+            "expiration_date": api_key_data.get("expiration_date"),
+            "user": {
+                "id": user_data.get("id"),
+                "email": user_data.get("email"),
+                "username": user_data.get("username"),
+                "credits": user_data.get("credits"),
+                "is_active": user_data.get("is_active"),
+                "role": user_data.get("role"),
+                "subscription_status": user_data.get("subscription_status"),
+                "created_at": user_data.get("created_at"),
+            }
+        }
+
+        return {
+            "status": "success",
+            "api_key": response_data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching API key details for ID {api_key_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch API key details: {str(e)}"
+        ) from e
+
+
 @router.get("/admin/users/{user_id}", tags=["admin"])
 async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_admin)):
     """Get detailed information for a specific user (Admin only)"""
@@ -1476,3 +1606,543 @@ async def delete_users_by_domain(
     except Exception as e:
         logger.error(f"Error deleting users by domain {domain}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete users by domain") from e
+
+
+
+# ============================================================================
+# ADMIN MONITORING - Chat Completion Requests Analytics
+# ============================================================================
+# These endpoints provide comprehensive chat completion request analytics
+# for administrators. All endpoints require admin authentication.
+
+
+@router.get("/admin/monitoring/chat-requests/by-api-key", tags=["admin", "monitoring"])
+async def get_chat_completion_requests_by_api_key_admin(
+    api_key: str = Query(..., description="API key to search for (exact match)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of requests to return"),
+    offset: int = Query(0, ge=0, description="Number of requests to skip for pagination"),
+    admin_user: dict = Depends(require_admin),
+):
+    """
+    Get all chat completion requests for a specific API key with pagination (Admin only).
+
+    **PAGINATED ENDPOINT** - Fetch chat completion requests 100 at a time.
+
+    This endpoint allows administrators to:
+    - View all chat completion requests made with a specific API key
+    - See detailed usage statistics (tokens, processing time, success rate)
+    - Monitor API key activity and usage patterns
+    - Track which models were used and when
+    - Paginate through results 100 at a time (or custom limit)
+
+    **Query Parameters:**
+    - `api_key`: Full API key string (exact match required) - e.g., "gw_live_abc123..."
+    - `limit`: Maximum number of requests to return (1-1000, default: 100)
+    - `offset`: Number of requests to skip for pagination (default: 0)
+
+    **Pagination Example:**
+    ```
+    # First 100 requests
+    GET /admin/monitoring/chat-requests/by-api-key?api_key=gw_live_xxx&limit=100&offset=0
+
+    # Next 100 requests (101-200)
+    GET /admin/monitoring/chat-requests/by-api-key?api_key=gw_live_xxx&limit=100&offset=100
+
+    # Next 100 requests (201-300)
+    GET /admin/monitoring/chat-requests/by-api-key?api_key=gw_live_xxx&limit=100&offset=200
+    ```
+
+    **Returns:**
+    - `requests`: List of chat completion requests with model and user details
+    - `total_count`: Total number of requests for this API key
+    - `summary`: Aggregated statistics (total tokens, avg time, success rate)
+    - `api_key_info`: Information about the API key (id, name, user_id, etc.)
+    - `pagination`: Pagination metadata (limit, offset, has_more, current_page, total_pages)
+
+    **Response Format:**
+    ```json
+    {
+      "requests": [...],
+      "total_count": 523,
+      "summary": {
+        "total_requests": 523,
+        "total_input_tokens": 125000,
+        "total_output_tokens": 85000,
+        "total_tokens": 210000,
+        "avg_processing_time_ms": 1250.5,
+        "completed_requests": 520,
+        "failed_requests": 3
+      },
+      "api_key_info": {...},
+      "limit": 100,
+      "offset": 0,
+      "pagination": {
+        "limit": 100,
+        "offset": 0,
+        "has_more": true,
+        "current_page": 1,
+        "total_pages": 6
+      }
+    }
+    ```
+    """
+    try:
+        from src.db.api_keys import get_api_key_by_key
+
+        # Look up API key by the actual key string
+        api_key_data = get_api_key_by_key(api_key)
+
+        if not api_key_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"API key not found. Please verify the key is correct. Key preview: {api_key[:20]}..."
+            )
+
+        api_key_id = api_key_data.get("id")
+        if not api_key_id:
+            raise HTTPException(status_code=500, detail="API key found but missing ID field")
+
+        # Fetch paginated chat completion requests
+        result = get_chat_completion_requests_by_api_key(
+            api_key_id=api_key_id,
+            limit=limit,
+            offset=offset
+        )
+
+        # Extract data from result
+        requests = result.get("requests", [])
+        total_count = result.get("total_count", 0)
+        summary = result.get("summary", {})
+
+        # Calculate pagination metadata
+        has_more = (offset + limit) < total_count
+        current_page = (offset // limit) + 1
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+
+        # Build API key info
+        api_key_info = {
+            "id": api_key_data.get("id"),
+            "key_name": api_key_data.get("key_name"),
+            "user_id": api_key_data.get("user_id"),
+            "environment_tag": api_key_data.get("environment_tag"),
+            "is_active": api_key_data.get("is_active", True),
+            "created_at": api_key_data.get("created_at"),
+        }
+
+        # Return enhanced response with clear pagination info
+        return {
+            "requests": requests,
+            "total_count": total_count,
+            "summary": summary,
+            "api_key_info": api_key_info,
+            "limit": limit,
+            "offset": offset,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+                "current_page": current_page,
+                "total_pages": total_pages,
+                "next_offset": offset + limit if has_more else None,
+                "prev_offset": max(0, offset - limit) if offset > 0 else None,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching chat completion requests by API key: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch chat completion requests") from e
+
+
+@router.get("/admin/monitoring/chat-requests/providers", tags=["admin", "monitoring"])
+async def get_providers_with_requests_admin(admin_user: dict = Depends(require_admin)):
+    """
+    Get all providers that have models with chat completion requests (Admin only).
+
+    Returns a list of providers that have at least one model with chat completion requests.
+    Useful for building provider selection UI and analytics dashboards.
+
+    Returns:
+    - Provider information (id, name, slug)
+    - Count of models with requests  
+    - Total requests across all models
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Try to use optimized RPC function first
+        try:
+            rpc_result = client.rpc('get_provider_request_stats').execute()
+            if rpc_result.data:
+                return {
+                    "success": True,
+                    "data": rpc_result.data,
+                    "metadata": {
+                        "total_providers": len(rpc_result.data),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "method": "rpc"
+                    }
+                }
+        except Exception as rpc_error:
+            logger.debug(f"RPC function not available, using fallback: {rpc_error}")
+
+        # Fallback implementation
+        distinct_result = client.table("chat_completion_requests").select(
+            "model_id, models!inner(provider_id, providers!inner(id, name, slug))"
+        ).execute()
+
+        if not distinct_result.data:
+            return {
+                "success": True,
+                "data": [],
+                "metadata": {"total_providers": 0, "timestamp": datetime.now(timezone.utc).isoformat()}
+            }
+
+        provider_stats = {}
+        for record in distinct_result.data:
+            model_id = record.get("model_id")
+            provider_info = record.get("models", {}).get("providers", {})
+            provider_id = provider_info.get("id")
+            
+            if provider_id and model_id:
+                if provider_id not in provider_stats:
+                    provider_stats[provider_id] = {
+                        "provider_id": provider_id,
+                        "name": provider_info.get("name"),
+                        "slug": provider_info.get("slug"),
+                        "model_ids": set()
+                    }
+                provider_stats[provider_id]["model_ids"].add(model_id)
+
+        providers_list = []
+        for provider_id, stats in provider_stats.items():
+            count_result = client.table("chat_completion_requests").select(
+                "id", count="exact", head=True
+            ).in_("model_id", list(stats["model_ids"])).execute()
+            
+            providers_list.append({
+                "provider_id": stats["provider_id"],
+                "name": stats["name"],
+                "slug": stats["slug"],
+                "models_with_requests": len(stats["model_ids"]),
+                "total_requests": count_result.count or 0
+            })
+
+        providers_list.sort(key=lambda x: x["total_requests"], reverse=True)
+        return {
+            "success": True,
+            "data": providers_list,
+            "metadata": {"total_providers": len(providers_list), "timestamp": datetime.now(timezone.utc).isoformat()}
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get providers with requests: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get providers with requests: {str(e)}")
+
+
+@router.get("/admin/monitoring/chat-requests/counts", tags=["admin", "monitoring"])
+async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_admin)):
+    """
+    Get request counts for each model - lightweight endpoint (Admin only).
+
+    Returns simple counts of requests per model, sorted by count (descending).
+    This is lighter than /models when you only need counts.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        client = get_supabase_client()
+
+        result = client.table("chat_completion_requests").select(
+            "model_id, models!inner(id, model_name, model_id, providers!inner(name, slug))"
+        ).execute()
+
+        if not result.data:
+            return {"success": True, "data": [], "metadata": {"total_models": 0, "total_requests": 0, "timestamp": datetime.now(timezone.utc).isoformat()}}
+
+        model_counts = {}
+        for record in result.data:
+            model_id = record.get("model_id")
+            if model_id:
+                model_info = record.get("models", {})
+                if model_id not in model_counts:
+                    model_counts[model_id] = {
+                        "model_id": model_id,
+                        "model_name": model_info.get("model_name"),
+                        "model_identifier": model_info.get("model_id"),
+                        "provider_name": model_info.get("providers", {}).get("name"),
+                        "provider_slug": model_info.get("providers", {}).get("slug"),
+                        "request_count": 0
+                    }
+                model_counts[model_id]["request_count"] += 1
+
+        counts_list = list(model_counts.values())
+        counts_list.sort(key=lambda x: x["request_count"], reverse=True)
+        
+        return {
+            "success": True,
+            "data": counts_list,
+            "metadata": {"total_models": len(counts_list), "total_requests": sum(m["request_count"] for m in counts_list), "timestamp": datetime.now(timezone.utc).isoformat()}
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get request counts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get request counts: {str(e)}")
+
+
+@router.get("/admin/monitoring/chat-requests/models", tags=["admin", "monitoring"])
+async def get_models_with_requests_admin(
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get all unique models that have chat completion requests (Admin only).
+
+    Returns models with request statistics including token usage and performance metrics.
+    Optionally filter by provider_id.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        client = get_supabase_client()
+
+        # Try RPC first
+        try:
+            if provider_id is not None:
+                rpc_result = client.rpc('get_models_with_requests_by_provider', {'p_provider_id': provider_id}).execute()
+            else:
+                rpc_result = client.rpc('get_models_with_requests').execute()
+            
+            if rpc_result.data:
+                return {"success": True, "data": rpc_result.data, "metadata": {"total_models": len(rpc_result.data), "timestamp": datetime.now(timezone.utc).isoformat(), "method": "rpc"}}
+        except Exception as rpc_error:
+            logger.debug(f"RPC not available, using fallback: {rpc_error}")
+
+        # Fallback implementation
+        models_query = client.table("models").select("id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug)")
+        if provider_id is not None:
+            models_query = models_query.eq("provider_id", provider_id)
+        models_result = models_query.execute()
+
+        if not models_result.data:
+            return {"success": True, "data": [], "metadata": {"total_models": 0, "timestamp": datetime.now(timezone.utc).isoformat()}}
+
+        models_data = []
+        for model_info in models_result.data:
+            model_id = model_info.get("id")
+            if not model_id:
+                continue
+
+            try:
+                # Try RPC for stats
+                stats_rpc = client.rpc('get_model_request_stats', {'p_model_id': model_id}).execute()
+                if stats_rpc.data and len(stats_rpc.data) > 0:
+                    stats_data = stats_rpc.data[0]
+                    stats = {
+                        "total_requests": int(stats_data.get("total_requests", 0)),
+                        "total_input_tokens": int(stats_data.get("total_input_tokens", 0)),
+                        "total_output_tokens": int(stats_data.get("total_output_tokens", 0)),
+                        "total_tokens": int(stats_data.get("total_tokens", 0)),
+                        "avg_processing_time_ms": round(float(stats_data.get("avg_processing_time_ms", 0)), 2)
+                    }
+                else:
+                    raise Exception("RPC returned no data")
+            except Exception:
+                # Fallback to count
+                count_result = client.table("chat_completion_requests").select("id", count="exact", head=True).eq("model_id", model_id).execute()
+                total_requests = count_result.count or 0
+                if total_requests == 0:
+                    continue
+                stats = {"total_requests": total_requests, "total_input_tokens": 0, "total_output_tokens": 0, "total_tokens": 0, "avg_processing_time_ms": 0}
+
+            if stats["total_requests"] > 0:
+                models_data.append({
+                    "model_id": model_info["id"],
+                    "model_identifier": model_info["model_id"],
+                    "model_name": model_info["model_name"],
+                    "provider_model_id": model_info["provider_model_id"],
+                    "provider": model_info["providers"],
+                    "stats": stats
+                })
+
+        models_data.sort(key=lambda x: x["stats"]["total_requests"], reverse=True)
+        return {"success": True, "data": models_data, "metadata": {"total_models": len(models_data), "timestamp": datetime.now(timezone.utc).isoformat()}}
+
+    except Exception as e:
+        logger.error(f"Failed to get models with requests: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get models with requests: {str(e)}")
+
+
+@router.get("/admin/monitoring/chat-requests", tags=["admin", "monitoring"])
+async def get_chat_completion_requests_admin(
+    model_id: int | None = Query(None, description="Filter by model ID"),
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    model_name: str | None = Query(None, description="Filter by model name (contains)"),
+    start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
+    end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
+    limit: int = Query(100, ge=1, le=100000, description="Maximum records to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get chat completion requests with flexible filtering (Admin only).
+
+    Allows fetching chat completion data for analytics with multiple filter options.
+    Returns full request details including model, provider, tokens, and performance metrics.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        client = get_supabase_client()
+
+        query = client.table("chat_completion_requests").select(
+            "*, models!inner(id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))"
+        )
+
+        if model_id is not None:
+            query = query.eq("model_id", model_id)
+        if provider_id is not None:
+            query = query.eq("models.provider_id", provider_id)
+        if model_name is not None:
+            query = query.ilike("models.model_name", f"%{model_name}%")
+        if start_date is not None:
+            query = query.gte("created_at", start_date)
+        if end_date is not None:
+            query = query.lte("created_at", end_date)
+
+        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+        result = query.execute()
+
+        # Get total count with all filters applied
+        count_query = client.table("chat_completion_requests").select(
+            "id, models!inner(id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))",
+            count="exact",
+            head=True
+        )
+        if model_id is not None:
+            count_query = count_query.eq("model_id", model_id)
+        if provider_id is not None:
+            count_query = count_query.eq("models.provider_id", provider_id)
+        if model_name is not None:
+            count_query = count_query.ilike("models.model_name", f"%{model_name}%")
+        if start_date is not None:
+            count_query = count_query.gte("created_at", start_date)
+        if end_date is not None:
+            count_query = count_query.lte("created_at", end_date)
+        count_result = count_query.execute()
+        total_count = count_result.count if count_result.count is not None else len(result.data)
+
+        return {
+            "success": True,
+            "data": result.data or [],
+            "metadata": {
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset,
+                "returned_count": len(result.data or []),
+                "filters": {
+                    "model_id": model_id,
+                    "provider_id": provider_id,
+                    "model_name": model_name,
+                    "start_date": start_date,
+                    "end_date": end_date
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get chat completion requests: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get chat completion requests: {str(e)}")
+
+
+@router.get("/admin/monitoring/chat-requests/plot-data", tags=["admin", "monitoring"])
+async def get_chat_requests_plot_data_admin(
+    model_id: int | None = Query(None, description="Filter by model ID"),
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
+    end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Get optimized chat completion request data for plotting graphs (Admin only).
+
+    Returns:
+    - recent_requests: Last 10 full requests for display
+    - plot_data: ALL requests in compressed array format (tokens, latency, timestamps)
+    
+    Highly optimized for frontend plotting with minimal data transfer.
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+        client = get_supabase_client()
+
+        # Get last 10 full requests
+        recent_query = client.table("chat_completion_requests").select(
+            "id, request_id, model_id, input_tokens, output_tokens, processing_time_ms, status, error_message, created_at, models!inner(id, model_id, model_name, provider_model_id, providers!inner(id, name, slug))"
+        )
+        
+        if model_id is not None:
+            recent_query = recent_query.eq("model_id", model_id)
+        if start_date is not None:
+            recent_query = recent_query.gte("created_at", start_date)
+        if end_date is not None:
+            recent_query = recent_query.lte("created_at", end_date)
+        
+        recent_query = recent_query.order("created_at", desc=True).limit(10)
+        recent_result = recent_query.execute()
+        recent_requests = recent_result.data or []
+        
+        # Filter by provider if needed
+        if provider_id is not None:
+            recent_requests = [r for r in recent_requests if r.get("models", {}).get("providers", {}).get("id") == provider_id]
+        
+        for req in recent_requests:
+            req["total_tokens"] = req.get("input_tokens", 0) + req.get("output_tokens", 0)
+
+        # Get ALL requests for plotting (lightweight - only 4 fields)
+        plot_query = client.table("chat_completion_requests").select("input_tokens, output_tokens, processing_time_ms, created_at")
+        
+        if model_id is not None:
+            plot_query = plot_query.eq("model_id", model_id)
+        if start_date is not None:
+            plot_query = plot_query.gte("created_at", start_date)
+        if end_date is not None:
+            plot_query = plot_query.lte("created_at", end_date)
+        
+        plot_query = plot_query.order("created_at", desc=False)
+        plot_result = plot_query.execute()
+        all_requests = plot_result.data or []
+
+        # Compress into arrays for efficient transfer
+        tokens_array = []
+        latency_array = []
+        timestamps_array = []
+        
+        for req in all_requests:
+            total_tokens = req.get("input_tokens", 0) + req.get("output_tokens", 0)
+            tokens_array.append(total_tokens)
+            latency_array.append(req.get("processing_time_ms", 0))
+            timestamps_array.append(req.get("created_at"))
+
+        return {
+            "success": True,
+            "recent_requests": recent_requests[:10],
+            "plot_data": {
+                "tokens": tokens_array,
+                "latency": latency_array,
+                "timestamps": timestamps_array
+            },
+            "metadata": {
+                "recent_count": len(recent_requests[:10]),
+                "total_count": len(all_requests),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "compression": "arrays",
+                "format_version": "1.0"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get plot data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get plot data: {str(e)}")

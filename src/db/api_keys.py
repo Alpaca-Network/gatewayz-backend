@@ -1130,3 +1130,32 @@ def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
             sanitize_for_logging(str(e)),
         )
         return None
+
+
+def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
+    """
+    Get API key data by the API key value (for admin use).
+    
+    Args:
+        api_key: The API key string to look up
+        
+    Returns:
+        Dictionary with API key data if found, None otherwise
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Query api_keys_new table for the key
+        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+        
+        if key_result.data and len(key_result.data) > 0:
+            return key_result.data[0]
+        
+        return None
+        
+    except Exception as e:
+        logger.error(
+            "Error getting API key by value: %s",
+            sanitize_for_logging(str(e)),
+        )
+        return None

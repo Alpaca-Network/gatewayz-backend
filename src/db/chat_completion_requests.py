@@ -143,6 +143,7 @@ def save_chat_completion_request(
     user_id: Optional[int] = None,
     provider_name: Optional[str] = None,
     model_id: Optional[int] = None,
+    api_key_id: Optional[int] = None,
 ) -> Optional[dict[str, Any]]:
     """
     Save a chat completion request to the database.
@@ -158,6 +159,7 @@ def save_chat_completion_request(
         user_id: Optional user identifier (integer) for the request
         provider_name: Optional provider name to help identify the model
         model_id: Optional model ID if already resolved (avoids lookup)
+        api_key_id: Optional API key identifier to track which key was used
 
     Returns:
         Created record or None on error
@@ -191,6 +193,8 @@ def save_chat_completion_request(
             request_data["error_message"] = error_message
         if user_id:
             request_data["user_id"] = user_id
+        if api_key_id:
+            request_data["api_key_id"] = api_key_id
 
         # Insert into database
         result = client.table("chat_completion_requests").insert(request_data).execute()
@@ -229,21 +233,28 @@ def get_chat_completion_stats(
     model_id: Optional[int] = None,
     user_id: Optional[str] = None,
     limit: int = 100,
-) -> list[dict[str, Any]]:
+    offset: int = 0,
+) -> dict[str, Any]:
     """
-    Get chat completion request statistics.
+    Get chat completion request statistics with pagination.
 
     Args:
         model_id: Optional model ID to filter by
         user_id: Optional user ID to filter by
-        limit: Maximum number of records to return
+        limit: Maximum number of records to return (default: 100)
+        offset: Number of records to skip for pagination (default: 0)
 
     Returns:
-        List of chat completion request records
+        Dictionary containing:
+        - requests: List of chat completion request records
+        - total_count: Total number of requests matching filters
+        - limit: Applied limit
+        - offset: Applied offset
     """
     try:
         client = get_supabase_client()
 
+        # Build query for data retrieval
         query = client.table("chat_completion_requests").select("*")
 
         if model_id is not None:
@@ -251,14 +262,132 @@ def get_chat_completion_stats(
         if user_id is not None:
             query = query.eq("user_id", user_id)
 
-        query = query.order("created_at", desc=True).limit(limit)
+        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
 
         result = query.execute()
-        return result.data or []
+
+        # Get total count with filters applied
+        count_query = client.table("chat_completion_requests").select("id", count="exact", head=True)
+
+        if model_id is not None:
+            count_query = count_query.eq("model_id", model_id)
+        if user_id is not None:
+            count_query = count_query.eq("user_id", user_id)
+
+        count_result = count_query.execute()
+        total_count = count_result.count if count_result.count is not None else len(result.data or [])
+
+        return {
+            "requests": result.data or [],
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
 
     except Exception as e:
         logger.error(f"Failed to get chat completion stats: {e}", exc_info=True)
-        return []
+        return {
+            "requests": [],
+            "total_count": 0,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+def get_chat_completion_requests_by_api_key(
+    api_key_id: int,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """
+    Get chat completion requests for a specific API key with enriched details.
+
+    Args:
+        api_key_id: API key ID to filter by
+        limit: Maximum number of records to return (default: 100, max: 1000)
+        offset: Number of records to skip for pagination (default: 0)
+
+    Returns:
+        Dictionary containing:
+        - requests: List of chat completion request records with model and user info
+        - total_count: Total number of requests for this API key
+        - summary: Aggregated statistics (total tokens, avg processing time, etc.)
+    """
+    try:
+        client = get_supabase_client()
+
+        # Get total count for this API key
+        count_result = (
+            client.table("chat_completion_requests")
+            .select("*", count="exact")
+            .eq("api_key_id", api_key_id)
+            .execute()
+        )
+        total_count = count_result.count if hasattr(count_result, "count") else 0
+
+        # Get paginated requests with related data
+        query = (
+            client.table("chat_completion_requests")
+            .select("*, models(id, model_name, model_id, provider_id, providers(name, slug)), users(id, username, email)")
+            .eq("api_key_id", api_key_id)
+            .order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+        )
+
+        result = query.execute()
+        requests = result.data or []
+
+        # Calculate summary statistics
+        summary = {
+            "total_requests": total_count,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_tokens": 0,
+            "avg_processing_time_ms": 0,
+            "completed_requests": 0,
+            "failed_requests": 0,
+        }
+
+        if requests:
+            summary["total_input_tokens"] = sum(r.get("input_tokens", 0) for r in requests)
+            summary["total_output_tokens"] = sum(r.get("output_tokens", 0) for r in requests)
+            summary["total_tokens"] = summary["total_input_tokens"] + summary["total_output_tokens"]
+            summary["completed_requests"] = sum(1 for r in requests if r.get("status") == "completed")
+            summary["failed_requests"] = sum(1 for r in requests if r.get("status") == "failed")
+
+            total_processing_time = sum(r.get("processing_time_ms", 0) for r in requests)
+            summary["avg_processing_time_ms"] = (
+                round(total_processing_time / len(requests), 2) if len(requests) > 0 else 0
+            )
+
+        return {
+            "requests": requests,
+            "total_count": total_count,
+            "summary": summary,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    except Exception as e:
+        logger.error(
+            f"Failed to get chat completion requests for API key {api_key_id}: {e}",
+            exc_info=True
+        )
+        return {
+            "requests": [],
+            "total_count": 0,
+            "summary": {
+                "total_requests": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_tokens": 0,
+                "avg_processing_time_ms": 0,
+                "completed_requests": 0,
+                "failed_requests": 0,
+            },
+            "limit": limit,
+            "offset": offset,
+        }
 
 
 def search_models_with_chat_summary(
