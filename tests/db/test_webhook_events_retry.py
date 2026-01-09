@@ -13,7 +13,7 @@ Tests cover:
 import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime, timezone
-from httpcore import LocalProtocolError, RemoteProtocolError, ConnectionTerminated
+from httpcore import LocalProtocolError, RemoteProtocolError
 
 from src.db.webhook_events import (
     is_event_processed,
@@ -101,8 +101,8 @@ class TestIsEventProcessedWithRetry:
     def test_is_event_processed_http2_error_retry(self, mock_execute_retry):
         """Test HTTP/2 connection error triggers retry via execute_with_retry"""
         # Simulate execute_with_retry raising an error after retries exhausted
-        mock_execute_retry.side_effect = ConnectionTerminated(
-            error_code=9, last_stream_id=191, additional_data=None
+        mock_execute_retry.side_effect = RemoteProtocolError(
+            "ConnectionTerminated: error_code=9, last_stream_id=191"
         )
 
         exists = is_event_processed("evt_test123")
@@ -264,8 +264,8 @@ class TestGetProcessedEventWithRetry:
     @patch("src.db.webhook_events.execute_with_retry")
     def test_get_processed_event_http2_error(self, mock_execute_retry):
         """Test HTTP/2 connection error during retrieval"""
-        mock_execute_retry.side_effect = ConnectionTerminated(
-            error_code=9, last_stream_id=191, additional_data=None
+        mock_execute_retry.side_effect = RemoteProtocolError(
+            "ConnectionTerminated: error_code=9, last_stream_id=191"
         )
 
         event = get_processed_event("evt_test123")

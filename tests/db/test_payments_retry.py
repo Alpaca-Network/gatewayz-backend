@@ -12,7 +12,7 @@ Tests cover:
 import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime, timezone
-from httpcore import LocalProtocolError, RemoteProtocolError, ConnectionTerminated
+from httpcore import LocalProtocolError, RemoteProtocolError
 
 from src.db.payments import create_payment, update_payment_status
 
@@ -115,8 +115,8 @@ class TestCreatePaymentWithRetry:
     @patch("src.db.payments.execute_with_retry")
     def test_create_payment_http2_connection_error(self, mock_execute_retry):
         """Test HTTP/2 ConnectionTerminated error during payment creation"""
-        mock_execute_retry.side_effect = ConnectionTerminated(
-            error_code=9, last_stream_id=191, additional_data=None
+        mock_execute_retry.side_effect = RemoteProtocolError(
+            "ConnectionTerminated: error_code=9, last_stream_id=191"
         )
 
         payment = create_payment(user_id=123, amount=29.99)
@@ -285,8 +285,8 @@ class TestUpdatePaymentStatusWithRetry:
     @patch("src.db.payments.execute_with_retry")
     def test_update_payment_status_http2_error(self, mock_execute_retry):
         """Test HTTP/2 connection error during status update"""
-        mock_execute_retry.side_effect = ConnectionTerminated(
-            error_code=9, last_stream_id=191, additional_data=None
+        mock_execute_retry.side_effect = RemoteProtocolError(
+            "ConnectionTerminated: error_code=9, last_stream_id=191"
         )
 
         payment = update_payment_status(payment_id=1, status="completed")
@@ -467,8 +467,8 @@ class TestPaymentErrorHandling:
     @patch("src.db.payments.execute_with_retry")
     def test_get_payment_http2_error(self, mock_execute_retry):
         """Test get_payment with HTTP/2 connection error"""
-        mock_execute_retry.side_effect = ConnectionTerminated(
-            error_code=9, last_stream_id=191, additional_data=None
+        mock_execute_retry.side_effect = RemoteProtocolError(
+            "ConnectionTerminated: error_code=9, last_stream_id=191"
         )
 
         from src.db.payments import get_payment
