@@ -11,9 +11,8 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, patch, call
+from unittest.mock import Mock, patch
 from datetime import datetime, timezone
-from h2.exceptions import StreamIDTooLowError
 from httpcore import LocalProtocolError, RemoteProtocolError, ConnectionTerminated
 
 from src.db.webhook_events import (

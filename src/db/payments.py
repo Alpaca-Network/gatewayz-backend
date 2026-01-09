@@ -75,8 +75,7 @@ def create_payment(
             payment_data["stripe_customer_id"] = stripe_customer_id
 
         # Insert into Supabase with retry logic for transient connection errors
-        def _insert_payment():
-            client = get_supabase_client()
+        def _insert_payment(client):
             return client.table("payments").insert(payment_data).execute()
 
         result = execute_with_retry(_insert_payment, max_retries=2, retry_delay=0.2)
@@ -110,8 +109,7 @@ def get_payment(payment_id: int) -> dict[str, Any] | None:
     """
     try:
 
-        def _get_payment():
-            client = get_supabase_client()
+        def _get_payment(client):
             return client.table("payments").select("*").eq("id", payment_id).execute()
 
         result = execute_with_retry(_get_payment, max_retries=2, retry_delay=0.2)
@@ -278,8 +276,7 @@ def update_payment_status(
                     update_data["metadata"] = metadata
 
         # Update payment with retry logic for transient connection errors
-        def _update_payment():
-            client = get_supabase_client()
+        def _update_payment(client):
             return client.table("payments").update(update_data).eq("id", payment_id).execute()
 
         result = execute_with_retry(_update_payment, max_retries=2, retry_delay=0.2)

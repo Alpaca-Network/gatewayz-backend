@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.config.supabase_config import execute_with_retry, get_supabase_client
+from src.config.supabase_config import execute_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,7 @@ def is_event_processed(event_id: str) -> bool:
     """
     try:
 
-        def _check_event():
-            client = get_supabase_client()
+        def _check_event(client):
             return (
                 client.table("stripe_webhook_events")
                 .select("event_id")
@@ -94,8 +93,7 @@ def record_processed_event(
     """
     try:
 
-        def _record_event():
-            client = get_supabase_client()
+        def _record_event(client):
             return (
                 client.table("stripe_webhook_events")
                 .insert(
@@ -137,8 +135,7 @@ def get_processed_event(event_id: str) -> dict[str, Any] | None:
     """
     try:
 
-        def _get_event():
-            client = get_supabase_client()
+        def _get_event(client):
             return client.table("stripe_webhook_events").select("*").eq("event_id", event_id).execute()
 
         result = execute_with_retry(_get_event, max_retries=2, retry_delay=0.2)
@@ -168,8 +165,7 @@ def cleanup_old_events(days: int = 90) -> int:
         cutoff = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
         cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
 
-        def _cleanup_events():
-            client = get_supabase_client()
+        def _cleanup_events(client):
             return client.table("stripe_webhook_events").delete().lt("created_at", cutoff_dt).execute()
 
         result = execute_with_retry(_cleanup_events, max_retries=2, retry_delay=0.2)
