@@ -143,6 +143,66 @@ class TestStreamNormalizer(unittest.TestCase):
         self.assertIn("Thinking step 1", reasoning)
         self.assertIn("Thinking step 2", reasoning)
 
+    def test_reasoning_details_empty_array(self):
+        """Test reasoning_details with empty array"""
+        normalizer = StreamNormalizer("xai", "grok-4.1-fast")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "Answer",
+                        "reasoning_details": []
+                    }
+                }
+            ]
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertEqual(normalized.choices[0]["delta"]["content"], "Answer")
+        # Empty array should not produce reasoning_content
+        self.assertNotIn("reasoning_content", normalized.choices[0]["delta"])
+
+    def test_reasoning_details_mixed_types(self):
+        """Test reasoning_details with mixed types including None"""
+        normalizer = StreamNormalizer("xai", "grok-4.1-fast")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "Answer",
+                        "reasoning_details": [
+                            {"content": "Valid step"},
+                            "String step",
+                            None,
+                            {"invalid": "no content/text/thinking field"}
+                        ]
+                    }
+                }
+            ]
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        reasoning = normalized.choices[0]["delta"]["reasoning_content"]
+        self.assertIn("Valid step", reasoning)
+        self.assertIn("String step", reasoning)
+        # None and invalid dict should be skipped
+
+    def test_reasoning_details_invalid_type(self):
+        """Test reasoning_details with non-list/non-string type"""
+        normalizer = StreamNormalizer("xai", "grok-4.1-fast")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "Answer",
+                        "reasoning_details": 42  # Invalid type
+                    }
+                }
+            ]
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertEqual(normalized.choices[0]["delta"]["content"], "Answer")
+        # Invalid type should not produce reasoning_content
+        self.assertNotIn("reasoning_content", normalized.choices[0]["delta"])
+
     def test_finish_reason_normalization(self):
         normalizer = StreamNormalizer("test", "test")
         self.assertEqual(normalizer._normalize_finish_reason("stop_sequence"), "stop")

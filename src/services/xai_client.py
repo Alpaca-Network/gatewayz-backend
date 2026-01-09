@@ -9,17 +9,22 @@ logger = logging.getLogger(__name__)
 
 # Grok models that support reasoning/thinking capabilities
 # These models can use the reasoning parameter to enable/disable extended thinking
+# See: https://docs.x.ai/docs/models
 XAI_REASONING_MODELS = {
     "grok-3-mini",
     "grok-3-mini-beta",
+    "grok-3",  # Base grok-3 supports reasoning
     "grok-4",
     "grok-4-fast",
+    "grok-4.1",  # Base grok-4.1
     "grok-4.1-fast",
     "grok-4-1-fast-reasoning",
     "grok-4.1-fast-reasoning",
 }
 
 # Models that explicitly do NOT use reasoning (faster responses)
+# Note: These are checked FIRST in is_xai_reasoning_model() since they are more
+# specific patterns (e.g., "grok-4-1-fast-non-reasoning" contains "grok-4")
 XAI_NON_REASONING_MODELS = {
     "grok-4-1-fast-non-reasoning",
     "grok-4.1-fast-non-reasoning",
@@ -40,14 +45,16 @@ def is_xai_reasoning_model(model: str) -> bool:
         True if the model supports reasoning, False otherwise
     """
     model_lower = model.lower()
-    # Check explicit reasoning models
-    for reasoning_model in XAI_REASONING_MODELS:
-        if reasoning_model in model_lower:
-            return True
-    # Check if explicitly non-reasoning
+    # Check non-reasoning models FIRST (more specific patterns)
+    # e.g., "grok-4-1-fast-non-reasoning" contains "grok-4" as substring,
+    # so we must check the non-reasoning set before reasoning set
     for non_reasoning_model in XAI_NON_REASONING_MODELS:
         if non_reasoning_model in model_lower:
             return False
+    # Then check explicit reasoning models
+    for reasoning_model in XAI_REASONING_MODELS:
+        if reasoning_model in model_lower:
+            return True
     # Default: newer grok-4+ models likely support reasoning
     if "grok-4" in model_lower or "grok-3-mini" in model_lower:
         return True
