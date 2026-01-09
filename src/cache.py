@@ -214,6 +214,13 @@ _anthropic_models_cache = {
     "stale_ttl": 7200,
 }
 
+_simplismart_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Simplismart catalog
+    "stale_ttl": 7200,
+}
+
 # BACKWARD COMPATIBILITY: Alias for old cache name
 # Some deployed modules may still reference the old name
 _hug_models_cache = _huggingface_models_cache
@@ -254,6 +261,7 @@ def get_models_cache(gateway: str):
         "clarifai": _clarifai_models_cache,
         "openai": _openai_models_cache,
         "anthropic": _anthropic_models_cache,
+        "simplismart": _simplismart_models_cache,
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -294,6 +302,7 @@ def clear_models_cache(gateway: str):
         "clarifai": _clarifai_models_cache,
         "openai": _openai_models_cache,
         "anthropic": _anthropic_models_cache,
+        "simplismart": _simplismart_models_cache,
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())

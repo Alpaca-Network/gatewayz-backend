@@ -534,6 +534,23 @@ def get_anthropic_pooled_client() -> OpenAI:
     )
 
 
+def get_simplismart_pooled_client() -> OpenAI:
+    """Get pooled client for Simplismart AI.
+
+    Simplismart provides an OpenAI-compatible API endpoint for various LLM models
+    including Llama, Gemma, Qwen, DeepSeek, Mixtral, and more.
+    See: https://docs.simplismart.ai/overview
+    """
+    if not Config.SIMPLISMART_API_KEY:
+        raise ValueError("Simplismart API key not configured")
+
+    return get_pooled_client(
+        provider="simplismart",
+        base_url="https://api.simplismart.live",
+        api_key=Config.SIMPLISMART_API_KEY,
+    )
+
+
 # =============================================================================
 # CONNECTION PRE-WARMING
 # =============================================================================
