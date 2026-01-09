@@ -220,6 +220,7 @@ src/services/request_prioritization.py
 src/services/response_cache.py
 src/services/roles.py
 src/services/simple_health_cache.py
+src/services/simplismart_client.py
 src/services/startup.py
 src/services/statsig_service.py
 src/services/stream_normalizer.py
