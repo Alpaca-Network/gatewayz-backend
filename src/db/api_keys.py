@@ -5,7 +5,7 @@ from typing import Any
 
 from postgrest import APIError
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import get_supabase_client, execute_with_retry
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
@@ -1135,24 +1135,31 @@ def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
 def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
     """
     Get API key data by the API key value (for admin use).
-    
+
     Args:
         api_key: The API key string to look up
-        
+
     Returns:
         Dictionary with API key data if found, None otherwise
     """
-    try:
-        client = get_supabase_client()
-        
+    def _fetch_key(client):
         # Query api_keys_new table for the key
         key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-        
+
         if key_result.data and len(key_result.data) > 0:
             return key_result.data[0]
-        
+
         return None
-        
+
+    try:
+        # Use execute_with_retry to handle HTTP/2 connection errors
+        return execute_with_retry(
+            _fetch_key,
+            max_retries=2,
+            retry_delay=0.2,
+            operation_name="get_api_key_by_key"
+        )
+
     except Exception as e:
         logger.error(
             "Error getting API key by value: %s",
