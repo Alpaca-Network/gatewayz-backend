@@ -188,24 +188,46 @@ def create_api_key(
 
         # Create the API key record with new fields
         # Set up trial for new users (if this is their first key)
+        # Skip trial setup for paid users (pro/max/admin tier or active subscription)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(timezone.utc)
-            trial_end = trial_start + timedelta(days=3)
-            trial_data = {
-                "is_trial": True,
-                "trial_start_date": trial_start.isoformat(),
-                "trial_end_date": trial_end.isoformat(),
-                "trial_used_tokens": 0,
-                "trial_used_requests": 0,
-                "trial_used_credits": 0.0,
-                "trial_max_tokens": 100000,
-                "trial_max_requests": 1000,
-                "trial_credits": 5.0,
-                "trial_converted": False,
-                "subscription_status": "trial",
-                "subscription_plan": "free_trial",
-            }
+            # Check if user is a paid user before setting trial
+            is_paid_user = False
+            try:
+                user_result = client.table("users").select(
+                    "tier, subscription_status, stripe_subscription_id"
+                ).eq("id", user_id).execute()
+                if user_result.data:
+                    user = user_result.data[0]
+                    is_paid_user = (
+                        user.get("tier") in ("pro", "max", "admin") or
+                        user.get("subscription_status") == "active" or
+                        user.get("stripe_subscription_id") is not None
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to check paid status for user {user_id}: {e}")
+                # Safe default: don't set trial if we can't verify payment status
+
+            if not is_paid_user:
+                # Only set trial for non-paid users
+                trial_start = datetime.now(timezone.utc)
+                trial_end = trial_start + timedelta(days=3)
+                trial_data = {
+                    "is_trial": True,
+                    "trial_start_date": trial_start.isoformat(),
+                    "trial_end_date": trial_end.isoformat(),
+                    "trial_used_tokens": 0,
+                    "trial_used_requests": 0,
+                    "trial_used_credits": 0.0,
+                    "trial_max_tokens": 100000,
+                    "trial_max_requests": 1000,
+                    "trial_credits": 5.0,
+                    "trial_converted": False,
+                    "subscription_status": "trial",
+                    "subscription_plan": "free_trial",
+                }
+            else:
+                logger.info(f"Skipping trial setup for paid user {user_id}")
 
         # KEY_HASH_SALT is required - always validate it first (outside try-except)
         # This ensures the mandatory hash check cannot be bypassed by encryption failures

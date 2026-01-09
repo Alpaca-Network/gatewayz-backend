@@ -462,3 +462,120 @@ def test_get_user_all_api_keys_usage(mod, fake_supabase):
     by_name = {k["key_name"]: k for k in out["keys"]}
     assert by_name["K1"]["requests_remaining"] == 95
     assert by_name["K2"]["max_requests"] is None
+
+
+# ------------------------ Trial Skip Tests for Paid Users ------------------------
+
+def test_create_api_key_primary_skips_trial_for_paid_user_pro_tier(monkeypatch, mod, fake_supabase):
+    """Ensure primary keys for pro tier users don't get trial data set."""
+    # Add a pro tier user to the fake store
+    fake_supabase.table("users").insert({
+        "id": 100,
+        "tier": "pro",
+        "subscription_status": None,
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=100,
+        key_name="ProUserKey",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["is_primary"] is True
+    # Trial data should NOT be set for paid users
+    assert row.get("is_trial") is None or row.get("is_trial") is False
+    assert row.get("subscription_status") != "trial"
+
+
+def test_create_api_key_primary_skips_trial_for_paid_user_max_tier(monkeypatch, mod, fake_supabase):
+    """Ensure primary keys for max tier users don't get trial data set."""
+    fake_supabase.table("users").insert({
+        "id": 101,
+        "tier": "max",
+        "subscription_status": None,
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=101,
+        key_name="MaxUserKey",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.get("is_trial") is None or row.get("is_trial") is False
+    assert row.get("subscription_status") != "trial"
+
+
+def test_create_api_key_primary_skips_trial_for_user_with_active_subscription(monkeypatch, mod, fake_supabase):
+    """Ensure primary keys for users with active subscription don't get trial data set."""
+    fake_supabase.table("users").insert({
+        "id": 102,
+        "tier": "free",
+        "subscription_status": "active",
+        "stripe_subscription_id": "sub_abc123"
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=102,
+        key_name="ActiveSubKey",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.get("is_trial") is None or row.get("is_trial") is False
+    assert row.get("subscription_status") != "trial"
+
+
+def test_create_api_key_primary_sets_trial_for_new_free_user(monkeypatch, mod, fake_supabase):
+    """Ensure primary keys for new free users still get trial data set."""
+    fake_supabase.table("users").insert({
+        "id": 103,
+        "tier": "free",
+        "subscription_status": None,
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=103,
+        key_name="FreeUserKey",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    assert len(rows) == 1
+    row = rows[0]
+    # Trial data SHOULD be set for free users
+    assert row.get("is_trial") is True
+    assert row.get("subscription_status") == "trial"
+    assert "trial_end_date" in row
+
+
+def test_create_api_key_primary_skips_trial_for_admin_tier(monkeypatch, mod, fake_supabase):
+    """Ensure primary keys for admin tier users don't get trial data set."""
+    fake_supabase.table("users").insert({
+        "id": 104,
+        "tier": "admin",
+        "subscription_status": None,
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=104,
+        key_name="AdminUserKey",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.get("is_trial") is None or row.get("is_trial") is False
+    assert row.get("subscription_status") != "trial"
