@@ -39,12 +39,14 @@ DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or auto-detect if not specified"
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
+    "'vercel-ai-gateway', 'google-vertex', 'simplismart', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', 'vercel-ai-gateway', 'google-vertex', or 'all'"
+    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
+    "'vercel-ai-gateway', 'google-vertex', 'simplismart', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -231,6 +233,7 @@ async def get_providers(
             "aihubmix",
             "anannas",
             "vercel-ai-gateway",
+            "simplismart",
         ]
         all_models = {}  # Track models for each gateway
 
@@ -483,6 +486,11 @@ async def get_models(
             if not google_models and gateway_value == "google-vertex":
                 logger.warning("Google Vertex AI models unavailable - continuing without them")
 
+        if gateway_value in ("simplismart", "all"):
+            simplismart_models = get_cached_models("simplismart") or []
+            if not simplismart_models and gateway_value == "simplismart":
+                logger.warning("Simplismart models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "onerouter":
@@ -527,6 +535,8 @@ async def get_models(
             models = alibaba_models
         elif gateway_value == "google-vertex":
             models = google_models
+        elif gateway_value == "simplismart":
+            models = simplismart_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -547,6 +557,7 @@ async def get_models(
                 aihubmix_models,
                 vercel_ai_gateway_models,
                 alibaba_models,
+                simplismart_models,
             )
 
         if not models:
@@ -694,6 +705,12 @@ async def get_models(
             )
             annotated_vercel = annotate_provider_sources(vercel_providers, "vercel-ai-gateway")
             provider_groups.append(annotated_vercel)
+
+        if gateway_value in ("simplismart", "all"):
+            models_for_providers = simplismart_models if gateway_value == "all" else models
+            simplismart_providers = derive_providers_from_models(models_for_providers, "simplismart")
+            annotated_simplismart = annotate_provider_sources(simplismart_providers, "simplismart")
+            provider_groups.append(annotated_simplismart)
 
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")
@@ -922,6 +939,7 @@ async def get_specific_model(
             "anannas",
             "aihubmix",
             "vercel-ai-gateway",
+            "simplismart",
         ]:
             gateway_models = get_cached_models(detected_gateway)
             if gateway_models:
@@ -1172,6 +1190,7 @@ async def get_gateway_statistics(
             "fireworks",
             "together",
             "google-vertex",
+            "simplismart",
         ]
         if gateway.lower() not in valid_gateways:
             raise HTTPException(
@@ -1402,6 +1421,7 @@ async def compare_model_across_gateways(
                 "together",
                 "google-vertex",
                 "vercel-ai-gateway",
+                "simplismart",
             ]
 
         model_id = f"{provider_name}/{model_name}"
@@ -1546,6 +1566,7 @@ async def batch_compare_models(
                     "together",
                     "google-vertex",
                     "vercel-ai-gateway",
+                    "simplismart",
                 ]
                 models_data = []
 
@@ -1892,6 +1913,10 @@ async def search_models(
         if gateway_value in ("vercel-ai-gateway", "all"):
             vercel_models = get_cached_models("vercel-ai-gateway") or []
             all_models.extend(vercel_models)
+
+        if gateway_value in ("simplismart", "all"):
+            simplismart_models = get_cached_models("simplismart") or []
+            all_models.extend(simplismart_models)
 
         # Apply filters
         filtered_models = all_models
