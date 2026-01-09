@@ -444,6 +444,61 @@ class TestPaymentErrorHandling:
         mock_execute_retry.assert_called_once()
 
     @patch("src.db.payments.execute_with_retry")
+    @patch("src.db.payments.get_supabase_client")
+    def test_get_payment_with_retry_success(
+        self, mock_get_client, mock_execute_retry, mock_supabase_client, mock_payment_data
+    ):
+        """Test get_payment with retry wrapper"""
+        client, table_mock = mock_supabase_client
+        mock_get_client.return_value = client
+
+        result_mock = Mock()
+        result_mock.data = [mock_payment_data]
+        mock_execute_retry.return_value = result_mock
+
+        from src.db.payments import get_payment
+
+        payment = get_payment(payment_id=1)
+
+        assert payment is not None
+        assert payment["id"] == 1
+        mock_execute_retry.assert_called_once()
+
+    @patch("src.db.payments.execute_with_retry")
+    def test_get_payment_http2_error(self, mock_execute_retry):
+        """Test get_payment with HTTP/2 connection error"""
+        mock_execute_retry.side_effect = ConnectionTerminated(
+            error_code=9, last_stream_id=191, additional_data=None
+        )
+
+        from src.db.payments import get_payment
+
+        payment = get_payment(payment_id=1)
+
+        assert payment is None
+        mock_execute_retry.assert_called_once()
+
+    @patch("src.db.payments.execute_with_retry")
+    @patch("src.db.payments.get_supabase_client")
+    def test_get_payment_not_found(
+        self, mock_get_client, mock_execute_retry, mock_supabase_client
+    ):
+        """Test get_payment when payment not found"""
+        client, table_mock = mock_supabase_client
+        mock_get_client.return_value = client
+
+        result_mock = Mock()
+        result_mock.data = []
+        mock_execute_retry.return_value = result_mock
+
+        from src.db.payments import get_payment
+
+        payment = get_payment(payment_id=999)
+
+        assert payment is None
+        mock_execute_retry.assert_called_once()
+
+    @patch("src.db.payments.execute_with_retry")
     def test_update_payment_status_generic_exception(self, mock_execute_retry):
         """Test generic exception handling during status update"""
         mock_execute_retry.side_effect = Exception("Unexpected database error")
