@@ -111,6 +111,10 @@ async def get_system_health(
             healthy_models=0,
             degraded_models=0,
             unhealthy_models=0,
+            total_gateways=0,
+            healthy_gateways=0,
+            tracked_models=0,
+            tracked_providers=0,
             system_uptime=0.0,
             last_updated=datetime.now(timezone.utc),
         )
@@ -132,6 +136,10 @@ async def get_system_health(
             healthy_models=0,
             degraded_models=0,
             unhealthy_models=0,
+            total_gateways=0,
+            healthy_gateways=0,
+            tracked_models=0,
+            tracked_providers=0,
             system_uptime=0.0,
             last_updated=datetime.now(timezone.utc),
         )
@@ -434,6 +442,10 @@ async def get_health_summary(
                 healthy_models=0,
                 degraded_models=0,
                 unhealthy_models=0,
+                total_gateways=0,
+                healthy_gateways=0,
+                tracked_models=0,
+                tracked_providers=0,
                 system_uptime=0.0,
                 last_updated=datetime.now(timezone.utc),
             )
@@ -654,6 +666,10 @@ async def get_health_dashboard(
                 healthy_models=0,
                 degraded_models=0,
                 unhealthy_models=0,
+                total_gateways=0,
+                healthy_gateways=0,
+                tracked_models=0,
+                tracked_providers=0,
                 system_uptime=0.0,
                 last_updated=datetime.now(timezone.utc),
             )
