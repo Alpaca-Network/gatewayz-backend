@@ -180,6 +180,7 @@ def test_check_key_name_uniqueness(mod, fake_supabase):
 
 
 def test_create_api_key_primary_sets_trial_and_prefix_and_audit(monkeypatch, mod, fake_supabase):
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     # user 99, enforce plan limit, deterministic token -> "gw_live_TOK"
     api_key, key_id = mod.create_api_key(
         user_id=99,
@@ -215,6 +216,7 @@ def test_create_api_key_primary_sets_trial_and_prefix_and_audit(monkeypatch, mod
 
 
 def test_create_api_key_refreshes_schema_cache_on_pgrst204(monkeypatch, mod, fake_supabase):
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     from postgrest import APIError
     # Simulate PostgREST schema cache error
     error = APIError(
@@ -468,6 +470,7 @@ def test_get_user_all_api_keys_usage(mod, fake_supabase):
 
 def test_create_api_key_primary_skips_trial_for_paid_user_pro_tier(monkeypatch, mod, fake_supabase):
     """Ensure primary keys for pro tier users don't get trial data set."""
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     # Add a pro tier user to the fake store
     fake_supabase.table("users").insert({
         "id": 100,
@@ -493,6 +496,7 @@ def test_create_api_key_primary_skips_trial_for_paid_user_pro_tier(monkeypatch, 
 
 def test_create_api_key_primary_skips_trial_for_paid_user_max_tier(monkeypatch, mod, fake_supabase):
     """Ensure primary keys for max tier users don't get trial data set."""
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     fake_supabase.table("users").insert({
         "id": 101,
         "tier": "max",
@@ -515,6 +519,7 @@ def test_create_api_key_primary_skips_trial_for_paid_user_max_tier(monkeypatch, 
 
 def test_create_api_key_primary_skips_trial_for_user_with_active_subscription(monkeypatch, mod, fake_supabase):
     """Ensure primary keys for users with active subscription don't get trial data set."""
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     fake_supabase.table("users").insert({
         "id": 102,
         "tier": "free",
@@ -537,6 +542,7 @@ def test_create_api_key_primary_skips_trial_for_user_with_active_subscription(mo
 
 def test_create_api_key_primary_sets_trial_for_new_free_user(monkeypatch, mod, fake_supabase):
     """Ensure primary keys for new free users still get trial data set."""
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     fake_supabase.table("users").insert({
         "id": 103,
         "tier": "free",
@@ -561,6 +567,7 @@ def test_create_api_key_primary_sets_trial_for_new_free_user(monkeypatch, mod, f
 
 def test_create_api_key_primary_skips_trial_for_admin_tier(monkeypatch, mod, fake_supabase):
     """Ensure primary keys for admin tier users don't get trial data set."""
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
     fake_supabase.table("users").insert({
         "id": 104,
         "tier": "admin",
