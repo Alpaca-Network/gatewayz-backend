@@ -82,6 +82,7 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             "anannas": "https://api.anannas.ai/favicon.ico",
             "alpaca-network": "https://console.anyscale.com/favicon.ico",
             "onerouter": "https://onerouter.pro/favicon.ico",
+            "simplismart": "https://simplismart.ai/favicon.ico",
         }
 
         # Try manual mapping first
@@ -302,5 +303,12 @@ def fetch_models_from_onerouter():
 def fetch_models_from_morpheus():
     """Fetch models from Morpheus AI Gateway client"""
     from src.services.morpheus_client import fetch_models_from_morpheus as _fetch
+
+    return _fetch()
+
+
+def fetch_models_from_simplismart():
+    """Fetch models from Simplismart client"""
+    from src.services.simplismart_client import fetch_models_from_simplismart as _fetch
 
     return _fetch()

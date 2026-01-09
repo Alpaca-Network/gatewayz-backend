@@ -153,6 +153,7 @@ OPENROUTER_AUTO_FALLBACKS = {
     "aihubmix": "openai/gpt-4o-mini",
     "anannas": "openai/gpt-4o-mini",
     "alibaba-cloud": "qwen/qwen-plus",
+    "simplismart": "meta-llama/Llama-3.3-70B-Instruct",
 }
 
 # Shared helper for resolving aliases before any downstream routing logic runs.
