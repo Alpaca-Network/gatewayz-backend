@@ -35,7 +35,7 @@ class Message(BaseModel):
     def validate_content_for_role(self) -> "Message":
         """Validate that content is provided for roles that require it.
 
-        - user and system roles require non-empty content
+        - user, system, and developer roles require non-empty content
         - assistant role allows null content when tool_calls is present
         - tool and function roles require non-empty content (the tool response)
         """
