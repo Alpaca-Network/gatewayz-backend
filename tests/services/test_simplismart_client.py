@@ -303,3 +303,77 @@ class TestSimplismartConstants:
             assert "name" in info, f"Model '{model_id}' missing 'name'"
             assert "context_length" in info, f"Model '{model_id}' missing 'context_length'"
             assert info["context_length"] > 0, f"Model '{model_id}' has invalid context_length"
+
+    def test_models_have_pricing(self):
+        """Test that all models have pricing information"""
+        for model_id, info in SIMPLISMART_MODELS.items():
+            assert "pricing" in info, f"Model '{model_id}' missing 'pricing'"
+            pricing = info["pricing"]
+            assert "prompt" in pricing, f"Model '{model_id}' missing 'prompt' pricing"
+            assert "completion" in pricing, f"Model '{model_id}' missing 'completion' pricing"
+            # Verify pricing is a valid number string
+            assert float(pricing["prompt"]) >= 0, f"Model '{model_id}' has invalid prompt pricing"
+            assert float(pricing["completion"]) >= 0, f"Model '{model_id}' has invalid completion pricing"
+
+
+class TestSimplismartPricing:
+    """Test Simplismart pricing functionality"""
+
+    def test_fetch_models_includes_pricing(self):
+        """Test that fetched models include pricing data"""
+        models = fetch_models_from_simplismart()
+        for model in models:
+            assert "pricing" in model, f"Model '{model['id']}' missing pricing in fetch result"
+            pricing = model["pricing"]
+            assert "prompt" in pricing
+            assert "completion" in pricing
+
+    def test_pricing_values_match_source(self):
+        """Test specific pricing values from https://simplismart.ai/pricing"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        # Verify specific pricing values
+        assert models_by_id["meta-llama/Meta-Llama-3.1-8B-Instruct"]["pricing"]["prompt"] == "0.13"
+        assert models_by_id["meta-llama/Meta-Llama-3.1-70B-Instruct"]["pricing"]["prompt"] == "0.74"
+        assert models_by_id["meta-llama/Meta-Llama-3.1-405B-Instruct"]["pricing"]["prompt"] == "3.00"
+        assert models_by_id["deepseek-ai/DeepSeek-R1"]["pricing"]["prompt"] == "3.90"
+        assert models_by_id["deepseek-ai/DeepSeek-V3"]["pricing"]["prompt"] == "0.90"
+        assert models_by_id["google/gemma-3-1b-it"]["pricing"]["prompt"] == "0.06"
+        assert models_by_id["google/gemma-3-4b-it"]["pricing"]["prompt"] == "0.10"
+        assert models_by_id["microsoft/Phi-3-medium-128k-instruct"]["pricing"]["prompt"] == "0.08"
+        assert models_by_id["Qwen/Qwen2.5-72B-Instruct"]["pricing"]["prompt"] == "1.08"
+        assert models_by_id["Qwen/Qwen2.5-7B-Instruct"]["pricing"]["prompt"] == "0.30"
+
+    def test_new_models_present(self):
+        """Test that new models from pricing page are present"""
+        models = fetch_models_from_simplismart()
+        model_ids = [m["id"] for m in models]
+
+        # Verify new models added from pricing page
+        assert "deepseek-ai/DeepSeek-R1" in model_ids
+        assert "deepseek-ai/DeepSeek-V3" in model_ids
+        assert "meta-llama/Meta-Llama-3.1-405B-Instruct" in model_ids
+        assert "microsoft/Phi-3-medium-128k-instruct" in model_ids
+        assert "microsoft/Phi-3-mini-4k-instruct" in model_ids
+        assert "Qwen/Qwen2.5-7B-Instruct" in model_ids
+        assert "Qwen/Qwen2.5-72B-Instruct" in model_ids
+        assert "Qwen/Qwen3-4B" in model_ids
+
+    def test_new_aliases_work(self):
+        """Test that new model aliases resolve correctly"""
+        # DeepSeek aliases
+        assert resolve_simplismart_model("deepseek-r1") == "deepseek-ai/DeepSeek-R1"
+        assert resolve_simplismart_model("deepseek-v3") == "deepseek-ai/DeepSeek-V3"
+
+        # Llama 405B aliases
+        assert resolve_simplismart_model("llama-3.1-405b") == "meta-llama/Meta-Llama-3.1-405B-Instruct"
+
+        # Phi-3 aliases
+        assert resolve_simplismart_model("phi-3-medium") == "microsoft/Phi-3-medium-128k-instruct"
+        assert resolve_simplismart_model("phi-3-mini") == "microsoft/Phi-3-mini-4k-instruct"
+
+        # Qwen aliases
+        assert resolve_simplismart_model("qwen-2.5-7b") == "Qwen/Qwen2.5-7B-Instruct"
+        assert resolve_simplismart_model("qwen-2.5-72b") == "Qwen/Qwen2.5-72B-Instruct"
+        assert resolve_simplismart_model("qwen3-4b") == "Qwen/Qwen3-4B"

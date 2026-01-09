@@ -2,23 +2,32 @@
 Simplismart AI provider client module.
 
 Simplismart provides OpenAI-compatible API endpoints for various LLM models
-including Llama, Gemma, Qwen, DeepSeek, Mixtral, and more.
+including Llama, Gemma, Qwen, DeepSeek, Phi-3, Mixtral, and more.
 
 API Documentation: https://docs.simplismart.ai/overview
 Base URL: https://api.simplismart.live
+Pricing: https://simplismart.ai/pricing
 
 Supported models:
-- meta-llama/Meta-Llama-3.1-8B-Instruct
-- meta-llama/Meta-Llama-3.1-70B-Instruct
-- meta-llama/Llama-3.3-70B-Instruct
+- meta-llama/Meta-Llama-3.1-8B-Instruct ($0.13/1M tokens)
+- meta-llama/Meta-Llama-3.1-70B-Instruct ($0.74/1M tokens)
+- meta-llama/Meta-Llama-3.1-405B-Instruct ($3.00/1M tokens)
+- meta-llama/Llama-3.3-70B-Instruct ($0.74/1M tokens)
 - meta-llama/Llama-4-Maverick-17B-Instruct (preview)
+- deepseek-ai/DeepSeek-R1 ($3.90/1M tokens)
+- deepseek-ai/DeepSeek-V3 ($0.90/1M tokens)
 - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
 - deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
-- google/gemma-3-1b-it
-- google/gemma-3-4b-it
+- google/gemma-3-1b-it ($0.06/1M tokens)
+- google/gemma-3-4b-it ($0.10/1M tokens)
 - google/gemma-3-27b-it
+- microsoft/Phi-3-medium-128k-instruct ($0.08/1M tokens)
+- microsoft/Phi-3-mini-4k-instruct ($0.08/1M tokens)
+- Qwen/Qwen2.5-7B-Instruct ($0.30/1M tokens)
 - Qwen/Qwen2.5-14B-Instruct
 - Qwen/Qwen2.5-32B-Instruct
+- Qwen/Qwen2.5-72B-Instruct ($1.08/1M tokens)
+- Qwen/Qwen3-4B ($0.10/1M tokens)
 - mistralai/Mixtral-8x7B-Instruct-v0.1-FP8
 - mistralai/Devstral-Small-2505
 """
@@ -36,79 +45,142 @@ logger = logging.getLogger(__name__)
 SIMPLISMART_BASE_URL = "https://api.simplismart.live"
 
 # Simplismart model catalog - models available via the API
+# Pricing from https://simplismart.ai/pricing (per 1M tokens)
 SIMPLISMART_MODELS = {
     # Llama 3.1 series
     "meta-llama/Meta-Llama-3.1-8B-Instruct": {
         "name": "Meta Llama 3.1 8B Instruct",
         "context_length": 131072,
         "description": "Meta's Llama 3.1 8B parameter instruction-tuned model",
+        "pricing": {"prompt": "0.13", "completion": "0.13", "request": "0", "image": "0"},
     },
     "meta-llama/Meta-Llama-3.1-70B-Instruct": {
         "name": "Meta Llama 3.1 70B Instruct",
         "context_length": 131072,
         "description": "Meta's Llama 3.1 70B parameter instruction-tuned model",
+        "pricing": {"prompt": "0.74", "completion": "0.74", "request": "0", "image": "0"},
+    },
+    "meta-llama/Meta-Llama-3.1-405B-Instruct": {
+        "name": "Meta Llama 3.1 405B Instruct",
+        "context_length": 131072,
+        "description": "Meta's Llama 3.1 405B parameter instruction-tuned model",
+        "pricing": {"prompt": "3.00", "completion": "3.00", "request": "0", "image": "0"},
     },
     # Llama 3.3 series
     "meta-llama/Llama-3.3-70B-Instruct": {
         "name": "Meta Llama 3.3 70B Instruct",
         "context_length": 131072,
         "description": "Meta's Llama 3.3 70B parameter instruction-tuned model",
+        "pricing": {"prompt": "0.74", "completion": "0.74", "request": "0", "image": "0"},
     },
     # Llama 4 series (preview)
     "meta-llama/Llama-4-Maverick-17B-Instruct": {
         "name": "Meta Llama 4 Maverick 17B Instruct",
         "context_length": 131072,
         "description": "Meta's Llama 4 Maverick 17B parameter instruction-tuned model (preview)",
+        "pricing": {"prompt": "0.74", "completion": "0.74", "request": "0", "image": "0"},
     },
-    # DeepSeek R1 Distill series
+    # DeepSeek series
+    "deepseek-ai/DeepSeek-R1": {
+        "name": "DeepSeek R1",
+        "context_length": 131072,
+        "description": "DeepSeek's R1 reasoning model",
+        "pricing": {"prompt": "3.90", "completion": "3.90", "request": "0", "image": "0"},
+    },
+    "deepseek-ai/DeepSeek-V3": {
+        "name": "DeepSeek V3",
+        "context_length": 131072,
+        "description": "DeepSeek's V3 large language model",
+        "pricing": {"prompt": "0.90", "completion": "0.90", "request": "0", "image": "0"},
+    },
     "deepseek-ai/DeepSeek-R1-Distill-Llama-70B": {
         "name": "DeepSeek R1 Distill Llama 70B",
         "context_length": 65536,
         "description": "DeepSeek R1 distilled into Llama 70B architecture",
+        "pricing": {"prompt": "0.74", "completion": "0.74", "request": "0", "image": "0"},
     },
     "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B": {
         "name": "DeepSeek R1 Distill Qwen 32B",
         "context_length": 65536,
         "description": "DeepSeek R1 distilled into Qwen 32B architecture",
+        "pricing": {"prompt": "1.08", "completion": "1.08", "request": "0", "image": "0"},
     },
     # Gemma 3 series
     "google/gemma-3-1b-it": {
         "name": "Google Gemma 3 1B IT",
         "context_length": 8192,
         "description": "Google's Gemma 3 1B instruction-tuned model",
+        "pricing": {"prompt": "0.06", "completion": "0.06", "request": "0", "image": "0"},
     },
     "google/gemma-3-4b-it": {
         "name": "Google Gemma 3 4B IT",
         "context_length": 8192,
         "description": "Google's Gemma 3 4B instruction-tuned model",
+        "pricing": {"prompt": "0.10", "completion": "0.10", "request": "0", "image": "0"},
     },
     "google/gemma-3-27b-it": {
         "name": "Google Gemma 3 27B IT",
         "context_length": 8192,
         "description": "Google's Gemma 3 27B instruction-tuned model",
+        "pricing": {"prompt": "0.30", "completion": "0.30", "request": "0", "image": "0"},
     },
-    # Qwen 2.5 series
+    # Phi-3 series
+    "microsoft/Phi-3-medium-128k-instruct": {
+        "name": "Microsoft Phi-3 Medium 128K",
+        "context_length": 128000,
+        "description": "Microsoft's Phi-3 medium model with 128K context",
+        "pricing": {"prompt": "0.08", "completion": "0.08", "request": "0", "image": "0"},
+    },
+    "microsoft/Phi-3-mini-4k-instruct": {
+        "name": "Microsoft Phi-3 Mini 4K",
+        "context_length": 4096,
+        "description": "Microsoft's Phi-3 mini model with 4K context",
+        "pricing": {"prompt": "0.08", "completion": "0.08", "request": "0", "image": "0"},
+    },
+    # Qwen series
+    "Qwen/Qwen2.5-7B-Instruct": {
+        "name": "Qwen 2.5 7B Instruct",
+        "context_length": 32768,
+        "description": "Alibaba's Qwen 2.5 7B instruction-tuned model",
+        "pricing": {"prompt": "0.30", "completion": "0.30", "request": "0", "image": "0"},
+    },
     "Qwen/Qwen2.5-14B-Instruct": {
         "name": "Qwen 2.5 14B Instruct",
         "context_length": 32768,
         "description": "Alibaba's Qwen 2.5 14B instruction-tuned model",
+        "pricing": {"prompt": "0.30", "completion": "0.30", "request": "0", "image": "0"},
     },
     "Qwen/Qwen2.5-32B-Instruct": {
         "name": "Qwen 2.5 32B Instruct",
         "context_length": 32768,
         "description": "Alibaba's Qwen 2.5 32B instruction-tuned model",
+        "pricing": {"prompt": "1.08", "completion": "1.08", "request": "0", "image": "0"},
+    },
+    "Qwen/Qwen2.5-72B-Instruct": {
+        "name": "Qwen 2.5 72B Instruct",
+        "context_length": 32768,
+        "description": "Alibaba's Qwen 2.5 72B instruction-tuned model",
+        "pricing": {"prompt": "1.08", "completion": "1.08", "request": "0", "image": "0"},
+    },
+    "Qwen/Qwen3-4B": {
+        "name": "Qwen 3 4B",
+        "context_length": 32768,
+        "description": "Alibaba's Qwen 3 4B model",
+        "pricing": {"prompt": "0.10", "completion": "0.10", "request": "0", "image": "0"},
     },
     # Mixtral series
     "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8": {
         "name": "Mixtral 8x7B Instruct FP8",
         "context_length": 32768,
         "description": "Mistral's Mixtral 8x7B MoE instruction model (FP8 quantized)",
+        "pricing": {"prompt": "0.30", "completion": "0.30", "request": "0", "image": "0"},
     },
     # Devstral series
     "mistralai/Devstral-Small-2505": {
         "name": "Devstral Small 2505",
         "context_length": 32768,
         "description": "Mistral's Devstral Small coding assistant model",
+        "pricing": {"prompt": "0.30", "completion": "0.30", "request": "0", "image": "0"},
     },
 }
 
@@ -121,6 +193,9 @@ SIMPLISMART_MODEL_ALIASES = {
     "llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "meta-llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+    "llama-3.1-405b-instruct": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+    "meta-llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
     # Llama 3.3 aliases
     "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
     "llama-3.3-70b-instruct": "meta-llama/Llama-3.3-70B-Instruct",
@@ -129,17 +204,30 @@ SIMPLISMART_MODEL_ALIASES = {
     "llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
     "llama-4-maverick-17b": "meta-llama/Llama-4-Maverick-17B-Instruct",
     # DeepSeek aliases
+    "deepseek-r1": "deepseek-ai/DeepSeek-R1",
+    "deepseek-v3": "deepseek-ai/DeepSeek-V3",
     "deepseek-r1-distill-llama-70b": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
     "deepseek-r1-distill-qwen-32b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
     # Gemma aliases
     "gemma-3-1b": "google/gemma-3-1b-it",
     "gemma-3-4b": "google/gemma-3-4b-it",
     "gemma-3-27b": "google/gemma-3-27b-it",
+    # Phi-3 aliases
+    "phi-3-medium": "microsoft/Phi-3-medium-128k-instruct",
+    "phi-3-medium-128k": "microsoft/Phi-3-medium-128k-instruct",
+    "phi-3-mini": "microsoft/Phi-3-mini-4k-instruct",
+    "phi-3-mini-4k": "microsoft/Phi-3-mini-4k-instruct",
     # Qwen aliases
+    "qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
+    "qwen2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
     "qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
-    "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
     "qwen2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
+    "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
     "qwen2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
+    "qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
+    "qwen2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
+    "qwen3-4b": "Qwen/Qwen3-4B",
+    "qwen-3-4b": "Qwen/Qwen3-4B",
     # Mixtral aliases
     "mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
     "mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
@@ -279,20 +367,23 @@ def fetch_models_from_simplismart():
     """Fetch available models from Simplismart.
 
     Returns a list of model info dictionaries in catalog format.
+    Includes pricing data from https://simplismart.ai/pricing
     """
     try:
         models = []
         for model_id, model_info in SIMPLISMART_MODELS.items():
-            models.append(
-                {
-                    "id": model_id,
-                    "name": model_info["name"],
-                    "description": model_info.get("description", ""),
-                    "context_length": model_info.get("context_length", 8192),
-                    "provider": "simplismart",
-                    "provider_name": "Simplismart",
-                }
-            )
+            model_data = {
+                "id": model_id,
+                "name": model_info["name"],
+                "description": model_info.get("description", ""),
+                "context_length": model_info.get("context_length", 8192),
+                "provider": "simplismart",
+                "provider_name": "Simplismart",
+            }
+            # Include pricing if available
+            if "pricing" in model_info:
+                model_data["pricing"] = model_info["pricing"]
+            models.append(model_data)
         logger.info(f"Fetched {len(models)} models from Simplismart")
         return models
     except Exception as e:
