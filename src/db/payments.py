@@ -109,9 +109,12 @@ def get_payment(payment_id: int) -> dict[str, Any] | None:
         Payment record or None if not found
     """
     try:
-        client = get_supabase_client()
 
-        result = client.table("payments").select("*").eq("id", payment_id).execute()
+        def _get_payment():
+            client = get_supabase_client()
+            return client.table("payments").select("*").eq("id", payment_id).execute()
+
+        result = execute_with_retry(_get_payment, max_retries=2, retry_delay=0.2)
 
         if not result.data:
             logger.warning(f"Payment {payment_id} not found")
