@@ -184,7 +184,7 @@ class TestCreatePaymentWithRetry:
         result_mock.data = [mock_payment_data]
         mock_execute_retry.return_value = result_mock
 
-        payment = create_payment(user_id=123, amount=29.99)
+        create_payment(user_id=123, amount=29.99)
 
         # Verify the wrapped function was called
         mock_execute_retry.assert_called_once()
