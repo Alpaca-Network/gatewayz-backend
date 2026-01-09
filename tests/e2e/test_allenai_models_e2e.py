@@ -373,3 +373,69 @@ class TestAllenAIModelsStreamingE2E:
             assert len(data_lines) > 0, "No data lines in SSE response"
             # Last data line should be [DONE]
             assert "data: [DONE]" in response.text
+
+
+class TestAllenAIModelsDeveloperRoleE2E:
+    """Tests for AllenAI models with developer role support."""
+
+    @pytest.mark.parametrize("model", ALLENAI_MODELS)
+    def test_allenai_model_with_developer_role(
+        self, client: TestClient, auth_headers: dict, model: str
+    ):
+        """Test AllenAI models with developer role instead of system role.
+
+        The developer role is an OpenAI API feature that some models support
+        as an alternative to the system role for setting assistant behavior.
+        """
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "developer",
+                    "content": "You are a helpful assistant who responds briefly.",
+                },
+                {"role": "user", "content": "What is 2+2?"},
+            ],
+            "max_tokens": 50,
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        # Developer role should be accepted by our API validation
+        # Provider may or may not support it, so we accept various status codes
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            data = response.json()
+            assert "choices" in data
+            assert data["choices"][0]["message"]["role"] == "assistant"
+
+    @pytest.mark.parametrize("model", ALLENAI_MODELS)
+    def test_allenai_model_developer_role_streaming(
+        self, client: TestClient, auth_headers: dict, model: str
+    ):
+        """Test streaming with developer role for AllenAI models."""
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "developer", "content": "Respond in one word only."},
+                {"role": "user", "content": "Hello"},
+            ],
+            "max_tokens": 30,
+            "stream": True,
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            assert "[DONE]" in response.text

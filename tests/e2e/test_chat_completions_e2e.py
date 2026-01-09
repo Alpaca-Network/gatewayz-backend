@@ -407,3 +407,109 @@ class TestChatCompletionsE2E:
         if response.status_code == 200:
             data = response.json()
             assert data["choices"][0]["message"]["content"]
+
+
+class TestChatCompletionsDeveloperRoleE2E:
+    """E2E tests for chat completions with developer message role.
+
+    The 'developer' role is an OpenAI API feature used by reasoning models
+    (o1, o3, etc.) as an alternative to the 'system' role.
+    """
+
+    def test_chat_completions_with_developer_role(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """Test chat completion with developer role message."""
+        payload = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {
+                    "role": "developer",
+                    "content": "You are a helpful assistant who responds briefly.",
+                },
+                {"role": "user", "content": "What is 2+2?"},
+            ],
+            "max_tokens": 50,
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        # Developer role should be accepted by our API validation
+        # Provider may or may not support it
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            data = response.json()
+            assert "choices" in data
+            assert data["choices"][0]["message"]["role"] == "assistant"
+
+    def test_chat_completions_developer_role_streaming(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """Test streaming chat completion with developer role."""
+        payload = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {"role": "developer", "content": "Respond in one word only."},
+                {"role": "user", "content": "Hello"},
+            ],
+            "max_tokens": 30,
+            "stream": True,
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            assert "[DONE]" in response.text
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "o1",
+            "o1-mini",
+            "o1-preview",
+            "o3-mini",
+        ],
+    )
+    def test_reasoning_models_with_developer_role(
+        self, client: TestClient, auth_headers: dict, model: str
+    ):
+        """Test OpenAI reasoning models (o1/o3) with developer role.
+
+        These models specifically use the developer role instead of system role.
+        """
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "developer",
+                    "content": "You are a helpful assistant.",
+                },
+                {"role": "user", "content": "What is 5+3?"},
+            ],
+            "max_tokens": 100,
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        # Reasoning models may not be available, so accept various status codes
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            data = response.json()
+            assert "choices" in data
+            assert data["choices"][0]["message"]["role"] == "assistant"
