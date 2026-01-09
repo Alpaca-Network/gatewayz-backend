@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Discriminator, Field, field_validator, model_validator
 
-ALLOWED_CHAT_ROLES = {"system", "user", "assistant", "tool", "function"}
+ALLOWED_CHAT_ROLES = {"system", "user", "assistant", "tool", "function", "developer"}
 
 
 class Message(BaseModel):
@@ -54,8 +54,8 @@ class Message(BaseModel):
                 return len(c) == 0
             return False
 
-        # User and system messages must have non-empty content
-        if role in ("user", "system") and is_empty_content(content):
+        # User, system, and developer messages must have non-empty content
+        if role in ("user", "system", "developer") and is_empty_content(content):
             raise ValueError(f"'{role}' messages must have non-empty content.")
 
         # Tool/function responses must have non-empty content
