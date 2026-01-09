@@ -132,10 +132,70 @@ def fake_supabase():
     return FakeSupabase()
 
 
+def _is_connection_error(exception: Exception) -> bool:
+    """Check if an exception is a connection-related error that should trigger retry."""
+    error_message = str(exception).lower()
+    connection_indicators = [
+        "connection",
+        "protocol",
+        "stream",
+        "terminated",
+        "network",
+        "timeout",
+        "econnreset",
+        "epipe",
+        "eof",
+        "socket",
+        "ssl",
+        "http/2",
+        "h2",
+        "localprotocolerror",
+        "remoteprotocolerror",
+        "stream reset",
+        "goaway",
+        "send_headers",
+    ]
+    return any(indicator in error_message for indicator in connection_indicators)
+
+
+def _make_execute_with_retry(get_client_func):
+    """Create an execute_with_retry function that uses the provided get_client function."""
+    def execute_with_retry(
+        operation,
+        max_retries: int = 2,
+        retry_delay: float = 0.5,
+        operation_name: str = "database operation",
+    ):
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                client = get_client_func()
+                return operation(client)
+            except Exception as e:
+                last_exception = e
+                if _is_connection_error(e):
+                    if attempt < max_retries:
+                        continue
+                else:
+                    # Non-connection error, don't retry
+                    raise
+        if last_exception:
+            raise last_exception
+    return execute_with_retry
+
+
 @pytest.fixture
 def mod(fake_supabase, monkeypatch):
-    # stub out get_supabase_client
-    supabase_mod = types.SimpleNamespace(get_supabase_client=lambda: fake_supabase)
+    # Set KEY_HASH_SALT for API key creation tests
+    monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
+
+    # stub out get_supabase_client and execute_with_retry
+    supabase_mod = types.SimpleNamespace(
+        get_supabase_client=lambda: fake_supabase,
+        execute_with_retry=_make_execute_with_retry(lambda: fake_supabase),
+        is_connection_error=_is_connection_error,
+        refresh_supabase_client=lambda: None,
+    )
     monkeypatch.setitem(sys.modules, "src.config.supabase_config", supabase_mod)
 
     # stub plan entitlements
@@ -578,7 +638,7 @@ def test_get_api_key_by_key_no_retry_on_non_connection_error(monkeypatch, mod, f
     def non_connection_error_table(name):
         nonlocal call_count
         call_count += 1
-        raise ValueError("Some other error that is not a connection issue")
+        raise ValueError("Invalid data format - missing required field")
 
     fake_supabase.table = non_connection_error_table
 

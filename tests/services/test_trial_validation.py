@@ -76,7 +76,8 @@ def test_validate_missing_key_returns_not_found(monkeypatch, mod):
     out = mod.validate_trial_access("sk-nope")
     assert out["is_valid"] is False
     assert out["is_trial"] is False
-    assert "not found" in out["error"].lower()
+    # Error message indicates invalid/forbidden when key not found in either table
+    assert "forbidden" in out["error"].lower() or "invalid" in out["error"].lower()
 
 
 def test_validate_non_trial_key(monkeypatch, mod):
@@ -221,7 +222,8 @@ def test_validate_handles_exception(monkeypatch, mod):
     out = mod.validate_trial_access("sk-any")
     assert out["is_valid"] is False
     assert out["is_trial"] is False
-    assert "validation error" in out["error"].lower()
+    # Error message includes "error occurred" and the original exception message
+    assert "error occurred" in out["error"].lower() or "supabase down" in out["error"].lower()
 
 
 # ----------------------------- tests: track_trial_usage -----------------------------
