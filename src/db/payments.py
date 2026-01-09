@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import execute_with_retry, get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +76,12 @@ def create_payment(
         if stripe_customer_id:
             payment_data["stripe_customer_id"] = stripe_customer_id
 
-        # Insert into Supabase
-        result = client.table("payments").insert(payment_data).execute()
+        # Insert into Supabase with retry logic for transient connection errors
+        def _insert_payment():
+            client = get_supabase_client()
+            return client.table("payments").insert(payment_data).execute()
+
+        result = execute_with_retry(_insert_payment, max_retries=2, retry_delay=0.2)
 
         if not result.data:
             logger.error("Failed to create payment record - no data returned")
@@ -274,7 +278,12 @@ def update_payment_status(
                     metadata["error"] = error_message
                     update_data["metadata"] = metadata
 
-        result = client.table("payments").update(update_data).eq("id", payment_id).execute()
+        # Update payment with retry logic for transient connection errors
+        def _update_payment():
+            client = get_supabase_client()
+            return client.table("payments").update(update_data).eq("id", payment_id).execute()
+
+        result = execute_with_retry(_update_payment, max_retries=2, retry_delay=0.2)
 
         if not result.data:
             logger.error(f"Failed to update payment {payment_id}")
