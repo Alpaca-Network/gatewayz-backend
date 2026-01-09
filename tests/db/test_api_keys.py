@@ -462,3 +462,128 @@ def test_get_user_all_api_keys_usage(mod, fake_supabase):
     by_name = {k["key_name"]: k for k in out["keys"]}
     assert by_name["K1"]["requests_remaining"] == 95
     assert by_name["K2"]["max_requests"] is None
+
+
+# ----------------------------- tests: HTTP/2 connection error handling -----------------------------
+
+def test_get_api_key_by_key_retries_on_http2_error(monkeypatch, mod, fake_supabase):
+    """HTTP/2 connection errors should trigger retry via execute_with_retry"""
+    # Seed a key
+    fake_supabase.table("api_keys_new").insert({
+        "api_key": "gw_live_retry",
+        "user_id": 1,
+        "key_name": "RetryKey",
+        "is_active": True,
+    }).execute()
+
+    call_count = 0
+    original_table = fake_supabase.table
+
+    def failing_then_succeeding_table(name):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("LocalProtocolError: StreamIDTooLowError: 173 is lower than 193")
+        return original_table(name)
+
+    fake_supabase.table = failing_then_succeeding_table
+
+    result = mod.get_api_key_by_key("gw_live_retry")
+
+    # Should succeed after retry
+    assert result is not None
+    assert result["api_key"] == "gw_live_retry"
+    assert call_count == 2  # Initial call + 1 retry
+
+
+def test_get_api_key_by_key_retries_on_connection_terminated(monkeypatch, mod, fake_supabase):
+    """ConnectionTerminated errors should trigger retry"""
+    fake_supabase.table("api_keys_new").insert({
+        "api_key": "gw_live_ct",
+        "user_id": 1,
+        "key_name": "CTKey",
+        "is_active": True,
+    }).execute()
+
+    call_count = 0
+    original_table = fake_supabase.table
+
+    def failing_then_succeeding_table(name):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("<ConnectionTerminated error_code:9, last_stream_id:191>")
+        return original_table(name)
+
+    fake_supabase.table = failing_then_succeeding_table
+
+    result = mod.get_api_key_by_key("gw_live_ct")
+
+    assert result is not None
+    assert result["api_key"] == "gw_live_ct"
+    assert call_count == 2
+
+
+def test_get_api_key_by_key_retries_on_send_headers_error(monkeypatch, mod, fake_supabase):
+    """SEND_HEADERS state errors should trigger retry"""
+    fake_supabase.table("api_keys_new").insert({
+        "api_key": "gw_live_sh",
+        "user_id": 1,
+        "key_name": "SHKey",
+        "is_active": True,
+    }).execute()
+
+    call_count = 0
+    original_table = fake_supabase.table
+
+    def failing_then_succeeding_table(name):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("Invalid input StreamInputs.SEND_HEADERS in state 5")
+        return original_table(name)
+
+    fake_supabase.table = failing_then_succeeding_table
+
+    result = mod.get_api_key_by_key("gw_live_sh")
+
+    assert result is not None
+    assert result["api_key"] == "gw_live_sh"
+    assert call_count == 2
+
+
+def test_get_api_key_by_key_returns_none_after_max_retries(monkeypatch, mod, fake_supabase):
+    """Should return None after max retries are exhausted"""
+    call_count = 0
+
+    def always_failing_table(name):
+        nonlocal call_count
+        call_count += 1
+        raise Exception("LocalProtocolError: StreamIDTooLowError: connection broken")
+
+    fake_supabase.table = always_failing_table
+
+    result = mod.get_api_key_by_key("gw_live_fail")
+
+    # Should return None after retries exhausted
+    assert result is None
+    # execute_with_retry uses max_retries=2, so initial + 2 retries = 3 calls
+    assert call_count == 3
+
+
+def test_get_api_key_by_key_no_retry_on_non_connection_error(monkeypatch, mod, fake_supabase):
+    """Non-connection errors should not trigger retry"""
+    call_count = 0
+
+    def non_connection_error_table(name):
+        nonlocal call_count
+        call_count += 1
+        raise ValueError("Some other error that is not a connection issue")
+
+    fake_supabase.table = non_connection_error_table
+
+    result = mod.get_api_key_by_key("gw_live_other")
+
+    # Should return None without retrying
+    assert result is None
+    assert call_count == 1  # Only 1 call, no retries for non-connection errors

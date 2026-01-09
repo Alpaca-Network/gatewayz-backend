@@ -217,20 +217,18 @@ def _validate_trial_access_uncached(api_key: str, retry_count: int = 0) -> dict[
         error_str = str(e)
 
         # Check for transient SSL/connection errors that may benefit from retry
-        # This includes HTTP/2 specific errors like StreamIDTooLowError, ConnectionTerminated
+        # is_connection_error() already covers: connectionterminated, connection reset,
+        # connection refused, broken pipe, stream reset, etc.
+        # Here we add HTTP/2 specific errors not covered by is_connection_error()
         is_transient_error = is_connection_error(e) or any(
             msg in error_str
             for msg in [
                 "EOF occurred in violation of protocol",
-                "Connection reset",
-                "Connection refused",
                 "timed out",
-                "ConnectionError",
-                # HTTP/2 specific errors
+                # HTTP/2 specific errors not covered by is_connection_error
                 "LocalProtocolError",
                 "RemoteProtocolError",
                 "StreamID",
-                "ConnectionTerminated",
                 "SEND_HEADERS",
                 "ConnectionState.CLOSED",
             ]
