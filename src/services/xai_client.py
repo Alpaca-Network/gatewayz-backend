@@ -40,14 +40,15 @@ def is_xai_reasoning_model(model: str) -> bool:
         True if the model supports reasoning, False otherwise
     """
     model_lower = model.lower()
+    # Check non-reasoning models FIRST (more specific patterns take priority)
+    # This prevents "grok-4-1-fast-non-reasoning" from matching "grok-4" pattern
+    for non_reasoning_model in XAI_NON_REASONING_MODELS:
+        if non_reasoning_model in model_lower:
+            return False
     # Check explicit reasoning models
     for reasoning_model in XAI_REASONING_MODELS:
         if reasoning_model in model_lower:
             return True
-    # Check if explicitly non-reasoning
-    for non_reasoning_model in XAI_NON_REASONING_MODELS:
-        if non_reasoning_model in model_lower:
-            return False
     # Default: newer grok-4+ models likely support reasoning
     if "grok-4" in model_lower or "grok-3-mini" in model_lower:
         return True
@@ -149,7 +150,9 @@ def make_xai_request_openai_stream(messages, model, **kwargs):
         # Merge reasoning params with kwargs (kwargs takes precedence if reasoning already set)
         if reasoning_params and "reasoning" not in kwargs:
             kwargs.update(reasoning_params)
-            logger.debug(f"xAI streaming request for {model} with reasoning params: {reasoning_params}")
+            logger.debug(
+                f"xAI streaming request for {model} with reasoning params: {reasoning_params}"
+            )
 
         stream = client.chat.completions.create(
             model=model, messages=messages, stream=True, **kwargs
