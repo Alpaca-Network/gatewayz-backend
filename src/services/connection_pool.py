@@ -50,6 +50,16 @@ HUGGINGFACE_TIMEOUT = httpx.Timeout(
     pool=5.0,
 )
 
+# xAI timeout for reasoning models (Grok 4.x with extended thinking)
+# xAI documentation recommends 3600s timeout for reasoning models
+# See: https://docs.x.ai/docs/guides/reasoning
+XAI_REASONING_TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=600.0,  # 10 minutes for extended reasoning (conservative vs 3600s)
+    write=10.0,
+    pool=5.0,
+)
+
 
 def _normalize_base_url(base_url: str) -> str:
     """Normalize base URLs to avoid duplicate cache keys due to trailing slashes."""
@@ -357,7 +367,12 @@ def get_huggingface_pooled_client() -> OpenAI:
 
 
 def get_xai_pooled_client() -> OpenAI:
-    """Get pooled client for X.AI."""
+    """Get pooled client for X.AI.
+
+    Uses extended timeout for Grok reasoning models which can take
+    significantly longer to respond due to extended thinking capabilities.
+    See: https://docs.x.ai/docs/guides/reasoning
+    """
     if not Config.XAI_API_KEY:
         raise ValueError("X.AI API key not configured")
 
@@ -365,6 +380,7 @@ def get_xai_pooled_client() -> OpenAI:
         provider="xai",
         base_url="https://api.x.ai/v1",
         api_key=Config.XAI_API_KEY,
+        timeout=XAI_REASONING_TIMEOUT,
     )
 
 

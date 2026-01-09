@@ -163,6 +163,27 @@ class StreamNormalizer:
         for field in fields:
             if field in data and data[field]:
                 return data[field]
+
+        # Handle Grok 4.1's reasoning_details array structure
+        # reasoning_details is an array of reasoning steps used by x-ai models
+        if "reasoning_details" in data and data["reasoning_details"]:
+            reasoning_details = data["reasoning_details"]
+            if isinstance(reasoning_details, list):
+                # Extract text content from reasoning details array
+                reasoning_texts = []
+                for detail in reasoning_details:
+                    if isinstance(detail, dict):
+                        # Handle various possible structures in reasoning_details
+                        text = detail.get("content") or detail.get("text") or detail.get("thinking")
+                        if text:
+                            reasoning_texts.append(text)
+                    elif isinstance(detail, str):
+                        reasoning_texts.append(detail)
+                if reasoning_texts:
+                    return "\n".join(reasoning_texts)
+            elif isinstance(reasoning_details, str):
+                return reasoning_details
+
         return None
 
     def _normalize_finish_reason(self, reason: Any) -> str | None:
