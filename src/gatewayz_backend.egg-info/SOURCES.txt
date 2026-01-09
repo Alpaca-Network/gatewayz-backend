@@ -17,6 +17,7 @@ src/config/logging_config.py
 src/config/opentelemetry_config.py
 src/config/redis_config.py
 src/config/supabase_config.py
+src/config/usage_limits.py
 src/db/__init__.py
 src/db/activity.py
 src/db/api_keys.py
@@ -38,6 +39,7 @@ src/db/ranking.py
 src/db/rate_limits.py
 src/db/referral.py
 src/db/roles.py
+src/db/shared_chats.py
 src/db/subscription_products.py
 src/db/trials.py
 src/db/users.py
@@ -65,6 +67,7 @@ src/routes/ai_sdk.py
 src/routes/alibaba_debug.py
 src/routes/analytics.py
 src/routes/api_keys.py
+src/routes/api_models.py
 src/routes/audit.py
 src/routes/auth.py
 src/routes/availability.py
@@ -99,11 +102,14 @@ src/routes/rate_limits.py
 src/routes/referral.py
 src/routes/roles.py
 src/routes/root.py
+src/routes/share.py
 src/routes/status_page.py
 src/routes/system.py
 src/routes/tools.py
 src/routes/transaction_analytics.py
+src/routes/trial_analytics.py
 src/routes/users.py
+src/routes/helpers/__init__.py
 src/schemas/__init__.py
 src/schemas/admin.py
 src/schemas/api_keys.py
@@ -117,6 +123,8 @@ src/schemas/payments.py
 src/schemas/plans.py
 src/schemas/providers.py
 src/schemas/proxy.py
+src/schemas/share.py
+src/schemas/trial_analytics.py
 src/schemas/trials.py
 src/schemas/users.py
 src/security/__init__.py
@@ -131,6 +139,7 @@ src/services/alibaba_cloud_client.py
 src/services/alpaca_network_client.py
 src/services/analytics.py
 src/services/anannas_client.py
+src/services/anthropic_client.py
 src/services/anthropic_transformer.py
 src/services/auth_cache.py
 src/services/auth_rate_limiting.py
@@ -145,6 +154,7 @@ src/services/clarifai_client.py
 src/services/cloudflare_workers_ai_client.py
 src/services/connection_pool.py
 src/services/connection_pool_monitor.py
+src/services/daily_usage_limiter.py
 src/services/db_cache.py
 src/services/deepinfra_client.py
 src/services/error_monitor.py
@@ -182,6 +192,7 @@ src/services/nebius_client.py
 src/services/notification.py
 src/services/novita_client.py
 src/services/onerouter_client.py
+src/services/openai_client.py
 src/services/openrouter_client.py
 src/services/passive_health_monitor.py
 src/services/payments.py
@@ -209,6 +220,7 @@ src/services/request_prioritization.py
 src/services/response_cache.py
 src/services/roles.py
 src/services/simple_health_cache.py
+src/services/simplismart_client.py
 src/services/startup.py
 src/services/statsig_service.py
 src/services/stream_normalizer.py
@@ -227,18 +239,21 @@ src/utils/braintrust_tracing.py
 src/utils/crypto.py
 src/utils/db_safety.py
 src/utils/dependency_utils.py
+src/utils/exceptions.py
 src/utils/performance_tracker.py
 src/utils/provider_safety.py
 src/utils/rate_limit_headers.py
 src/utils/release_tracking.py
 src/utils/reset_welcome_emails.py
 src/utils/retry.py
+src/utils/safe_logger.py
 src/utils/security_validators.py
 src/utils/sentry_context.py
 src/utils/sentry_insights.py
 src/utils/token_estimator.py
 src/utils/trial_utils.py
 src/utils/validators.py
+tests/test_admin_stats_growth_fix.py
 tests/test_auth_timeout_fixes.py
 tests/test_cache.py
 tests/test_health_alerting.py
