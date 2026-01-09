@@ -462,3 +462,132 @@ def test_get_user_all_api_keys_usage(mod, fake_supabase):
     by_name = {k["key_name"]: k for k in out["keys"]}
     assert by_name["K1"]["requests_remaining"] == 95
     assert by_name["K2"]["max_requests"] is None
+
+
+def test_create_api_key_primary_skips_trial_for_paid_user_pro_tier(mod, fake_supabase):
+    """Paid users with pro tier should not get trial status on new primary keys."""
+    # Seed a paid user with pro tier
+    fake_supabase.table("users").insert({
+        "id": 100,
+        "tier": "pro",
+        "subscription_status": "active",
+        "stripe_subscription_id": "sub_123"
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=100,
+        key_name="Primary Key",
+        environment_tag="live",
+        is_primary=True,
+    )
+
+    # Verify key was created
+    assert api_key.startswith("gw_live_")
+    rows = fake_supabase.store["api_keys_new"]
+    assert len(rows) == 1
+    row = rows[0]
+
+    # Verify trial was NOT set for paid user
+    assert row.get("is_trial") is not True
+    assert row.get("subscription_status") != "trial"
+    assert row.get("trial_end_date") is None
+
+
+def test_create_api_key_primary_skips_trial_for_paid_user_max_tier(mod, fake_supabase):
+    """Paid users with max tier should not get trial status on new primary keys."""
+    # Seed a paid user with max tier
+    fake_supabase.table("users").insert({
+        "id": 101,
+        "tier": "max",
+        "subscription_status": "active",
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=101,
+        key_name="Primary Key",
+        environment_tag="live",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    row = rows[0]
+
+    # Verify trial was NOT set for paid user
+    assert row.get("is_trial") is not True
+    assert row.get("subscription_status") != "trial"
+
+
+def test_create_api_key_primary_skips_trial_for_user_with_active_subscription(mod, fake_supabase):
+    """Users with active subscription status should not get trial."""
+    # Seed a user with active subscription but basic tier
+    fake_supabase.table("users").insert({
+        "id": 102,
+        "tier": "basic",
+        "subscription_status": "active",
+        "stripe_subscription_id": "sub_456"
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=102,
+        key_name="Primary Key",
+        environment_tag="live",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    row = rows[0]
+
+    # Verify trial was NOT set - has active subscription
+    assert row.get("is_trial") is not True
+    assert row.get("subscription_status") != "trial"
+
+
+def test_create_api_key_primary_sets_trial_for_new_free_user(mod, fake_supabase):
+    """New free users should still get trial status on primary keys."""
+    # Seed a free user (no subscription, basic tier)
+    fake_supabase.table("users").insert({
+        "id": 103,
+        "tier": "basic",
+        "subscription_status": None,
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=103,
+        key_name="Primary Key",
+        environment_tag="live",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    row = rows[0]
+
+    # Verify trial WAS set for free user
+    assert row.get("is_trial") is True
+    assert row.get("subscription_status") == "trial"
+    assert row.get("trial_end_date") is not None
+
+
+def test_create_api_key_primary_skips_trial_for_admin_tier(mod, fake_supabase):
+    """Admin tier users should not get trial status."""
+    fake_supabase.table("users").insert({
+        "id": 104,
+        "tier": "admin",
+        "subscription_status": None,
+        "stripe_subscription_id": None
+    }).execute()
+
+    api_key, key_id = mod.create_api_key(
+        user_id=104,
+        key_name="Primary Key",
+        environment_tag="live",
+        is_primary=True,
+    )
+
+    rows = fake_supabase.store["api_keys_new"]
+    row = rows[0]
+
+    # Verify trial was NOT set for admin
+    assert row.get("is_trial") is not True
+    assert row.get("subscription_status") != "trial"
