@@ -181,6 +181,7 @@ def _make_execute_with_retry(get_client_func):
                     raise
         if last_exception:
             raise last_exception
+        return None
     return execute_with_retry
 
 
