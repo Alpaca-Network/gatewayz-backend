@@ -657,3 +657,24 @@ def test_validate_max_retries_exceeded(monkeypatch, mod):
     assert result["is_valid"] is False
     assert "error" in result
     assert call_count == 3  # Initial call + 2 retries (MAX_RETRIES=2)
+
+
+def test_validate_no_retry_on_non_connection_error(monkeypatch, mod):
+    """Non-connection errors should not trigger retry logic"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+
+    def failing_client():
+        nonlocal call_count
+        call_count += 1
+        # Non-connection error (e.g., authentication failure)
+        raise Exception("Invalid authentication credentials")
+
+    monkeypatch.setattr(mod, "get_supabase_client", failing_client)
+
+    result = mod.validate_trial_access("sk-fail")
+
+    # Should fail immediately without retry
+    assert result["is_valid"] is False
+    assert call_count == 1  # Only initial call, no retries

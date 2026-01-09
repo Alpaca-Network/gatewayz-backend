@@ -7,6 +7,8 @@ PERF: Includes in-memory caching to reduce database queries by ~95%
 """
 
 import logging
+import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -246,13 +248,10 @@ def _validate_trial_access_uncached(api_key: str, retry_count: int = 0) -> dict[
                 logger.warning(f"Failed to refresh Supabase client: {refresh_error}")
 
             # Brief pause before retry to allow connection to reset
-            import time
             time.sleep(0.1 * (retry_count + 1))  # 0.1s, 0.2s backoff
             return _validate_trial_access_uncached(api_key, retry_count + 1)
 
         logger.error(f"Error validating trial access: {e}")
-        import traceback
-
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {
             "is_valid": False,
