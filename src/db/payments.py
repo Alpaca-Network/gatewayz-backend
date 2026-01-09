@@ -47,8 +47,6 @@ def create_payment(
         Created payment record or None if failed
     """
     try:
-        client = get_supabase_client()
-
         # Calculate amount in cents
         amount_cents = int(amount * 100)
 
@@ -253,8 +251,6 @@ def update_payment_status(
         Updated payment record or None if failed
     """
     try:
-        client = get_supabase_client()
-
         update_data = {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
 
         if stripe_payment_intent_id:
