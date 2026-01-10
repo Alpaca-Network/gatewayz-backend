@@ -83,14 +83,17 @@ async def get_overall_status():
         active_incidents = incidents_response.count or 0
 
         # Calculate gateway health metrics
-        gateways_set = set(p["gateway"] for p in providers if p.get("gateway"))
+        # Filter out None and empty string gateways
+        gateways_set = set(
+            p["gateway"] for p in providers if p.get("gateway") and p["gateway"].strip()
+        )
         total_gateways = len(gateways_set) if gateways_set else 0
 
         # Calculate healthy gateways (gateways that have at least one healthy provider)
         gateway_health = {}
         for p in providers:
             gw = p.get("gateway")
-            if gw:
+            if gw and gw.strip():  # Filter out None and empty strings
                 if gw not in gateway_health:
                     gateway_health[gw] = {"has_healthy": False}
                 # Consider a gateway healthy if any of its providers are operational

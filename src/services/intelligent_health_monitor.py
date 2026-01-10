@@ -989,7 +989,6 @@ class IntelligentHealthMonitor:
                     try:
                         provider = model_data["provider"]
                         model = model_data["model"]
-                        gateway = model_data.get("gateway", provider)
 
                         # Calculate 24h uptime from history
                         history_24h = (
