@@ -338,6 +338,68 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         raise RuntimeError(f"Failed to get chat session: {e}") from e
 
 
+def get_chat_message(message_id: int, user_id: int) -> dict[str, Any] | None:
+    """
+    Get a specific chat message and verify it belongs to the user.
+
+    This function checks that the message exists and that its parent session
+    belongs to the specified user, providing authorization verification.
+
+    Args:
+        message_id: The message ID to retrieve
+        user_id: The user ID for authorization check
+
+    Returns:
+        The message dict if found and authorized, None otherwise
+    """
+    try:
+        client = get_supabase_client()
+
+        # Get the message
+        def query_message():
+            return (
+                client.table("chat_messages")
+                .select("*, chat_sessions!inner(user_id, is_active)")
+                .eq("id", message_id)
+                .execute()
+            )
+
+        result = _execute_with_connection_retry(
+            query_message,
+            f"get_chat_message(message={message_id}, user={user_id})"
+        )
+
+        if not result.data:
+            logger.warning(f"Chat message {message_id} not found")
+            return None
+
+        message = result.data[0]
+
+        # Verify the message's session belongs to the user and is active
+        session_data = message.get("chat_sessions", {})
+        if session_data.get("user_id") != user_id:
+            logger.warning(
+                f"Chat message {message_id} does not belong to user {user_id}"
+            )
+            return None
+
+        if not session_data.get("is_active", False):
+            logger.warning(
+                f"Chat message {message_id} belongs to inactive session"
+            )
+            return None
+
+        # Remove the joined session data from the response
+        message.pop("chat_sessions", None)
+
+        logger.info(f"Retrieved message {message_id} for user {user_id}")
+        return message
+
+    except Exception as e:
+        logger.error(f"Failed to get chat message: {e}")
+        raise RuntimeError(f"Failed to get chat message: {e}") from e
+
+
 @with_retry(
     max_attempts=3,
     initial_delay=0.1,

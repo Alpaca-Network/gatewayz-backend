@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.db.chat_history import (
     create_chat_session,
     delete_chat_session,
+    get_chat_message,
     get_chat_session,
     get_chat_session_stats,
     get_user_chat_sessions,
@@ -441,6 +442,12 @@ async def submit_feedback(
             session = get_chat_session(request.session_id, user["id"])
             if not session:
                 raise HTTPException(status_code=404, detail="Chat session not found")
+
+        # If message_id provided, verify it belongs to user's session
+        if request.message_id is not None:
+            message = get_chat_message(request.message_id, user["id"])
+            if not message:
+                raise HTTPException(status_code=404, detail="Chat message not found")
 
         # Save feedback
         feedback = save_message_feedback(

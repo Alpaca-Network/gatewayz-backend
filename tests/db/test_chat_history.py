@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timedelta, timezone
 
 # =========================
 # In-memory Supabase stub
@@ -94,13 +94,58 @@ class _Select(_BaseQuery):
     def __init__(self, store, table):
         super().__init__(store, table)
         self._count = None
-    def select(self, *_cols, count=None):
-        self._count = count; return self
+        self._embed = None  # (table, cols, inner)
+        self._embed_fk = None  # Foreign key field on this table pointing to embedded table
+        self._limit = None
+
+    def limit(self, n):
+        self._limit = n
+        if self._range is None:
+            self._range = (0, n - 1)
+        return self
+
+    def select(self, *cols, count=None):
+        self._count = count
+        # Parse PostgREST embedded resource syntax: "*, table!inner(col1, col2)"
+        for col in cols:
+            if col and "!" in col:
+                # Parse: "*, chat_sessions!inner(user_id, is_active)"
+                import re
+                match = re.match(r".*?,?\s*(\w+)!(\w+)\(([^)]+)\)", col)
+                if match:
+                    embed_table = match.group(1)
+                    embed_type = match.group(2)  # "inner" or "left"
+                    embed_cols = [c.strip() for c in match.group(3).split(",")]
+                    self._embed = (embed_table, embed_cols, embed_type == "inner")
+                    # Determine FK field based on convention
+                    # e.g., "chat_sessions" -> "session_id" (strip prefix and add _id)
+                    table_parts = embed_table.split("_")
+                    if len(table_parts) > 1:
+                        # Handle "chat_sessions" -> "session_id"
+                        self._embed_fk = table_parts[-1].rstrip("s") + "_id"
+                    else:
+                        self._embed_fk = embed_table.rstrip("s") + "_id"
+        return self
+
     def execute(self):
         rows = []
         for r in self.store[self.table]:
             if self._match(r):
-                rows.append(r.copy())
+                row_copy = r.copy()
+                # Handle embedded resource
+                if self._embed:
+                    embed_table, embed_cols, is_inner = self._embed
+                    fk_value = r.get(self._embed_fk)
+                    embed_row = None
+                    for er in self.store[embed_table]:
+                        if er.get("id") == fk_value:
+                            embed_row = {col: er.get(col) for col in embed_cols}
+                            embed_row["id"] = er.get("id")  # Include id
+                            break
+                    if is_inner and embed_row is None:
+                        continue  # Skip row if inner join has no match
+                    row_copy[embed_table] = embed_row or {}
+                rows.append(row_copy)
         rows = self._apply_order_range(rows)
         cnt = len(rows) if self._count == "exact" else None
         return _Result(rows, cnt)
@@ -271,3 +316,72 @@ def test_search_chat_sessions_title_and_message(sb):
 
     # ensure sorted by updated_at desc
     assert res == sorted(res, key=lambda r: r["updated_at"], reverse=True)
+
+
+# =========================
+# Tests: get_chat_message
+# =========================
+
+def test_get_chat_message_success(sb):
+    """Test getting a message that belongs to the user"""
+    import src.db.chat_history as ch
+
+    # Create session for user 1
+    sess = ch.create_chat_session(user_id=1, title="Test Session", model="openai/gpt-4o")
+
+    # Save a message
+    msg = ch.save_chat_message(sess["id"], "assistant", "Hello, world!", "openai/gpt-4o", 10)
+
+    # Get the message - should succeed for user 1
+    result = ch.get_chat_message(msg["id"], user_id=1)
+
+    assert result is not None
+    assert result["id"] == msg["id"]
+    assert result["content"] == "Hello, world!"
+    assert result["role"] == "assistant"
+    # Ensure joined session data is removed from response
+    assert "chat_sessions" not in result
+
+
+def test_get_chat_message_wrong_user_returns_none(sb):
+    """Test that getting a message belonging to another user returns None"""
+    import src.db.chat_history as ch
+
+    # Create session for user 1
+    sess = ch.create_chat_session(user_id=1, title="Test Session", model="openai/gpt-4o")
+
+    # Save a message
+    msg = ch.save_chat_message(sess["id"], "assistant", "Hello, world!", "openai/gpt-4o", 10)
+
+    # Try to get the message as user 2 - should return None
+    result = ch.get_chat_message(msg["id"], user_id=2)
+
+    assert result is None
+
+
+def test_get_chat_message_nonexistent_returns_none(sb):
+    """Test that getting a nonexistent message returns None"""
+    import src.db.chat_history as ch
+
+    result = ch.get_chat_message(message_id=99999, user_id=1)
+
+    assert result is None
+
+
+def test_get_chat_message_inactive_session_returns_none(sb):
+    """Test that getting a message from an inactive session returns None"""
+    import src.db.chat_history as ch
+
+    # Create session for user 1
+    sess = ch.create_chat_session(user_id=1, title="Test Session", model="openai/gpt-4o")
+
+    # Save a message
+    msg = ch.save_chat_message(sess["id"], "assistant", "Hello, world!", "openai/gpt-4o", 10)
+
+    # Deactivate the session
+    ch.delete_chat_session(sess["id"], user_id=1)
+
+    # Try to get the message - should return None because session is inactive
+    result = ch.get_chat_message(msg["id"], user_id=1)
+
+    assert result is None

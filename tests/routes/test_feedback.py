@@ -211,6 +211,82 @@ def test_submit_feedback_session_not_found(
     assert "Chat session not found" in response.json()["detail"]
 
 
+@patch("src.routes.chat_history.get_chat_message")
+@patch("src.routes.chat_history.get_user")
+def test_submit_feedback_message_not_found(
+    mock_get_user, mock_get_message, client, auth_headers, mock_user
+):
+    """Test submitting feedback with non-existent message returns 404"""
+    mock_get_user.return_value = mock_user
+    mock_get_message.return_value = None
+
+    response = client.post(
+        "/v1/chat/feedback",
+        json={"feedback_type": "thumbs_up", "message_id": 99999},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert "Chat message not found" in response.json()["detail"]
+
+
+@patch("src.routes.chat_history.get_chat_message")
+@patch("src.routes.chat_history.get_user")
+def test_submit_feedback_message_belongs_to_other_user(
+    mock_get_user, mock_get_message, client, auth_headers, mock_user
+):
+    """Test submitting feedback for another user's message returns 404"""
+    mock_get_user.return_value = mock_user
+    # get_chat_message returns None when message doesn't belong to user
+    mock_get_message.return_value = None
+
+    response = client.post(
+        "/v1/chat/feedback",
+        json={"feedback_type": "thumbs_up", "message_id": 12345},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert "Chat message not found" in response.json()["detail"]
+
+
+@patch("src.routes.chat_history.log_activity_background")
+@patch("src.routes.chat_history.save_message_feedback")
+@patch("src.routes.chat_history.get_chat_message")
+@patch("src.routes.chat_history.get_chat_session")
+@patch("src.routes.chat_history.get_user")
+def test_submit_feedback_with_valid_message_id(
+    mock_get_user, mock_get_session, mock_get_message, mock_save_feedback, mock_log_activity,
+    client, auth_headers, mock_user, mock_feedback
+):
+    """Test submitting feedback with valid message_id succeeds"""
+    mock_get_user.return_value = mock_user
+    mock_get_session.return_value = {"id": 100, "user_id": 1}
+    mock_get_message.return_value = {
+        "id": 200,
+        "session_id": 100,
+        "role": "assistant",
+        "content": "Test response",
+    }
+    mock_save_feedback.return_value = mock_feedback
+
+    response = client.post(
+        "/v1/chat/feedback",
+        json={
+            "feedback_type": "thumbs_up",
+            "session_id": 100,
+            "message_id": 200,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    # Verify get_chat_message was called with correct params
+    mock_get_message.assert_called_once_with(200, mock_user["id"])
+
+
 def test_submit_feedback_unauthorized(client):
     """Test submitting feedback without auth returns 401"""
     # Don't use the auth override
