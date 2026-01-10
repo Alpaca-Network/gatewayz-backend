@@ -449,6 +449,12 @@ async def submit_feedback(
             if not message:
                 raise HTTPException(status_code=404, detail="Chat message not found")
 
+            # If both session_id and message_id provided, verify they match
+            if request.session_id is not None and message.get("session_id") != request.session_id:
+                raise HTTPException(
+                    status_code=400, detail="Message does not belong to specified session"
+                )
+
         # Save feedback
         feedback = save_message_feedback(
             user_id=user["id"],

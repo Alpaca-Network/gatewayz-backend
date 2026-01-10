@@ -287,6 +287,37 @@ def test_submit_feedback_with_valid_message_id(
     mock_get_message.assert_called_once_with(200, mock_user["id"])
 
 
+@patch("src.routes.chat_history.get_chat_message")
+@patch("src.routes.chat_history.get_chat_session")
+@patch("src.routes.chat_history.get_user")
+def test_submit_feedback_message_session_mismatch(
+    mock_get_user, mock_get_session, mock_get_message, client, auth_headers, mock_user
+):
+    """Test submitting feedback with message_id that doesn't match session_id returns 400"""
+    mock_get_user.return_value = mock_user
+    mock_get_session.return_value = {"id": 100, "user_id": 1}
+    # Message belongs to a different session (session_id=200, not 100)
+    mock_get_message.return_value = {
+        "id": 300,
+        "session_id": 200,  # Different from request.session_id (100)
+        "role": "assistant",
+        "content": "Test response",
+    }
+
+    response = client.post(
+        "/v1/chat/feedback",
+        json={
+            "feedback_type": "thumbs_up",
+            "session_id": 100,
+            "message_id": 300,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert "Message does not belong to specified session" in response.json()["detail"]
+
+
 def test_submit_feedback_unauthorized(client):
     """Test submitting feedback without auth returns 401"""
     # Don't use the auth override
