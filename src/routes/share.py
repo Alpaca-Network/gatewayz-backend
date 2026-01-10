@@ -24,7 +24,7 @@ from src.schemas.share import (
     SharedChatPublicView,
     ShareLinksListResponse,
 )
-from src.security.deps import get_api_key, get_api_key_optional
+from src.security.deps import get_api_key, get_optional_api_key
 from src.services.user_lookup_cache import get_user
 
 logger = logging.getLogger(__name__)
