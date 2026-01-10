@@ -3,7 +3,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from fastapi import APIRouter, Query, HTTPException, Depends
 from collections import defaultdict
-import math
+import hashlib
+import json
+import logging
 
 from ..config.supabase_config import get_supabase_admin
 from ..schemas.health_timeline import (
@@ -17,7 +19,51 @@ from ..schemas.health_timeline import (
 )
 from ..security.deps import require_admin
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Cache for health timeline data (5-minute TTL)
+_health_timeline_cache = {
+    "providers": {},  # Key: cache_key, Value: {"data": response, "timestamp": datetime}
+    "models": {},     # Key: cache_key, Value: {"data": response, "timestamp": datetime}
+    "ttl": 300,       # 5 minutes in seconds
+}
+
+
+def get_cache_key(endpoint: str, **params) -> str:
+    """Generate cache key from endpoint and parameters"""
+    param_str = json.dumps(params, sort_keys=True)
+    return hashlib.md5(f"{endpoint}:{param_str}".encode()).hexdigest()
+
+
+def get_cached_response(cache_type: str, cache_key: str) -> Optional[dict]:
+    """Retrieve cached response if still valid"""
+    cache = _health_timeline_cache.get(cache_type, {})
+    cached_entry = cache.get(cache_key)
+
+    if not cached_entry:
+        return None
+
+    # Check if cache is still fresh
+    cache_age = (datetime.now(timezone.utc) - cached_entry["timestamp"]).total_seconds()
+    if cache_age >= _health_timeline_cache["ttl"]:
+        # Cache expired
+        return None
+
+    logger.debug(f"Cache hit for {cache_type}:{cache_key} (age: {cache_age:.1f}s)")
+    return cached_entry["data"]
+
+
+def set_cached_response(cache_type: str, cache_key: str, data: dict):
+    """Store response in cache"""
+    if cache_type not in _health_timeline_cache:
+        _health_timeline_cache[cache_type] = {}
+
+    _health_timeline_cache[cache_type][cache_key] = {
+        "data": data,
+        "timestamp": datetime.now(timezone.utc)
+    }
+    logger.debug(f"Cached {cache_type}:{cache_key}")
 
 
 def parse_period(period: str) -> timedelta:
@@ -123,7 +169,15 @@ async def get_providers_uptime(
     Get provider uptime timeline with time-bucketed samples.
 
     Returns uptime percentage, status samples, and incident summaries for each provider.
+
+    Cached for 5 minutes to reduce database load.
     """
+    # Check cache first
+    cache_key = get_cache_key("providers_uptime", period=period, bucket=bucket)
+    cached = get_cached_response("providers", cache_key)
+    if cached:
+        return ProviderUptimeResponse(**cached)
+
     supabase = get_supabase_admin()
     current_time = datetime.now(timezone.utc)
 
@@ -190,14 +244,8 @@ async def get_providers_uptime(
             ]
 
             if not bucket_records:
-                # No data for this bucket - assume operational
-                buckets.append({
-                    "timestamp": bucket_start,
-                    "status": "operational",
-                    "duration_minutes": bucket_minutes,
-                    "incident": None,
-                    "success_rate": 1.0
-                })
+                # No data for this bucket - skip it to avoid false "operational" status
+                # This allows gaps in monitoring to be visible as gaps in the timeline
                 continue
 
             # Calculate metrics for this bucket
@@ -265,7 +313,13 @@ async def get_providers_uptime(
     # Sort by uptime percentage (worst first for alerting)
     providers.sort(key=lambda p: p.uptime_percentage)
 
-    return ProviderUptimeResponse(success=True, providers=providers)
+    # Create response
+    response = ProviderUptimeResponse(success=True, providers=providers)
+
+    # Cache the response
+    set_cached_response("providers", cache_key, response.model_dump())
+
+    return response
 
 
 @router.get(
@@ -283,7 +337,15 @@ async def get_models_uptime(
     Get model uptime timeline with time-bucketed samples.
 
     Returns uptime percentage, status samples, and incident summaries for top models.
+
+    Cached for 5 minutes to reduce database load.
     """
+    # Check cache first
+    cache_key = get_cache_key("models_uptime", period=period, bucket=bucket, limit=limit)
+    cached = get_cached_response("models", cache_key)
+    if cached:
+        return ModelUptimeResponse(**cached)
+
     supabase = get_supabase_admin()
     current_time = datetime.now(timezone.utc)
 
@@ -353,14 +415,8 @@ async def get_models_uptime(
             ]
 
             if not bucket_records:
-                # No data for this bucket - assume operational
-                buckets.append({
-                    "timestamp": bucket_start,
-                    "status": "operational",
-                    "duration_minutes": bucket_minutes,
-                    "incident": None,
-                    "success_rate": 1.0
-                })
+                # No data for this bucket - skip it to avoid false "operational" status
+                # This allows gaps in monitoring to be visible as gaps in the timeline
                 continue
 
             # Calculate metrics for this bucket
@@ -430,4 +486,10 @@ async def get_models_uptime(
     models.sort(key=lambda m: m.uptime_percentage)
     models = models[:limit]
 
-    return ModelUptimeResponse(success=True, models=models)
+    # Create response
+    response = ModelUptimeResponse(success=True, models=models)
+
+    # Cache the response
+    set_cached_response("models", cache_key, response.model_dump())
+
+    return response
