@@ -527,9 +527,12 @@ class IntelligentHealthMonitor:
 
             next_check_at = datetime.now(timezone.utc) + timedelta(seconds=interval)
 
-            # Calculate uptime percentages (simplified - should use history)
-            success_rate = success_count / call_count if call_count > 0 else 1.0
-            uptime_percentage = success_rate * 100
+            # Preserve existing uptime percentages - they are calculated from actual history
+            # by the _aggregate_hourly_metrics background task. Only set initial defaults
+            # for new models that don't have values yet.
+            existing_uptime_24h = current_data.get("uptime_percentage_24h")
+            existing_uptime_7d = current_data.get("uptime_percentage_7d")
+            existing_uptime_30d = current_data.get("uptime_percentage_30d")
 
             # Update model_health_tracking
             update_data = {
@@ -550,9 +553,11 @@ class IntelligentHealthMonitor:
                 "last_success_at": result.checked_at.isoformat() if is_success else current_data.get("last_success_at"),
                 "last_failure_at": result.checked_at.isoformat() if not is_success else current_data.get("last_failure_at"),
                 "next_check_at": next_check_at.isoformat(),
-                "uptime_percentage_24h": uptime_percentage,  # Should be calculated from history
-                "uptime_percentage_7d": uptime_percentage,
-                "uptime_percentage_30d": uptime_percentage,
+                # Preserve existing uptime percentages (calculated by aggregate task)
+                # Default to 100.0 for new models - they will be updated by the aggregate task
+                "uptime_percentage_24h": existing_uptime_24h if existing_uptime_24h is not None else 100.0,
+                "uptime_percentage_7d": existing_uptime_7d if existing_uptime_7d is not None else 100.0,
+                "uptime_percentage_30d": existing_uptime_30d if existing_uptime_30d is not None else 100.0,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -950,10 +955,126 @@ class IntelligentHealthMonitor:
                 await asyncio.sleep(300)
 
     async def _aggregate_hourly_metrics(self):
-        """Aggregate hourly health metrics for fast querying"""
-        # This would aggregate model_health_history into model_health_aggregates
-        # Implementation details depend on volume and requirements
-        pass
+        """Aggregate hourly health metrics and update uptime percentages from actual history data"""
+        try:
+            from src.config.supabase_config import supabase
+
+            # Calculate 24h uptime from model_health_history for all models
+            # This uses actual success/failure counts from the last 24 hours
+            now = datetime.now(timezone.utc)
+            twenty_four_hours_ago = now - timedelta(hours=24)
+            seven_days_ago = now - timedelta(days=7)
+            thirty_days_ago = now - timedelta(days=30)
+
+            # Get all tracked models
+            tracked_models = (
+                supabase.table("model_health_tracking")
+                .select("provider, model, gateway")
+                .eq("is_enabled", True)
+                .execute()
+            )
+
+            if not tracked_models.data:
+                logger.debug("No tracked models found for uptime aggregation")
+                return
+
+            # Process models in batches to avoid overwhelming the database
+            batch_size = 50
+            updated_count = 0
+
+            for i in range(0, len(tracked_models.data), batch_size):
+                batch = tracked_models.data[i : i + batch_size]
+
+                for model_data in batch:
+                    try:
+                        provider = model_data["provider"]
+                        model = model_data["model"]
+                        gateway = model_data.get("gateway", provider)
+
+                        # Calculate 24h uptime from history
+                        history_24h = (
+                            supabase.table("model_health_history")
+                            .select("status")
+                            .eq("provider", provider)
+                            .eq("model", model)
+                            .gte("checked_at", twenty_four_hours_ago.isoformat())
+                            .execute()
+                        )
+
+                        if history_24h.data and len(history_24h.data) > 0:
+                            total_checks_24h = len(history_24h.data)
+                            success_checks_24h = len(
+                                [h for h in history_24h.data if h.get("status") == "success"]
+                            )
+                            uptime_24h = (success_checks_24h / total_checks_24h * 100) if total_checks_24h > 0 else 100.0
+                        else:
+                            # No history data in 24h - use last_status as indicator
+                            # If no checks, assume healthy (new model)
+                            uptime_24h = 100.0
+
+                        # Calculate 7d uptime from history
+                        history_7d = (
+                            supabase.table("model_health_history")
+                            .select("status")
+                            .eq("provider", provider)
+                            .eq("model", model)
+                            .gte("checked_at", seven_days_ago.isoformat())
+                            .execute()
+                        )
+
+                        if history_7d.data and len(history_7d.data) > 0:
+                            total_checks_7d = len(history_7d.data)
+                            success_checks_7d = len(
+                                [h for h in history_7d.data if h.get("status") == "success"]
+                            )
+                            uptime_7d = (success_checks_7d / total_checks_7d * 100) if total_checks_7d > 0 else 100.0
+                        else:
+                            uptime_7d = 100.0
+
+                        # Calculate 30d uptime from history
+                        history_30d = (
+                            supabase.table("model_health_history")
+                            .select("status")
+                            .eq("provider", provider)
+                            .eq("model", model)
+                            .gte("checked_at", thirty_days_ago.isoformat())
+                            .execute()
+                        )
+
+                        if history_30d.data and len(history_30d.data) > 0:
+                            total_checks_30d = len(history_30d.data)
+                            success_checks_30d = len(
+                                [h for h in history_30d.data if h.get("status") == "success"]
+                            )
+                            uptime_30d = (success_checks_30d / total_checks_30d * 100) if total_checks_30d > 0 else 100.0
+                        else:
+                            uptime_30d = 100.0
+
+                        # Update the model_health_tracking table with calculated uptime
+                        supabase.table("model_health_tracking").update(
+                            {
+                                "uptime_percentage_24h": round(uptime_24h, 2),
+                                "uptime_percentage_7d": round(uptime_7d, 2),
+                                "uptime_percentage_30d": round(uptime_30d, 2),
+                                "updated_at": now.isoformat(),
+                            }
+                        ).eq("provider", provider).eq("model", model).execute()
+
+                        updated_count += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to aggregate metrics for {model_data.get('provider')}/{model_data.get('model')}: {e}"
+                        )
+                        continue
+
+                # Small delay between batches to avoid rate limiting
+                await asyncio.sleep(0.1)
+
+            logger.info(f"Aggregated uptime metrics for {updated_count} models")
+
+        except Exception as e:
+            logger.error(f"Failed to aggregate hourly metrics: {e}", exc_info=True)
 
     async def _incident_resolution_loop(self):
         """Check for auto-resolvable incidents"""
