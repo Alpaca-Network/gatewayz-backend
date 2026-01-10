@@ -1482,8 +1482,25 @@ class StripeService:
                 return
 
             subscription = stripe.Subscription.retrieve(invoice.subscription)
-            user_id = int(subscription.metadata.get("user_id"))
-            metadata_tier = subscription.metadata.get("tier")
+
+            # Extract user_id with fallback strategies
+            user_id = self._extract_user_id_from_subscription(subscription)
+
+            if user_id is None:
+                subscription_id = self._get_stripe_object_value(subscription, "id")
+                customer_id = self._get_stripe_object_value(subscription, "customer")
+                logger.error(
+                    f"Cannot process invoice.paid: unable to identify user. "
+                    f"invoice_id={invoice.id}, subscription_id={subscription_id}, customer_id={customer_id}. "
+                    f"ACTION REQUIRED: Manually add subscription credits."
+                )
+                raise ValueError(
+                    f"Missing user_id in subscription metadata and no fallback found "
+                    f"(invoice_id={invoice.id})"
+                )
+
+            metadata = self._metadata_to_dict(self._get_stripe_object_value(subscription, "metadata"))
+            metadata_tier = metadata.get("tier") if metadata else None
 
             # Resolve tier from metadata or subscription items
             tier, _ = self._resolve_tier_from_subscription(subscription, metadata_tier)
