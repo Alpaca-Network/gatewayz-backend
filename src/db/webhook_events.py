@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import execute_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,16 @@ def is_event_processed(event_id: str) -> bool:
         True if event was already processed, False otherwise
     """
     try:
-        client = get_supabase_client()
 
-        result = (
-            client.table("stripe_webhook_events")
-            .select("event_id")
-            .eq("event_id", event_id)
-            .execute()
-        )
+        def _check_event(client):
+            return (
+                client.table("stripe_webhook_events")
+                .select("event_id")
+                .eq("event_id", event_id)
+                .execute()
+            )
+
+        result = execute_with_retry(_check_event, max_retries=2, retry_delay=0.2)
 
         exists = bool(result.data)
         if exists:
@@ -90,21 +92,23 @@ def record_processed_event(
         True if recorded successfully, False otherwise
     """
     try:
-        client = get_supabase_client()
 
-        result = (
-            client.table("stripe_webhook_events")
-            .insert(
-                {
-                    "event_id": event_id,
-                    "event_type": event_type,
-                    "user_id": user_id,
-                    "metadata": metadata or {},
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
-                }
+        def _record_event(client):
+            return (
+                client.table("stripe_webhook_events")
+                .insert(
+                    {
+                        "event_id": event_id,
+                        "event_type": event_type,
+                        "user_id": user_id,
+                        "metadata": metadata or {},
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .execute()
             )
-            .execute()
-        )
+
+        result = execute_with_retry(_record_event, max_retries=2, retry_delay=0.2)
 
         if result.data:
             logger.info(f"Recorded processed webhook event: {event_id} ({event_type})")
@@ -130,11 +134,11 @@ def get_processed_event(event_id: str) -> dict[str, Any] | None:
         Event details if found, None otherwise
     """
     try:
-        client = get_supabase_client()
 
-        result = (
-            client.table("stripe_webhook_events").select("*").eq("event_id", event_id).execute()
-        )
+        def _get_event(client):
+            return client.table("stripe_webhook_events").select("*").eq("event_id", event_id).execute()
+
+        result = execute_with_retry(_get_event, max_retries=2, retry_delay=0.2)
 
         if result.data:
             return result.data[0]
@@ -157,16 +161,14 @@ def cleanup_old_events(days: int = 90) -> int:
         Number of events deleted
     """
     try:
-        client = get_supabase_client()
-
         # Calculate cutoff timestamp
         cutoff = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
         cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
 
-        # Delete old events
-        result = (
-            client.table("stripe_webhook_events").delete().lt("created_at", cutoff_dt).execute()
-        )
+        def _cleanup_events(client):
+            return client.table("stripe_webhook_events").delete().lt("created_at", cutoff_dt).execute()
+
+        result = execute_with_retry(_cleanup_events, max_retries=2, retry_delay=0.2)
 
         count = len(result.data) if result.data else 0
         logger.info(f"Cleaned up {count} old webhook events (older than {days} days)")
