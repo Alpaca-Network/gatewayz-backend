@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 
-from ..config.supabase_config import get_supabase_admin
+from ..config.supabase_config import get_supabase_client
 from ..schemas.health_timeline import (
     ProviderUptimeResponse,
     ModelUptimeResponse,
@@ -178,7 +178,7 @@ async def get_providers_uptime(
     if cached:
         return ProviderUptimeResponse(**cached)
 
-    supabase = get_supabase_admin()
+    supabase = get_supabase_client()
     current_time = datetime.now(timezone.utc)
 
     # Parse parameters
@@ -346,7 +346,7 @@ async def get_models_uptime(
     if cached:
         return ModelUptimeResponse(**cached)
 
-    supabase = get_supabase_admin()
+    supabase = get_supabase_client()
     current_time = datetime.now(timezone.utc)
 
     # Parse parameters
