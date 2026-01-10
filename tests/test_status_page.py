@@ -4,7 +4,7 @@ Tests for the Public Status Page API
 Tests the status page endpoints that provide public health information.
 """
 
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -619,3 +619,45 @@ async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
     assert data["uptime_percentage"] == 0.0
     assert data["healthy_models"] == 0
     assert data["total_models"] == 100
+
+
+@pytest.mark.asyncio
+@patch("src.routes.status_page.supabase")
+async def test_providers_endpoint_caps_healthy_models(mock_supabase, client):
+    """
+    Test that the /providers endpoint also applies the data consistency check.
+
+    The /providers endpoint should cap healthy_models to total_models
+    just like the main status endpoint does.
+    """
+    inconsistent_providers = [
+        {
+            "provider": "openai",
+            "gateway": "openrouter",
+            "status_indicator": "operational",
+            "total_models": 50,
+            "healthy_models": 75,  # Inconsistent: more than total
+            "offline_models": 0,
+            "avg_uptime_24h": 99.95,
+            "avg_uptime_7d": 99.90,
+            "avg_response_time_ms": 450.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+        },
+    ]
+
+    mock_response = MagicMock()
+    mock_response.data = inconsistent_providers
+    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = mock_response
+
+    response = client.get("/v1/status/providers")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data) == 1
+    provider = data[0]
+
+    # healthy_models should be capped to total_models
+    assert provider["healthy_models"] <= provider["total_models"]
+    assert provider["healthy_models"] == 50
+    assert provider["total_models"] == 50
