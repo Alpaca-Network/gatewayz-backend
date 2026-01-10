@@ -47,6 +47,15 @@ async def get_overall_status():
         healthy_models = sum(p["healthy_models"] for p in providers)
         offline_models = sum(p["offline_models"] for p in providers)
 
+        # Ensure healthy_models doesn't exceed total_models (data consistency fix)
+        # This can happen when the database view has stale data
+        if healthy_models > total_models:
+            logger.warning(
+                f"Data inconsistency: healthy_models ({healthy_models}) > total_models ({total_models}). "
+                "Constraining healthy_models to total_models."
+            )
+            healthy_models = total_models
+
         # Determine overall status
         if total_models == 0:
             status = "unknown"
@@ -73,6 +82,29 @@ async def get_overall_status():
 
         active_incidents = incidents_response.count or 0
 
+        # Calculate gateway health metrics
+        gateways_set = set(p["gateway"] for p in providers if p.get("gateway"))
+        total_gateways = len(gateways_set) if gateways_set else 0
+
+        # Calculate healthy gateways (gateways that have at least one healthy provider)
+        gateway_health = {}
+        for p in providers:
+            gw = p.get("gateway")
+            if gw:
+                if gw not in gateway_health:
+                    gateway_health[gw] = {"has_healthy": False}
+                # Consider a gateway healthy if any of its providers are operational
+                if p.get("status_indicator") == "operational":
+                    gateway_health[gw]["has_healthy"] = True
+        healthy_gateways = sum(1 for g in gateway_health.values() if g.get("has_healthy", False))
+
+        # Calculate gateway health percentage
+        gateway_health_percentage = (
+            round((healthy_gateways / total_gateways) * 100, 1)
+            if total_gateways > 0
+            else 0.0
+        )
+
         return {
             "status": status,
             "status_message": status_message,
@@ -81,6 +113,9 @@ async def get_overall_status():
             "healthy_models": healthy_models,
             "offline_models": offline_models,
             "total_providers": len(providers),
+            "total_gateways": total_gateways,
+            "healthy_gateways": healthy_gateways,
+            "gateway_health_percentage": gateway_health_percentage,
             "active_incidents": active_incidents,
             "last_updated": datetime.now(timezone.utc).isoformat(),
         }

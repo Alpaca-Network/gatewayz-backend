@@ -399,3 +399,223 @@ async def test_get_uptime_history_invalid_period(client):
         response = client.get("/v1/status/uptime/openai/gpt-4?period=invalid")
 
         assert response.status_code == 400
+
+
+# =============================================================================
+# DATA CONSISTENCY TESTS
+# =============================================================================
+
+
+@pytest.mark.asyncio
+@patch("src.routes.status_page.supabase")
+async def test_healthy_models_never_exceeds_total(mock_supabase, client):
+    """
+    Test that healthy_models is constrained to never exceed total_models.
+
+    This can happen when database views have stale data where the healthy_models
+    count (based on last_status = 'success') doesn't align with total_models.
+
+    Issue: PDF dashboard showed 366 total models but 375 healthy models.
+    """
+    # Create mock data with healthy_models > total_models (inconsistent data)
+    inconsistent_providers = [
+        {
+            "provider": "openai",
+            "gateway": "openrouter",
+            "status_indicator": "operational",
+            "total_models": 50,  # Total is 50
+            "healthy_models": 75,  # But healthy shows 75 (impossible!)
+            "offline_models": 0,
+            "avg_uptime_24h": 99.95,
+            "avg_uptime_7d": 99.90,
+            "avg_response_time_ms": 450.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 1000,
+        },
+        {
+            "provider": "anthropic",
+            "gateway": "openrouter",
+            "status_indicator": "degraded",
+            "total_models": 10,  # Total is 10
+            "healthy_models": 15,  # But healthy shows 15 (impossible!)
+            "offline_models": 2,
+            "avg_uptime_24h": 95.0,
+            "avg_uptime_7d": 96.0,
+            "avg_response_time_ms": 550.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 500,
+        },
+    ]
+
+    # Mock provider health data
+    mock_response = MagicMock()
+    mock_response.data = inconsistent_providers
+    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+
+    # Mock incidents count
+    mock_incidents = MagicMock()
+    mock_incidents.count = 0
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+
+    response = client.get("/v1/status/")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Total models should be sum: 50 + 10 = 60
+    assert data["total_models"] == 60
+
+    # Healthy models should be constrained to total_models (60), not 90 (75+15)
+    assert data["healthy_models"] <= data["total_models"]
+    assert data["healthy_models"] == 60  # Should be capped at total
+
+    # Uptime percentage should be calculated correctly (not > 100%)
+    assert data["uptime_percentage"] <= 100.0
+
+
+@pytest.mark.asyncio
+@patch("src.routes.status_page.supabase")
+async def test_gateway_health_metrics_calculated(mock_supabase, client):
+    """
+    Test that gateway health metrics are properly calculated.
+
+    Issue: PDF dashboard showed 18 total gateways but 0 in the tabs,
+    and gateway health was 0.0% even when some gateways were operational.
+    """
+    providers_with_gateways = [
+        {
+            "provider": "openai",
+            "gateway": "openrouter",
+            "status_indicator": "operational",
+            "total_models": 20,
+            "healthy_models": 20,
+            "offline_models": 0,
+            "avg_uptime_24h": 99.95,
+            "avg_uptime_7d": 99.90,
+            "avg_response_time_ms": 450.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 1000,
+        },
+        {
+            "provider": "meta",
+            "gateway": "openrouter",  # Same gateway
+            "status_indicator": "operational",
+            "total_models": 10,
+            "healthy_models": 10,
+            "offline_models": 0,
+            "avg_uptime_24h": 99.0,
+            "avg_uptime_7d": 98.0,
+            "avg_response_time_ms": 500.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 500,
+        },
+        {
+            "provider": "deepseek",
+            "gateway": "deepinfra",  # Different gateway
+            "status_indicator": "degraded",
+            "total_models": 5,
+            "healthy_models": 3,
+            "offline_models": 1,
+            "avg_uptime_24h": 90.0,
+            "avg_uptime_7d": 92.0,
+            "avg_response_time_ms": 800.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 200,
+        },
+        {
+            "provider": "llama",
+            "gateway": "together",  # Different gateway with no operational providers
+            "status_indicator": "major_outage",
+            "total_models": 8,
+            "healthy_models": 0,
+            "offline_models": 8,
+            "avg_uptime_24h": 50.0,
+            "avg_uptime_7d": 60.0,
+            "avg_response_time_ms": 2000.0,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 10,
+        },
+    ]
+
+    mock_response = MagicMock()
+    mock_response.data = providers_with_gateways
+    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+
+    mock_incidents = MagicMock()
+    mock_incidents.count = 0
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+
+    response = client.get("/v1/status/")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Should have gateway metrics now
+    assert "total_gateways" in data
+    assert "healthy_gateways" in data
+    assert "gateway_health_percentage" in data
+
+    # Should have 3 unique gateways: openrouter, deepinfra, together
+    assert data["total_gateways"] == 3
+
+    # Only openrouter has operational providers, so 1 healthy gateway
+    assert data["healthy_gateways"] == 1
+
+    # Gateway health percentage should be ~33.3% (1/3)
+    assert data["gateway_health_percentage"] == pytest.approx(33.3, rel=0.1)
+
+
+@pytest.mark.asyncio
+@patch("src.routes.status_page.supabase")
+async def test_empty_providers_returns_zero_gateways(mock_supabase, client):
+    """Test that empty provider data returns zero gateway metrics."""
+    mock_response = MagicMock()
+    mock_response.data = []
+    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+
+    response = client.get("/v1/status/")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["status"] == "unknown"
+    assert data.get("total_gateways", 0) == 0 or "total_gateways" not in data
+
+
+@pytest.mark.asyncio
+@patch("src.routes.status_page.supabase")
+async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
+    """Test that when all models are unhealthy, uptime shows 0%."""
+    all_unhealthy_providers = [
+        {
+            "provider": "test",
+            "gateway": "openrouter",
+            "status_indicator": "major_outage",
+            "total_models": 100,
+            "healthy_models": 0,
+            "offline_models": 100,
+            "avg_uptime_24h": 0.0,
+            "avg_uptime_7d": 0.0,
+            "avg_response_time_ms": None,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "total_usage_24h": 0,
+        }
+    ]
+
+    mock_response = MagicMock()
+    mock_response.data = all_unhealthy_providers
+    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+
+    mock_incidents = MagicMock()
+    mock_incidents.count = 5
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+
+    response = client.get("/v1/status/")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["status"] == "major_outage"
+    assert data["uptime_percentage"] == 0.0
+    assert data["healthy_models"] == 0
+    assert data["total_models"] == 100
