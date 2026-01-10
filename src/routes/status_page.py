@@ -146,14 +146,25 @@ async def get_providers_status():
         # Format for frontend display
         formatted = []
         for provider in providers:
+            healthy = provider["healthy_models"]
+            total = provider["total_models"]
+
+            # Apply same data consistency check as main status endpoint
+            if healthy > total:
+                logger.warning(
+                    f"Data inconsistency in provider {provider['provider']}/{provider['gateway']}: "
+                    f"healthy_models ({healthy}) > total_models ({total}). Capping to total."
+                )
+                healthy = total
+
             formatted.append({
                 "name": provider["provider"],
                 "gateway": provider["gateway"],
                 "status": provider["status_indicator"],
                 "uptime_24h": round(provider["avg_uptime_24h"] or 0, 2),
                 "uptime_7d": round(provider["avg_uptime_7d"] or 0, 2),
-                "total_models": provider["total_models"],
-                "healthy_models": provider["healthy_models"],
+                "total_models": total,
+                "healthy_models": healthy,
                 "offline_models": provider["offline_models"],
                 "avg_response_time_ms": round(provider["avg_response_time_ms"] or 0, 0),
                 "last_checked": provider["last_checked_at"],
