@@ -710,6 +710,99 @@
       "context_length": 200000
     }
   },
+  "simplismart": {
+    "deepseek-ai/DeepSeek-R1": {
+      "prompt": "3.90",
+      "completion": "3.90",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "deepseek-ai/DeepSeek-V3": {
+      "prompt": "0.90",
+      "completion": "0.90",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "google/gemma-3-4b-it": {
+      "prompt": "0.10",
+      "completion": "0.10",
+      "request": "0",
+      "image": "0",
+      "context_length": 8192
+    },
+    "google/gemma-3-1b-it": {
+      "prompt": "0.06",
+      "completion": "0.06",
+      "request": "0",
+      "image": "0",
+      "context_length": 8192
+    },
+    "meta-llama/Meta-Llama-3.1-405B-Instruct": {
+      "prompt": "3.00",
+      "completion": "3.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "meta-llama/Meta-Llama-3.1-70B-Instruct": {
+      "prompt": "0.74",
+      "completion": "0.74",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "meta-llama/Meta-Llama-3.1-8B-Instruct": {
+      "prompt": "0.13",
+      "completion": "0.13",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "meta-llama/Llama-3.3-70B-Instruct": {
+      "prompt": "0.74",
+      "completion": "0.74",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "microsoft/Phi-3-medium-128k-instruct": {
+      "prompt": "0.08",
+      "completion": "0.08",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "microsoft/Phi-3-mini-4k-instruct": {
+      "prompt": "0.08",
+      "completion": "0.08",
+      "request": "0",
+      "image": "0",
+      "context_length": 4096
+    },
+    "Qwen/Qwen2.5-72B-Instruct": {
+      "prompt": "1.08",
+      "completion": "1.08",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "Qwen/Qwen2.5-7B-Instruct": {
+      "prompt": "0.30",
+      "completion": "0.30",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "Qwen/Qwen3-4B": {
+      "prompt": "0.10",
+      "completion": "0.10",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    }
+  },
   "onerouter": {
     "claude-opus-4-5@20251101": {
       "prompt": "5.00",
@@ -982,6 +1075,7 @@
     "last_updated": "2026-01-04",
     "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",
     "sources": [
+      "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference)",
       "https://openai.com/api/pricing (OpenAI - official API pricing)",
       "https://www.anthropic.com/pricing (Anthropic - Claude models pricing)",
       "https://deepinfra.com/pricing",

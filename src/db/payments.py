@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import execute_with_retry, get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,6 @@ def create_payment(
         Created payment record or None if failed
     """
     try:
-        client = get_supabase_client()
-
         # Calculate amount in cents
         amount_cents = int(amount * 100)
 
@@ -76,8 +74,11 @@ def create_payment(
         if stripe_customer_id:
             payment_data["stripe_customer_id"] = stripe_customer_id
 
-        # Insert into Supabase
-        result = client.table("payments").insert(payment_data).execute()
+        # Insert into Supabase with retry logic for transient connection errors
+        def _insert_payment(client):
+            return client.table("payments").insert(payment_data).execute()
+
+        result = execute_with_retry(_insert_payment, max_retries=2, retry_delay=0.2)
 
         if not result.data:
             logger.error("Failed to create payment record - no data returned")
@@ -107,9 +108,11 @@ def get_payment(payment_id: int) -> dict[str, Any] | None:
         Payment record or None if not found
     """
     try:
-        client = get_supabase_client()
 
-        result = client.table("payments").select("*").eq("id", payment_id).execute()
+        def _get_payment(client):
+            return client.table("payments").select("*").eq("id", payment_id).execute()
+
+        result = execute_with_retry(_get_payment, max_retries=2, retry_delay=0.2)
 
         if not result.data:
             logger.warning(f"Payment {payment_id} not found")
@@ -249,8 +252,6 @@ def update_payment_status(
         Updated payment record or None if failed
     """
     try:
-        client = get_supabase_client()
-
         update_data = {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
 
         if stripe_payment_intent_id:
@@ -274,7 +275,11 @@ def update_payment_status(
                     metadata["error"] = error_message
                     update_data["metadata"] = metadata
 
-        result = client.table("payments").update(update_data).eq("id", payment_id).execute()
+        # Update payment with retry logic for transient connection errors
+        def _update_payment(client):
+            return client.table("payments").update(update_data).eq("id", payment_id).execute()
+
+        result = execute_with_retry(_update_payment, max_retries=2, retry_delay=0.2)
 
         if not result.data:
             logger.error(f"Failed to update payment {payment_id}")

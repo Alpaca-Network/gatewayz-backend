@@ -1,5 +1,6 @@
 import logging
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter
 from openai import AsyncOpenAI, BadRequestError, APIStatusError
@@ -11,6 +12,34 @@ from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+
+def _normalize_message_roles(messages: list[dict[str, Any] | Any]) -> list[dict[str, Any] | Any]:
+    """Normalize message roles for OpenRouter compatibility.
+
+    The 'developer' role is an OpenAI API feature for system-level instructions
+    that many providers (including OpenRouter's underlying models) don't support.
+    This function transforms 'developer' role to 'system' role for compatibility.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' keys
+
+    Returns:
+        List of messages with normalized roles (shallow copies to avoid mutation)
+    """
+    normalized = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            if msg.get("role") == "developer":
+                # Transform developer role to system role for compatibility
+                normalized_msg = {**msg, "role": "system"}
+                normalized.append(normalized_msg)
+            else:
+                # Create a shallow copy to avoid mutation issues
+                normalized.append({**msg})
+        else:
+            normalized.append(msg)
+    return normalized
 
 
 def _extract_error_details(e: Exception, model: str, kwargs: dict) -> dict:
@@ -92,9 +121,11 @@ def make_openrouter_request_openai(messages, model, **kwargs):
     """Make request to OpenRouter using OpenAI client"""
     try:
         client = get_openrouter_client()
+        # Normalize message roles (e.g., developer -> system) for compatibility
+        normalized_messages = _normalize_message_roles(messages)
         # Merge provider settings to allow access to all model endpoints
         merged_kwargs = _merge_extra_body(kwargs)
-        response = client.chat.completions.create(model=model, messages=messages, **merged_kwargs)
+        response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
         return response
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors (helps diagnose openrouter/auto issues)
@@ -196,10 +227,12 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
     """Make streaming request to OpenRouter using OpenAI client"""
     try:
         client = get_openrouter_client()
+        # Normalize message roles (e.g., developer -> system) for compatibility
+        normalized_messages = _normalize_message_roles(messages)
         # Merge provider settings to allow access to all model endpoints
         merged_kwargs = _merge_extra_body(kwargs)
         stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **merged_kwargs
+            model=model, messages=normalized_messages, stream=True, **merged_kwargs
         )
         return stream
     except BadRequestError as e:
@@ -295,10 +328,12 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
     """
     try:
         client = get_openrouter_async_client()
+        # Normalize message roles (e.g., developer -> system) for compatibility
+        normalized_messages = _normalize_message_roles(messages)
         # Merge provider settings to allow access to all model endpoints
         merged_kwargs = _merge_extra_body(kwargs)
         stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True, **merged_kwargs
+            model=model, messages=normalized_messages, stream=True, **merged_kwargs
         )
         return stream
     except BadRequestError as e:

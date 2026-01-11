@@ -18,6 +18,9 @@ from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 
+# Simplismart base URL constant (duplicated here to avoid circular import with simplismart_client.py)
+SIMPLISMART_BASE_URL = "https://api.simplismart.live"
+
 logger = logging.getLogger(__name__)
 
 # Global connection pool instances with LRU tracking
@@ -46,6 +49,16 @@ DEFAULT_TIMEOUT = httpx.Timeout(
 HUGGINGFACE_TIMEOUT = httpx.Timeout(
     connect=10.0,
     read=120.0,  # HuggingFace models can be slow
+    write=10.0,
+    pool=5.0,
+)
+
+# xAI timeout for reasoning models (Grok 4.x with extended thinking)
+# xAI documentation recommends 3600s timeout for reasoning models
+# See: https://docs.x.ai/docs/guides/reasoning
+XAI_REASONING_TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=600.0,  # 10 minutes for extended reasoning (conservative vs 3600s)
     write=10.0,
     pool=5.0,
 )
@@ -357,7 +370,12 @@ def get_huggingface_pooled_client() -> OpenAI:
 
 
 def get_xai_pooled_client() -> OpenAI:
-    """Get pooled client for X.AI."""
+    """Get pooled client for X.AI.
+
+    Uses extended timeout for Grok reasoning models which can take
+    significantly longer to respond due to extended thinking capabilities.
+    See: https://docs.x.ai/docs/guides/reasoning
+    """
     if not Config.XAI_API_KEY:
         raise ValueError("X.AI API key not configured")
 
@@ -365,6 +383,7 @@ def get_xai_pooled_client() -> OpenAI:
         provider="xai",
         base_url="https://api.x.ai/v1",
         api_key=Config.XAI_API_KEY,
+        timeout=XAI_REASONING_TIMEOUT,
     )
 
 
@@ -515,6 +534,23 @@ def get_anthropic_pooled_client() -> OpenAI:
         provider="anthropic",
         base_url="https://api.anthropic.com/v1",
         api_key=Config.ANTHROPIC_API_KEY,
+    )
+
+
+def get_simplismart_pooled_client() -> OpenAI:
+    """Get pooled client for Simplismart AI.
+
+    Simplismart provides an OpenAI-compatible API endpoint for various LLM models
+    including Llama, Gemma, Qwen, DeepSeek, Mixtral, and more.
+    See: https://docs.simplismart.ai/overview
+    """
+    if not Config.SIMPLISMART_API_KEY:
+        raise ValueError("Simplismart API key not configured")
+
+    return get_pooled_client(
+        provider="simplismart",
+        base_url=SIMPLISMART_BASE_URL,
+        api_key=Config.SIMPLISMART_API_KEY,
     )
 
 

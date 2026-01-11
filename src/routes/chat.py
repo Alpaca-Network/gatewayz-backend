@@ -168,6 +168,8 @@ PROVIDER_FUNCTIONS = {
                  "make_morpheus_request_openai_stream"],
     "onerouter": ["make_onerouter_request_openai", "process_onerouter_response",
                   "make_onerouter_request_openai_stream"],
+    "simplismart": ["make_simplismart_request_openai", "process_simplismart_response",
+                    "make_simplismart_request_openai_stream"],
 }
 
 # Load all providers and expose functions to global namespace
@@ -284,6 +286,11 @@ PROVIDER_ROUTING = {
         "request": make_onerouter_request_openai,
         "process": process_onerouter_response,
         "stream": make_onerouter_request_openai_stream,
+    },
+    "simplismart": {
+        "request": make_simplismart_request_openai,
+        "process": process_simplismart_response,
+        "stream": make_simplismart_request_openai_stream,
     },
 }
 

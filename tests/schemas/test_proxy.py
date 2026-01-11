@@ -57,7 +57,7 @@ class TestMessageSchema:
 
     def test_valid_roles(self):
         """Test all valid message roles"""
-        valid_roles = ["system", "user", "assistant", "tool", "function"]
+        valid_roles = ["system", "user", "assistant", "tool", "function", "developer"]
         for role in valid_roles:
             msg = Message(role=role, content="test")
             assert msg.role == role
@@ -78,6 +78,18 @@ class TestMessageSchema:
         with pytest.raises(ValidationError) as exc_info:
             Message(role="system", content=None)
         assert "'system' messages must have non-empty content" in str(exc_info.value)
+
+    def test_developer_message_requires_content(self):
+        """Test that developer messages must have content"""
+        with pytest.raises(ValidationError) as exc_info:
+            Message(role="developer", content=None)
+        assert "'developer' messages must have non-empty content" in str(exc_info.value)
+
+    def test_developer_message_basic(self):
+        """Test basic developer message creation (OpenAI developer role)"""
+        msg = Message(role="developer", content="You are a helpful assistant.")
+        assert msg.role == "developer"
+        assert msg.content == "You are a helpful assistant."
 
     def test_tool_message_requires_content(self):
         """Test that tool messages must have content (the response)"""
@@ -628,6 +640,16 @@ class TestMessageContentValidation:
         """Test that system messages reject empty string content"""
         with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="system", content="")
+
+    def test_developer_message_rejects_empty_string(self):
+        """Test that developer messages reject empty string content"""
+        with pytest.raises(ValidationError, match="must have non-empty content"):
+            Message(role="developer", content="")
+
+    def test_developer_message_rejects_whitespace_only(self):
+        """Test that developer messages reject whitespace-only content"""
+        with pytest.raises(ValidationError, match="must have non-empty content"):
+            Message(role="developer", content="   \n\t  ")
 
     def test_tool_message_rejects_empty_string(self):
         """Test that tool messages reject empty string content"""

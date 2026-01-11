@@ -12,6 +12,7 @@ from src.db.chat_history import (
     save_chat_message,
     search_chat_sessions,
     update_chat_session,
+    validate_message_ownership,
 )
 from src.db.feedback import (
     delete_feedback,
@@ -441,6 +442,15 @@ async def submit_feedback(
             session = get_chat_session(request.session_id, user["id"])
             if not session:
                 raise HTTPException(status_code=404, detail="Chat session not found")
+
+        # If message_id provided, verify it belongs to user's session
+        if request.message_id is not None:
+            if not validate_message_ownership(
+                message_id=request.message_id,
+                user_id=user["id"],
+                session_id=request.session_id,
+            ):
+                raise HTTPException(status_code=404, detail="Message not found")
 
         # Save feedback
         feedback = save_message_feedback(

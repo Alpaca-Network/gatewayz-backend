@@ -227,3 +227,163 @@ class TestMergeExtraBody:
         })
         # User's explicit setting takes precedence
         assert result["extra_body"]["provider"]["data_collection"] == "deny"
+
+
+# Tests for _normalize_message_roles helper function
+class TestNormalizeMessageRoles:
+    """Tests for the _normalize_message_roles helper that transforms developer role to system."""
+
+    def test_normalize_empty_messages(self, mod):
+        """Empty messages list should return empty list."""
+        result = mod._normalize_message_roles([])
+        assert result == []
+
+    def test_normalize_preserves_standard_roles(self, mod):
+        """Standard roles (user, assistant, system, tool) should be preserved."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+            {"role": "system", "content": "You are helpful"},
+            {"role": "tool", "content": "Tool result", "tool_call_id": "123"},
+        ]
+        result = mod._normalize_message_roles(messages)
+        assert result == messages
+
+    def test_normalize_transforms_developer_to_system(self, mod):
+        """Developer role should be transformed to system role."""
+        messages = [
+            {"role": "developer", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+        ]
+        result = mod._normalize_message_roles(messages)
+        assert len(result) == 2
+        assert result[0]["role"] == "system"
+        assert result[0]["content"] == "You are a helpful assistant."
+        assert result[1]["role"] == "user"
+        assert result[1]["content"] == "Hello"
+
+    def test_normalize_preserves_other_message_fields(self, mod):
+        """Other message fields should be preserved when transforming developer role."""
+        messages = [
+            {"role": "developer", "content": "Instructions", "name": "developer_name"},
+        ]
+        result = mod._normalize_message_roles(messages)
+        assert result[0]["role"] == "system"
+        assert result[0]["content"] == "Instructions"
+        assert result[0]["name"] == "developer_name"
+
+    def test_normalize_multiple_developer_messages(self, mod):
+        """Multiple developer messages should all be transformed."""
+        messages = [
+            {"role": "developer", "content": "First instruction"},
+            {"role": "user", "content": "Question"},
+            {"role": "assistant", "content": "Answer"},
+            {"role": "developer", "content": "Second instruction"},
+        ]
+        result = mod._normalize_message_roles(messages)
+        assert result[0]["role"] == "system"
+        assert result[1]["role"] == "user"
+        assert result[2]["role"] == "assistant"
+        assert result[3]["role"] == "system"
+
+    def test_normalize_handles_non_dict_messages(self, mod):
+        """Non-dict messages should be passed through unchanged."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            None,  # Edge case: None in messages list
+            {"role": "developer", "content": "Instructions"},
+        ]
+        result = mod._normalize_message_roles(messages)
+        assert result[0]["role"] == "user"
+        assert result[1] is None
+        assert result[2]["role"] == "system"
+
+
+def test_make_openrouter_request_normalizes_developer_role(monkeypatch, mod):
+    """Verify that make_openrouter_request_openai normalizes developer role to system."""
+    fake = FakeOpenAI()
+    monkeypatch.setattr(mod, "get_openrouter_client", lambda: fake)
+
+    messages = [
+        {"role": "developer", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+    ]
+    model = "openrouter/some-model"
+
+    mod.make_openrouter_request_openai(messages, model)
+
+    # Check that the messages passed to the API have normalized roles
+    assert len(fake.chat.completions.calls) == 1
+    call = fake.chat.completions.calls[0]
+    assert call["messages"][0]["role"] == "system"
+    assert call["messages"][0]["content"] == "You are helpful."
+    assert call["messages"][1]["role"] == "user"
+
+
+def test_make_openrouter_request_stream_normalizes_developer_role(monkeypatch, mod):
+    """Verify that make_openrouter_request_openai_stream normalizes developer role to system."""
+    fake = FakeOpenAI()
+    monkeypatch.setattr(mod, "get_openrouter_client", lambda: fake)
+
+    messages = [
+        {"role": "developer", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+    ]
+    model = "openrouter/some-model"
+
+    mod.make_openrouter_request_openai_stream(messages, model)
+
+    # Check that the messages passed to the API have normalized roles
+    assert len(fake.chat.completions.calls) == 1
+    call = fake.chat.completions.calls[0]
+    assert call["messages"][0]["role"] == "system"
+    assert call["messages"][0]["content"] == "You are helpful."
+    assert call["messages"][1]["role"] == "user"
+
+
+# Async fake client for testing async streaming function
+class FakeAsyncCompletions:
+    def __init__(self, parent):
+        self.parent = parent
+        self.calls = []
+        self.return_value = object()  # sentinel
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.return_value
+
+
+class FakeAsyncChat:
+    def __init__(self, parent):
+        self.parent = parent
+        self.completions = FakeAsyncCompletions(parent)
+
+
+class FakeAsyncOpenAI:
+    def __init__(self, base_url=None, api_key=None, default_headers=None):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.default_headers = default_headers or {}
+        self.chat = FakeAsyncChat(self)
+
+
+@pytest.mark.asyncio
+async def test_make_openrouter_request_stream_async_normalizes_developer_role(monkeypatch, mod):
+    """Verify that make_openrouter_request_openai_stream_async normalizes developer role to system."""
+    fake = FakeAsyncOpenAI()
+    monkeypatch.setattr(mod, "get_openrouter_async_client", lambda: fake)
+
+    messages = [
+        {"role": "developer", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+    ]
+    model = "openrouter/some-model"
+
+    await mod.make_openrouter_request_openai_stream_async(messages, model)
+
+    # Check that the messages passed to the API have normalized roles
+    assert len(fake.chat.completions.calls) == 1
+    call = fake.chat.completions.calls[0]
+    assert call["messages"][0]["role"] == "system"
+    assert call["messages"][0]["content"] == "You are helpful."
+    assert call["messages"][1]["role"] == "user"

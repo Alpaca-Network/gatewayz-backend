@@ -501,6 +501,45 @@ def get_chat_session_stats(user_id: int) -> dict[str, Any]:
         raise RuntimeError(f"Failed to get chat session stats: {e}") from e
 
 
+def validate_message_ownership(message_id: int, user_id: int, session_id: int = None) -> bool:
+    """
+    Validate that a message belongs to the user (via their session).
+
+    Args:
+        message_id: The message ID to validate
+        user_id: The user ID to check ownership against
+        session_id: Optional session ID - if provided, also validates message belongs to this session
+
+    Returns:
+        True if the message belongs to the user's session, False otherwise
+    """
+    try:
+        client = get_supabase_client()
+
+        # Query the message and join with session to verify ownership
+        def query_message():
+            query = (
+                client.table("chat_messages")
+                .select("id, session_id, chat_sessions!inner(id, user_id)")
+                .eq("id", message_id)
+                .eq("chat_sessions.user_id", user_id)
+            )
+            if session_id is not None:
+                query = query.eq("session_id", session_id)
+            return query.execute()
+
+        result = _execute_with_connection_retry(
+            query_message,
+            f"validate_message_ownership(message={message_id}, user={user_id})"
+        )
+
+        return bool(result.data)
+
+    except Exception as e:
+        logger.error(f"Failed to validate message ownership: {e}")
+        return False
+
+
 def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search chat sessions by title or message content"""
     try:

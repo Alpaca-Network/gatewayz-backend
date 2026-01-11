@@ -221,6 +221,9 @@ class Config:
     # Morpheus AI Gateway Configuration
     MORPHEUS_API_KEY = os.environ.get("MORPHEUS_API_KEY")
 
+    # Simplismart AI Configuration
+    SIMPLISMART_API_KEY = os.environ.get("SIMPLISMART_API_KEY")
+
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
     CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
