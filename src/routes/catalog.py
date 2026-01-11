@@ -811,7 +811,8 @@ async def get_models(
             "anannas": "Anannas catalog",
             "aihubmix": "AiHubMix catalog",
             "vercel-ai-gateway": "Vercel AI Gateway catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, OneRouter, and Vercel AI Gateway catalogs",
+            "simplismart": "Simplismart catalog",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, OneRouter, Vercel AI Gateway, and Simplismart catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         result = {
