@@ -13,7 +13,6 @@ Fix: Initialize simplismart_models = [] at the beginning of get_models() functio
 alongside all other model list initializations.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 from src.main import app
