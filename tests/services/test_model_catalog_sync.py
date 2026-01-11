@@ -1,8 +1,5 @@
 """Tests for model catalog sync functionality."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-
 from src.services.model_catalog_sync import (
     transform_normalized_model_to_db_schema,
     extract_modality,
