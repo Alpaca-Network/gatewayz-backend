@@ -740,8 +740,11 @@ async def test_publish_health_gateway_health_calculation(mock_supabase, mock_cac
     Test that gateway health is calculated based on provider health data.
 
     A gateway is considered healthy if at least one of its providers is online.
+    A provider is "online" only if all its models are healthy (0 unhealthy models).
     """
-    # Mock model health tracking data with mixed health status
+    # Mock model health tracking data:
+    # - openrouter: 2 healthy models -> provider status "online" -> gateway healthy
+    # - featherless: 1 unhealthy model -> provider status "offline" -> gateway not healthy
     mock_tracking_response = MagicMock()
     mock_tracking_response.data = [
         {"provider": "openrouter", "model": "model-1", "gateway": "openrouter",
@@ -749,8 +752,8 @@ async def test_publish_health_gateway_health_calculation(mock_supabase, mock_cac
          "uptime_percentage_24h": 99.0, "error_count": 0, "call_count": 10,
          "last_called_at": "2025-01-01T00:00:00Z"},
         {"provider": "openrouter", "model": "model-2", "gateway": "openrouter",
-         "last_status": "error", "last_response_time_ms": 500,
-         "uptime_percentage_24h": 50.0, "error_count": 5, "call_count": 10,
+         "last_status": "success", "last_response_time_ms": 150,
+         "uptime_percentage_24h": 98.0, "error_count": 0, "call_count": 15,
          "last_called_at": "2025-01-01T00:00:00Z"},
         {"provider": "featherless", "model": "model-3", "gateway": "featherless",
          "last_status": "error", "last_response_time_ms": 1000,
@@ -789,11 +792,11 @@ async def test_publish_health_gateway_health_calculation(mock_supabase, mock_cac
     assert "total_gateways" in system_data
     assert "healthy_gateways" in system_data
 
-    # The openrouter gateway has 1 healthy provider (online), so it's healthy
-    # The featherless gateway has no healthy providers (all offline), so it's not healthy
+    # The openrouter gateway has all healthy models -> provider status "online" -> gateway healthy
+    # The featherless gateway has unhealthy models -> provider status "offline" -> gateway not healthy
     # We mock 2 gateways total (openrouter, featherless), expect exactly 1 healthy
     assert system_data["total_gateways"] >= 1
-    assert system_data["healthy_gateways"] >= 1  # At least openrouter is healthy
+    assert system_data["healthy_gateways"] >= 1  # openrouter gateway is healthy
 
 
 @pytest.mark.asyncio
