@@ -801,6 +801,132 @@
       "request": "0",
       "image": "0",
       "context_length": 32768
+    },
+    "meta-llama/Llama-4-Maverick-17B-Instruct": {
+      "prompt": "0.74",
+      "completion": "0.74",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-70B": {
+      "prompt": "0.74",
+      "completion": "0.74",
+      "request": "0",
+      "image": "0",
+      "context_length": 65536
+    },
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B": {
+      "prompt": "1.08",
+      "completion": "1.08",
+      "request": "0",
+      "image": "0",
+      "context_length": 65536
+    },
+    "google/gemma-3-27b-it": {
+      "prompt": "0.30",
+      "completion": "0.30",
+      "request": "0",
+      "image": "0",
+      "context_length": 8192
+    },
+    "Qwen/Qwen2.5-14B-Instruct": {
+      "prompt": "0.30",
+      "completion": "0.30",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "Qwen/Qwen2.5-32B-Instruct": {
+      "prompt": "1.08",
+      "completion": "1.08",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8": {
+      "prompt": "0.30",
+      "completion": "0.30",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "mistralai/Devstral-Small-2505": {
+      "prompt": "0.30",
+      "completion": "0.30",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "simplismart/flux-1.1-pro": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.05",
+      "image": "0.05",
+      "pricing_model": "per_image"
+    },
+    "simplismart/flux-dev": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.03",
+      "image": "0.03",
+      "pricing_model": "per_image"
+    },
+    "simplismart/flux-kontext": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.04",
+      "image": "0.04",
+      "pricing_model": "per_image"
+    },
+    "simplismart/flux-1.1-pro-redux": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.05",
+      "image": "0.05",
+      "pricing_model": "per_image"
+    },
+    "simplismart/flux-pro-canny": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.05",
+      "image": "0.05",
+      "pricing_model": "per_image"
+    },
+    "simplismart/flux-pro-depth": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.05",
+      "image": "0.05",
+      "pricing_model": "per_image"
+    },
+    "simplismart/sdxl": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.28",
+      "image": "0.28",
+      "pricing_model": "per_image"
+    },
+    "simplismart/whisper-large-v2": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.0028",
+      "image": "0",
+      "pricing_model": "per_minute"
+    },
+    "simplismart/whisper-large-v3": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.0030",
+      "image": "0",
+      "pricing_model": "per_minute"
+    },
+    "simplismart/whisper-v3-turbo": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.0018",
+      "image": "0",
+      "pricing_model": "per_minute"
     }
   },
   "onerouter": {
@@ -1072,10 +1198,10 @@
     }
   },
   "_metadata": {
-    "last_updated": "2026-01-04",
+    "last_updated": "2026-01-11",
     "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",
     "sources": [
-      "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference)",
+      "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference, image generation, and speech-to-text)",
       "https://openai.com/api/pricing (OpenAI - official API pricing)",
       "https://www.anthropic.com/pricing (Anthropic - Claude models pricing)",
       "https://deepinfra.com/pricing",

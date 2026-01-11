@@ -212,7 +212,10 @@ class TestSimplismartModelCatalog:
             assert "name" in model
             assert "provider" in model
             assert model["provider"] == "simplismart"
-            assert "context_length" in model
+            # context_length is only required for LLM models, not image/speech models
+            model_type = model.get("type")
+            if model_type not in ("text-to-image", "image-to-image", "speech-to-text"):
+                assert "context_length" in model
 
     def test_fetch_models_has_llama_models(self):
         """Test that catalog includes Llama models"""
@@ -301,8 +304,11 @@ class TestSimplismartConstants:
         """Test that all models have required metadata"""
         for model_id, info in SIMPLISMART_MODELS.items():
             assert "name" in info, f"Model '{model_id}' missing 'name'"
-            assert "context_length" in info, f"Model '{model_id}' missing 'context_length'"
-            assert info["context_length"] > 0, f"Model '{model_id}' has invalid context_length"
+            # context_length is only required for LLM models
+            model_type = info.get("type")
+            if model_type not in ("text-to-image", "image-to-image", "speech-to-text"):
+                assert "context_length" in info, f"Model '{model_id}' missing 'context_length'"
+                assert info["context_length"] > 0, f"Model '{model_id}' has invalid context_length"
 
     def test_models_have_pricing(self):
         """Test that all models have pricing information"""
@@ -377,3 +383,150 @@ class TestSimplismartPricing:
         assert resolve_simplismart_model("qwen-2.5-7b") == "Qwen/Qwen2.5-7B-Instruct"
         assert resolve_simplismart_model("qwen-2.5-72b") == "Qwen/Qwen2.5-72B-Instruct"
         assert resolve_simplismart_model("qwen3-4b") == "Qwen/Qwen3-4B"
+
+
+class TestSimplismartImageModels:
+    """Test Simplismart image/diffusion model functionality"""
+
+    def test_fetch_models_has_flux_models(self):
+        """Test that catalog includes Flux image models"""
+        models = fetch_models_from_simplismart()
+        model_ids = [m["id"] for m in models]
+
+        assert "simplismart/flux-1.1-pro" in model_ids
+        assert "simplismart/flux-dev" in model_ids
+        assert "simplismart/flux-kontext" in model_ids
+        assert "simplismart/flux-1.1-pro-redux" in model_ids
+        assert "simplismart/flux-pro-canny" in model_ids
+        assert "simplismart/flux-pro-depth" in model_ids
+
+    def test_fetch_models_has_sdxl(self):
+        """Test that catalog includes SDXL"""
+        models = fetch_models_from_simplismart()
+        model_ids = [m["id"] for m in models]
+
+        assert "simplismart/sdxl" in model_ids
+
+    def test_image_models_have_type(self):
+        """Test that image models have correct type"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        assert models_by_id["simplismart/flux-1.1-pro"]["type"] == "text-to-image"
+        assert models_by_id["simplismart/flux-dev"]["type"] == "text-to-image"
+        assert models_by_id["simplismart/flux-kontext"]["type"] == "text-to-image"
+        assert models_by_id["simplismart/flux-1.1-pro-redux"]["type"] == "image-to-image"
+        assert models_by_id["simplismart/flux-pro-canny"]["type"] == "image-to-image"
+        assert models_by_id["simplismart/flux-pro-depth"]["type"] == "image-to-image"
+        assert models_by_id["simplismart/sdxl"]["type"] == "text-to-image"
+
+    def test_image_models_have_per_image_pricing(self):
+        """Test that image models have per_image pricing model"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        for model_id in [
+            "simplismart/flux-1.1-pro",
+            "simplismart/flux-dev",
+            "simplismart/flux-kontext",
+            "simplismart/flux-1.1-pro-redux",
+            "simplismart/flux-pro-canny",
+            "simplismart/flux-pro-depth",
+            "simplismart/sdxl",
+        ]:
+            pricing = models_by_id[model_id]["pricing"]
+            assert pricing["pricing_model"] == "per_image"
+            assert float(pricing["image"]) > 0
+
+    def test_image_model_pricing_values(self):
+        """Test specific image model pricing from simplismart.ai/pricing"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        assert models_by_id["simplismart/flux-1.1-pro"]["pricing"]["image"] == "0.05"
+        assert models_by_id["simplismart/flux-dev"]["pricing"]["image"] == "0.03"
+        assert models_by_id["simplismart/flux-kontext"]["pricing"]["image"] == "0.04"
+        assert models_by_id["simplismart/sdxl"]["pricing"]["image"] == "0.28"
+
+    def test_flux_aliases_resolve_correctly(self):
+        """Test Flux image model aliases"""
+        assert resolve_simplismart_model("flux-1.1-pro") == "simplismart/flux-1.1-pro"
+        assert resolve_simplismart_model("flux-pro") == "simplismart/flux-1.1-pro"
+        assert resolve_simplismart_model("flux-dev") == "simplismart/flux-dev"
+        assert resolve_simplismart_model("flux-kontext") == "simplismart/flux-kontext"
+        assert resolve_simplismart_model("flux-pro-redux") == "simplismart/flux-1.1-pro-redux"
+        assert resolve_simplismart_model("flux-canny") == "simplismart/flux-pro-canny"
+        assert resolve_simplismart_model("flux-depth") == "simplismart/flux-pro-depth"
+        assert resolve_simplismart_model("sdxl") == "simplismart/sdxl"
+        assert resolve_simplismart_model("stable-diffusion-xl") == "simplismart/sdxl"
+
+
+class TestSimplismartSpeechModels:
+    """Test Simplismart speech-to-text model functionality"""
+
+    def test_fetch_models_has_whisper_models(self):
+        """Test that catalog includes Whisper models"""
+        models = fetch_models_from_simplismart()
+        model_ids = [m["id"] for m in models]
+
+        assert "simplismart/whisper-large-v2" in model_ids
+        assert "simplismart/whisper-large-v3" in model_ids
+        assert "simplismart/whisper-v3-turbo" in model_ids
+
+    def test_whisper_models_have_type(self):
+        """Test that Whisper models have correct type"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        assert models_by_id["simplismart/whisper-large-v2"]["type"] == "speech-to-text"
+        assert models_by_id["simplismart/whisper-large-v3"]["type"] == "speech-to-text"
+        assert models_by_id["simplismart/whisper-v3-turbo"]["type"] == "speech-to-text"
+
+    def test_whisper_models_have_per_minute_pricing(self):
+        """Test that Whisper models have per_minute pricing model"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        for model_id in [
+            "simplismart/whisper-large-v2",
+            "simplismart/whisper-large-v3",
+            "simplismart/whisper-v3-turbo",
+        ]:
+            pricing = models_by_id[model_id]["pricing"]
+            assert pricing["pricing_model"] == "per_minute"
+            assert float(pricing["request"]) > 0
+
+    def test_whisper_model_pricing_values(self):
+        """Test specific Whisper model pricing from simplismart.ai/pricing"""
+        models = fetch_models_from_simplismart()
+        models_by_id = {m["id"]: m for m in models}
+
+        assert models_by_id["simplismart/whisper-large-v2"]["pricing"]["request"] == "0.0028"
+        assert models_by_id["simplismart/whisper-large-v3"]["pricing"]["request"] == "0.0030"
+        assert models_by_id["simplismart/whisper-v3-turbo"]["pricing"]["request"] == "0.0018"
+
+    def test_whisper_aliases_resolve_correctly(self):
+        """Test Whisper model aliases"""
+        assert resolve_simplismart_model("whisper-large-v2") == "simplismart/whisper-large-v2"
+        assert resolve_simplismart_model("whisper-v2") == "simplismart/whisper-large-v2"
+        assert resolve_simplismart_model("whisper-large-v3") == "simplismart/whisper-large-v3"
+        assert resolve_simplismart_model("whisper-v3") == "simplismart/whisper-large-v3"
+        assert resolve_simplismart_model("whisper-v3-turbo") == "simplismart/whisper-v3-turbo"
+        assert resolve_simplismart_model("whisper-turbo") == "simplismart/whisper-v3-turbo"
+
+
+class TestSimplismartIsModelWithNewTypes:
+    """Test is_simplismart_model function with new model types"""
+
+    def test_is_simplismart_model_flux(self):
+        """Test checking Flux image models"""
+        assert is_simplismart_model("flux-1.1-pro") is True
+        assert is_simplismart_model("flux-dev") is True
+        assert is_simplismart_model("sdxl") is True
+        assert is_simplismart_model("simplismart/flux-1.1-pro") is True
+
+    def test_is_simplismart_model_whisper(self):
+        """Test checking Whisper speech models"""
+        assert is_simplismart_model("whisper-large-v3") is True
+        assert is_simplismart_model("whisper-turbo") is True
+        assert is_simplismart_model("simplismart/whisper-v3-turbo") is True

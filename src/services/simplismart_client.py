@@ -1,35 +1,49 @@
 """
 Simplismart AI provider client module.
 
-Simplismart provides OpenAI-compatible API endpoints for various LLM models
-including Llama, Gemma, Qwen, DeepSeek, Phi-3, Mixtral, and more.
+Simplismart provides OpenAI-compatible API endpoints for various LLM models,
+image generation (Flux, SDXL), and speech-to-text (Whisper).
 
 API Documentation: https://docs.simplismart.ai/overview
 Base URL: https://api.simplismart.live
 Pricing: https://simplismart.ai/pricing
 
-Supported models:
-- meta-llama/Meta-Llama-3.1-8B-Instruct ($0.13/1M tokens)
-- meta-llama/Meta-Llama-3.1-70B-Instruct ($0.74/1M tokens)
-- meta-llama/Meta-Llama-3.1-405B-Instruct ($3.00/1M tokens)
-- meta-llama/Llama-3.3-70B-Instruct ($0.74/1M tokens)
+Supported LLM models (per 1M tokens):
+- meta-llama/Meta-Llama-3.1-8B-Instruct ($0.13)
+- meta-llama/Meta-Llama-3.1-70B-Instruct ($0.74)
+- meta-llama/Meta-Llama-3.1-405B-Instruct ($3.00)
+- meta-llama/Llama-3.3-70B-Instruct ($0.74)
 - meta-llama/Llama-4-Maverick-17B-Instruct (preview)
-- deepseek-ai/DeepSeek-R1 ($3.90/1M tokens)
-- deepseek-ai/DeepSeek-V3 ($0.90/1M tokens)
-- deepseek-ai/DeepSeek-R1-Distill-Llama-70B
-- deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
-- google/gemma-3-1b-it ($0.06/1M tokens)
-- google/gemma-3-4b-it ($0.10/1M tokens)
-- google/gemma-3-27b-it
-- microsoft/Phi-3-medium-128k-instruct ($0.08/1M tokens)
-- microsoft/Phi-3-mini-4k-instruct ($0.08/1M tokens)
-- Qwen/Qwen2.5-7B-Instruct ($0.30/1M tokens)
-- Qwen/Qwen2.5-14B-Instruct
-- Qwen/Qwen2.5-32B-Instruct
-- Qwen/Qwen2.5-72B-Instruct ($1.08/1M tokens)
-- Qwen/Qwen3-4B ($0.10/1M tokens)
-- mistralai/Mixtral-8x7B-Instruct-v0.1-FP8
-- mistralai/Devstral-Small-2505
+- deepseek-ai/DeepSeek-R1 ($3.90)
+- deepseek-ai/DeepSeek-V3 ($0.90)
+- deepseek-ai/DeepSeek-R1-Distill-Llama-70B ($0.74)
+- deepseek-ai/DeepSeek-R1-Distill-Qwen-32B ($1.08)
+- google/gemma-3-1b-it ($0.06)
+- google/gemma-3-4b-it ($0.10)
+- google/gemma-3-27b-it ($0.30)
+- microsoft/Phi-3-medium-128k-instruct ($0.08)
+- microsoft/Phi-3-mini-4k-instruct ($0.08)
+- Qwen/Qwen2.5-7B-Instruct ($0.30)
+- Qwen/Qwen2.5-14B-Instruct ($0.30)
+- Qwen/Qwen2.5-32B-Instruct ($1.08)
+- Qwen/Qwen2.5-72B-Instruct ($1.08)
+- Qwen/Qwen3-4B ($0.10)
+- mistralai/Mixtral-8x7B-Instruct-v0.1-FP8 ($0.30)
+- mistralai/Devstral-Small-2505 ($0.30)
+
+Supported Diffusion models (per 1024x1024 image):
+- simplismart/flux-1.1-pro ($0.05)
+- simplismart/flux-dev ($0.03)
+- simplismart/flux-kontext ($0.04)
+- simplismart/flux-1.1-pro-redux ($0.05)
+- simplismart/flux-pro-canny ($0.05)
+- simplismart/flux-pro-depth ($0.05)
+- simplismart/sdxl ($0.28)
+
+Supported Speech-to-Text models (per audio minute):
+- simplismart/whisper-large-v2 ($0.0028)
+- simplismart/whisper-large-v3 ($0.0030)
+- simplismart/whisper-v3-turbo ($0.0018)
 """
 
 import logging
@@ -182,6 +196,134 @@ SIMPLISMART_MODELS = {
         "description": "Mistral's Devstral Small coding assistant model",
         "pricing": {"prompt": "0.30", "completion": "0.30", "request": "0", "image": "0"},
     },
+    # =====================
+    # Diffusion/Image Models
+    # =====================
+    # Pricing is per 1024x1024 image from https://simplismart.ai/pricing
+    "simplismart/flux-1.1-pro": {
+        "name": "Flux 1.1 Pro",
+        "type": "text-to-image",
+        "description": "High-quality Flux 1.1 Pro image generation model",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.05",
+            "image": "0.05",
+            "pricing_model": "per_image",
+        },
+    },
+    "simplismart/flux-dev": {
+        "name": "Flux Dev",
+        "type": "text-to-image",
+        "description": "Flux Dev image generation model for development",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.03",
+            "image": "0.03",
+            "pricing_model": "per_image",
+        },
+    },
+    "simplismart/flux-kontext": {
+        "name": "Flux Kontext",
+        "type": "text-to-image",
+        "description": "Flux Kontext context-aware image generation",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.04",
+            "image": "0.04",
+            "pricing_model": "per_image",
+        },
+    },
+    "simplismart/flux-1.1-pro-redux": {
+        "name": "Flux 1.1 Pro Redux",
+        "type": "image-to-image",
+        "description": "Flux 1.1 Pro Redux for image variations and remixing",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.05",
+            "image": "0.05",
+            "pricing_model": "per_image",
+        },
+    },
+    "simplismart/flux-pro-canny": {
+        "name": "Flux Pro Canny",
+        "type": "image-to-image",
+        "description": "Flux Pro with Canny edge detection control",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.05",
+            "image": "0.05",
+            "pricing_model": "per_image",
+        },
+    },
+    "simplismart/flux-pro-depth": {
+        "name": "Flux Pro Depth",
+        "type": "image-to-image",
+        "description": "Flux Pro with depth map control",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.05",
+            "image": "0.05",
+            "pricing_model": "per_image",
+        },
+    },
+    "simplismart/sdxl": {
+        "name": "Stable Diffusion XL",
+        "type": "text-to-image",
+        "description": "Stable Diffusion XL image generation model",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.28",
+            "image": "0.28",
+            "pricing_model": "per_image",
+        },
+    },
+    # =====================
+    # Speech-to-Text Models
+    # =====================
+    # Pricing is per audio minute from https://simplismart.ai/pricing
+    "simplismart/whisper-large-v2": {
+        "name": "Whisper Large v2",
+        "type": "speech-to-text",
+        "description": "OpenAI Whisper Large v2 for speech transcription",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.0028",
+            "image": "0",
+            "pricing_model": "per_minute",
+        },
+    },
+    "simplismart/whisper-large-v3": {
+        "name": "Whisper Large v3",
+        "type": "speech-to-text",
+        "description": "OpenAI Whisper Large v3 for speech transcription",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.0030",
+            "image": "0",
+            "pricing_model": "per_minute",
+        },
+    },
+    "simplismart/whisper-v3-turbo": {
+        "name": "Whisper v3 Turbo",
+        "type": "speech-to-text",
+        "description": "Fast OpenAI Whisper v3 Turbo for speech transcription",
+        "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "request": "0.0018",
+            "image": "0",
+            "pricing_model": "per_minute",
+        },
+    },
 }
 
 # Model ID aliases for user convenience
@@ -233,6 +375,26 @@ SIMPLISMART_MODEL_ALIASES = {
     "mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
     # Devstral aliases
     "devstral-small": "mistralai/Devstral-Small-2505",
+    # Flux image model aliases
+    "flux-1.1-pro": "simplismart/flux-1.1-pro",
+    "flux-pro": "simplismart/flux-1.1-pro",
+    "flux-dev": "simplismart/flux-dev",
+    "flux-kontext": "simplismart/flux-kontext",
+    "flux-1.1-pro-redux": "simplismart/flux-1.1-pro-redux",
+    "flux-pro-redux": "simplismart/flux-1.1-pro-redux",
+    "flux-pro-canny": "simplismart/flux-pro-canny",
+    "flux-canny": "simplismart/flux-pro-canny",
+    "flux-pro-depth": "simplismart/flux-pro-depth",
+    "flux-depth": "simplismart/flux-pro-depth",
+    "sdxl": "simplismart/sdxl",
+    "stable-diffusion-xl": "simplismart/sdxl",
+    # Whisper speech-to-text aliases
+    "whisper-large-v2": "simplismart/whisper-large-v2",
+    "whisper-v2": "simplismart/whisper-large-v2",
+    "whisper-large-v3": "simplismart/whisper-large-v3",
+    "whisper-v3": "simplismart/whisper-large-v3",
+    "whisper-v3-turbo": "simplismart/whisper-v3-turbo",
+    "whisper-turbo": "simplismart/whisper-v3-turbo",
 }
 
 
@@ -368,6 +530,8 @@ def fetch_models_from_simplismart():
 
     Returns a list of model info dictionaries in catalog format.
     Includes pricing data from https://simplismart.ai/pricing
+
+    Supports LLM, text-to-image, image-to-image, and speech-to-text models.
     """
     try:
         models = []
@@ -376,10 +540,15 @@ def fetch_models_from_simplismart():
                 "id": model_id,
                 "name": model_info["name"],
                 "description": model_info.get("description", ""),
-                "context_length": model_info.get("context_length", 8192),
                 "provider": "simplismart",
                 "provider_name": "Simplismart",
             }
+            # Include model type if available (text-to-image, speech-to-text, etc.)
+            if "type" in model_info:
+                model_data["type"] = model_info["type"]
+            # Include context_length for LLM models
+            if "context_length" in model_info:
+                model_data["context_length"] = model_info["context_length"]
             # Include pricing if available
             if "pricing" in model_info:
                 model_data["pricing"] = model_info["pricing"]
