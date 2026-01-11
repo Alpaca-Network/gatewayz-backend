@@ -835,6 +835,9 @@ class IntelligentHealthMonitor:
 
             # Get total counts from openrouter_models table (not just tracked)
             # NOTE: We get total counts FIRST so we can properly calculate healthy/unhealthy
+            # Track if database queries failed to avoid publishing 0 counts that
+            # would overwrite valid cached data
+            db_query_failed = False
             try:
                 catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
                 total_models = catalog_models_response.count if catalog_models_response.count is not None else 0
@@ -848,6 +851,7 @@ class IntelligentHealthMonitor:
                 except Exception as e2:
                     logger.warning(f"Failed to get models catalog count: {e2}")
                     total_models = 0
+                    db_query_failed = True
 
             try:
                 # Get all providers from providers table
@@ -857,6 +861,7 @@ class IntelligentHealthMonitor:
             except Exception as e:
                 logger.warning(f"Failed to get providers catalog count: {e}")
                 total_providers = 0
+                db_query_failed = True
 
             # Get gateway count from GATEWAY_CONFIG (not a database table)
             try:
@@ -909,9 +914,20 @@ class IntelligentHealthMonitor:
 
             # Calculate healthy gateways based on provider health data
             # A gateway is considered healthy if at least one of its providers is online
+            # Only count gateways that are defined in GATEWAY_CONFIG
+            # (exclude "unknown" or invalid gateways)
             gateway_health = {}
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                valid_gateways = set(GATEWAY_CONFIG.keys())
+            except Exception:
+                valid_gateways = set()
+
             for p in providers_data:
                 gw = p.get("gateway", "unknown")
+                # Skip unknown or invalid gateways to prevent healthy_gateways > total_gateways
+                if gw == "unknown" or (valid_gateways and gw not in valid_gateways):
+                    continue
                 if gw not in gateway_health:
                     gateway_health[gw] = {"healthy": False, "status": "offline"}
                 if p.get("status") == "online":
@@ -940,8 +956,16 @@ class IntelligentHealthMonitor:
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
 
-            simple_health_cache.cache_system_health(system_data)
-            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy), tracked: {tracked_models} models")
+            # Skip publishing if database queries failed to avoid overwriting valid
+            # cached data with 0 counts
+            if db_query_failed:
+                logger.warning(
+                    "Skipping cache publish: database queries failed, "
+                    "preserving previously cached valid data"
+                )
+            else:
+                simple_health_cache.cache_system_health(system_data)
+                logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy), tracked: {tracked_models} models")
 
         except Exception as e:
             logger.warning(f"Failed to publish health data to Redis cache: {e}")
