@@ -1,44 +1,56 @@
 """
-End-to-end tests for AllenAI OLMo models via the /v1/chat/completions endpoint.
+End-to-end tests for Simplismart models via the /v1/chat/completions endpoint.
 
-Tests the following AllenAI models:
-- allenai/olmo-3.1-32b-think - 32B reasoning model
-- allenai/olmo-3-32b-think - 32B reasoning model
-- allenai/olmo-3-7b-instruct - 7B instruction model
-- allenai/olmo-3-7b-think - 7B reasoning model
+Tests the following Simplismart models:
+- meta-llama/Meta-Llama-3.1-8B-Instruct - Llama 3.1 8B
+- meta-llama/Meta-Llama-3.1-70B-Instruct - Llama 3.1 70B
+- meta-llama/Llama-3.3-70B-Instruct - Llama 3.3 70B
+- google/gemma-3-27b-it - Gemma 3 27B
+- Qwen/Qwen2.5-32B-Instruct - Qwen 2.5 32B
+- deepseek-ai/DeepSeek-R1-Distill-Llama-70B - DeepSeek R1 Distill
+- mistralai/Mixtral-8x7B-Instruct-v0.1-FP8 - Mixtral 8x7B
 
 These tests validate:
 - Models can be called via the chat completions endpoint
 - Streaming responses work correctly
 - Response format follows OpenAI standard
-- Thinking/reasoning models return appropriate responses
+- Model aliases work correctly
 """
 
 import pytest
 from fastapi.testclient import TestClient
 
 
-# AllenAI OLMo models available via OpenRouter
-ALLENAI_MODELS = [
-    "allenai/olmo-3.1-32b-think",
-    "allenai/olmo-3-32b-think",
-    "allenai/olmo-3-7b-instruct",
-    "allenai/olmo-3-7b-think",
+# Simplismart models available via the API
+SIMPLISMART_MODELS = [
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "google/gemma-3-27b-it",
+    "Qwen/Qwen2.5-32B-Instruct",
+]
+
+# Models with aliases for alias testing
+SIMPLISMART_MODEL_ALIASES = [
+    ("llama-3.1-8b", "meta-llama/Meta-Llama-3.1-8B-Instruct"),
+    ("llama-3.3-70b", "meta-llama/Llama-3.3-70B-Instruct"),
+    ("gemma-3-27b", "google/gemma-3-27b-it"),
+    ("qwen-2.5-32b", "Qwen/Qwen2.5-32B-Instruct"),
 ]
 
 
-class TestAllenAIModelsE2E:
-    """E2E tests for AllenAI OLMo models via chat completions endpoint."""
+class TestSimplismartModelsE2E:
+    """E2E tests for Simplismart models via chat completions endpoint."""
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_basic_request(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_basic_request(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test basic chat completion request for each AllenAI model."""
+        """Test basic chat completion request for each Simplismart model."""
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Say hello in one sentence."}],
             "max_tokens": 100,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -61,16 +73,17 @@ class TestAllenAIModelsE2E:
             # Content should not be empty
             assert data["choices"][0]["message"]["content"]
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_streaming(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_streaming(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test streaming chat completion for each AllenAI model."""
+        """Test streaming chat completion for each Simplismart model."""
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Count from 1 to 5."}],
             "max_tokens": 100,
             "stream": True,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -89,11 +102,11 @@ class TestAllenAIModelsE2E:
             assert "data:" in content
             assert "[DONE]" in content
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_with_system_prompt(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_with_system_prompt(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test AllenAI models with system prompt."""
+        """Test Simplismart models with system prompt."""
         payload = {
             "model": model,
             "messages": [
@@ -101,6 +114,7 @@ class TestAllenAIModelsE2E:
                 {"role": "user", "content": "What is 2+2?"},
             ],
             "max_tokens": 50,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -116,11 +130,11 @@ class TestAllenAIModelsE2E:
             assert "choices" in data
             assert data["choices"][0]["message"]["role"] == "assistant"
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_conversation_history(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_conversation_history(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test AllenAI models with conversation history."""
+        """Test Simplismart models with conversation history."""
         payload = {
             "model": model,
             "messages": [
@@ -129,6 +143,7 @@ class TestAllenAIModelsE2E:
                 {"role": "user", "content": "What is my name?"},
             ],
             "max_tokens": 50,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -146,16 +161,17 @@ class TestAllenAIModelsE2E:
             content = data["choices"][0]["message"]["content"]
             assert content is not None
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_with_temperature(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_with_temperature(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test AllenAI models with custom temperature."""
+        """Test Simplismart models with custom temperature."""
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
             "max_tokens": 50,
             "temperature": 0.7,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -166,16 +182,17 @@ class TestAllenAIModelsE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_with_top_p(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_with_top_p(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test AllenAI models with top_p parameter."""
+        """Test Simplismart models with top_p parameter."""
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
             "max_tokens": 50,
-            "top_p": 0.9,
+            "top_p": 0.95,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -186,102 +203,16 @@ class TestAllenAIModelsE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_olmo_instruct_follows_instructions(
-        self, client: TestClient, auth_headers: dict
-    ):
-        """Test that OLMo instruct model follows instructions."""
-        payload = {
-            "model": "allenai/olmo-3-7b-instruct",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant. Always respond in exactly one word.",
-                },
-                {"role": "user", "content": "What color is the sky?"},
-            ],
-            "max_tokens": 20,
-        }
-
-        response = client.post(
-            "/v1/chat/completions",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-
-        if response.status_code == 200:
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            assert content is not None
-
-    @pytest.mark.parametrize(
-        "model",
-        [
-            "allenai/olmo-3.1-32b-think",
-            "allenai/olmo-3-32b-think",
-            "allenai/olmo-3-7b-think",
-        ],
-    )
-    def test_thinking_models_reasoning_task(
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
+    def test_simplismart_model_response_has_usage(
         self, client: TestClient, auth_headers: dict, model: str
     ):
-        """Test thinking models with a reasoning task."""
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "What is 15 + 27? Explain your reasoning.",
-                }
-            ],
-            "max_tokens": 200,
-        }
-
-        response = client.post(
-            "/v1/chat/completions",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-
-        if response.status_code == 200:
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            assert content is not None
-            # Thinking models should provide detailed responses
-            assert len(content) > 0
-
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_with_openrouter_provider(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
-        """Test AllenAI models with explicit OpenRouter provider."""
+        """Test that Simplismart model responses include usage information."""
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
             "max_tokens": 50,
-            "provider": "openrouter",
-        }
-
-        response = client.post(
-            "/v1/chat/completions",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_response_has_usage(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
-        """Test that AllenAI model responses include usage information."""
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": 50,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -299,14 +230,15 @@ class TestAllenAIModelsE2E:
                 assert "prompt_tokens" in data["usage"] or data["usage"] == {}
                 assert "completion_tokens" in data["usage"] or data["usage"] == {}
 
-    def test_allenai_model_invalid_should_fail(
+    def test_simplismart_model_invalid_should_fail(
         self, client: TestClient, auth_headers: dict
     ):
-        """Test that invalid AllenAI model ID returns appropriate error."""
+        """Test that invalid Simplismart model ID returns appropriate error."""
         payload = {
-            "model": "allenai/invalid-model-name",
+            "model": "simplismart/invalid-model-name",
             "messages": [{"role": "user", "content": "Hello"}],
             "max_tokens": 50,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -315,14 +247,39 @@ class TestAllenAIModelsE2E:
             headers=auth_headers,
         )
 
-        # Should fail with 400 (bad request) for invalid model
+        # Should fail with appropriate error code
         assert response.status_code in [400, 401, 402, 403, 422, 429, 500, 502, 503]
 
 
-class TestAllenAIModelsStreamingE2E:
-    """Dedicated streaming tests for AllenAI models."""
+class TestSimplismartModelAliasesE2E:
+    """E2E tests for Simplismart model aliases."""
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
+    @pytest.mark.parametrize("alias,expected_model", SIMPLISMART_MODEL_ALIASES)
+    def test_simplismart_alias_resolution(
+        self, client: TestClient, auth_headers: dict, alias: str, expected_model: str
+    ):
+        """Test that model aliases are correctly resolved."""
+        payload = {
+            "model": alias,
+            "messages": [{"role": "user", "content": "Say hi"}],
+            "max_tokens": 30,
+            "provider": "simplismart",
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        # Should succeed or fail gracefully
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+
+class TestSimplismartStreamingE2E:
+    """Dedicated streaming tests for Simplismart models."""
+
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
     def test_streaming_with_custom_params(
         self, client: TestClient, auth_headers: dict, model: str
     ):
@@ -333,6 +290,7 @@ class TestAllenAIModelsStreamingE2E:
             "temperature": 0.5,
             "max_tokens": 30,
             "stream": True,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -346,7 +304,7 @@ class TestAllenAIModelsStreamingE2E:
         if response.status_code == 200:
             assert "[DONE]" in response.text
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
+    @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
     def test_streaming_response_structure(
         self, client: TestClient, auth_headers: dict, model: str
     ):
@@ -356,6 +314,7 @@ class TestAllenAIModelsStreamingE2E:
             "messages": [{"role": "user", "content": "Hi"}],
             "max_tokens": 20,
             "stream": True,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -369,34 +328,30 @@ class TestAllenAIModelsStreamingE2E:
         if response.status_code == 200:
             # Check SSE format
             lines = response.text.strip().split("\n")
-            data_lines = [l for l in lines if l.startswith("data:")]
+            data_lines = [line for line in lines if line.startswith("data:")]
             assert len(data_lines) > 0, "No data lines in SSE response"
             # Last data line should be [DONE]
             assert "data: [DONE]" in response.text
 
 
-class TestAllenAIModelsDeveloperRoleE2E:
-    """Tests for AllenAI models with developer role support."""
+class TestSimplismartLlamaModelsE2E:
+    """Specific tests for Llama models on Simplismart."""
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_with_developer_role(
-        self, client: TestClient, auth_headers: dict, model: str
+    def test_llama_3_1_8b_instruction_following(
+        self, client: TestClient, auth_headers: dict
     ):
-        """Test AllenAI models with developer role instead of system role.
-
-        The developer role is an OpenAI API feature that some models support
-        as an alternative to the system role for setting assistant behavior.
-        """
+        """Test that Llama 3.1 8B follows instructions."""
         payload = {
-            "model": model,
+            "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
             "messages": [
                 {
-                    "role": "developer",
-                    "content": "You are a helpful assistant who responds briefly.",
+                    "role": "system",
+                    "content": "You are a helpful assistant. Always respond in exactly one word.",
                 },
-                {"role": "user", "content": "What is 2+2?"},
+                {"role": "user", "content": "What color is the sky?"},
             ],
-            "max_tokens": 50,
+            "max_tokens": 20,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -405,28 +360,27 @@ class TestAllenAIModelsDeveloperRoleE2E:
             headers=auth_headers,
         )
 
-        # Developer role should be accepted by our API validation
-        # Provider may or may not support it, so we accept various status codes
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
         if response.status_code == 200:
             data = response.json()
-            assert "choices" in data
-            assert data["choices"][0]["message"]["role"] == "assistant"
+            content = data["choices"][0]["message"]["content"]
+            assert content is not None
 
-    @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_developer_role_streaming(
-        self, client: TestClient, auth_headers: dict, model: str
+    def test_llama_3_3_70b_reasoning_task(
+        self, client: TestClient, auth_headers: dict
     ):
-        """Test streaming with developer role for AllenAI models."""
+        """Test Llama 3.3 70B with a reasoning task."""
         payload = {
-            "model": model,
+            "model": "meta-llama/Llama-3.3-70B-Instruct",
             "messages": [
-                {"role": "developer", "content": "Respond in one word only."},
-                {"role": "user", "content": "Hello"},
+                {
+                    "role": "user",
+                    "content": "What is 15 + 27? Explain your reasoning.",
+                }
             ],
-            "max_tokens": 30,
-            "stream": True,
+            "max_tokens": 200,
+            "provider": "simplismart",
         }
 
         response = client.post(
@@ -438,4 +392,67 @@ class TestAllenAIModelsDeveloperRoleE2E:
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
         if response.status_code == 200:
-            assert "[DONE]" in response.text
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            assert content is not None
+            assert len(content) > 0
+
+
+class TestSimplismartGemmaModelsE2E:
+    """Specific tests for Gemma models on Simplismart."""
+
+    def test_gemma_3_27b_basic(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """Test Gemma 3 27B basic functionality."""
+        payload = {
+            "model": "google/gemma-3-27b-it",
+            "messages": [
+                {"role": "user", "content": "What is the capital of France?"},
+            ],
+            "max_tokens": 50,
+            "provider": "simplismart",
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            assert content is not None
+
+
+class TestSimplismartQwenModelsE2E:
+    """Specific tests for Qwen models on Simplismart."""
+
+    def test_qwen_2_5_32b_basic(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """Test Qwen 2.5 32B basic functionality."""
+        payload = {
+            "model": "Qwen/Qwen2.5-32B-Instruct",
+            "messages": [
+                {"role": "user", "content": "Write a haiku about programming."},
+            ],
+            "max_tokens": 100,
+            "provider": "simplismart",
+        }
+
+        response = client.post(
+            "/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
+
+        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
+
+        if response.status_code == 200:
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            assert content is not None

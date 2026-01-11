@@ -18,6 +18,9 @@ from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 
+# Simplismart base URL constant (duplicated here to avoid circular import with simplismart_client.py)
+SIMPLISMART_BASE_URL = "https://api.simplismart.live"
+
 logger = logging.getLogger(__name__)
 
 # Global connection pool instances with LRU tracking
@@ -531,6 +534,23 @@ def get_anthropic_pooled_client() -> OpenAI:
         provider="anthropic",
         base_url="https://api.anthropic.com/v1",
         api_key=Config.ANTHROPIC_API_KEY,
+    )
+
+
+def get_simplismart_pooled_client() -> OpenAI:
+    """Get pooled client for Simplismart AI.
+
+    Simplismart provides an OpenAI-compatible API endpoint for various LLM models
+    including Llama, Gemma, Qwen, DeepSeek, Mixtral, and more.
+    See: https://docs.simplismart.ai/overview
+    """
+    if not Config.SIMPLISMART_API_KEY:
+        raise ValueError("Simplismart API key not configured")
+
+    return get_pooled_client(
+        provider="simplismart",
+        base_url=SIMPLISMART_BASE_URL,
+        api_key=Config.SIMPLISMART_API_KEY,
     )
 
 

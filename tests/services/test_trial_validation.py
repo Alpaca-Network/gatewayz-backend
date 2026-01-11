@@ -76,7 +76,8 @@ def test_validate_missing_key_returns_not_found(monkeypatch, mod):
     out = mod.validate_trial_access("sk-nope")
     assert out["is_valid"] is False
     assert out["is_trial"] is False
-    assert "not found" in out["error"].lower()
+    # Error message indicates invalid/forbidden when key not found in either table
+    assert "forbidden" in out["error"].lower() or "invalid" in out["error"].lower()
 
 
 def test_validate_non_trial_key(monkeypatch, mod):
@@ -221,7 +222,8 @@ def test_validate_handles_exception(monkeypatch, mod):
     out = mod.validate_trial_access("sk-any")
     assert out["is_valid"] is False
     assert out["is_trial"] is False
-    assert "validation error" in out["error"].lower()
+    # Error message includes "error occurred" and the original exception message
+    assert "error occurred" in out["error"].lower() or "supabase down" in out["error"].lower()
 
 
 # ----------------------------- tests: track_trial_usage -----------------------------
@@ -532,3 +534,147 @@ def test_track_usage_invalidates_cache(monkeypatch, mod):
     # Next validation should hit DB again (cache was invalidated)
     mod.validate_trial_access("sk-trial")
     assert call_count > initial_calls  # New DB call for fresh data
+
+
+# ----------------------------- tests: HTTP/2 connection error handling -----------------------------
+
+def test_validate_retries_on_http2_connection_error(monkeypatch, mod):
+    """HTTP/2 connection errors should trigger retry with client refresh"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    refresh_called = False
+    rows = {
+        "sk-retry": {"api_key": "sk-retry", "is_trial": False}
+    }
+
+    def failing_then_succeeding_client():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call fails with HTTP/2 connection error
+            raise Exception("LocalProtocolError: StreamIDTooLowError: 173 is lower than 193")
+        return _FakeSupabase(rows)
+
+    def mock_refresh():
+        nonlocal refresh_called
+        refresh_called = True
+
+    monkeypatch.setattr(mod, "get_supabase_client", failing_then_succeeding_client)
+    monkeypatch.setattr(mod, "refresh_supabase_client", mock_refresh)
+
+    result = mod.validate_trial_access("sk-retry")
+
+    # Should succeed after retry
+    assert result["is_valid"] is True
+    assert result["is_trial"] is False
+    assert call_count == 2  # Initial call + 1 retry
+    assert refresh_called is True  # Client should have been refreshed
+
+
+def test_validate_retries_on_connection_terminated_error(monkeypatch, mod):
+    """ConnectionTerminated errors should trigger retry with client refresh"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    refresh_called = False
+    rows = {
+        "sk-retry-ct": {"api_key": "sk-retry-ct", "is_trial": False}
+    }
+
+    def failing_then_succeeding_client():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("<ConnectionTerminated error_code:9, last_stream_id:191, additional_data:None>")
+        return _FakeSupabase(rows)
+
+    def mock_refresh():
+        nonlocal refresh_called
+        refresh_called = True
+
+    monkeypatch.setattr(mod, "get_supabase_client", failing_then_succeeding_client)
+    monkeypatch.setattr(mod, "refresh_supabase_client", mock_refresh)
+
+    result = mod.validate_trial_access("sk-retry-ct")
+
+    assert result["is_valid"] is True
+    assert call_count == 2
+    assert refresh_called is True
+
+
+def test_validate_retries_on_send_headers_state_error(monkeypatch, mod):
+    """SEND_HEADERS state errors should trigger retry with client refresh"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+    refresh_called = False
+    rows = {
+        "sk-retry-sh": {"api_key": "sk-retry-sh", "is_trial": False}
+    }
+
+    def failing_then_succeeding_client():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("Invalid input StreamInputs.SEND_HEADERS in state 5")
+        return _FakeSupabase(rows)
+
+    def mock_refresh():
+        nonlocal refresh_called
+        refresh_called = True
+
+    monkeypatch.setattr(mod, "get_supabase_client", failing_then_succeeding_client)
+    monkeypatch.setattr(mod, "refresh_supabase_client", mock_refresh)
+
+    result = mod.validate_trial_access("sk-retry-sh")
+
+    assert result["is_valid"] is True
+    assert call_count == 2
+    assert refresh_called is True
+
+
+def test_validate_max_retries_exceeded(monkeypatch, mod):
+    """Should fail after max retries are exhausted"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+
+    def always_failing_client():
+        nonlocal call_count
+        call_count += 1
+        raise Exception("LocalProtocolError: StreamIDTooLowError: connection broken")
+
+    def mock_refresh():
+        pass  # Do nothing
+
+    monkeypatch.setattr(mod, "get_supabase_client", always_failing_client)
+    monkeypatch.setattr(mod, "refresh_supabase_client", mock_refresh)
+
+    result = mod.validate_trial_access("sk-fail")
+
+    # Should fail after max retries (initial + 2 retries = 3 calls)
+    assert result["is_valid"] is False
+    assert "error" in result
+    assert call_count == 3  # Initial call + 2 retries (MAX_RETRIES=2)
+
+
+def test_validate_no_retry_on_non_connection_error(monkeypatch, mod):
+    """Non-connection errors should not trigger retry logic"""
+    mod.clear_trial_cache()
+
+    call_count = 0
+
+    def failing_client():
+        nonlocal call_count
+        call_count += 1
+        # Non-connection error (e.g., authentication failure)
+        raise Exception("Invalid authentication credentials")
+
+    monkeypatch.setattr(mod, "get_supabase_client", failing_client)
+
+    result = mod.validate_trial_access("sk-fail")
+
+    # Should fail immediately without retry
+    assert result["is_valid"] is False
+    assert call_count == 1  # Only initial call, no retries

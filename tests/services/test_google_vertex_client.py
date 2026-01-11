@@ -658,6 +658,47 @@ class TestFetchModelsFromGoogleVertex:
         assert _google_vertex_models_cache["timestamp"] is not None
         assert len(_google_vertex_models_cache["data"]) == len(models)
 
+    def test_fetch_models_includes_provider_model_id(self):
+        """Test that returned models include provider_model_id for database sync.
+
+        This is critical for models where the canonical ID differs from the
+        actual provider model ID (e.g., gemini-3-flash vs gemini-3-flash-preview).
+        The provider_model_id is used when saving chat completion requests to
+        ensure proper model lookup in the database.
+        """
+        from src.services.google_vertex_client import fetch_models_from_google_vertex
+
+        models = fetch_models_from_google_vertex()
+
+        # Check that all models have provider_model_id
+        for model in models:
+            assert "provider_model_id" in model, f"Model {model['id']} missing provider_model_id"
+            assert model["provider_model_id"] is not None, f"Model {model['id']} has None provider_model_id"
+
+        # Specifically check Gemini 3 models which have different provider model IDs
+        gemini_3_flash = next((m for m in models if m["id"] == "gemini-3-flash"), None)
+        assert gemini_3_flash is not None, "gemini-3-flash model not found"
+        assert gemini_3_flash["provider_model_id"] == "gemini-3-flash-preview", \
+            f"Expected gemini-3-flash to have provider_model_id 'gemini-3-flash-preview', got '{gemini_3_flash['provider_model_id']}'"
+
+        gemini_3_pro = next((m for m in models if m["id"] == "gemini-3-pro"), None)
+        assert gemini_3_pro is not None, "gemini-3-pro model not found"
+        assert gemini_3_pro["provider_model_id"] == "gemini-3-pro-preview", \
+            f"Expected gemini-3-pro to have provider_model_id 'gemini-3-pro-preview', got '{gemini_3_pro['provider_model_id']}'"
+
+    def test_fetch_models_raw_google_vertex_includes_provider_model_id(self):
+        """Test that raw_google_vertex metadata includes provider_model_id."""
+        from src.services.google_vertex_client import fetch_models_from_google_vertex
+
+        models = fetch_models_from_google_vertex()
+
+        # Check Gemini 3 flash specifically
+        gemini_3_flash = next((m for m in models if m["id"] == "gemini-3-flash"), None)
+        assert gemini_3_flash is not None, "gemini-3-flash model not found"
+        assert "raw_google_vertex" in gemini_3_flash, "Missing raw_google_vertex metadata"
+        assert gemini_3_flash["raw_google_vertex"]["provider_model_id"] == "gemini-3-flash-preview", \
+            "raw_google_vertex should include the provider_model_id for database sync"
+
 
 @pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
 class TestModelLocationRouting:

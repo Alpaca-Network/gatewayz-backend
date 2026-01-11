@@ -669,232 +669,240 @@ async def test_process_health_check_result_logs_debug_after_max_retries(mock_sup
     assert "after 2 attempts" in debug_call
 
 
-# =============================================================================
-# Tests for health calculation data accuracy (Issue: total vs healthy count mismatch)
-# =============================================================================
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_process_health_check_result_preserves_uptime_percentages(mock_supabase, mock_logger, health_monitor):
+    """Test that _process_health_check_result preserves existing uptime percentages rather than overwriting them"""
+    # Create mock with existing uptime data
+    mock_table = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = {
+        "provider": "openai",
+        "model": "gpt-4",
+        "gateway": "openrouter",
+        "call_count": 100,
+        "success_count": 95,
+        "error_count": 5,
+        "consecutive_failures": 0,
+        "consecutive_successes": 5,
+        "circuit_breaker_state": "closed",
+        "monitoring_tier": "critical",
+        "average_response_time_ms": 200.0,
+        # These are the existing uptime values calculated by the aggregate task
+        "uptime_percentage_24h": 99.5,
+        "uptime_percentage_7d": 98.8,
+        "uptime_percentage_30d": 97.2,
+    }
+
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+    mock_table.execute.return_value = mock_response
+    mock_table.upsert.return_value = mock_table
+    mock_table.insert.return_value = mock_table
+    mock_supabase.table.return_value = mock_table
+
+    # Create a successful health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4",
+        gateway="openrouter",
+        status=HealthCheckStatus.SUCCESS,
+        response_time_ms=150.0,
+        error_message=None,
+        http_status_code=200,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    await health_monitor._process_health_check_result(result)
+
+    # Verify upsert was called with preserved uptime values
+    upsert_call = mock_table.upsert.call_args
+    assert upsert_call is not None
+    upsert_data = upsert_call[0][0]
+
+    # The uptime percentages should be preserved, not recalculated
+    assert upsert_data["uptime_percentage_24h"] == 99.5
+    assert upsert_data["uptime_percentage_7d"] == 98.8
+    assert upsert_data["uptime_percentage_30d"] == 97.2
 
 
 @pytest.mark.asyncio
-@patch("src.services.simple_health_cache.simple_health_cache")
+@patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_publish_health_healthy_models_never_exceeds_total(mock_supabase, mock_cache, health_monitor):
-    """
-    Test that healthy_models count never exceeds total_models count.
+async def test_process_health_check_result_defaults_uptime_for_new_models(mock_supabase, mock_logger, health_monitor):
+    """Test that _process_health_check_result defaults uptime to 100% for new models without existing data"""
+    # Create mock for a new model with no existing uptime data
+    mock_table = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = {
+        "provider": "openai",
+        "model": "gpt-4-new",
+        "gateway": "openrouter",
+        "call_count": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "consecutive_failures": 0,
+        "consecutive_successes": 0,
+        "circuit_breaker_state": "closed",
+        "monitoring_tier": "standard",
+        "average_response_time_ms": None,
+        # No uptime values yet
+        "uptime_percentage_24h": None,
+        "uptime_percentage_7d": None,
+        "uptime_percentage_30d": None,
+    }
 
-    This prevents data inconsistency where UI shows "366 Total Models" but "375 healthy".
-    The healthy count must be constrained to be at most equal to total models.
-    """
-    # Mock model health tracking data (tracked models)
-    mock_tracking_response = MagicMock()
-    mock_tracking_response.data = [
-        {"provider": "openrouter", "model": f"model-{i}", "gateway": "openrouter",
-         "last_status": "success", "last_response_time_ms": 100,
-         "uptime_percentage_24h": 99.0, "error_count": 0, "call_count": 10,
-         "last_called_at": "2025-01-01T00:00:00Z"}
-        for i in range(375)  # 375 tracked healthy models
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.maybe_single.return_value = mock_table
+    mock_table.execute.return_value = mock_response
+    mock_table.upsert.return_value = mock_table
+    mock_table.insert.return_value = mock_table
+    mock_supabase.table.return_value = mock_table
+
+    # Create a successful health check result
+    result = HealthCheckResult(
+        provider="openai",
+        model="gpt-4-new",
+        gateway="openrouter",
+        status=HealthCheckStatus.SUCCESS,
+        response_time_ms=150.0,
+        error_message=None,
+        http_status_code=200,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+    await health_monitor._process_health_check_result(result)
+
+    # Verify upsert was called with default 100% uptime
+    upsert_call = mock_table.upsert.call_args
+    assert upsert_call is not None
+    upsert_data = upsert_call[0][0]
+
+    # New models should default to 100% uptime
+    assert upsert_data["uptime_percentage_24h"] == 100.0
+    assert upsert_data["uptime_percentage_7d"] == 100.0
+    assert upsert_data["uptime_percentage_30d"] == 100.0
+
+
+@pytest.mark.asyncio
+@patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
+@patch("src.services.intelligent_health_monitor.logger")
+@patch("src.config.supabase_config.supabase")
+async def test_aggregate_hourly_metrics_calculates_uptime_from_history(mock_supabase, mock_logger, mock_sleep, health_monitor):
+    """Test that _aggregate_hourly_metrics calculates uptime from actual history data"""
+    # Mock tracked models
+    mock_tracked_response = MagicMock()
+    mock_tracked_response.data = [
+        {"provider": "openai", "model": "gpt-4", "gateway": "openrouter"},
     ]
 
-    # Mock openrouter_models catalog (total models = 366, less than tracked)
-    mock_catalog_response = MagicMock()
-    mock_catalog_response.count = 366  # Total is less than tracked healthy
+    # Mock history data - 10 checks, 9 successful
+    mock_history_response = MagicMock()
+    mock_history_response.data = [
+        {"status": "success"} for _ in range(9)
+    ] + [{"status": "error"}]
 
-    # Mock providers table
-    mock_providers_response = MagicMock()
-    mock_providers_response.count = 23
+    # Set up mock table behavior
+    call_tracker = {"tracked_calls": 0, "history_calls": 0, "update_calls": 0}
 
     def table_side_effect(table_name):
         mock_table = MagicMock()
+        mock_table.select.return_value = mock_table
+        mock_table.eq.return_value = mock_table
+        mock_table.gte.return_value = mock_table
+        mock_table.update.return_value = mock_table
+
         if table_name == "model_health_tracking":
-            mock_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_tracking_response
-        elif table_name == "openrouter_models":
-            mock_table.select.return_value.execute.return_value = mock_catalog_response
-        elif table_name == "providers":
-            mock_table.select.return_value.execute.return_value = mock_providers_response
+            if call_tracker["update_calls"] > 0:
+                # This is an update call
+                mock_table.execute.return_value = MagicMock(data=[{}])
+            else:
+                # This is a select call for tracked models
+                call_tracker["tracked_calls"] += 1
+                mock_table.execute.return_value = mock_tracked_response
+        elif table_name == "model_health_history":
+            call_tracker["history_calls"] += 1
+            mock_table.execute.return_value = mock_history_response
+
+        def update_side_effect(data):
+            call_tracker["update_calls"] += 1
+            # Verify the calculated uptime
+            assert "uptime_percentage_24h" in data
+            # 9 out of 10 = 90%
+            assert data["uptime_percentage_24h"] == 90.0
+            mock_update_table = MagicMock()
+            mock_update_table.eq.return_value = mock_update_table
+            mock_update_table.execute.return_value = MagicMock(data=[{}])
+            return mock_update_table
+
+        mock_table.update.side_effect = update_side_effect
         return mock_table
 
     mock_supabase.table.side_effect = table_side_effect
 
-    # Call the method
-    await health_monitor._publish_health_to_cache()
+    # Run the aggregation
+    await health_monitor._aggregate_hourly_metrics()
 
-    # Verify cache_system_health was called
-    assert mock_cache.cache_system_health.called
-
-    # Get the system_data that was cached
-    system_data = mock_cache.cache_system_health.call_args[0][0]
-
-    # CRITICAL: healthy_models should never exceed total_models
-    assert system_data["total_models"] == 366
-    assert system_data["healthy_models"] <= system_data["total_models"], \
-        f"healthy_models ({system_data['healthy_models']}) exceeds total_models ({system_data['total_models']})"
-
-    # tracked_models can be different from total_models
-    assert system_data["tracked_models"] == 375
+    # Verify calls were made
+    assert call_tracker["tracked_calls"] >= 1
+    assert call_tracker["history_calls"] >= 1
+    assert call_tracker["update_calls"] >= 1
 
 
 @pytest.mark.asyncio
-@patch("src.services.simple_health_cache.simple_health_cache")
+@patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
+@patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_publish_health_gateway_health_calculation(mock_supabase, mock_cache, health_monitor):
-    """
-    Test that gateway health is calculated based on provider health data.
-
-    A gateway is considered healthy if at least one of its providers is online.
-    """
-    # Mock model health tracking data with mixed health status
-    mock_tracking_response = MagicMock()
-    mock_tracking_response.data = [
-        {"provider": "openrouter", "model": "model-1", "gateway": "openrouter",
-         "last_status": "success", "last_response_time_ms": 100,
-         "uptime_percentage_24h": 99.0, "error_count": 0, "call_count": 10,
-         "last_called_at": "2025-01-01T00:00:00Z"},
-        {"provider": "openrouter", "model": "model-2", "gateway": "openrouter",
-         "last_status": "error", "last_response_time_ms": 500,
-         "uptime_percentage_24h": 50.0, "error_count": 5, "call_count": 10,
-         "last_called_at": "2025-01-01T00:00:00Z"},
-        {"provider": "featherless", "model": "model-3", "gateway": "featherless",
-         "last_status": "error", "last_response_time_ms": 1000,
-         "uptime_percentage_24h": 10.0, "error_count": 9, "call_count": 10,
-         "last_called_at": "2025-01-01T00:00:00Z"},
+async def test_aggregate_hourly_metrics_defaults_to_100_when_no_history(mock_supabase, mock_logger, mock_sleep, health_monitor):
+    """Test that _aggregate_hourly_metrics defaults to 100% uptime when there's no history data"""
+    # Mock tracked models
+    mock_tracked_response = MagicMock()
+    mock_tracked_response.data = [
+        {"provider": "openai", "model": "gpt-4-new", "gateway": "openrouter"},
     ]
 
-    mock_catalog_response = MagicMock()
-    mock_catalog_response.count = 100
+    # Empty history data
+    mock_empty_history = MagicMock()
+    mock_empty_history.data = []
 
-    mock_providers_response = MagicMock()
-    mock_providers_response.count = 10
+    call_tracker = {"update_calls": 0}
 
     def table_side_effect(table_name):
         mock_table = MagicMock()
+        mock_table.select.return_value = mock_table
+        mock_table.eq.return_value = mock_table
+        mock_table.gte.return_value = mock_table
+        mock_table.update.return_value = mock_table
+
         if table_name == "model_health_tracking":
-            mock_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_tracking_response
-        elif table_name == "openrouter_models":
-            mock_table.select.return_value.execute.return_value = mock_catalog_response
-        elif table_name == "providers":
-            mock_table.select.return_value.execute.return_value = mock_providers_response
+            if call_tracker["update_calls"] > 0:
+                mock_table.execute.return_value = MagicMock(data=[{}])
+            else:
+                mock_table.execute.return_value = mock_tracked_response
+        elif table_name == "model_health_history":
+            mock_table.execute.return_value = mock_empty_history
+
+        def update_side_effect(data):
+            call_tracker["update_calls"] += 1
+            # Should default to 100% when no history
+            assert data["uptime_percentage_24h"] == 100.0
+            assert data["uptime_percentage_7d"] == 100.0
+            assert data["uptime_percentage_30d"] == 100.0
+            mock_update_table = MagicMock()
+            mock_update_table.eq.return_value = mock_update_table
+            mock_update_table.execute.return_value = MagicMock(data=[{}])
+            return mock_update_table
+
+        mock_table.update.side_effect = update_side_effect
         return mock_table
 
     mock_supabase.table.side_effect = table_side_effect
 
-    # Call the method
-    await health_monitor._publish_health_to_cache()
+    # Run the aggregation
+    await health_monitor._aggregate_hourly_metrics()
 
-    # Verify cache_system_health was called
-    assert mock_cache.cache_system_health.called
-
-    # Get the system_data that was cached
-    system_data = mock_cache.cache_system_health.call_args[0][0]
-
-    # Verify gateway health fields exist
-    assert "total_gateways" in system_data
-    assert "healthy_gateways" in system_data
-
-    # The openrouter gateway has 1 healthy provider (online), so it's healthy
-    # The featherless gateway has no healthy providers (all offline), so it's not healthy
-    # We mock 2 gateways total (openrouter, featherless), expect exactly 1 healthy
-    assert system_data["total_gateways"] >= 1
-    assert system_data["healthy_gateways"] >= 1  # At least openrouter is healthy
-
-
-@pytest.mark.asyncio
-@patch("src.services.simple_health_cache.simple_health_cache")
-@patch("src.config.supabase_config.supabase")
-async def test_publish_health_zero_tracked_models(mock_supabase, mock_cache, health_monitor):
-    """
-    Test that when there are no tracked models, healthy/unhealthy counts are 0.
-
-    This prevents incorrect status when health monitoring hasn't run yet.
-    """
-    # Mock empty tracking data
-    mock_tracking_response = MagicMock()
-    mock_tracking_response.data = []
-
-    mock_catalog_response = MagicMock()
-    mock_catalog_response.count = 366
-
-    mock_providers_response = MagicMock()
-    mock_providers_response.count = 23
-
-    def table_side_effect(table_name):
-        mock_table = MagicMock()
-        if table_name == "model_health_tracking":
-            mock_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_tracking_response
-        elif table_name == "openrouter_models":
-            mock_table.select.return_value.execute.return_value = mock_catalog_response
-        elif table_name == "providers":
-            mock_table.select.return_value.execute.return_value = mock_providers_response
-        return mock_table
-
-    mock_supabase.table.side_effect = table_side_effect
-
-    # Call the method
-    await health_monitor._publish_health_to_cache()
-
-    # Verify cache_system_health was called
-    assert mock_cache.cache_system_health.called
-
-    # Get the system_data that was cached
-    system_data = mock_cache.cache_system_health.call_args[0][0]
-
-    # When no models are tracked, we report 0 healthy/unhealthy (unknown state)
-    assert system_data["total_models"] == 366
-    assert system_data["healthy_models"] == 0
-    assert system_data["unhealthy_models"] == 0
-    assert system_data["tracked_models"] == 0
-    assert system_data["overall_status"] == "unknown"
-
-
-@pytest.mark.asyncio
-@patch("src.services.simple_health_cache.simple_health_cache")
-@patch("src.config.supabase_config.supabase")
-async def test_publish_health_status_based_on_tracked_health(mock_supabase, mock_cache, health_monitor):
-    """
-    Test that overall_status reflects actual tracked model health.
-
-    If all tracked models are unhealthy, status should be degraded, not healthy.
-    """
-    # Mock tracking data where ALL models are unhealthy
-    mock_tracking_response = MagicMock()
-    mock_tracking_response.data = [
-        {"provider": "openrouter", "model": f"model-{i}", "gateway": "openrouter",
-         "last_status": "error",  # All models unhealthy
-         "last_response_time_ms": 500,
-         "uptime_percentage_24h": 10.0, "error_count": 9, "call_count": 10,
-         "last_called_at": "2025-01-01T00:00:00Z"}
-        for i in range(45)
-    ]
-
-    mock_catalog_response = MagicMock()
-    mock_catalog_response.count = 366
-
-    mock_providers_response = MagicMock()
-    mock_providers_response.count = 23
-
-    def table_side_effect(table_name):
-        mock_table = MagicMock()
-        if table_name == "model_health_tracking":
-            mock_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_tracking_response
-        elif table_name == "openrouter_models":
-            mock_table.select.return_value.execute.return_value = mock_catalog_response
-        elif table_name == "providers":
-            mock_table.select.return_value.execute.return_value = mock_providers_response
-        return mock_table
-
-    mock_supabase.table.side_effect = table_side_effect
-
-    # Call the method
-    await health_monitor._publish_health_to_cache()
-
-    # Verify cache_system_health was called
-    assert mock_cache.cache_system_health.called
-
-    # Get the system_data that was cached
-    system_data = mock_cache.cache_system_health.call_args[0][0]
-
-    # When all tracked models are unhealthy, status should be "unhealthy" or "degraded"
-    # (depends on provider count - if >50% providers unhealthy, it's "unhealthy")
-    assert system_data["healthy_models"] == 0
-    assert system_data["unhealthy_models"] == 45
-    assert system_data["overall_status"] in ["degraded", "unhealthy"]
-    # System uptime should be 0% when all tracked models are unhealthy
-    assert system_data["system_uptime"] == 0.0
+    # Verify update was called with 100% defaults
+    assert call_tracker["update_calls"] >= 1

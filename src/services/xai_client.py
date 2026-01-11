@@ -152,7 +152,9 @@ def make_xai_request_openai_stream(messages, model, **kwargs):
         # Merge reasoning params with kwargs (kwargs takes precedence if reasoning already set)
         if reasoning_params and "reasoning" not in kwargs:
             kwargs.update(reasoning_params)
-            logger.debug(f"xAI streaming request for {model} with reasoning params: {reasoning_params}")
+            logger.debug(
+                f"xAI streaming request for {model} with reasoning params: {reasoning_params}"
+            )
 
         stream = client.chat.completions.create(
             model=model, messages=messages, stream=True, **kwargs
