@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from src.cache import _huggingface_models_cache
 from src.config import Config
 
 # Initialize logging
@@ -118,6 +119,54 @@ def _normalize_namespace(namespace: str) -> str:
     return clean.replace("_", "-")
 
 
+def _resolve_model_id_case(model_id: str) -> str:
+    """
+    Resolve the correct case for a HuggingFace model ID by looking it up in the cache.
+
+    HuggingFace Router API is case-sensitive, but model IDs coming from the gateway
+    may have been lowercased by model_transformations.py. This function looks up the
+    correct case from the cached HuggingFace model catalog.
+
+    Args:
+        model_id: The model ID to resolve (may be lowercase)
+
+    Returns:
+        The correctly-cased model ID, or the original if not found in cache
+    """
+    # Strip the :hf-inference suffix if present for lookup
+    lookup_id = model_id
+    has_suffix = False
+    if lookup_id.endswith(HF_INFERENCE_SUFFIX):
+        lookup_id = lookup_id[: -len(HF_INFERENCE_SUFFIX)]
+        has_suffix = True
+
+    # Check cache for the correct case
+    cache_data = _huggingface_models_cache.get("data")
+    if cache_data:
+        lookup_lower = lookup_id.lower()
+        for cached_model in cache_data:
+            cached_id = cached_model.get("id", "")
+            if cached_id.lower() == lookup_lower:
+                resolved = cached_id
+                if resolved != lookup_id:
+                    logger.info(
+                        "Resolved HuggingFace model ID case: '%s' -> '%s'",
+                        lookup_id,
+                        resolved,
+                    )
+                # Re-add suffix if it was present
+                if has_suffix:
+                    resolved = f"{resolved}{HF_INFERENCE_SUFFIX}"
+                return resolved
+
+    # If not found in cache, return as-is
+    logger.debug(
+        "Model '%s' not found in HuggingFace cache, using as-is",
+        lookup_id,
+    )
+    return model_id
+
+
 def _extract_namespace(model: str) -> str | None:
     """Return the provider namespace portion of a model ID."""
     if not model or "/" not in model:
@@ -141,6 +190,16 @@ def _is_foreign_provider_model(model: str) -> tuple[bool, str | None]:
 
 
 def _prepare_model(model: str) -> str:
+    """
+    Prepare a model ID for HuggingFace Router API.
+
+    This function:
+    1. Resolves the correct case from the HuggingFace model cache
+    2. Adds the :hf-inference suffix if not already present
+    """
+    # First, resolve the correct case from cache
+    model = _resolve_model_id_case(model)
+
     if model.endswith(HF_INFERENCE_SUFFIX):
         return model
     is_foreign, _ = _is_foreign_provider_model(model)
