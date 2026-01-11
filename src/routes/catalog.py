@@ -362,6 +362,7 @@ async def get_models(
         aihubmix_models: list[dict] = []
         vercel_ai_gateway_models: list[dict] = []
         alibaba_models: list[dict] = []
+        simplismart_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
