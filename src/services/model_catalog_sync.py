@@ -228,11 +228,16 @@ def transform_normalized_model_to_db_schema(
         if normalized_model.get("default_parameters"):
             metadata["default_parameters"] = normalized_model["default_parameters"]
 
+        # Extract provider_model_id - use explicit field if available, otherwise fall back to model_id
+        # This is important for providers like Google Vertex where the model_id (e.g., "gemini-3-flash")
+        # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
+        provider_model_id = normalized_model.get("provider_model_id") or model_id
+
         return {
             "provider_id": provider_id,
             "model_id": str(model_id),
             "model_name": str(model_name),
-            "provider_model_id": str(model_id),  # Use model_id as provider_model_id
+            "provider_model_id": str(provider_model_id),
             "description": description,
             "context_length": context_length,
             "modality": modality,

@@ -1582,6 +1582,9 @@ def _get_static_model_config() -> list[dict]:
         output_modalities = ["text"]
 
         prefixed_slug = f"google-vertex/{model.id}"
+        # Use the provider-specific model_id if available (e.g., gemini-3-flash-preview)
+        # This is the actual model ID used when making API requests to the provider
+        provider_model_id = vertex_provider.model_id if vertex_provider else model.id
         normalized = {
             "id": model.id,
             "slug": prefixed_slug,
@@ -1614,9 +1617,13 @@ def _get_static_model_config() -> list[dict]:
             "model_logo_url": None,
             "source_gateway": "google-vertex",
             "tags": features,
+            # Include provider_model_id for database sync - this is the actual model ID
+            # used by the provider (e.g., "gemini-3-flash-preview" for Vertex AI)
+            "provider_model_id": provider_model_id,
             "raw_google_vertex": {
                 "id": model.id,
                 "name": model.name,
+                "provider_model_id": provider_model_id,
                 "modalities": model.modalities,
                 "context_length": model.context_length,
             },
