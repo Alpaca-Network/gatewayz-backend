@@ -40,17 +40,20 @@ def is_xai_reasoning_model(model: str) -> bool:
         True if the model supports reasoning, False otherwise
     """
     model_lower = model.lower()
-    # Check explicit reasoning models
-    for reasoning_model in XAI_REASONING_MODELS:
-        if reasoning_model in model_lower:
-            return True
-    # Check if explicitly non-reasoning
+    # Extract the base model name (handle prefixed model IDs like "xai/grok-4")
+    base_model = model_lower.split("/")[-1] if "/" in model_lower else model_lower
+
+    # Check if explicitly non-reasoning first (takes precedence)
     for non_reasoning_model in XAI_NON_REASONING_MODELS:
-        if non_reasoning_model in model_lower:
+        if base_model == non_reasoning_model or base_model.startswith(f"{non_reasoning_model}-"):
             return False
-    # Default: newer grok-4+ models likely support reasoning
-    if "grok-4" in model_lower or "grok-3-mini" in model_lower:
-        return True
+
+    # Check explicit reasoning models (exact match or with suffix)
+    for reasoning_model in XAI_REASONING_MODELS:
+        if base_model == reasoning_model or base_model.startswith(f"{reasoning_model}-"):
+            return True
+
+    # Default: only known grok reasoning models should return True
     return False
 
 

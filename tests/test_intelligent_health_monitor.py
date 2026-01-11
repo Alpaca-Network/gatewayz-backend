@@ -789,10 +789,11 @@ async def test_publish_health_gateway_health_calculation(mock_supabase, mock_cac
     assert "total_gateways" in system_data
     assert "healthy_gateways" in system_data
 
-    # The openrouter gateway should be counted as healthy (has 1 healthy model)
-    # The featherless gateway should not be healthy (all unhealthy)
-    # So we expect healthy_gateways >= 1 (at least openrouter is partially healthy)
-    assert system_data["healthy_gateways"] >= 0
+    # The openrouter gateway has 1 healthy provider (online), so it's healthy
+    # The featherless gateway has no healthy providers (all offline), so it's not healthy
+    # We mock 2 gateways total (openrouter, featherless), expect exactly 1 healthy
+    assert system_data["total_gateways"] >= 1
+    assert system_data["healthy_gateways"] >= 1  # At least openrouter is healthy
 
 
 @pytest.mark.asyncio

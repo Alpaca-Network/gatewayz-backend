@@ -871,11 +871,9 @@ class IntelligentHealthMonitor:
             unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
 
             # IMPORTANT: healthy_models and unhealthy_models must be based on total_models
-            # If we have tracked data, extrapolate the health ratio to total
+            # Report only what we actually know from tracked data
             # Otherwise, report 0 healthy until we have actual health data
             if tracked_models > 0 and total_models > 0:
-                # Calculate health rate from tracked models and apply to total
-                health_rate = tracked_healthy_models / tracked_models
                 # For models we haven't tracked, we don't know their status
                 # Report only what we actually know: healthy = tracked healthy, unhealthy = tracked unhealthy
                 # Untracked models are in "unknown" state (not counted as healthy or unhealthy)
@@ -927,7 +925,7 @@ class IntelligentHealthMonitor:
                 "unhealthy_providers": unhealthy_providers,
                 "total_models": total_models,
                 "healthy_models": healthy_models,
-                "degraded_models": 0,  # Would need more complex calculation
+                "degraded_models": 0,  # Not tracked - models are either healthy or unhealthy
                 "unhealthy_models": unhealthy_models,
                 "total_gateways": total_gateways,
                 "healthy_gateways": healthy_gateways,
