@@ -154,7 +154,7 @@ GRANT EXECUTE ON FUNCTION run_and_log_trial_reconciliation() TO service_role;
 -- Schedule the job to run daily at 3:00 AM UTC
 -- Note: pg_cron jobs are stored in the cron schema
 -- Wrapped in DO block to handle pg_cron extension not being available
-DO $$
+DO $block$
 BEGIN
     -- Check if pg_cron extension exists
     IF EXISTS (
@@ -174,7 +174,7 @@ EXCEPTION
     WHEN OTHERS THEN
         RAISE WARNING 'Failed to schedule trial reconciliation cron job: %. Job can be scheduled manually later.', SQLERRM;
 END;
-$$;
+$block$;
 
 -- Add a comment explaining the job
 COMMENT ON FUNCTION reconcile_paid_users_trial_status() IS
