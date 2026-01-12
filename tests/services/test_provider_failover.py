@@ -762,6 +762,30 @@ class TestMapProviderErrorCerebras:
         assert mapped.status_code == 503
         assert "service error" in mapped.detail.lower()
 
+    def test_map_cerebras_api_status_error_403_generic(self):
+        """Test generic Cerebras APIStatusError with 403 maps to 401"""
+        response = Mock()
+        response.status_code = 403
+        error = CerebrasAPIStatusError("Forbidden", response=response, body=None)
+        error.status_code = 403
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 401
+        assert "authentication" in mapped.detail.lower()
+
+    def test_map_cerebras_api_status_error_404_generic(self):
+        """Test generic Cerebras APIStatusError with 404 provides proper error message"""
+        response = Mock()
+        response.status_code = 404
+        error = CerebrasAPIStatusError("Not Found", response=response, body=None)
+        error.status_code = 404
+        error.message = "Not Found"
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 404
+        assert "llama-3.3-70b" in mapped.detail
+        assert "cerebras" in mapped.detail.lower()
+
 
 # ============================================================
 # TEST CLASS: Error Mapping - Generic Exceptions

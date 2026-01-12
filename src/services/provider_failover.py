@@ -452,8 +452,8 @@ def map_provider_error(
             try:
                 response_body = exc.response.text[:500] if exc.response.text else "No response body"
                 error_detail += f" | Response: {response_body}"
-            except Exception:
-                pass
+            except Exception as log_exc:
+                logger.debug("Failed to extract httpx response body: %r", log_exc)
             return HTTPException(status_code=400, detail=error_detail)
         return HTTPException(status_code=502, detail="Upstream service error")
 
