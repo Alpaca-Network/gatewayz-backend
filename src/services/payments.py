@@ -767,7 +767,7 @@ class StripeService:
                             amount_usd = payment_record.get("amount_usd", payment_record.get("amount"))
                             if amount_usd is not None:
                                 try:
-                                    credits_cents = int(round(float(amount_usd) * 100))
+                                    credits_cents = int(Decimal(str(amount_usd)) * 100)
                                 except (TypeError, ValueError):
                                     credits_cents = None
 
