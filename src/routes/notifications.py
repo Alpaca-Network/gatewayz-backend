@@ -299,3 +299,135 @@ async def process_notifications(admin_user: dict = Depends(require_admin)):
     except Exception as e:
         logger.error(f"Error processing notifications: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+# =============================================================================
+# Admin Dashboard In-App Notifications
+# =============================================================================
+
+try:
+    from src.models.notification_models import (
+        NotificationActionResponse,
+        NotificationListResponse,
+        NotificationResponse,
+        UnreadCountResponse,
+    )
+    from src.services.notification_service import notification_service as admin_notification_service
+
+    @router.get("/notifications", response_model=NotificationListResponse, tags=["notifications"])
+    async def get_admin_notifications(
+        limit: int = Query(20, ge=1, le=100, description="Number of notifications to fetch"),
+        offset: int = Query(0, ge=0, description="Offset for pagination"),
+        is_read: bool | None = Query(None, description="Filter by read status"),
+        category: str | None = Query(None, description="Filter by category"),
+        admin_user: dict = Depends(require_admin),
+    ):
+        """Get admin dashboard notifications with filtering and pagination"""
+        try:
+            notifications = await admin_notification_service.get_notifications(
+                user_id=admin_user["id"],
+                limit=limit,
+                offset=offset,
+                is_read=is_read,
+                category=category,
+            )
+            return notifications
+        except Exception as e:
+            logger.error(f"Error fetching admin notifications: {e}")
+            raise HTTPException(status_code=500, detail="Failed to fetch notifications") from e
+
+    @router.get("/notifications/unread-count", response_model=UnreadCountResponse, tags=["notifications"])
+    async def get_unread_notification_count(admin_user: dict = Depends(require_admin)):
+        """Get count of unread admin notifications"""
+        try:
+            count = await admin_notification_service.get_unread_count(admin_user["id"])
+            return UnreadCountResponse(count=count, timestamp=datetime.now(timezone.utc))
+        except Exception as e:
+            logger.error(f"Error getting unread count: {e}")
+            raise HTTPException(status_code=500, detail="Failed to get unread count") from e
+
+    @router.patch("/notifications/{notification_id}/read", response_model=NotificationActionResponse, tags=["notifications"])
+    async def mark_notification_read(
+        notification_id: int,
+        admin_user: dict = Depends(require_admin),
+    ):
+        """Mark a single notification as read"""
+        try:
+            success = await admin_notification_service.mark_as_read(
+                notification_id=notification_id,
+                user_id=admin_user["id"]
+            )
+            return NotificationActionResponse(
+                success=success,
+                message="Notification marked as read" if success else "Failed to mark notification as read",
+                notification_id=notification_id
+            )
+        except Exception as e:
+            logger.error(f"Error marking notification as read: {e}")
+            raise HTTPException(status_code=500, detail="Failed to mark notification as read") from e
+
+    @router.patch("/notifications/mark-all-read", response_model=NotificationActionResponse, tags=["notifications"])
+    async def mark_all_notifications_read(admin_user: dict = Depends(require_admin)):
+        """Mark all notifications as read for the current admin"""
+        try:
+            count = await admin_notification_service.mark_all_as_read(admin_user["id"])
+            return NotificationActionResponse(
+                success=True,
+                message=f"Marked {count} notifications as read"
+            )
+        except Exception as e:
+            logger.error(f"Error marking all notifications as read: {e}")
+            raise HTTPException(status_code=500, detail="Failed to mark all notifications as read") from e
+
+    @router.delete("/notifications/{notification_id}", response_model=NotificationActionResponse, tags=["notifications"])
+    async def delete_admin_notification(
+        notification_id: int,
+        admin_user: dict = Depends(require_admin),
+    ):
+        """Delete a notification"""
+        try:
+            success = await admin_notification_service.delete_notification(
+                notification_id=notification_id,
+                user_id=admin_user["id"]
+            )
+            return NotificationActionResponse(
+                success=success,
+                message="Notification deleted" if success else "Failed to delete notification",
+                notification_id=notification_id
+            )
+        except Exception as e:
+            logger.error(f"Error deleting notification: {e}")
+            raise HTTPException(status_code=500, detail="Failed to delete notification") from e
+
+    @router.post("/notifications/test", response_model=NotificationActionResponse, tags=["notifications"])
+    async def create_test_admin_notification(admin_user: dict = Depends(require_admin)):
+        """Create a test notification for the current admin user"""
+        try:
+            from src.models.notification_models import NotificationCreate, NotificationType, NotificationCategory
+
+            notification = NotificationCreate(
+                user_id=admin_user["id"],
+                title="Test Notification",
+                message=f"This is a test notification created at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                type=NotificationType.INFO,
+                category=NotificationCategory.SYSTEM,
+                link="/admin/dashboard",
+                metadata={"test": True, "created_by": admin_user.get("email", "admin")},
+                expires_in_days=1,
+            )
+
+            result = await admin_notification_service.create_notification(notification)
+            return NotificationActionResponse(
+                success=True,
+                message="Test notification created successfully",
+                notification_id=result.id
+            )
+        except Exception as e:
+            logger.error(f"Error creating test notification: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create test notification") from e
+
+    logger.info("✓ Admin dashboard notification endpoints loaded successfully")
+
+except ImportError as e:
+    logger.warning(f"Admin notification models not available: {e}. Admin notification endpoints not loaded.")
+    # Silently skip if notification models don't exist yet
