@@ -158,9 +158,7 @@ def enforce_model_failover_rules(
 
 
 def filter_by_circuit_breaker(
-    model_id: str | None,
-    provider_chain: list[str],
-    allow_emergency_fallback: bool = True
+    model_id: str | None, provider_chain: list[str], allow_emergency_fallback: bool = True
 ) -> list[str]:
     """
     Filter provider chain based on circuit breaker state.
@@ -342,8 +340,8 @@ def map_provider_error(
                     response_text = getattr(exc.response, "text", None)
                     if response_text:
                         error_msg = f"{error_msg} | Response: {response_text[:200]}"
-            except Exception:
-                pass
+            except Exception as log_exc:
+                logger.debug("Failed to extract OpenAI BadRequestError response body: %r", log_exc)
             detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
             status = 400
         elif status == 403:
@@ -408,8 +406,10 @@ def map_provider_error(
                     response_text = getattr(exc.response, "text", None)
                     if response_text:
                         error_msg = f"{error_msg} | Response: {response_text[:200]}"
-            except Exception:
-                pass
+            except Exception as log_exc:
+                logger.debug(
+                    "Failed to extract Cerebras BadRequestError response body: %r", log_exc
+                )
             detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
             status = 400
         elif status == 403:
