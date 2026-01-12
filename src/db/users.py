@@ -237,9 +237,13 @@ def create_enhanced_user(
             logger.error(f"User creation failed: {e}")
             raise ValueError(f"Failed to create user account: {e}")
 
-        # Generate primary API key
+        # Generate primary API key with the appropriate subscription status
         primary_key, _ = create_api_key(
-            user_id=user_id, key_name="Primary Key", environment_tag="live", is_primary=True
+            user_id=user_id,
+            key_name="Primary Key",
+            environment_tag="live",
+            is_primary=True,
+            subscription_status=subscription_status,
         )
 
         # Update user with the actual API key
