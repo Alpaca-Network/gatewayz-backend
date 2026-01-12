@@ -185,8 +185,18 @@ def create_enhanced_user(
     auth_method: str,
     credits: float = 5.0,
     privy_user_id: str | None = None,
+    subscription_status: str = "trial",
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $5 credits (limited to $1/day usage)"""
+    """Create a new user with automatic 3-day trial and $5 credits (limited to $1/day usage).
+
+    Args:
+        username: User's username
+        email: User's email address
+        auth_method: Authentication method used (e.g., 'privy', 'email')
+        credits: Initial credit amount (default $5)
+        privy_user_id: Optional Privy user ID for Privy-authenticated users
+        subscription_status: Initial subscription status (default 'trial', use 'bot' for temp emails)
+    """
     try:
         client = get_supabase_client()
 
@@ -201,7 +211,7 @@ def create_enhanced_user(
             "is_active": True,
             "registration_date": trial_start.isoformat(),
             "auth_method": auth_method,
-            "subscription_status": "trial",
+            "subscription_status": subscription_status,
             "trial_expires_at": trial_end.isoformat(),
             "welcome_email_sent": False,  # New users haven't received welcome email yet
             "tier": "basic",
@@ -256,7 +266,7 @@ def create_enhanced_user(
             "email": email,
             "credits": credits,
             "primary_api_key": primary_key,
-            "subscription_status": "trial",
+            "subscription_status": subscription_status,
             "trial_expires_at": trial_end.isoformat(),
             "tier": "basic",
         }
