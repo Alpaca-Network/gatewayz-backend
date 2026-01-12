@@ -168,6 +168,9 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'
     ) THEN
+        -- Unschedule existing job if it exists (idempotent)
+        PERFORM cron.unschedule('reconcile-paid-users-trial-status');
+
         -- Schedule the cron job
         PERFORM cron.schedule(
             'reconcile-paid-users-trial-status',  -- job name

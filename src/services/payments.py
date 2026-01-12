@@ -419,12 +419,12 @@ class StripeService:
                 credits_display = f"${request.credit_value:.0f}"
                 logger.info(
                     f"Using discounted credit_value: ${request.credit_value} "
-                    f"(payment amount: ${request.amount / 100})"
+                    f"(payment amount: ${float(Decimal(request.amount) / 100)})"
                 )
             else:
                 # Fall back to payment amount
                 credits_cents = request.amount
-                credits_display = f"${request.amount / 100:.0f}"
+                credits_display = f"${float(Decimal(request.amount) / 100):.0f}"
 
             checkout_metadata = {
                 "user_id": str(user_id),
@@ -490,7 +490,7 @@ class StripeService:
                 e,
                 operation='checkout_session',
                 user_id=str(user_id),
-                amount=request.amount / 100,
+                amount=float(Decimal(request.amount) / 100),
                 details={'currency': request.currency.value}
             )
             raise Exception(f"Payment processing error: {str(e)}") from e
@@ -501,7 +501,7 @@ class StripeService:
                 e,
                 operation='checkout_session',
                 user_id=str(user_id),
-                amount=request.amount / 100,
+                amount=float(Decimal(request.amount) / 100),
                 details={'currency': request.currency.value}
             )
             raise
