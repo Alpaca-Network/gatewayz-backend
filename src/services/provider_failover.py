@@ -414,6 +414,7 @@ def map_provider_error(
             status = 400
         elif status == 403:
             detail = f"{provider} authentication error"
+            status = 401  # Map 403 to 401 for consistency with auth error handling
         elif status == 404:
             detail = f"Model {model} not found or unavailable on {provider}"
         elif 500 <= status < 600:
