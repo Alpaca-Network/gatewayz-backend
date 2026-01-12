@@ -5,6 +5,7 @@ Unified Pydantic models for payment integrations (Stripe, subscriptions, credits
 """
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -190,7 +191,7 @@ class CreateCheckoutSessionRequest(BaseModel):
         # Get amount from the data being validated
         amount = info.data.get("amount")
         if amount:
-            amount_dollars = amount / 100
+            amount_dollars = float(Decimal(amount) / 100)
             # Credit value must be at least equal to payment amount (100% minimum)
             # This prevents discount packages that give less value than paid
             if v < amount_dollars:

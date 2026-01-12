@@ -1,8 +1,16 @@
 -- Add scheduled job to reconcile trial status for paid users
 -- This ensures users who have paid (subscription or credits) are not marked as trial
 
--- Enable pg_cron extension if not already enabled
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- Enable pg_cron extension if not already enabled (wrapped in exception handler)
+DO $ext$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+    RAISE NOTICE 'pg_cron extension enabled successfully';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'Could not create pg_cron extension: %. This is expected if pg_cron is not installed or you lack permissions. The scheduled job will need to be set up manually.', SQLERRM;
+END
+$ext$;
 
 -- Create the reconciliation function
 CREATE OR REPLACE FUNCTION reconcile_paid_users_trial_status()
