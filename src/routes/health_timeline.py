@@ -11,8 +11,10 @@ from ..config.supabase_config import get_supabase_client
 from ..schemas.health_timeline import (
     ProviderUptimeResponse,
     ModelUptimeResponse,
+    GatewayUptimeResponse,
     ProviderUptimeData,
     ModelUptimeData,
+    GatewayUptimeData,
     UptimeSample,
     IncidentMetadata,
     IncidentSummary,
@@ -26,6 +28,7 @@ router = APIRouter()
 _health_timeline_cache = {
     "providers": {},  # Key: cache_key, Value: {"data": response, "timestamp": datetime}
     "models": {},     # Key: cache_key, Value: {"data": response, "timestamp": datetime}
+    "gateways": {},   # Key: cache_key, Value: {"data": response, "timestamp": datetime}
     "ttl": 300,       # 5 minutes in seconds
 }
 
@@ -491,5 +494,183 @@ async def get_models_uptime(
 
     # Cache the response
     set_cached_response("models", cache_key, response.model_dump())
+
+    return response
+
+
+@router.get(
+    "/health/gateways/uptime",
+    response_model=GatewayUptimeResponse,
+    tags=["health", "monitoring"]
+)
+async def get_gateways_uptime(
+    period: Literal["24h", "72h", "7d"] = Query("72h", description="Time period for uptime analysis"),
+    bucket: Literal["5m", "1h"] = Query("1h", description="Time bucket size for sampling"),
+    admin_user: dict = Depends(require_admin),
+):
+    """
+    Get gateway uptime timeline with time-bucketed samples.
+
+    Returns uptime percentage, status samples, and incident summaries for each gateway.
+
+    Cached for 5 minutes to reduce database load.
+    """
+    # Check cache first
+    cache_key = get_cache_key("gateways_uptime", period=period, bucket=bucket)
+    cached = get_cached_response("gateways", cache_key)
+    if cached:
+        return GatewayUptimeResponse(**cached)
+
+    supabase = get_supabase_client()
+    current_time = datetime.now(timezone.utc)
+
+    # Parse parameters
+    time_delta = parse_period(period)
+    bucket_minutes = parse_bucket(bucket)
+    start_time = current_time - time_delta
+    period_label = get_period_label(period)
+
+    # Query model_health_history for the time range
+    response = (
+        supabase.table("model_health_history")
+        .select("provider,gateway,checked_at,status,response_time_ms,error_message,http_status_code")
+        .gte("checked_at", start_time.isoformat())
+        .lte("checked_at", current_time.isoformat())
+        .order("checked_at", desc=False)
+        .execute()
+    )
+
+    history_records = response.data
+
+    if not history_records:
+        return GatewayUptimeResponse(success=True, gateways=[])
+
+    # Group by gateway
+    gateway_data = defaultdict(lambda: {
+        "records": [],
+        "providers": set(),
+        "last_checked": None
+    })
+
+    for record in history_records:
+        gateway = record.get("gateway", "primary")
+        provider = record["provider"]
+
+        gateway_data[gateway]["records"].append(record)
+        gateway_data[gateway]["providers"].add(provider)
+
+        # Track last checked time
+        checked_at = datetime.fromisoformat(record["checked_at"].replace("Z", "+00:00"))
+        if not gateway_data[gateway]["last_checked"] or checked_at > gateway_data[gateway]["last_checked"]:
+            gateway_data[gateway]["last_checked"] = checked_at
+
+    # Process each gateway
+    gateways = []
+
+    for gateway_name, data in gateway_data.items():
+        records = data["records"]
+
+        # Create time buckets
+        num_buckets = int(time_delta.total_seconds() / (bucket_minutes * 60))
+        buckets = []
+
+        for i in range(num_buckets):
+            bucket_start = start_time + timedelta(minutes=i * bucket_minutes)
+            bucket_end = bucket_start + timedelta(minutes=bucket_minutes)
+
+            # Filter records for this bucket
+            bucket_records = [
+                r for r in records
+                if bucket_start <= datetime.fromisoformat(r["checked_at"].replace("Z", "+00:00")) < bucket_end
+            ]
+
+            if not bucket_records:
+                # No data for this bucket - skip it to avoid false "operational" status
+                continue
+
+            # Calculate metrics for this bucket
+            total = len(bucket_records)
+            successes = sum(1 for r in bucket_records if r["status"] == "success")
+            errors = total - successes
+            success_rate = successes / total if total > 0 else 0.0
+            error_rate = errors / total if total > 0 else 0.0
+
+            # Calculate average response time
+            response_times = [r["response_time_ms"] for r in bucket_records if r.get("response_time_ms")]
+            avg_response_time = sum(response_times) / len(response_times) if response_times else None
+
+            # Determine status
+            bucket_status = calculate_status(success_rate)
+
+            # Detect incident
+            incident = detect_incident(error_rate, avg_response_time, bucket_status)
+
+            buckets.append({
+                "timestamp": bucket_start,
+                "status": bucket_status,
+                "duration_minutes": bucket_minutes,
+                "incident": incident,
+                "success_rate": success_rate
+            })
+
+        # Calculate overall uptime percentage
+        total_success_rate = sum(b["success_rate"] for b in buckets) / len(buckets) if buckets else 0.0
+        uptime_percentage = round(total_success_rate * 100, 3)
+
+        # Create samples
+        samples = [
+            UptimeSample(
+                timestamp=b["timestamp"],
+                status=b["status"],
+                duration_minutes=b["duration_minutes"],
+                incident=b["incident"]
+            )
+            for b in buckets
+        ]
+
+        # Calculate incident summary
+        incidents = [b for b in buckets if b["incident"] is not None]
+        statuses = [b["status"] for b in buckets]
+
+        incident_summary = IncidentSummary(
+            total_incidents=len(incidents),
+            mttr_minutes=round(calculate_mttr(incidents), 2),
+            worst_status=get_worst_status(statuses)
+        )
+
+        # Count healthy providers (providers with at least some successful checks)
+        provider_health = defaultdict(lambda: {"total": 0, "successes": 0})
+        for record in records:
+            provider = record["provider"]
+            provider_health[provider]["total"] += 1
+            if record["status"] == "success":
+                provider_health[provider]["successes"] += 1
+
+        healthy_providers = sum(
+            1 for p_health in provider_health.values()
+            if p_health["successes"] / p_health["total"] >= 0.5
+        )
+
+        gateways.append(
+            GatewayUptimeData(
+                gateway=gateway_name,
+                uptime_percentage=uptime_percentage,
+                period_label=period_label,
+                last_checked=data["last_checked"] or current_time,
+                total_providers=len(data["providers"]),
+                healthy_providers=healthy_providers,
+                samples=samples,
+                incident_summary=incident_summary
+            )
+        )
+
+    # Sort by uptime percentage (worst first for alerting)
+    gateways.sort(key=lambda g: g.uptime_percentage)
+
+    # Create response
+    response = GatewayUptimeResponse(success=True, gateways=gateways)
+
+    # Cache the response
+    set_cached_response("gateways", cache_key, response.model_dump())
 
     return response

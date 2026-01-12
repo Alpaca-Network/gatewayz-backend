@@ -81,3 +81,25 @@ class ModelUptimeResponse(BaseModel):
     """Response for GET /health/models/uptime"""
     success: bool = True
     models: list[ModelUptimeData]
+
+
+# ===========================
+# Gateway Uptime Schemas
+# ===========================
+
+class GatewayUptimeData(BaseModel):
+    """Uptime data for a single gateway"""
+    gateway: str = Field(..., description="Gateway name (e.g., openrouter, fireworks)")
+    uptime_percentage: float = Field(..., description="Uptime percentage over the period")
+    period_label: str = Field(..., description="Human-readable period label")
+    last_checked: datetime = Field(..., description="Timestamp of last health check")
+    total_providers: int = Field(..., description="Total number of providers on this gateway")
+    healthy_providers: int = Field(..., description="Number of healthy providers")
+    samples: list[UptimeSample] = Field(..., description="Array of uptime samples per time bucket")
+    incident_summary: IncidentSummary = Field(..., description="Summary of incidents over the period")
+
+
+class GatewayUptimeResponse(BaseModel):
+    """Response for GET /health/gateways/uptime"""
+    success: bool = True
+    gateways: list[GatewayUptimeData]

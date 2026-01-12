@@ -161,7 +161,7 @@ Each provider has a dedicated client module:
 - ✅ **Braintrust** - ML evaluation & tracing
 - ✅ **OpenAI** - Direct ChatGPT API calls
 
-### API Endpoints (83+ endpoints)
+### API Endpoints (86+ endpoints)
 
 **Chat & Inference:**
 - `POST /chat/completions` - OpenAI-compatible chat
@@ -185,6 +185,11 @@ Each provider has a dedicated client module:
 - `GET /api/monitoring/chat-requests/models` - Model statistics
 - `GET /api/monitoring/chat-requests` - Full request logs
 - `GET /api/monitoring/anomalies` - Anomaly detection
+
+**Health & Uptime Timeline:**
+- `GET /health/providers/uptime` - Provider uptime timeline with time-bucketed samples
+- `GET /health/models/uptime` - Model uptime timeline with incident tracking
+- `GET /health/gateways/uptime` - Gateway uptime timeline and provider health
 
 **Prometheus Metrics:**
 - `GET /metrics` - Prometheus format metrics
