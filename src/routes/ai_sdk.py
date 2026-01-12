@@ -49,6 +49,43 @@ except ImportError:
 router = APIRouter()
 
 
+def _extract_delta_content(delta) -> tuple[dict, bool]:
+    """Extract content and reasoning from a streaming delta object.
+
+    This helper function extracts both regular text content and reasoning/thinking
+    content from a streaming delta, handling various attribute naming conventions
+    used by different providers.
+
+    Args:
+        delta: A streaming delta object from OpenAI-compatible API response
+
+    Returns:
+        Tuple of (delta_response dict, has_content bool) where:
+        - delta_response contains 'content' and/or 'reasoning_content' if present
+        - has_content indicates whether any meaningful content was extracted
+    """
+    delta_response = {}
+    has_content = False
+
+    # Handle regular text content
+    content = getattr(delta, "content", None)
+    if content:
+        delta_response["content"] = content
+        has_content = True
+
+    # Handle reasoning/thinking content (Claude extended thinking, etc.)
+    # Check for reasoning_content first, then fall back to reasoning attribute
+    # Use `is None` check to properly handle explicit empty string values
+    reasoning = getattr(delta, "reasoning_content", None)
+    if reasoning is None:
+        reasoning = getattr(delta, "reasoning", None)
+    if reasoning:
+        delta_response["reasoning_content"] = reasoning
+        has_content = True
+
+    return delta_response, has_content
+
+
 # Request/Response schemas for AI SDK endpoint
 class Message(BaseModel):
     """Message object for chat completions"""
@@ -357,15 +394,27 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
             # Stream response chunks using async iteration
             # PERF: async for yields control to the event loop between chunks,
             # allowing FastAPI to flush each chunk immediately instead of buffering
+            has_any_content = False  # Track if we received any content
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = getattr(chunk.choices[0], "delta", None)
-                    if delta and hasattr(delta, "content") and delta.content:
-                        # Format as SSE (Server-Sent Events)
-                        data = {
-                            "choices": [{"delta": {"role": "assistant", "content": delta.content}}]
-                        }
-                        yield f"data: {json.dumps(data)}\n\n"
+                    if delta:
+                        # Extract content and reasoning using shared helper
+                        delta_response, has_content = _extract_delta_content(delta)
+                        if has_content:
+                            has_any_content = True
+
+                        # Only yield if we have content to send
+                        if delta_response:
+                            # Format as SSE (Server-Sent Events)
+                            data = {
+                                "choices": [{"delta": {"role": "assistant", **delta_response}}]
+                            }
+                            yield f"data: {json.dumps(data)}\n\n"
+
+            # If no content was streamed, log a warning for debugging
+            if not has_any_content:
+                logger.warning(f"OpenRouter stream completed with no content for model {request.model}")
 
             # Send completion signal
             completion_data = {"choices": [{"finish_reason": "stop"}]}
@@ -434,15 +483,27 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
             # Stream response chunks using async iteration
             # PERF: async for yields control to the event loop between chunks,
             # allowing FastAPI to flush each chunk immediately instead of buffering
+            has_any_content = False  # Track if we received any content
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = getattr(chunk.choices[0], "delta", None)
-                    if delta and hasattr(delta, "content") and delta.content:
-                        # Format as SSE (Server-Sent Events)
-                        data = {
-                            "choices": [{"delta": {"role": "assistant", "content": delta.content}}]
-                        }
-                        yield f"data: {json.dumps(data)}\n\n"
+                    if delta:
+                        # Extract content and reasoning using shared helper
+                        delta_response, has_content = _extract_delta_content(delta)
+                        if has_content:
+                            has_any_content = True
+
+                        # Only yield if we have content to send
+                        if delta_response:
+                            # Format as SSE (Server-Sent Events)
+                            data = {
+                                "choices": [{"delta": {"role": "assistant", **delta_response}}]
+                            }
+                            yield f"data: {json.dumps(data)}\n\n"
+
+            # If no content was streamed, log a warning for debugging
+            if not has_any_content:
+                logger.warning(f"AI SDK stream completed with no content for model {model}")
 
             # Send completion signal
             completion_data = {"choices": [{"finish_reason": "stop"}]}

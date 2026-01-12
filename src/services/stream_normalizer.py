@@ -225,19 +225,90 @@ class StreamNormalizer:
         }
 
     def _normalize_anthropic_event(self, chunk: dict) -> dict | None:
+        """Normalize Anthropic streaming events to OpenAI format.
+
+        Handles all Anthropic streaming event types:
+        - message_start: Initial message metadata
+        - content_block_start: Start of a content block (text, thinking, tool_use)
+        - content_block_delta: Content update (text_delta, thinking_delta, input_json_delta)
+        - content_block_stop: End of a content block
+        - message_delta: Message completion with stop_reason and usage
+        - message_stop: Final message event
+        - ping: Keep-alive event
+
+        Reference: https://docs.anthropic.com/claude/reference/messages-streaming
+        """
         event_type = chunk.get("type")
         delta = {}
         finish_reason = None
 
         if event_type == "content_block_delta":
-            if "delta" in chunk and "text" in chunk["delta"]:
-                delta["content"] = chunk["delta"]["text"]
-                self.accumulated_content += chunk["delta"]["text"]
+            inner_delta = chunk.get("delta", {})
+            delta_type = inner_delta.get("type", "")
+
+            # Handle text content delta
+            # Use explicit type checking first, fallback to key presence only when type is missing
+            if delta_type == "text_delta" or (not delta_type and "text" in inner_delta):
+                text = inner_delta.get("text", "")
+                if text:
+                    delta["content"] = text
+                    self.accumulated_content += text
+
+            # Handle thinking/reasoning delta (extended thinking feature)
+            # Use explicit type checking first, fallback to key presence only when type is missing
+            elif delta_type == "thinking_delta" or (not delta_type and "thinking" in inner_delta):
+                thinking = inner_delta.get("thinking", "")
+                if thinking:
+                    delta["reasoning_content"] = thinking
+                    self.accumulated_reasoning += thinking
+
+            # Handle signature delta (extended thinking verification)
+            elif delta_type == "signature_delta":
+                # Signature is used for verifying thinking content authenticity
+                # We can include it as metadata but don't accumulate it
+                signature = inner_delta.get("signature", "")
+                if signature:
+                    delta["signature"] = signature
+
+            # Handle tool input delta (for tool use streaming)
+            elif delta_type == "input_json_delta":
+                partial_json = inner_delta.get("partial_json", "")
+                if partial_json:
+                    delta["tool_input_delta"] = partial_json
+
         elif event_type == "message_delta":
-             if "delta" in chunk and "stop_reason" in chunk["delta"]:
-                 finish_reason = self._normalize_finish_reason(chunk["delta"]["stop_reason"])
-             elif "usage" in chunk:
-                 pass # Usage info
+            inner_delta = chunk.get("delta", {})
+            if "stop_reason" in inner_delta:
+                finish_reason = self._normalize_finish_reason(inner_delta["stop_reason"])
+            # Usage info is in chunk.usage, not delta - handled elsewhere
+
+        elif event_type == "content_block_start":
+            # Content block starting - we can extract type info for context
+            content_block = chunk.get("content_block", {})
+            block_type = content_block.get("type", "")
+
+            # For thinking blocks, extract initial thinking content if present
+            if block_type == "thinking":
+                thinking = content_block.get("thinking", "")
+                if thinking:
+                    delta["reasoning_content"] = thinking
+                    self.accumulated_reasoning += thinking
+
+            # For text blocks, extract initial text if present
+            elif block_type == "text":
+                text = content_block.get("text", "")
+                if text:
+                    delta["content"] = text
+                    self.accumulated_content += text
+
+        elif event_type == "message_stop":
+            # Message completed - this is the final event
+            finish_reason = "stop"
+
+        # Events we acknowledge but don't produce output for:
+        # - message_start: Contains initial message structure (id, type, role, model)
+        # - content_block_stop: End of content block marker
+        # - ping: Keep-alive signal
 
         if not delta and not finish_reason:
             return None
