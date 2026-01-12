@@ -6,7 +6,6 @@ to avoid floating-point precision errors in financial calculations.
 """
 
 from decimal import Decimal
-import pytest
 
 
 def test_decimal_credit_calculation():
