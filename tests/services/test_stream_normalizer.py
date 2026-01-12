@@ -143,6 +143,186 @@ class TestStreamNormalizer(unittest.TestCase):
         self.assertIn("Thinking step 1", reasoning)
         self.assertIn("Thinking step 2", reasoning)
 
+    def test_anthropic_thinking_delta(self):
+        """Test Anthropic extended thinking delta events (Claude Sonnet 4, etc.)"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "Let me analyze this step by step..."}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["delta"]["reasoning_content"], "Let me analyze this step by step...")
+        self.assertEqual(normalizer.get_accumulated_reasoning(), "Let me analyze this step by step...")
+
+    def test_anthropic_text_delta(self):
+        """Test Anthropic text_delta events with type field"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Here is my response."}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["delta"]["content"], "Here is my response.")
+        self.assertEqual(normalizer.get_accumulated_content(), "Here is my response.")
+
+    def test_anthropic_signature_delta(self):
+        """Test Anthropic signature delta events for extended thinking verification"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "signature_delta", "signature": "abc123sig"}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["delta"]["signature"], "abc123sig")
+
+    def test_anthropic_content_block_start_thinking(self):
+        """Test Anthropic content_block_start event with thinking type"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": "Initial thought..."}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["delta"]["reasoning_content"], "Initial thought...")
+
+    def test_anthropic_content_block_start_text(self):
+        """Test Anthropic content_block_start event with text type"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        # Empty text should return None
+        self.assertIsNone(normalized)
+
+    def test_anthropic_message_delta_stop_reason(self):
+        """Test Anthropic message_delta event with stop_reason"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 100}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["finish_reason"], "stop")
+
+    def test_anthropic_message_stop(self):
+        """Test Anthropic message_stop event"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "message_stop"
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["finish_reason"], "stop")
+
+    def test_anthropic_tool_input_delta(self):
+        """Test Anthropic input_json_delta for tool use streaming"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"query": "test'}
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.choices[0]["delta"]["tool_input_delta"], '{"query": "test')
+
+    def test_anthropic_ping_ignored(self):
+        """Test that Anthropic ping events are ignored"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "ping"
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNone(normalized)
+
+    def test_anthropic_message_start_ignored(self):
+        """Test that Anthropic message_start events are ignored"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "message_start",
+            "message": {
+                "id": "msg_123",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-4"
+            }
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNone(normalized)
+
+    def test_anthropic_content_block_stop_ignored(self):
+        """Test that Anthropic content_block_stop events are ignored"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+        chunk = {
+            "type": "content_block_stop",
+            "index": 0
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertIsNone(normalized)
+
+    def test_anthropic_full_extended_thinking_flow(self):
+        """Test a complete extended thinking flow with multiple events"""
+        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
+
+        # 1. Thinking block start
+        chunk1 = {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""}
+        }
+        normalized1 = normalizer.normalize_chunk(chunk1)
+        # Empty thinking block start returns None
+        self.assertIsNone(normalized1)
+
+        # 2. Thinking delta
+        chunk2 = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "Step 1: "}
+        }
+        normalized2 = normalizer.normalize_chunk(chunk2)
+        self.assertIsNotNone(normalized2)
+
+        # 3. More thinking
+        chunk3 = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "Step 2"}
+        }
+        normalizer.normalize_chunk(chunk3)
+
+        # 4. Text delta
+        chunk4 = {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "text_delta", "text": "Here is the answer."}
+        }
+        normalizer.normalize_chunk(chunk4)
+
+        # 5. Message stop
+        chunk5 = {
+            "type": "message_stop"
+        }
+        normalized5 = normalizer.normalize_chunk(chunk5)
+
+        # Verify accumulated content
+        self.assertEqual(normalizer.get_accumulated_reasoning(), "Step 1: Step 2")
+        self.assertEqual(normalizer.get_accumulated_content(), "Here is the answer.")
+        self.assertEqual(normalized5.choices[0]["finish_reason"], "stop")
+
     def test_finish_reason_normalization(self):
         normalizer = StreamNormalizer("test", "test")
         self.assertEqual(normalizer._normalize_finish_reason("stop_sequence"), "stop")
