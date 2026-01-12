@@ -26,6 +26,23 @@ except ImportError:  # pragma: no cover - handled gracefully below
     APIConnectionError = APITimeoutError = APIStatusError = AuthenticationError = None
     BadRequestError = NotFoundError = OpenAIError = PermissionDeniedError = RateLimitError = None
 
+# Cerebras SDK has its own exception hierarchy separate from OpenAI's.
+# Import these to properly handle Cerebras-specific errors.
+try:  # pragma: no cover - import guard
+    from cerebras.cloud.sdk import (
+        APIConnectionError as CerebrasAPIConnectionError,
+        APIStatusError as CerebrasAPIStatusError,
+        AuthenticationError as CerebrasAuthenticationError,
+        BadRequestError as CerebrasBadRequestError,
+        NotFoundError as CerebrasNotFoundError,
+        PermissionDeniedError as CerebrasPermissionDeniedError,
+        RateLimitError as CerebrasRateLimitError,
+    )
+except ImportError:  # pragma: no cover - handled gracefully below
+    CerebrasAPIConnectionError = CerebrasAPIStatusError = CerebrasAuthenticationError = None
+    CerebrasBadRequestError = CerebrasNotFoundError = CerebrasPermissionDeniedError = None
+    CerebrasRateLimitError = None
+
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "onerouter",
     "openrouter",
@@ -141,9 +158,7 @@ def enforce_model_failover_rules(
 
 
 def filter_by_circuit_breaker(
-    model_id: str | None,
-    provider_chain: list[str],
-    allow_emergency_fallback: bool = True
+    model_id: str | None, provider_chain: list[str], allow_emergency_fallback: bool = True
 ) -> list[str]:
     """
     Filter provider chain based on circuit breaker state.
@@ -325,8 +340,8 @@ def map_provider_error(
                     response_text = getattr(exc.response, "text", None)
                     if response_text:
                         error_msg = f"{error_msg} | Response: {response_text[:200]}"
-            except Exception:
-                pass
+            except Exception as log_exc:
+                logger.debug("Failed to extract OpenAI BadRequestError response body: %r", log_exc)
             detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
             status = 400
         elif status == 403:
@@ -344,6 +359,72 @@ def map_provider_error(
 
     if OpenAIError and isinstance(exc, OpenAIError):
         return HTTPException(status_code=502, detail=str(exc))
+
+    # Cerebras SDK exceptions (similar structure to OpenAI SDK but separate classes)
+    if CerebrasAPIConnectionError and isinstance(exc, CerebrasAPIConnectionError):
+        return HTTPException(status_code=503, detail="Upstream service unavailable")
+
+    if CerebrasAPIStatusError and isinstance(exc, CerebrasAPIStatusError):
+        status = getattr(exc, "status_code", None)
+        try:
+            status = int(status)
+        except (TypeError, ValueError):
+            status = 500
+        detail = "Upstream error"
+        headers: dict[str, str] | None = None
+
+        if CerebrasRateLimitError and isinstance(exc, CerebrasRateLimitError):
+            retry_after = None
+            if getattr(exc, "response", None):
+                retry_after = exc.response.headers.get("retry-after")
+            if retry_after is None and isinstance(getattr(exc, "body", None), dict):
+                retry_after = exc.body.get("retry_after")
+            if retry_after:
+                headers = {"Retry-After": str(retry_after)}
+            return HTTPException(
+                status_code=429, detail="Upstream rate limit exceeded", headers=headers
+            )
+
+        cerebras_auth_error_classes = tuple(
+            err
+            for err in (CerebrasAuthenticationError, CerebrasPermissionDeniedError)
+            if err is not None
+        )
+        if cerebras_auth_error_classes and isinstance(exc, cerebras_auth_error_classes):
+            detail = f"{provider} authentication error"
+            # Always map auth errors to 401 for consistency
+            status = 401
+        elif CerebrasNotFoundError and isinstance(exc, CerebrasNotFoundError):
+            detail = f"Model {model} not found or unavailable on {provider}"
+            status = 404
+        elif CerebrasBadRequestError and isinstance(exc, CerebrasBadRequestError):
+            # Extract actual error message from BadRequestError
+            error_msg = getattr(exc, "message", None) or str(exc)
+            try:
+                # Try to get response body if available
+                if hasattr(exc, "response") and exc.response:
+                    response_text = getattr(exc.response, "text", None)
+                    if response_text:
+                        error_msg = f"{error_msg} | Response: {response_text[:200]}"
+            except Exception as log_exc:
+                logger.debug(
+                    "Failed to extract Cerebras BadRequestError response body: %r", log_exc
+                )
+            detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
+            status = 400
+        elif status == 403:
+            detail = f"{provider} authentication error"
+            status = 401  # Map 403 to 401 for consistency with auth error handling
+        elif status == 404:
+            detail = f"Model {model} not found or unavailable on {provider}"
+        elif 500 <= status < 600:
+            detail = "Upstream service error"
+
+        # Fall back to message body if we still have the generic detail
+        if detail == "Upstream error":
+            detail = getattr(exc, "message", None) or str(exc)
+
+        return HTTPException(status_code=status, detail=detail, headers=headers)
 
     if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
         return HTTPException(status_code=504, detail="Upstream timeout")
@@ -372,8 +453,8 @@ def map_provider_error(
             try:
                 response_body = exc.response.text[:500] if exc.response.text else "No response body"
                 error_detail += f" | Response: {response_body}"
-            except Exception:
-                pass
+            except Exception as log_exc:
+                logger.debug("Failed to extract httpx response body: %r", log_exc)
             return HTTPException(status_code=400, detail=error_detail)
         return HTTPException(status_code=502, detail="Upstream service error")
 
