@@ -153,11 +153,28 @@ GRANT EXECUTE ON FUNCTION run_and_log_trial_reconciliation() TO service_role;
 
 -- Schedule the job to run daily at 3:00 AM UTC
 -- Note: pg_cron jobs are stored in the cron schema
-SELECT cron.schedule(
-    'reconcile-paid-users-trial-status',  -- job name
-    '0 3 * * *',                           -- cron schedule: daily at 3 AM UTC
-    $$SELECT run_and_log_trial_reconciliation()$$
-);
+-- Wrapped in DO block to handle pg_cron extension not being available
+DO $$
+BEGIN
+    -- Check if pg_cron extension exists
+    IF EXISTS (
+        SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'
+    ) THEN
+        -- Schedule the cron job
+        PERFORM cron.schedule(
+            'reconcile-paid-users-trial-status',  -- job name
+            '0 3 * * *',                           -- cron schedule: daily at 3 AM UTC
+            $$SELECT run_and_log_trial_reconciliation()$$
+        );
+        RAISE NOTICE 'Successfully scheduled trial reconciliation cron job';
+    ELSE
+        RAISE WARNING 'pg_cron extension not found. Scheduled trial reconciliation will not run automatically. Please enable pg_cron or run reconciliation manually.';
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'Failed to schedule trial reconciliation cron job: %. Job can be scheduled manually later.', SQLERRM;
+END;
+$$;
 
 -- Add a comment explaining the job
 COMMENT ON FUNCTION reconcile_paid_users_trial_status() IS
