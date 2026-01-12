@@ -144,6 +144,7 @@ def save_chat_completion_request(
     provider_name: Optional[str] = None,
     model_id: Optional[int] = None,
     api_key_id: Optional[int] = None,
+    is_anonymous: bool = False,
 ) -> Optional[dict[str, Any]]:
     """
     Save a chat completion request to the database.
@@ -160,6 +161,7 @@ def save_chat_completion_request(
         provider_name: Optional provider name to help identify the model
         model_id: Optional model ID if already resolved (avoids lookup)
         api_key_id: Optional API key identifier to track which key was used
+        is_anonymous: Whether this request was made anonymously (default: False)
 
     Returns:
         Created record or None on error
@@ -186,6 +188,7 @@ def save_chat_completion_request(
             "output_tokens": output_tokens,
             "processing_time_ms": processing_time_ms,
             "status": status,
+            "is_anonymous": is_anonymous,
         }
 
         # Add optional fields if provided

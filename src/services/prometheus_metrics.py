@@ -219,6 +219,31 @@ provider_response_time = get_or_create_metric(Histogram,
     buckets=(0.1, 0.5, 1, 2.5, 5, 10),
 )
 
+# ==================== API Key Tracking Metrics ====================
+api_key_lookup_attempts = get_or_create_metric(Counter,
+    "api_key_lookup_attempts_total",
+    "Total API key lookup attempts",
+    ["status"],  # success, failed, retry
+)
+
+api_key_tracking_success = get_or_create_metric(Counter,
+    "api_key_tracking_success_total",
+    "Chat requests with successfully tracked API key",
+    ["request_type"],  # authenticated, anonymous
+)
+
+api_key_tracking_failures = get_or_create_metric(Counter,
+    "api_key_tracking_failures_total",
+    "Chat requests with failed API key tracking",
+    ["reason"],  # lookup_failed, not_found, anonymous
+)
+
+api_key_tracking_rate = get_or_create_metric(Gauge,
+    "api_key_tracking_rate",
+    "Current API key tracking success rate (0-1)",
+)
+
+
 # ==================== Authentication & API Key Metrics ====================
 api_key_usage = get_or_create_metric(Counter,
     "api_key_usage_total",

@@ -964,6 +964,7 @@ async def _process_stream_completion_background(
                     provider_name=provider,
                     model_id=None,
                     api_key_id=api_key_id,
+                    is_anonymous=is_anonymous,
                 )
             except Exception as e:
                 logger.debug(f"Failed to save chat completion request: {e}")
@@ -1272,6 +1273,14 @@ async def chat_completions(
                 trial = {"is_valid": True, "is_trial": False}
                 environment_tag = "live"
                 logger.info("Processing anonymous chat request (request_id=%s)", request_id)
+
+                # Track anonymous request (no API key)
+                try:
+                    from src.services.prometheus_metrics import api_key_tracking_failures
+
+                    api_key_tracking_failures.labels(reason="anonymous").inc()
+                except ImportError:
+                    pass
             else:
                 # Authenticated user - perform full validation
                 # Step 1: Get user first (required for subsequent checks)
@@ -1283,9 +1292,24 @@ async def chat_completions(
                     logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
                     raise APIExceptions.invalid_api_key()
 
-                # Get API key ID for tracking (if available)
-                api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
-                api_key_id = api_key_record.get("id") if api_key_record else None
+                # Get API key ID for tracking (if available) - with retry logic
+                from src.utils.api_key_lookup import get_api_key_id_with_retry
+
+                api_key_id = await get_api_key_id_with_retry(api_key, max_retries=3, retry_delay=0.1)
+                if api_key_id is None:
+                    logger.warning(
+                        "Could not retrieve API key ID for tracking (request_id=%s, key=%s)",
+                        request_id,
+                        mask_key(api_key),
+                    )
+                else:
+                    # Track successful API key tracking
+                    try:
+                        from src.services.prometheus_metrics import api_key_tracking_success
+
+                        api_key_tracking_success.labels(request_type="authenticated").inc()
+                    except ImportError:
+                        pass
 
                 environment_tag = user.get("environment_tag", "live")
 
@@ -2123,6 +2147,7 @@ async def chat_completions(
             provider_name=provider,
             model_id=None,
             api_key_id=api_key_id,
+            is_anonymous=is_anonymous,
         )
 
         # Prepare headers including rate limit information
@@ -2198,9 +2223,16 @@ async def unified_responses(
             logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
             raise APIExceptions.invalid_api_key()
 
-        # Get API key ID for tracking (if available)
-        api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
-        api_key_id = api_key_record.get("id") if api_key_record else None
+        # Get API key ID for tracking (if available) - with retry logic
+        from src.utils.api_key_lookup import get_api_key_id_with_retry
+
+        api_key_id = await get_api_key_id_with_retry(api_key, max_retries=3, retry_delay=0.1)
+        if api_key_id is None:
+            logger.warning(
+                "Could not retrieve API key ID for tracking (request_id=%s, key=%s)",
+                request_id,
+                mask_key(api_key),
+            )
 
         environment_tag = user.get("environment_tag", "live")
 
@@ -3221,6 +3253,7 @@ async def unified_responses(
             provider_name=provider,
             model_id=None,
             api_key_id=api_key_id,
+            is_anonymous=False,  # /v1/responses requires authentication
         )
 
         return response

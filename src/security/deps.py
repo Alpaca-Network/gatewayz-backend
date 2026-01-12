@@ -106,11 +106,19 @@ async def get_api_key(
     # Import Config here to avoid circular imports
     from src.config import Config
 
-    # In local/development environment, bypass API key validation
+    # In local/development environment, use a real development API key
+    # This allows proper tracking even in development mode
     if Config.IS_DEVELOPMENT:
-        # Return a dummy API key for local development
-        # This allows the endpoint to work without requiring actual API keys
-        return "local-dev-bypass-key"
+        from src.utils.dev_api_key import get_or_create_dev_api_key
+
+        dev_key = get_or_create_dev_api_key()
+        if dev_key:
+            logger.debug("Using development API key for local environment")
+            return dev_key
+        else:
+            # Fallback to bypass key if dev key creation fails
+            logger.warning("Failed to create dev API key, using bypass key")
+            return "local-dev-bypass-key"
 
     if not credentials:
         raise HTTPException(status_code=401, detail="Authorization header is required")
