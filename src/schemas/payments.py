@@ -191,12 +191,13 @@ class CreateCheckoutSessionRequest(BaseModel):
         amount = info.data.get("amount")
         if amount:
             amount_dollars = amount / 100
-            # Credit value should be at least 50% of payment (generous discount limit)
-            if v < amount_dollars * 0.5:
-                raise ValueError("Credit value cannot be less than 50% of payment amount")
-            # Credit value shouldn't exceed 2x payment (prevents abuse)
-            if v > amount_dollars * 2:
-                raise ValueError("Credit value cannot exceed 2x the payment amount")
+            # Credit value must be at least equal to payment amount (100% minimum)
+            # This prevents discount packages that give less value than paid
+            if v < amount_dollars:
+                raise ValueError("Credit value cannot be less than payment amount (minimum 100% value)")
+            # Credit value shouldn't exceed 3x payment (prevents abuse while allowing promotional packages)
+            if v > amount_dollars * 3:
+                raise ValueError("Credit value cannot exceed 3x the payment amount")
         return v
 
 

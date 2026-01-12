@@ -7,6 +7,7 @@ Handles all Stripe payment operations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 import stripe
@@ -412,8 +413,9 @@ class StripeService:
             # credit_value is in dollars, credits_cents is used for metadata (in cents)
             if request.credit_value is not None:
                 # credit_value is in dollars, convert to cents for metadata
-                # Use round() to avoid floating-point precision errors
-                credits_cents = int(round(request.credit_value * 100))
+                # Use Decimal for precise financial calculations
+                credit_value_decimal = Decimal(str(request.credit_value))
+                credits_cents = int(credit_value_decimal * 100)
                 credits_display = f"${request.credit_value:.0f}"
                 logger.info(
                     f"Using discounted credit_value: ${request.credit_value} "
@@ -765,7 +767,7 @@ class StripeService:
                             amount_usd = payment_record.get("amount_usd", payment_record.get("amount"))
                             if amount_usd is not None:
                                 try:
-                                    credits_cents = int(round(float(amount_usd) * 100))
+                                    credits_cents = int(Decimal(str(amount_usd)) * 100)
                                 except (TypeError, ValueError):
                                     credits_cents = None
 
