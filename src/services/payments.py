@@ -303,7 +303,7 @@ class StripeService:
         """
         Create a synthetic payment record when the original checkout metadata is missing.
         """
-        amount_dollars = credits_cents / 100
+        amount_dollars = float(Decimal(credits_cents) / 100)
         payment_currency = (currency or self.default_currency.value).lower()
         fallback_metadata = {
             "created_via": "stripe_webhook_fallback",
@@ -379,7 +379,7 @@ class StripeService:
             # Create payment record
             payment = create_payment(
                 user_id=user_id,
-                amount=request.amount / 100,  # Convert cents to dollars
+                amount=float(Decimal(request.amount) / 100),  # Convert cents to dollars
                 currency=request.currency.value,
                 payment_method="stripe",
                 status="pending",
@@ -542,7 +542,7 @@ class StripeService:
 
             payment = create_payment(
                 user_id=user_id,
-                amount=request.amount / 100,
+                amount=float(Decimal(request.amount) / 100),
                 currency=request.currency.value,
                 payment_method="stripe",
                 status="pending",
@@ -834,7 +834,7 @@ class StripeService:
                     f"payment_id={payment_id}, credits_cents={credits_cents})"
                 )
 
-            amount_dollars = credits_cents / 100  # Convert cents to dollars
+            amount_dollars = float(Decimal(credits_cents) / 100)  # Convert cents to dollars
 
             # Add credits and log transaction
             add_credits_to_user(
