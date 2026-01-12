@@ -34,7 +34,7 @@ class TestCerebrasQwen:
     def test_cerebras_qwen_basic(self, cerebras_client):
         """Test basic Qwen model inference"""
         response = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "user", "content": "Say hello and tell me what model you are."}
             ],
@@ -53,7 +53,7 @@ class TestCerebrasQwen:
     def test_cerebras_qwen_streaming(self, cerebras_client):
         """Test streaming Qwen model inference"""
         stream = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "user", "content": "Count to 5"}
             ],
@@ -79,7 +79,7 @@ class TestCerebrasQwen:
     def test_cerebras_qwen_system_prompt(self, cerebras_client):
         """Test Qwen model with system prompt"""
         response = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant. Always respond in exactly 2 sentences."},
                 {"role": "user", "content": "What is Python?"}
@@ -98,7 +98,7 @@ class TestCerebrasQwen:
     def test_cerebras_qwen_multi_turn(self, cerebras_client):
         """Test multi-turn conversation with Qwen model"""
         response = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "user", "content": "What is 2+2?"},
                 {"role": "assistant", "content": "2+2 equals 4."},
@@ -119,7 +119,7 @@ class TestCerebrasQwen:
         """Test Qwen model with different temperature settings"""
         for temp in [0.1, 0.7, 1.5]:
             response = cerebras_client.chat.completions.create(
-                model="qwen-7b",
+                model="qwen-3-32b",
                 messages=[
                     {"role": "user", "content": "Say a sentence."}
                 ],
@@ -134,7 +134,7 @@ class TestCerebrasQwen:
     def test_cerebras_qwen_max_tokens(self, cerebras_client):
         """Test Qwen model with different max_tokens settings"""
         response_short = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "user", "content": "Tell me a long story"}
             ],
@@ -143,7 +143,7 @@ class TestCerebrasQwen:
         )
 
         response_long = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "user", "content": "Tell me a long story"}
             ],
@@ -164,7 +164,7 @@ class TestCerebrasQwen:
     def test_cerebras_qwen_response_format(self, cerebras_client):
         """Test response format from Qwen model"""
         response = cerebras_client.chat.completions.create(
-            model="qwen-7b",
+            model="qwen-3-32b",
             messages=[
                 {"role": "user", "content": "Hello"}
             ],
@@ -211,7 +211,7 @@ def test_cerebras_qwen_api_direct():
         timeout=120.0
     )
 
-    model = "qwen-7b"
+    model = "qwen-3-32b"
     print(f"\nTesting model: {model}")
     print("-" * 50)
 
