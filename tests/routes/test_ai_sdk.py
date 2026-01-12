@@ -683,6 +683,44 @@ class TestAISDKStreamingReasoningContent:
         assert "OpenRouter thinking" in content
         assert "OpenRouter answer" in content
 
+    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai_stream_async")
+    def test_streaming_empty_reasoning_content_no_fallback(self, mock_stream, mock_validate):
+        """Test that empty reasoning_content doesn't incorrectly fallback to reasoning attribute"""
+        mock_validate.return_value = "test-api-key"
+
+        # Mock streaming response where reasoning_content is empty string but reasoning has value
+        # The empty string should NOT trigger fallback to reasoning attribute
+        mock_chunk1 = MagicMock()
+        mock_delta1 = MagicMock()
+        mock_delta1.content = "Answer"
+        mock_delta1.reasoning_content = ""  # Explicitly empty
+        mock_delta1.reasoning = "Should not appear"  # This should NOT be used
+        mock_chunk1.choices = [MagicMock(delta=mock_delta1)]
+
+        # Create async iterator mock
+        async def mock_async_iter():
+            for chunk in [mock_chunk1]:
+                yield chunk
+
+        mock_stream.return_value = mock_async_iter()
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "anthropic/claude-sonnet-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        content = response.text
+        # Should include the regular content
+        assert "Answer" in content
+        # Should NOT include the fallback reasoning (empty reasoning_content should not trigger fallback)
+        assert "Should not appear" not in content
+
 
 class TestAISDKSentryIntegration:
     """Tests for Sentry error capture in AI SDK endpoint"""

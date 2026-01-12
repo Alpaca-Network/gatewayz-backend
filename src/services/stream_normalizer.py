@@ -247,14 +247,16 @@ class StreamNormalizer:
             delta_type = inner_delta.get("type", "")
 
             # Handle text content delta
-            if delta_type == "text_delta" or "text" in inner_delta:
+            # Use explicit type checking first, fallback to key presence only when type is missing
+            if delta_type == "text_delta" or (not delta_type and "text" in inner_delta):
                 text = inner_delta.get("text", "")
                 if text:
                     delta["content"] = text
                     self.accumulated_content += text
 
             # Handle thinking/reasoning delta (extended thinking feature)
-            elif delta_type == "thinking_delta" or "thinking" in inner_delta:
+            # Use explicit type checking first, fallback to key presence only when type is missing
+            elif delta_type == "thinking_delta" or (not delta_type and "thinking" in inner_delta):
                 thinking = inner_delta.get("thinking", "")
                 if thinking:
                     delta["reasoning_content"] = thinking
