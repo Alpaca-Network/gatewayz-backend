@@ -81,7 +81,7 @@ class TestHuggingFaceModelsJSONParsing:
         mock_response.headers = {"content-type": "text/html; charset=utf-8"}
         mock_response.raise_for_status = Mock()
         # Simulate HTML error page being parsed as JSON
-        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0)"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
         result = fetch_models_from_huggingface_api(limit=5)
