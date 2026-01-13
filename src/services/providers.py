@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -48,7 +49,7 @@ def fetch_providers_from_openrouter():
 
         try:
             providers_data = response.json()
-        except (ValueError, TypeError, AttributeError) as json_err:
+        except json.JSONDecodeError as json_err:
             logger.error(
                 f"Failed to parse JSON response from OpenRouter providers API: {json_err}. "
                 f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"

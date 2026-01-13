@@ -21,6 +21,7 @@ FEATURES:
   - Supports full-text search and filtering
 """
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -191,7 +192,7 @@ def fetch_models_from_huggingface_api(
 
             try:
                 batch_models = response.json()
-            except (ValueError, TypeError, AttributeError) as json_err:
+            except json.JSONDecodeError as json_err:
                 logger.error(
                     f"Failed to parse JSON response for sort={sort_method}: {json_err}. "
                     f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
@@ -481,7 +482,7 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
 
         try:
             models = response.json()
-        except (ValueError, TypeError, AttributeError) as json_err:
+        except json.JSONDecodeError as json_err:
             logger.error(
                 f"Failed to parse JSON response when searching for '{query}': {json_err}. "
                 f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
@@ -526,7 +527,7 @@ def get_huggingface_model_info(model_id: str) -> dict:
 
         try:
             model_data = response.json()
-        except (ValueError, TypeError, AttributeError) as json_err:
+        except json.JSONDecodeError as json_err:
             logger.error(
                 f"Failed to parse JSON response for model '{model_id}': {json_err}. "
                 f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"

@@ -5,6 +5,7 @@ These tests verify that service modules gracefully handle malformed JSON respons
 from external APIs without crashing or exposing sensitive information.
 """
 
+import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 import httpx
@@ -17,18 +18,18 @@ class TestHuggingFaceModelsJSONParsing:
     @patch("src.services.huggingface_models.httpx.get")
     async def test_fetch_models_with_invalid_json_response(self, mock_get):
         """Test that fetch_huggingface_models handles invalid JSON gracefully"""
-        from src.services.huggingface_models import fetch_huggingface_models
+        from src.services.huggingface_models import fetch_models_from_huggingface_api
 
         # Create a mock response with invalid JSON
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/html"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("Invalid JSON"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
         # Should return empty list instead of raising exception
-        result = fetch_huggingface_models(limit=10)
+        result = fetch_models_from_huggingface_api(limit=10)
 
         # Verify it doesn't crash and returns appropriate fallback
         assert isinstance(result, list)
@@ -43,7 +44,7 @@ class TestHuggingFaceModelsJSONParsing:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=TypeError("Unexpected type"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
         result = search_huggingface_models("test-query")
@@ -61,7 +62,7 @@ class TestHuggingFaceModelsJSONParsing:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/plain"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=AttributeError("No json method"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
         result = get_huggingface_model_info("test-model")
@@ -73,17 +74,17 @@ class TestHuggingFaceModelsJSONParsing:
     @patch("src.services.huggingface_models.httpx.get")
     async def test_fetch_models_with_html_error_response(self, mock_get):
         """Test handling when API returns HTML error page instead of JSON"""
-        from src.services.huggingface_models import fetch_huggingface_models
+        from src.services.huggingface_models import fetch_models_from_huggingface_api
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/html; charset=utf-8"}
         mock_response.raise_for_status = Mock()
         # Simulate HTML error page being parsed as JSON
-        mock_response.json = Mock(side_effect=ValueError("Expecting value: line 1 column 1 (char 0)"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0)"))
         mock_get.return_value = mock_response
 
-        result = fetch_huggingface_models(limit=5)
+        result = fetch_models_from_huggingface_api(limit=5)
 
         # Should handle gracefully and return appropriate type
         assert isinstance(result, list)
@@ -96,16 +97,16 @@ class TestProvidersJSONParsing:
     @patch("src.services.providers.httpx.get")
     async def test_fetch_providers_with_invalid_json(self, mock_get):
         """Test that fetch_providers handles malformed JSON response"""
-        from src.services.providers import fetch_providers
+        from src.services.providers import fetch_providers_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("Invalid JSON structure"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        result = fetch_providers()
+        result = fetch_providers_from_openrouter()
 
         # Should return None on JSON parse error (based on exception handler)
         assert result is None
@@ -114,16 +115,16 @@ class TestProvidersJSONParsing:
     @patch("src.services.providers.httpx.get")
     async def test_fetch_providers_with_empty_response(self, mock_get):
         """Test handling of empty response body"""
-        from src.services.providers import fetch_providers
+        from src.services.providers import fetch_providers_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("No JSON object could be decoded"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        result = fetch_providers()
+        result = fetch_providers_from_openrouter()
 
         assert result is None
 
@@ -135,16 +136,16 @@ class TestModelsJSONParsing:
     @patch("src.services.models.httpx.get")
     async def test_fetch_openrouter_models_with_invalid_json(self, mock_get):
         """Test that fetch_openrouter_models handles JSON parse errors"""
-        from src.services.models import fetch_openrouter_models
+        from src.services.models import fetch_models_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("Malformed JSON"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        result = fetch_openrouter_models()
+        result = fetch_models_from_openrouter()
 
         # Should return empty list instead of crashing
         assert result == []
@@ -153,17 +154,17 @@ class TestModelsJSONParsing:
     @patch("src.services.models.httpx.get")
     async def test_fetch_models_with_corrupted_json_response(self, mock_get):
         """Test handling of corrupted/truncated JSON"""
-        from src.services.models import fetch_openrouter_models
+        from src.services.models import fetch_models_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.raise_for_status = Mock()
         # Simulate truncated JSON that can't be parsed
-        mock_response.json = Mock(side_effect=ValueError("Unterminated string starting at: line 1 column 123"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        result = fetch_openrouter_models()
+        result = fetch_models_from_openrouter()
 
         assert result == []
 
@@ -181,7 +182,7 @@ class TestJSONParsingWithDifferentContentTypes:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/xml"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("XML cannot be parsed as JSON"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
         result = search_huggingface_models("test")
@@ -192,16 +193,16 @@ class TestJSONParsingWithDifferentContentTypes:
     @patch("src.services.providers.httpx.get")
     async def test_plain_text_error_message_as_json(self, mock_get):
         """Test handling when API returns plain text error"""
-        from src.services.providers import fetch_providers
+        from src.services.providers import fetch_providers_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/plain"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("Not valid JSON"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        result = fetch_providers()
+        result = fetch_providers_from_openrouter()
 
         assert result is None
 
@@ -214,16 +215,16 @@ class TestJSONParsingErrorLogging:
     @patch("src.services.huggingface_models.logger")
     async def test_json_error_is_logged_with_context(self, mock_logger, mock_get):
         """Verify JSON parse errors are logged with useful context"""
-        from src.services.huggingface_models import fetch_huggingface_models
+        from src.services.huggingface_models import fetch_models_from_huggingface_api
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/html"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("Bad JSON"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        fetch_huggingface_models(limit=1)
+        fetch_models_from_huggingface_api(limit=1)
 
         # Verify error was logged
         assert mock_logger.error.called
@@ -237,16 +238,16 @@ class TestJSONParsingErrorLogging:
     @patch("src.services.providers.logger")
     async def test_providers_json_error_logging(self, mock_logger, mock_get):
         """Verify provider JSON errors include response details"""
-        from src.services.providers import fetch_providers
+        from src.services.providers import fetch_providers_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.raise_for_status = Mock()
-        mock_response.json = Mock(side_effect=ValueError("Invalid"))
+        mock_response.json = Mock(side_effect=json.JSONDecodeError("Parse error", "", 0))
         mock_get.return_value = mock_response
 
-        fetch_providers()
+        fetch_providers_from_openrouter()
 
         # Verify appropriate error logging occurred
         assert mock_logger.error.called
@@ -277,7 +278,7 @@ class TestJSONParsingEdgeCases:
     @patch("src.services.models.httpx.get")
     async def test_json_with_unexpected_structure(self, mock_get):
         """Test when JSON structure differs from expected"""
-        from src.services.models import fetch_openrouter_models
+        from src.services.models import fetch_models_from_openrouter
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -287,7 +288,7 @@ class TestJSONParsingEdgeCases:
         mock_response.json = Mock(return_value="unexpected string response")
         mock_get.return_value = mock_response
 
-        result = fetch_openrouter_models()
+        result = fetch_models_from_openrouter()
 
         # Should handle gracefully
         assert isinstance(result, list)
