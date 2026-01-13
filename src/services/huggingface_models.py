@@ -189,7 +189,14 @@ def fetch_models_from_huggingface_api(
                         continue
                     raise
 
-            batch_models = response.json()
+            try:
+                batch_models = response.json()
+            except (ValueError, TypeError, AttributeError) as json_err:
+                logger.error(
+                    f"Failed to parse JSON response for sort={sort_method}: {json_err}. "
+                    f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+                )
+                continue
 
             if not batch_models:
                 logger.warning(f"No models returned for sort={sort_method}")
@@ -472,7 +479,15 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
         response = httpx.get(url, params=params, headers=headers, timeout=request_timeout)
         response.raise_for_status()
 
-        models = response.json()
+        try:
+            models = response.json()
+        except (ValueError, TypeError, AttributeError) as json_err:
+            logger.error(
+                f"Failed to parse JSON response when searching for '{query}': {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return []
+
         logger.info(f"Found {len(models)} models matching '{query}'")
 
         # Normalize results
@@ -509,7 +524,15 @@ def get_huggingface_model_info(model_id: str) -> dict:
         response = httpx.get(url, headers=headers, timeout=request_timeout)
         response.raise_for_status()
 
-        model_data = response.json()
+        try:
+            model_data = response.json()
+        except (ValueError, TypeError, AttributeError) as json_err:
+            logger.error(
+                f"Failed to parse JSON response for model '{model_id}': {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return None
+
         logger.info(f"Retrieved model info for {model_id}")
 
         return normalize_huggingface_model(model_data)
