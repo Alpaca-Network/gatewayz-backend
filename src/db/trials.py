@@ -1,8 +1,10 @@
 import logging
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.config.redis_config import get_redis_config
 from src.utils.db_safety import safe_get_first, DatabaseResultError
 
 logger = logging.getLogger(__name__)
@@ -134,24 +136,56 @@ def track_trial_usage_for_key(
 
 
 def get_trial_analytics() -> dict[str, Any]:
-    """Get trial analytics and conversion metrics"""
+    """Get trial analytics and conversion metrics with Redis caching"""
+    CACHE_KEY = "trial:analytics:summary"
+    CACHE_TTL = 300  # 5 minutes cache
+
     try:
+        # Try to get from cache first
+        redis_config = get_redis_config()
+        cached_data = redis_config.get_cache(CACHE_KEY)
+
+        if cached_data:
+            try:
+                logger.info("Returning trial analytics from cache")
+                return json.loads(cached_data)
+            except json.JSONDecodeError:
+                logger.warning("Failed to decode cached trial analytics, fetching fresh data")
+
         client = get_supabase_client()
 
-        # Get trial statistics from api_keys_new table
-        trial_stats = (
-            client.table("api_keys_new")
-            .select(
-                "is_trial, trial_converted, trial_start_date, trial_end_date, trial_used_tokens, trial_used_requests, trial_used_credits, trial_credits, subscription_status"
-            )
-            .execute()
-        )
+        # Get trial statistics from api_keys_new table with pagination
+        # Fetch all records beyond the 1000 limit
+        all_trial_stats = []
+        page_size = 1000
+        offset = 0
 
-        if not trial_stats.data:
+        while True:
+            trial_stats = (
+                client.table("api_keys_new")
+                .select(
+                    "is_trial, trial_converted, trial_start_date, trial_end_date, trial_used_tokens, trial_used_requests, trial_used_credits, trial_credits, subscription_status"
+                )
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+
+            if not trial_stats.data or len(trial_stats.data) == 0:
+                break
+
+            all_trial_stats.extend(trial_stats.data)
+
+            # If we got less than page_size, we've reached the end
+            if len(trial_stats.data) < page_size:
+                break
+
+            offset += page_size
+
+        if not all_trial_stats:
             return {"error": "No data available"}
 
         # Filter trial keys
-        trial_keys = [k for k in trial_stats.data if k.get("is_trial", False)]
+        trial_keys = [k for k in all_trial_stats if k.get("is_trial", False)]
         total_trials = len(trial_keys)
 
         # Calculate active trials (not expired)
@@ -198,7 +232,7 @@ def get_trial_analytics() -> dict[str, Any]:
         avg_requests_per_trial = total_requests_used / total_trials if total_trials > 0 else 0
         avg_credits_per_trial = total_credits_used / total_trials if total_trials > 0 else 0
 
-        return {
+        analytics_data = {
             "total_trials": total_trials,
             "active_trials": active_trials,
             "expired_trials": expired_trials,
@@ -231,6 +265,31 @@ def get_trial_analytics() -> dict[str, Any]:
             },
         }
 
+        # Cache the result
+        try:
+            redis_config.set_cache(CACHE_KEY, json.dumps(analytics_data), CACHE_TTL)
+            logger.info("Trial analytics cached successfully")
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache trial analytics: {cache_error}")
+
+        return analytics_data
+
     except Exception as e:
         logger.error(f"Error getting trial analytics: {e}")
         return {"error": str(e)}
+
+
+def invalidate_trial_analytics_cache() -> bool:
+    """
+    Invalidate all trial analytics caches.
+    Call this when trial data changes (new trial, conversion, etc.)
+    """
+    try:
+        redis_config = get_redis_config()
+        redis_config.delete_cache("trial:analytics:summary")
+        redis_config.delete_cache("trial:domain:analysis")
+        logger.info("Trial analytics caches invalidated")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to invalidate trial analytics cache: {e}")
+        return False
