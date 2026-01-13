@@ -140,6 +140,7 @@ def create_api_key(
     ip_allowlist: list[str] | None = None,
     domain_referrers: list[str] | None = None,
     is_primary: bool = False,
+    subscription_status: str = "trial",
 ) -> tuple[str, int]:
     """Create a new API key for a user"""
     global _encryption_warning_logged
@@ -192,19 +193,21 @@ def create_api_key(
         if is_primary:
             trial_start = datetime.now(timezone.utc)
             trial_end = trial_start + timedelta(days=3)
+            # Use the provided subscription_status (e.g., "bot" for temp emails, "trial" for normal)
+            is_trial = subscription_status == "trial"
             trial_data = {
-                "is_trial": True,
+                "is_trial": is_trial,
                 "trial_start_date": trial_start.isoformat(),
                 "trial_end_date": trial_end.isoformat(),
                 "trial_used_tokens": 0,
                 "trial_used_requests": 0,
                 "trial_used_credits": 0.0,
-                "trial_max_tokens": 100000,
-                "trial_max_requests": 1000,
-                "trial_credits": 5.0,
+                "trial_max_tokens": 100000 if is_trial else 0,
+                "trial_max_requests": 1000 if is_trial else 0,
+                "trial_credits": 5.0 if is_trial else 0.0,
                 "trial_converted": False,
-                "subscription_status": "trial",
-                "subscription_plan": "free_trial",
+                "subscription_status": subscription_status,
+                "subscription_plan": "free_trial" if is_trial else "bot",
             }
 
         # KEY_HASH_SALT is required - always validate it first (outside try-except)

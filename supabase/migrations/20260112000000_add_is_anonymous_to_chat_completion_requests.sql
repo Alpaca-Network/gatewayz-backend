@@ -60,23 +60,38 @@ BEGIN
 END $$;
 
 -- Add a helpful view to analyze API key tracking quality
-CREATE OR REPLACE VIEW "public"."api_key_tracking_quality" AS
-SELECT
-    DATE_TRUNC('hour', created_at) as hour,
-    COUNT(*) as total_requests,
-    COUNT(api_key_id) as requests_with_api_key,
-    COUNT(*) FILTER (WHERE api_key_id IS NULL) as requests_without_api_key,
-    COUNT(*) FILTER (WHERE is_anonymous = TRUE) as anonymous_requests,
-    COUNT(*) FILTER (WHERE api_key_id IS NULL AND user_id IS NOT NULL) as potential_lookup_failures,
-    ROUND(
-        (COUNT(api_key_id)::NUMERIC / NULLIF(COUNT(*), 0)) * 100,
-        2
-    ) as tracking_rate_percent
-FROM "public"."chat_completion_requests"
-WHERE created_at >= NOW() - INTERVAL '7 days'
-GROUP BY DATE_TRUNC('hour', created_at)
-ORDER BY hour DESC;
+-- Only create if the source table exists
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name = 'chat_completion_requests'
+    ) THEN
+        -- Create or replace the view
+        CREATE OR REPLACE VIEW "public"."api_key_tracking_quality" AS
+        SELECT
+            DATE_TRUNC('hour', created_at) as hour,
+            COUNT(*) as total_requests,
+            COUNT(api_key_id) as requests_with_api_key,
+            COUNT(*) FILTER (WHERE api_key_id IS NULL) as requests_without_api_key,
+            COUNT(*) FILTER (WHERE is_anonymous = TRUE) as anonymous_requests,
+            COUNT(*) FILTER (WHERE api_key_id IS NULL AND user_id IS NOT NULL) as potential_lookup_failures,
+            ROUND(
+                (COUNT(api_key_id)::NUMERIC / NULLIF(COUNT(*), 0)) * 100,
+                2
+            ) as tracking_rate_percent
+        FROM "public"."chat_completion_requests"
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE_TRUNC('hour', created_at)
+        ORDER BY hour DESC;
 
-COMMENT ON VIEW "public"."api_key_tracking_quality" IS
-    'Hourly breakdown of API key tracking quality metrics for the last 7 days. '
-    'Shows total requests, successful tracking rate, anonymous requests, and potential lookup failures.';
+        COMMENT ON VIEW "public"."api_key_tracking_quality" IS
+            'Hourly breakdown of API key tracking quality metrics for the last 7 days. '
+            'Shows total requests, successful tracking rate, anonymous requests, and potential lookup failures.';
+
+        RAISE NOTICE 'Successfully created api_key_tracking_quality view';
+    ELSE
+        RAISE NOTICE 'Table chat_completion_requests does not exist, skipping view creation';
+    END IF;
+END $$;

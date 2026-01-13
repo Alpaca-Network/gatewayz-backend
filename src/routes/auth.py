@@ -770,17 +770,6 @@ async def privy_auth(
             # New user - create account
             logger.info(f"Creating new Privy user: {request.user.id}")
 
-            # Block new registrations with temporary/disposable email addresses
-            if email and is_temporary_email_domain(email):
-                logger.warning(
-                    f"Registration blocked for temporary email domain: {sanitize_for_logging(email)} "
-                    f"(privy_user_id={request.user.id})"
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail="Temporary or disposable email addresses are not allowed. Please use a permanent email address.",
-                )
-
             # Block new registrations from domains identified as sources of abuse
             if email and is_blocked_email_domain(email):
                 logger.warning(
@@ -790,6 +779,14 @@ async def privy_auth(
                 raise HTTPException(
                     status_code=400,
                     detail="Registration from this email domain is not allowed.",
+                )
+
+            # Detect temporary/disposable email addresses and mark as bot
+            is_temp_email = email and is_temporary_email_domain(email)
+            if is_temp_email:
+                logger.warning(
+                    f"Temporary email detected, marking as bot: {sanitize_for_logging(email)} "
+                    f"(privy_user_id={request.user.id})"
                 )
 
             # Ensure username is unique before attempting to create user
@@ -815,6 +812,7 @@ async def privy_auth(
                     auth_method=auth_method_str,
                     privy_user_id=request.user.id,
                     credits=5,  # Users start with $5 trial credits for 3 days
+                    subscription_status="bot" if is_temp_email else "trial",
                 )
             except Exception as creation_error:
                 logger.warning(
@@ -876,7 +874,7 @@ async def privy_auth(
                     ),
                     "created_at": trial_start.isoformat(),
                     "welcome_email_sent": False,
-                    "subscription_status": "trial",
+                    "subscription_status": "bot" if is_temp_email else "trial",
                     "trial_expires_at": trial_end.isoformat(),
                     "tier": "basic",
                 }
@@ -1194,16 +1192,6 @@ async def register_user(
     try:
         logger.info(f"Registration request for user: {request.username}")
 
-        # Block temporary/disposable email addresses to prevent abuse
-        if is_temporary_email_domain(request.email):
-            logger.warning(
-                f"Registration blocked for temporary email domain: {sanitize_for_logging(request.email)}"
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Temporary or disposable email addresses are not allowed. Please use a permanent email address.",
-            )
-
         # Block domains identified as sources of abuse
         if is_blocked_email_domain(request.email):
             logger.warning(
@@ -1212,6 +1200,13 @@ async def register_user(
             raise HTTPException(
                 status_code=400,
                 detail="Registration from this email domain is not allowed.",
+            )
+
+        # Detect temporary/disposable email addresses and mark as bot
+        is_temp_email = is_temporary_email_domain(request.email)
+        if is_temp_email:
+            logger.warning(
+                f"Temporary email detected, marking as bot: {sanitize_for_logging(request.email)}"
             )
 
         client = supabase_config.get_supabase_client()
@@ -1264,6 +1259,7 @@ async def register_user(
                 auth_method=auth_method_str,
                 privy_user_id=None,  # No Privy for direct registration
                 credits=5,
+                subscription_status="bot" if is_temp_email else "trial",
             )
         except Exception as creation_error:
             logger.warning(
@@ -1287,7 +1283,7 @@ async def register_user(
                 ),
                 "created_at": trial_start.isoformat(),
                 "welcome_email_sent": False,
-                "subscription_status": "trial",
+                "subscription_status": "bot" if is_temp_email else "trial",
                 "trial_expires_at": trial_end.isoformat(),
                 "tier": "basic",
             }
