@@ -144,16 +144,16 @@ class TestBuildProviderFailoverChain:
         assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
 
     def test_chain_with_none_provider(self):
-        """Test chain with None provider defaults to openrouter"""
+        """Test chain with None provider defaults to onerouter"""
         chain = build_provider_failover_chain(None)
 
-        assert chain[0] == "openrouter"
+        assert chain[0] == "onerouter"
 
     def test_chain_with_empty_string(self):
-        """Test chain with empty string defaults to openrouter"""
+        """Test chain with empty string defaults to onerouter"""
         chain = build_provider_failover_chain("")
 
-        assert chain[0] == "openrouter"
+        assert chain[0] == "onerouter"
 
     def test_chain_with_unknown_provider(self):
         """Test chain with unknown provider (not in fallback list)"""
@@ -637,6 +637,168 @@ class TestMapProviderErrorOpenAI:
         assert "not found" in mapped.detail.lower()
         # Should NOT be just "Not Found" - should include model and provider
         assert mapped.detail != "Not Found"
+
+    def test_map_api_status_error_403_maps_to_401(self):
+        """Test generic APIStatusError with 403 maps to 401 for consistency"""
+        response = Mock()
+        response.status_code = 403
+        error = APIStatusError("Forbidden", response=response, body=None)
+        error.status_code = 403
+        error.message = "Forbidden"
+        mapped = map_provider_error("openrouter", "test-model", error)
+
+        # 403 should be mapped to 401 for auth error consistency
+        assert mapped.status_code == 401
+        assert "authentication" in mapped.detail.lower()
+        assert "openrouter" in mapped.detail.lower()
+
+
+# ============================================================
+# TEST CLASS: Error Mapping - Cerebras SDK Exceptions
+# ============================================================
+
+@pytest.mark.skipif(not CEREBRAS_SDK_AVAILABLE, reason="Cerebras SDK not installed")
+class TestMapProviderErrorCerebras:
+    """Test mapping Cerebras SDK exceptions"""
+
+    def test_map_cerebras_api_connection_error(self):
+        """Test Cerebras APIConnectionError maps to 503"""
+        # CerebrasAPIConnectionError requires a request parameter
+        mock_request = Mock()
+        error = CerebrasAPIConnectionError(request=mock_request)
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 503
+        assert "unavailable" in mapped.detail.lower()
+
+    def test_map_cerebras_rate_limit_error_with_retry_after_header(self):
+        """Test Cerebras RateLimitError with Retry-After in response headers"""
+        response = Mock()
+        response.headers = {"retry-after": "120"}
+
+        error = CerebrasRateLimitError("Rate limited", response=response, body=None)
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 429
+        assert "rate limit" in mapped.detail.lower()
+        assert mapped.headers is not None
+        assert mapped.headers.get("Retry-After") == "120"
+
+    def test_map_cerebras_rate_limit_error_with_retry_after_body(self):
+        """Test Cerebras RateLimitError with retry_after in body"""
+        # Create a mock response with no retry-after header
+        response = Mock()
+        response.headers = {}
+        error = CerebrasRateLimitError(
+            message="Rate limited", response=response, body={"retry_after": 90}
+        )
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 429
+        assert mapped.headers is not None
+        assert mapped.headers.get("Retry-After") == "90"
+
+    def test_map_cerebras_authentication_error(self):
+        """Test Cerebras AuthenticationError maps to 401"""
+        response = Mock()
+        response.status_code = 401
+        error = CerebrasAuthenticationError("Invalid API key", response=response, body=None)
+        error.status_code = 401
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 401
+        assert "authentication" in mapped.detail.lower()
+
+    def test_map_cerebras_permission_denied_error(self):
+        """Test Cerebras PermissionDeniedError maps to 401"""
+        response = Mock()
+        response.status_code = 403
+        error = CerebrasPermissionDeniedError("Permission denied", response=response, body=None)
+        error.status_code = 403
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        # Should map to 401 (authentication issue)
+        assert mapped.status_code == 401
+        assert "authentication" in mapped.detail.lower()
+
+    def test_map_cerebras_not_found_error(self):
+        """Test Cerebras NotFoundError indicates model not available"""
+        response = Mock()
+        response.status_code = 404
+        error = CerebrasNotFoundError("Model not found", response=response, body=None)
+        error.status_code = 404
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 404
+        assert "not found" in mapped.detail.lower()
+        assert "llama-3.3-70b" in mapped.detail
+        assert "cerebras" in mapped.detail.lower()
+
+    def test_map_cerebras_bad_request_error(self):
+        """Test Cerebras BadRequestError maps to 400"""
+        response = Mock()
+        response.status_code = 400
+        error = CerebrasBadRequestError("Invalid request", response=response, body=None)
+        error.status_code = 400
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 400
+        assert "rejected" in mapped.detail.lower()
+
+    def test_map_cerebras_api_status_error_with_custom_status(self):
+        """Test Cerebras APIStatusError with custom status code"""
+        response = Mock()
+        response.status_code = 418  # I'm a teapot
+        error = CerebrasAPIStatusError("Custom error", response=response, body=None)
+        error.status_code = 418
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 418
+
+    def test_map_cerebras_api_status_error_invalid_status(self):
+        """Test Cerebras APIStatusError with invalid status code defaults to 500"""
+        response = Mock()
+        response.status_code = "invalid"
+        error = CerebrasAPIStatusError("Error", response=response, body=None)
+        error.status_code = "invalid"
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 500
+
+    def test_map_cerebras_api_status_error_5xx(self):
+        """Test Cerebras APIStatusError with 5xx status maps to service error"""
+        response = Mock()
+        response.status_code = 503
+        error = CerebrasAPIStatusError("Service unavailable", response=response, body=None)
+        error.status_code = 503
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 503
+        assert "service error" in mapped.detail.lower()
+
+    def test_map_cerebras_api_status_error_403_generic(self):
+        """Test generic Cerebras APIStatusError with 403 maps to 401"""
+        response = Mock()
+        response.status_code = 403
+        error = CerebrasAPIStatusError("Forbidden", response=response, body=None)
+        error.status_code = 403
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 401
+        assert "authentication" in mapped.detail.lower()
+
+    def test_map_cerebras_api_status_error_404_generic(self):
+        """Test generic Cerebras APIStatusError with 404 provides proper error message"""
+        response = Mock()
+        response.status_code = 404
+        error = CerebrasAPIStatusError("Not Found", response=response, body=None)
+        error.status_code = 404
+        error.message = "Not Found"
+        mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
+
+        assert mapped.status_code == 404
+        assert "llama-3.3-70b" in mapped.detail
+        assert "cerebras" in mapped.detail.lower()
 
 
 # ============================================================
