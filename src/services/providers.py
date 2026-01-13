@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -46,7 +47,15 @@ def fetch_providers_from_openrouter():
         response = httpx.get("https://openrouter.ai/api/v1/providers", headers=headers)
         response.raise_for_status()
 
-        providers_data = response.json()
+        try:
+            providers_data = response.json()
+        except json.JSONDecodeError as json_err:
+            logger.error(
+                f"Failed to parse JSON response from OpenRouter providers API: {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return None
+
         _provider_cache["data"] = providers_data.get("data", [])
         _provider_cache["timestamp"] = datetime.now(timezone.utc)
 

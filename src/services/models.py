@@ -957,7 +957,15 @@ def fetch_models_from_openrouter():
         response = httpx.get("https://openrouter.ai/api/v1/models", headers=headers)
         response.raise_for_status()
 
-        models_data = response.json()
+        try:
+            models_data = response.json()
+        except json.JSONDecodeError as json_err:
+            logger.error(
+                f"Failed to parse JSON response from OpenRouter models API: {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return []
+
         raw_models = models_data.get("data", [])
 
         # Process and filter models
