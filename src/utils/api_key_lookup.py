@@ -38,7 +38,6 @@ async def get_api_key_id_with_retry(
         return None
 
     from src.db import api_keys as api_keys_module
-    from src.utils.retry import _to_thread
 
     # Import metrics for tracking
     try:
@@ -55,7 +54,7 @@ async def get_api_key_id_with_retry(
 
     for attempt in range(max_retries):
         try:
-            api_key_record = await _to_thread(api_keys_module.get_api_key_by_key, api_key)
+            api_key_record = await asyncio.to_thread(api_keys_module.get_api_key_by_key, api_key)
 
             if api_key_record:
                 api_key_id = api_key_record.get("id")
