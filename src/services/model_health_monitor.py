@@ -321,6 +321,17 @@ class ModelHealthMonitor:
                 "cerebras",
                 "nebius",
                 "helicone",
+                "aihubmix",
+                "anannas",
+                "onerouter",
+                "cloudflare-workers-ai",
+                "vercel-ai-gateway",
+                "openai",
+                "anthropic",
+                "clarifai",
+                "alibaba",
+                "simplismart",
+                "modelz",
             ]
 
             for gateway in gateways:
