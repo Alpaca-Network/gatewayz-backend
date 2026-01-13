@@ -638,6 +638,20 @@ class TestMapProviderErrorOpenAI:
         # Should NOT be just "Not Found" - should include model and provider
         assert mapped.detail != "Not Found"
 
+    def test_map_api_status_error_403_maps_to_401(self):
+        """Test generic APIStatusError with 403 maps to 401 for consistency"""
+        response = Mock()
+        response.status_code = 403
+        error = APIStatusError("Forbidden", response=response, body=None)
+        error.status_code = 403
+        error.message = "Forbidden"
+        mapped = map_provider_error("openrouter", "test-model", error)
+
+        # 403 should be mapped to 401 for auth error consistency
+        assert mapped.status_code == 401
+        assert "authentication" in mapped.detail.lower()
+        assert "openrouter" in mapped.detail.lower()
+
 
 # ============================================================
 # TEST CLASS: Error Mapping - Cerebras SDK Exceptions
