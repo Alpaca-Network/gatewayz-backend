@@ -144,16 +144,16 @@ class TestBuildProviderFailoverChain:
         assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
 
     def test_chain_with_none_provider(self):
-        """Test chain with None provider defaults to openrouter"""
+        """Test chain with None provider defaults to onerouter"""
         chain = build_provider_failover_chain(None)
 
-        assert chain[0] == "openrouter"
+        assert chain[0] == "onerouter"
 
     def test_chain_with_empty_string(self):
-        """Test chain with empty string defaults to openrouter"""
+        """Test chain with empty string defaults to onerouter"""
         chain = build_provider_failover_chain("")
 
-        assert chain[0] == "openrouter"
+        assert chain[0] == "onerouter"
 
     def test_chain_with_unknown_provider(self):
         """Test chain with unknown provider (not in fallback list)"""
