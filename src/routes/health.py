@@ -148,8 +148,6 @@ async def get_system_health(
 @router.get("/health/providers", tags=["health"])
 async def get_providers_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
-    limit: int = Query(1000, ge=1, le=5000, description="Number of providers to return (max 5000)"),
-    offset: int = Query(0, ge=0, description="Number of providers to skip for pagination"),
     api_key: str = Depends(get_api_key),
     force_refresh: bool = False,
 ):
@@ -167,51 +165,32 @@ async def get_providers_health(
 
     Query Parameters:
     - gateway: Filter by specific gateway
-    - limit: Number of providers to return (default 1000, max 5000)
-    - offset: Number of providers to skip for pagination (default 0)
     - force_refresh: Currently ignored (data comes from health-service cache)
     """
     try:
         # Get system health to get total provider count
         system_health = simple_health_cache.get_system_health() or {}
         total_providers = system_health.get("total_providers", 0)
-
+        
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_providers_health()
         tracked_providers = len(cached) if cached else 0
-
+        
         if cached:
             logger.debug(f"Returning cached providers health from health-service ({tracked_providers} tracked of {total_providers} total)")
-
             # Apply gateway filter if specified
-            filtered = cached
             if gateway:
-                filtered = [p for p in cached if p.get("gateway") == gateway]
-
-            # Apply pagination
-            total_filtered = len(filtered)
-            paginated = filtered[offset:offset + limit]
-            has_more = (offset + limit) < total_filtered
-
-            # Return format that frontend expects with pagination metadata
+                cached = [p for p in cached if p.get("gateway") == gateway]
+            
+            # Return format that frontend expects
             return {
-                "data": paginated,
-                "providers": paginated,  # Also include as 'providers' for compatibility
-                "total": total_providers,
+                "data": cached,
+                "providers": cached,  # Also include as 'providers' for compatibility
                 "total_providers": total_providers,
                 "tracked_providers": tracked_providers,
-                "returned_count": len(paginated),
-                "has_more": has_more,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "total_filtered": total_filtered,
-                    "has_more": has_more
-                },
                 "metadata": {
                     "total_providers": total_providers,
                     "tracked_providers": tracked_providers,
-                    "returned_count": len(paginated),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             }
@@ -221,17 +200,8 @@ async def get_providers_health(
         return {
             "data": [],
             "providers": [],
-            "total": total_providers,
             "total_providers": total_providers,
             "tracked_providers": 0,
-            "returned_count": 0,
-            "has_more": False,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total_filtered": 0,
-                "has_more": False
-            },
             "metadata": {
                 "total_providers": total_providers,
                 "tracked_providers": 0,
@@ -249,17 +219,8 @@ async def get_providers_health(
         return {
             "data": [],
             "providers": [],
-            "total": 0,
             "total_providers": 0,
             "tracked_providers": 0,
-            "returned_count": 0,
-            "has_more": False,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total_filtered": 0,
-                "has_more": False
-            },
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
@@ -273,8 +234,6 @@ async def get_models_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     provider: str | None = Query(None, description="Filter by specific provider"),
     status: str | None = Query(None, description="Filter by health status"),
-    limit: int = Query(1000, ge=1, le=5000, description="Number of models to return (max 5000)"),
-    offset: int = Query(0, ge=0, description="Number of models to skip for pagination"),
     api_key: str = Depends(get_api_key),
     force_refresh: bool = False,
 ):
@@ -294,55 +253,36 @@ async def get_models_health(
     - gateway: Filter by specific gateway
     - provider: Filter by specific provider
     - status: Filter by health status
-    - limit: Number of models to return (default 1000, max 5000)
-    - offset: Number of models to skip for pagination (default 0)
     - force_refresh: Currently ignored (data comes from health-service cache)
     """
     try:
         # Get system health to get total model count
         system_health = simple_health_cache.get_system_health() or {}
         total_models = system_health.get("total_models", 0)
-
+        
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_models_health()
         tracked_models = len(cached) if cached else 0
-
+        
         if cached:
             logger.debug(f"Returning cached models health from health-service ({tracked_models} tracked of {total_models} total)")
-
             # Apply filters
-            filtered = cached
             if gateway:
-                filtered = [m for m in filtered if m.get("gateway") == gateway]
+                cached = [m for m in cached if m.get("gateway") == gateway]
             if provider:
-                filtered = [m for m in filtered if m.get("provider") == provider]
+                cached = [m for m in cached if m.get("provider") == provider]
             if status:
-                filtered = [m for m in filtered if m.get("status") == status]
-
-            # Apply pagination
-            total_filtered = len(filtered)
-            paginated = filtered[offset:offset + limit]
-            has_more = (offset + limit) < total_filtered
-
-            # Return format that frontend expects with pagination metadata
+                cached = [m for m in cached if m.get("status") == status]
+            
+            # Return format that frontend expects
             return {
-                "data": paginated,
-                "models": paginated,  # Also include as 'models' for compatibility
-                "total": total_models,
+                "data": cached,
+                "models": cached,  # Also include as 'models' for compatibility
                 "total_models": total_models,
                 "tracked_models": tracked_models,
-                "returned_count": len(paginated),
-                "has_more": has_more,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "total_filtered": total_filtered,
-                    "has_more": has_more
-                },
                 "metadata": {
                     "total_models": total_models,
                     "tracked_models": tracked_models,
-                    "returned_count": len(paginated),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             }
@@ -352,17 +292,8 @@ async def get_models_health(
         return {
             "data": [],
             "models": [],
-            "total": total_models,
             "total_models": total_models,
             "tracked_models": 0,
-            "returned_count": 0,
-            "has_more": False,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total_filtered": 0,
-                "has_more": False
-            },
             "metadata": {
                 "total_models": total_models,
                 "tracked_models": 0,
@@ -380,17 +311,8 @@ async def get_models_health(
         return {
             "data": [],
             "models": [],
-            "total": 0,
             "total_models": 0,
             "tracked_models": 0,
-            "returned_count": 0,
-            "has_more": False,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total_filtered": 0,
-                "has_more": False
-            },
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
@@ -695,6 +617,199 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             error_rate=0.0,
             last_updated=datetime.now(timezone.utc),
         )
+
+
+@router.get(
+    "/health/dashboard", response_model=HealthDashboardResponse, tags=["health", "dashboard"]
+)
+async def get_health_dashboard(
+    api_key: str = Depends(get_api_key),
+    force_refresh: bool = False,
+):
+    """
+    Get complete health dashboard data for frontend
+
+    Returns comprehensive health data formatted for frontend dashboard including:
+    - System status with color indicators
+    - Provider statuses with counts and metrics
+    - Model statuses with response times and uptime
+    - Uptime metrics for status page integration
+
+    Note: Health data is provided by the dedicated health-service container
+    via Redis cache. If cache is empty, default values are returned.
+
+    Query Parameters:
+    - force_refresh: Currently ignored (data comes from health-service cache)
+    """
+    try:
+        # Try to get cached dashboard first
+        cached = simple_health_cache.get_health_dashboard()
+        if cached:
+            logger.debug("Returning cached health dashboard from health-service")
+            return HealthDashboardResponse(**cached)
+
+        # No cached dashboard, build from individual cache entries
+        logger.info("Building health dashboard from cached components")
+
+        # Get system health from cache
+        cached_system = simple_health_cache.get_system_health()
+        if cached_system:
+            system_health = SystemHealthResponse(**cached_system)
+        else:
+            system_health = SystemHealthResponse(
+                overall_status=HealthStatus.UNKNOWN,
+                total_providers=0,
+                healthy_providers=0,
+                degraded_providers=0,
+                unhealthy_providers=0,
+                total_models=0,
+                healthy_models=0,
+                degraded_models=0,
+                unhealthy_models=0,
+                total_gateways=0,
+                healthy_gateways=0,
+                tracked_models=0,
+                tracked_providers=0,
+                system_uptime=0.0,
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        # Get providers health from cache
+        cached_providers = simple_health_cache.get_providers_health() or []
+        providers_status = []
+
+        for provider in cached_providers:
+            # Determine status color
+            status = provider.get("status", "unknown")
+            if status in ["online", "ONLINE"]:
+                status_color = "green"
+                status_text = "Online"
+            elif status in ["degraded", "DEGRADED"]:
+                status_color = "yellow"
+                status_text = "Degraded"
+            else:
+                status_color = "red"
+                status_text = "Offline"
+
+            # Format response time
+            response_time_ms = provider.get("avg_response_time_ms")
+            response_time_display = None
+            if response_time_ms:
+                if response_time_ms < 1000:
+                    response_time_display = f"{response_time_ms:.0f}ms"
+                else:
+                    response_time_display = f"{response_time_ms/1000:.1f}s"
+
+            providers_status.append(
+                ProviderStatusResponse(
+                    provider=provider.get("provider", "unknown"),
+                    gateway=provider.get("gateway") or "unknown",
+                    status=status_text,
+                    status_color=status_color,
+                    models_count=provider.get("total_models", 0),
+                    healthy_count=provider.get("healthy_models", 0),
+                    uptime=f"{provider.get('overall_uptime', 0.0):.1f}%",
+                    avg_response_time=response_time_display,
+                )
+            )
+
+        # Get models health from cache
+        cached_models = simple_health_cache.get_models_health() or []
+        models_status = []
+
+        for model in cached_models:
+            # Determine status color
+            status = model.get("status", "unknown")
+            if status in ["healthy", "HEALTHY"]:
+                status_color = "green"
+                status_text = "Healthy"
+            elif status in ["degraded", "DEGRADED"]:
+                status_color = "yellow"
+                status_text = "Degraded"
+            else:
+                status_color = "red"
+                status_text = "Unhealthy"
+
+            # Format response time
+            response_time_ms = model.get("response_time_ms")
+            response_time_display = None
+            if response_time_ms:
+                if response_time_ms < 1000:
+                    response_time_display = f"{response_time_ms:.0f}ms"
+                else:
+                    response_time_display = f"{response_time_ms/1000:.1f}s"
+
+            # Format last checked
+            last_checked_display = None
+            last_checked = model.get("last_checked")
+            if last_checked:
+                try:
+                    from datetime import datetime as dt
+                    if isinstance(last_checked, str):
+                        parsed = dt.fromisoformat(last_checked.replace("Z", "+00:00"))
+                        last_checked_display = parsed.strftime("%H:%M:%S")
+                    elif hasattr(last_checked, "strftime"):
+                        last_checked_display = last_checked.strftime("%H:%M:%S")
+                except Exception as e:
+                    logger.debug(f"Failed to parse last_checked '{last_checked}': {e}")
+
+            model_id = model.get("model_id", "unknown")
+            models_status.append(
+                ModelStatusResponse(
+                    model_id=model_id,
+                    name=model_id.split("/")[-1] if "/" in model_id else model_id,
+                    provider=model.get("provider", "unknown"),
+                    status=status_text,
+                    status_color=status_color,
+                    response_time=response_time_display,
+                    uptime=f"{model.get('uptime_percentage', 0.0):.1f}%",
+                    last_checked=last_checked_display,
+                )
+            )
+
+        # Get uptime metrics
+        try:
+            uptime_metrics = await get_uptime_metrics(api_key)
+        except Exception as e:
+            logger.warning(f"Failed to get uptime metrics, using defaults: {e}")
+            uptime_metrics = UptimeMetricsResponse(
+                status="unknown",
+                uptime_percentage=0.0,
+                response_time_avg=None,
+                last_incident=None,
+                total_requests=0,
+                successful_requests=0,
+                failed_requests=0,
+                error_rate=0.0,
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        # Determine if monitoring is active based on cache availability
+        monitoring_active = cached_system is not None
+
+        response = HealthDashboardResponse(
+            system_status=system_health,
+            providers=providers_status,
+            models=models_status,
+            uptime_metrics=uptime_metrics,
+            last_updated=system_health.last_updated or datetime.now(timezone.utc),
+            monitoring_active=monitoring_active,
+        )
+
+        return response
+    except Exception as e:
+        logger.error(f"Failed to get health dashboard: {e}")
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/dashboard', 'operation': 'get_health_dashboard'},
+            tags={'endpoint': 'dashboard', 'error_type': type(e).__name__}
+        )
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve health dashboard: {str(e)}"
+        ) from e
 
 
 @router.get(
@@ -1426,452 +1541,3 @@ async def get_providers_health_stats(
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-
-# ============================================================================
-# OPTIMIZED HEALTH ENDPOINTS FOR LARGE SCALE DEPLOYMENT
-# ============================================================================
-
-import asyncio
-from ..cache import get_models_cache
-from ..routes.system import _run_gateway_check
-
-
-def _normalize_timestamp(timestamp):
-    """Normalize timestamp to datetime object."""
-    if timestamp is None:
-        return None
-    if isinstance(timestamp, datetime):
-        return timestamp
-    if isinstance(timestamp, (int, float)):
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    if isinstance(timestamp, str):
-        try:
-            return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-        except:
-            return None
-    return None
-
-
-async def get_optimized_gateway_data(
-    include_live_tests: bool = False,
-    auto_fix: bool = False
-) -> Dict[str, Any]:
-    """
-    Get optimized gateway data that can handle large scale.
-    
-    Strategy:
-    1. Use cached data from health-service for basic info
-    2. Only do live tests if explicitly requested
-    3. Enrich with model counts from cache
-    4. Parallel processing where possible
-    """
-    
-    start_time = datetime.now()
-    
-    try:
-        # Step 1: Get basic gateway health from cache (fast)
-        cached_gateways = simple_health_cache.get_gateways_health() or {}
-        
-        # Step 2: Get system health for summary
-        system_health = simple_health_cache.get_system_health() or {}
-        
-        # Step 3: Build gateway data structure
-        gateways_data = {}
-        total_gateways = 0
-        healthy_count = 0
-        unhealthy_count = 0
-        unconfigured_count = 0
-        
-        # Process cached gateway data
-        for gateway_name, gateway_info in cached_gateways.items():
-            total_gateways += 1
-            
-            # Determine status
-            status = gateway_info.get('status', 'unknown').lower()
-            if status in ['healthy', 'online']:
-                healthy_count += 1
-                final_status = 'healthy'
-            elif status in ['unhealthy', 'offline', 'degraded']:
-                unhealthy_count += 1
-                final_status = 'unhealthy'
-            else:
-                unconfigured_count += 1
-                final_status = 'unconfigured'
-            
-            # Get model count from cache (fast)
-            models_cache = get_models_cache(gateway_name)
-            models_count = 0
-            models_metadata = {}
-            
-            if models_cache and models_cache.get("data"):
-                models = models_cache.get("data", [])
-                models_count = len(models)
-                models_metadata = {
-                    "count": models_count,
-                    "last_updated": _normalize_timestamp(models_cache.get("timestamp")).isoformat()
-                    if _normalize_timestamp(models_cache.get("timestamp")) else None
-                }
-            else:
-                models_metadata = {
-                    "count": 0,
-                    "last_updated": None
-                }
-            
-            # Build gateway data
-            gateways_data[gateway_name] = {
-                "name": gateway_info.get('name', gateway_name),
-                "final_status": final_status,
-                "configured": final_status != 'unconfigured',
-                "models": models_cache.get("data", []) if models_cache else [],
-                "models_metadata": models_metadata,
-                "latency_ms": gateway_info.get('latency_ms', 0),
-                "available": gateway_info.get('available', final_status == 'healthy'),
-                "last_check": gateway_info.get('last_check'),
-                "error": gateway_info.get('error'),
-                # Include minimal endpoint_test data
-                "endpoint_test": {
-                    "available": gateway_info.get('available', final_status == 'healthy'),
-                    "latency_ms": gateway_info.get('latency_ms', 0),
-                    "last_check": gateway_info.get('last_check'),
-                    "error": gateway_info.get('error')
-                }
-            }
-        
-        # Step 4: Only do live tests if requested (expensive)
-        if include_live_tests:
-            logger.info("Performing live gateway tests...")
-            try:
-                live_results, _ = await _run_gateway_check(auto_fix=auto_fix)
-                live_gateways = live_results.get("gateways", {})
-                
-                # Merge live data with cached data
-                for gateway_name, live_data in live_gateways.items():
-                    if gateway_name in gateways_data:
-                        # Update with live test results
-                        endpoint_test = live_data.get('endpoint_test', {})
-                        gateways_data[gateway_name].update({
-                            "endpoint_test": endpoint_test,
-                            "latency_ms": endpoint_test.get('latency_ms', 0),
-                            "available": endpoint_test.get('available'),
-                            "last_check": endpoint_test.get('last_check'),
-                            "error": endpoint_test.get('error')
-                        })
-            except Exception as e:
-                logger.warning(f"Live tests failed, using cached data: {e}")
-                capture_error(
-                    e,
-                    context_type='gateway_live_tests',
-                    context_data={'gateways_count': total_gateways},
-                    tags={'endpoint': 'gateway_health', 'error_type': 'live_tests_failed'}
-                )
-        
-        # Step 5: Build final response
-        end_time = datetime.now()
-        processing_time = (end_time - start_time).total_seconds()
-        
-        response = {
-            "success": True,
-            "data": gateways_data,
-            "summary": {
-                "total_gateways": total_gateways,
-                "healthy": healthy_count,
-                "unhealthy": unhealthy_count,
-                "unconfigured": unconfigured_count,
-                "overall_health_percentage": round((healthy_count / total_gateways) * 100, 1) if total_gateways > 0 else 0,
-            },
-            "timestamp": end_time.isoformat(),
-            "metadata": {
-                "processing_time_seconds": processing_time,
-                "live_tests_performed": include_live_tests,
-                "data_source": "cached" if not include_live_tests else "hybrid"
-            }
-        }
-        
-        logger.info(f"Gateway data processed in {processing_time:.2f}s for {total_gateways} gateways")
-        return response
-        
-    except Exception as e:
-        logger.error(f"Failed to get optimized gateway data: {e}", exc_info=True)
-        capture_error(
-            e,
-            context_type='gateway_data_optimization',
-            context_data={'include_live_tests': include_live_tests},
-            tags={'endpoint': 'gateway_health', 'error_type': 'data_processing_failed'}
-        )
-        
-        # Return fallback data
-        return {
-            "success": False,
-            "data": {},
-            "summary": {
-                "total_gateways": 0,
-                "healthy": 0,
-                "unhealthy": 0,
-                "unconfigured": 0,
-                "overall_health_percentage": 0,
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "error": str(e),
-            "metadata": {
-                "fallback_mode": True
-            }
-        }
-
-
-@router.get("/health/gateways/optimized", tags=["health"])
-async def get_optimized_gateways_health(
-    include_live_tests: bool = Query(
-        False, 
-        description="Include live latency tests (slower but more accurate). Default: False (cached data only)"
-    ),
-    auto_fix: bool = Query(
-        False,
-        description="Attempt to auto-fix failing gateways when doing live tests."
-    ),
-    api_key: str = Depends(get_api_key)
-):
-    """
-    Get optimized gateway health data for large scale deployment.
-    
-    **Performance Strategy:**
-    - Default: Uses cached data (sub-second response)
-    - With live tests: Does comprehensive checks (slower, ~10-30 seconds)
-    
-    **Returns:**
-    - All 28 gateways with health status
-    - Model counts and metadata
-    - Latency data (cached or live)
-    - Summary statistics
-    
-    **Use Cases:**
-    - Dashboard loading: `include_live_tests=false` (fast)
-    - Detailed diagnostics: `include_live_tests=true` (accurate)
-    """
-    try:
-        logger.info(f"Gateway health request - live_tests: {include_live_tests}, auto_fix: {auto_fix}")
-        
-        result = await get_optimized_gateway_data(
-            include_live_tests=include_live_tests,
-            auto_fix=auto_fix
-        )
-        
-        if not result.get("success"):
-            raise HTTPException(
-                status_code=503,
-                detail="Gateway health service temporarily unavailable"
-            )
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Optimized gateway health endpoint failed: {e}", exc_info=True)
-        capture_error(
-            e,
-            context_type='health_endpoint',
-            context_data={
-                'endpoint': '/health/gateways/optimized',
-                'include_live_tests': include_live_tests,
-                'auto_fix': auto_fix
-            },
-            tags={'endpoint': 'gateways_health_optimized', 'error_type': type(e).__name__}
-        )
-        
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while fetching gateway health"
-        )
-
-
-@router.get("/health/models/optimized", tags=["health"])
-async def get_optimized_models_health(
-    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
-    provider: Optional[str] = Query(None, description="Filter by specific provider"),
-    status: Optional[str] = Query(None, description="Filter by health status"),
-    limit: int = Query(1000, ge=1, le=5000, description="Number of models to return"),
-    offset: int = Query(0, ge=0, description="Number of models to skip"),
-    api_key: str = Depends(get_api_key)
-):
-    """
-    Get optimized model health data for large scale deployment.
-    
-    **Performance:**
-    - Uses cached data from health-service (sub-second response)
-    - Efficient pagination for 9,000+ models
-    - Fast filtering capabilities
-    
-    **Parameters:**
-    - gateway: Filter by gateway name
-    - provider: Filter by provider name  
-    - status: Filter by health status
-    - limit: Max 5000 models per request
-    - offset: For pagination
-    
-    **Returns:**
-    - Paginated model health data
-    - Filtering and pagination metadata
-    - Summary statistics
-    """
-    try:
-        logger.info(f"Model health request - gateway: {gateway}, provider: {provider}, status: {status}, limit: {limit}, offset: {offset}")
-        
-        # Get models from cache (fast)
-        cached_models = simple_health_cache.get_models_health() or []
-        system_health = simple_health_cache.get_system_health() or {}
-        
-        total_models = system_health.get("total_models", 0)
-        tracked_models = len(cached_models)
-        
-        # Apply filters
-        filtered_models = cached_models
-        if gateway:
-            filtered_models = [m for m in filtered_models if m.get("gateway") == gateway]
-        if provider:
-            filtered_models = [m for m in filtered_models if m.get("provider") == provider]
-        if status:
-            filtered_models = [m for m in filtered_models if m.get("status") == status]
-        
-        # Apply pagination
-        paginated_models = filtered_models[offset:offset + limit]
-        
-        # Process model data
-        models_data = []
-        for model in paginated_models:
-            models_data.append({
-                "model_id": model.get("model_id", model.get("name", "Unknown")),
-                "name": model.get("name", "Unknown"),
-                "provider": model.get("provider", "Unknown"),
-                "gateway": model.get("gateway", "Unknown"),
-                "status": model.get("status", "Unknown"),
-                "status_color": model.get("status_color", "gray"),
-                "response_time_ms": model.get("response_time_ms", 0),
-                "response_time": f"{model.get('response_time_ms', 0)}ms",
-                "uptime_percentage": model.get("uptime_percentage", 0),
-                "uptime": f"{model.get('uptime_percentage', 0)}%",
-                "last_checked": model.get("last_checked", datetime.now(timezone.utc).isoformat()),
-                "success_rate": model.get("success_rate", 0),
-                "error_count": model.get("error_count", 0),
-                "total_requests": model.get("total_requests", 0),
-            })
-        
-        result = {
-            "success": True,
-            "data": models_data,
-            "models": models_data,
-            "total_models": total_models,
-            "tracked_models": tracked_models,
-            "filtered_models": len(filtered_models),
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "has_more": offset + limit < len(filtered_models),
-                "total_filtered": len(filtered_models)
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Optimized model health endpoint failed: {e}", exc_info=True)
-        capture_error(
-            e,
-            context_type='health_endpoint',
-            context_data={
-                'endpoint': '/health/models/optimized',
-                'gateway': gateway,
-                'provider': provider,
-                'status': status,
-                'limit': limit,
-                'offset': offset
-            },
-            tags={'endpoint': 'models_health_optimized', 'error_type': type(e).__name__}
-        )
-        
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while fetching model health"
-        )
-
-
-@router.get("/health/providers/optimized", tags=["health"])
-async def get_optimized_providers_health(
-    api_key: str = Depends(get_api_key)
-):
-    """
-    Get optimized provider health data for large scale deployment.
-    
-    **Performance:**
-    - Uses cached data from health-service (sub-second response)
-    - Handles 37+ providers efficiently
-    
-    **Returns:**
-    - All providers with health status
-    - Model counts and health metrics
-    - Summary statistics
-    """
-    try:
-        logger.info("Provider health request - optimized endpoint")
-        
-        # Get providers from cache (fast)
-        cached_providers = simple_health_cache.get_providers_health() or []
-        system_health = simple_health_cache.get_system_health() or {}
-        
-        total_providers = system_health.get("total_providers", 0)
-        tracked_providers = len(cached_providers)
-        
-        # Process provider data
-        providers_data = []
-        healthy_count = 0
-        unhealthy_count = 0
-        
-        for provider in cached_providers:
-            status = provider.get('status', 'unknown').lower()
-            if status in ['healthy', 'online']:
-                healthy_count += 1
-            elif status in ['unhealthy', 'offline', 'degraded']:
-                unhealthy_count += 1
-            
-            providers_data.append({
-                "provider": provider.get('provider', 'Unknown'),
-                "gateway": provider.get('gateway', 'Unknown'),
-                "status": provider.get('status', 'Unknown'),
-                "status_color": provider.get('status_color', 'gray'),
-                "models_count": provider.get('total_models', 0),
-                "healthy_count": provider.get('healthy_models', 0),
-                "uptime": provider.get('overall_uptime', '0%'),
-                "avg_response_time": provider.get('avg_response_time_ms', '0ms'),
-                "last_checked": provider.get('last_checked', datetime.now(timezone.utc).isoformat()),
-            })
-        
-        result = {
-            "success": True,
-            "data": providers_data,
-            "providers": providers_data,
-            "total_providers": total_providers,
-            "tracked_providers": tracked_providers,
-            "summary": {
-                "total_providers": total_providers,
-                "healthy": healthy_count,
-                "unhealthy": unhealthy_count,
-                "overall_health_percentage": round((healthy_count / tracked_providers) * 100, 1) if tracked_providers > 0 else 0,
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Optimized provider health endpoint failed: {e}", exc_info=True)
-        capture_error(
-            e,
-            context_type='providers_data_optimization',
-            tags={'endpoint': 'providers_health_optimized', 'error_type': 'data_processing_failed'}
-        )
-        
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while fetching provider health"
-        )
