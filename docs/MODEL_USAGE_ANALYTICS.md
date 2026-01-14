@@ -53,11 +53,11 @@ for model in models:
 | `avg_input_tokens_per_request` | NUMERIC | Average input tokens per request |
 | `avg_output_tokens_per_request` | NUMERIC | Average output tokens per request |
 
-### Pricing (Per 1,000 Tokens)
+### Pricing (Per Token)
 | Column | Type | Description |
 |--------|------|-------------|
-| `input_token_price_per_1k` | NUMERIC(20,10) | Price per 1K input tokens (USD) |
-| `output_token_price_per_1k` | NUMERIC(20,10) | Price per 1K output tokens (USD) |
+| `input_token_price` | NUMERIC(20,10) | Price per single token for input (USD) |
+| `output_token_price` | NUMERIC(20,10) | Price per single token for output (USD) |
 
 ### Cost Calculations (USD)
 | Column | Type | Description |
@@ -69,9 +69,11 @@ for model in models:
 
 **Formula:**
 ```
-total_cost_usd = (total_input_tokens × input_token_price_per_1k / 1,000)
-               + (total_output_tokens × output_token_price_per_1k / 1,000)
+total_cost_usd = (total_input_tokens × input_token_price)
+               + (total_output_tokens × output_token_price)
 ```
+
+**Note:** Pricing is stored per single token, not per 1K or 1M tokens. For example, GPT-4 at $30 per 1M tokens = $0.00003 per token.
 
 ### Performance Metrics
 | Column | Type | Description |
@@ -254,8 +256,10 @@ DROP VIEW IF EXISTS model_usage_analytics;
 - ✅ Only includes models with at least 1 successful request
 - ✅ Failed requests are excluded from cost calculations
 - ✅ Costs are calculated using the model's current pricing (not historical)
-- ✅ Pricing is per 1,000 tokens (per 1K) as stored in database
+- ✅ **CRITICAL:** Pricing is per single token (not per 1K or per 1M) as stored in database
+- ✅ Cost formula: `tokens × price` (no division needed)
 - ✅ All monetary values are in USD
+- ✅ Example: GPT-4 at $30/1M = $0.00003 per token in database
 
 ## Support
 
