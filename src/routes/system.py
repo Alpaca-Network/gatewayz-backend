@@ -1634,7 +1634,7 @@ async def gateway_health_dashboard_data(
     return payload
 
 
-@router.get("/health/{gateway}", tags=["health"])
+@router.get("/health/gateway/{gateway}", tags=["health"])
 async def check_single_gateway(gateway: str):
     """
     Check health status of a specific gateway with detailed diagnostics.
