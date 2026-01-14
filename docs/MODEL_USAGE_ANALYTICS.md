@@ -53,11 +53,11 @@ for model in models:
 | `avg_input_tokens_per_request` | NUMERIC | Average input tokens per request |
 | `avg_output_tokens_per_request` | NUMERIC | Average output tokens per request |
 
-### Pricing (Per 1 Million Tokens)
+### Pricing (Per 1,000 Tokens)
 | Column | Type | Description |
 |--------|------|-------------|
-| `input_token_price_per_1m` | NUMERIC(20,10) | Price per 1M input tokens (USD) |
-| `output_token_price_per_1m` | NUMERIC(20,10) | Price per 1M output tokens (USD) |
+| `input_token_price_per_1k` | NUMERIC(20,10) | Price per 1K input tokens (USD) |
+| `output_token_price_per_1k` | NUMERIC(20,10) | Price per 1K output tokens (USD) |
 
 ### Cost Calculations (USD)
 | Column | Type | Description |
@@ -69,8 +69,8 @@ for model in models:
 
 **Formula:**
 ```
-total_cost_usd = (total_input_tokens × input_token_price_per_1m / 1,000,000)
-               + (total_output_tokens × output_token_price_per_1m / 1,000,000)
+total_cost_usd = (total_input_tokens × input_token_price_per_1k / 1,000)
+               + (total_output_tokens × output_token_price_per_1k / 1,000)
 ```
 
 ### Performance Metrics
@@ -254,7 +254,7 @@ DROP VIEW IF EXISTS model_usage_analytics;
 - ✅ Only includes models with at least 1 successful request
 - ✅ Failed requests are excluded from cost calculations
 - ✅ Costs are calculated using the model's current pricing (not historical)
-- ✅ Pricing is per 1 million tokens (industry standard)
+- ✅ Pricing is per 1,000 tokens (per 1K) as stored in database
 - ✅ All monetary values are in USD
 
 ## Support
