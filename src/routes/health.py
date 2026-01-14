@@ -1355,8 +1355,7 @@ async def get_providers_health_stats(
 # ============================================================================
 
 import asyncio
-from ..cache import get_models_cache
-from ..routes.system import _run_gateway_check
+# from ..routes.system import _run_gateway_check  # Temporarily commented out for testing
 
 
 def _normalize_timestamp(timestamp):
@@ -1384,7 +1383,7 @@ async def get_optimized_gateway_data(
     
     Strategy:
     1. Use cached data from health-service for basic info
-    2. Only do live tests if explicitly requested
+    2. Only do live tests if explicitly requested (disabled for now)
     3. Enrich with model counts from cache
     4. Parallel processing where possible
     """
@@ -1421,20 +1420,28 @@ async def get_optimized_gateway_data(
                 unconfigured_count += 1
                 final_status = 'unconfigured'
             
-            # Get model count from cache (fast)
-            models_cache = get_models_cache(gateway_name)
+            # Get model count from cache (fast) - using simple approach
             models_count = 0
             models_metadata = {}
             
-            if models_cache and models_cache.get("data"):
-                models = models_cache.get("data", [])
-                models_count = len(models)
-                models_metadata = {
-                    "count": models_count,
-                    "last_updated": _normalize_timestamp(models_cache.get("timestamp")).isoformat()
-                    if _normalize_timestamp(models_cache.get("timestamp")) else None
-                }
-            else:
+            try:
+                from ..cache import get_models_cache
+                models_cache = get_models_cache(gateway_name)
+                if models_cache and models_cache.get("data"):
+                    models = models_cache.get("data", [])
+                    models_count = len(models)
+                    models_metadata = {
+                        "count": models_count,
+                        "last_updated": _normalize_timestamp(models_cache.get("timestamp")).isoformat()
+                        if _normalize_timestamp(models_cache.get("timestamp")) else None
+                    }
+                else:
+                    models_metadata = {
+                        "count": 0,
+                        "last_updated": None
+                    }
+            except Exception as cache_error:
+                logger.warning(f"Failed to get models cache for {gateway_name}: {cache_error}")
                 models_metadata = {
                     "count": 0,
                     "last_updated": None
@@ -1445,7 +1452,7 @@ async def get_optimized_gateway_data(
                 "name": gateway_info.get('name', gateway_name),
                 "final_status": final_status,
                 "configured": final_status != 'unconfigured',
-                "models": models_cache.get("data", []) if models_cache else [],
+                "models": [],  # Don't include full models array for performance
                 "models_metadata": models_metadata,
                 "latency_ms": gateway_info.get('latency_ms', 0),
                 "available": gateway_info.get('available', final_status == 'healthy'),
@@ -1460,33 +1467,9 @@ async def get_optimized_gateway_data(
                 }
             }
         
-        # Step 4: Only do live tests if requested (expensive)
+        # Step 4: Skip live tests for now (disabled)
         if include_live_tests:
-            logger.info("Performing live gateway tests...")
-            try:
-                live_results, _ = await _run_gateway_check(auto_fix=auto_fix)
-                live_gateways = live_results.get("gateways", {})
-                
-                # Merge live data with cached data
-                for gateway_name, live_data in live_gateways.items():
-                    if gateway_name in gateways_data:
-                        # Update with live test results
-                        endpoint_test = live_data.get('endpoint_test', {})
-                        gateways_data[gateway_name].update({
-                            "endpoint_test": endpoint_test,
-                            "latency_ms": endpoint_test.get('latency_ms', 0),
-                            "available": endpoint_test.get('available'),
-                            "last_check": endpoint_test.get('last_check'),
-                            "error": endpoint_test.get('error')
-                        })
-            except Exception as e:
-                logger.warning(f"Live tests failed, using cached data: {e}")
-                capture_error(
-                    e,
-                    context_type='gateway_live_tests',
-                    context_data={'gateways_count': total_gateways},
-                    tags={'endpoint': 'gateway_health', 'error_type': 'live_tests_failed'}
-                )
+            logger.warning("Live tests temporarily disabled - using cached data only")
         
         # Step 5: Build final response
         end_time = datetime.now()
@@ -1505,8 +1488,9 @@ async def get_optimized_gateway_data(
             "timestamp": end_time.isoformat(),
             "metadata": {
                 "processing_time_seconds": processing_time,
-                "live_tests_performed": include_live_tests,
-                "data_source": "cached" if not include_live_tests else "hybrid"
+                "live_tests_performed": False,  # Disabled for now
+                "data_source": "cached",
+                "note": "Live tests temporarily disabled for deployment"
             }
         }
         
@@ -1536,7 +1520,8 @@ async def get_optimized_gateway_data(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "error": str(e),
             "metadata": {
-                "fallback_mode": True
+                "fallback_mode": True,
+                "note": "Live tests temporarily disabled"
             }
         }
 
