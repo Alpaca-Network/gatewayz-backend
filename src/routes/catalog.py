@@ -63,6 +63,245 @@ DESC_ALL_MODELS = "All models"
 DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
 DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
 
+# Gateway configuration - centralized source of truth for all gateways
+# This is used by /gateways endpoint for frontend auto-discovery
+GATEWAY_REGISTRY = {
+    # Fast gateways (priority loading)
+    "openai": {
+        "name": "OpenAI",
+        "color": "bg-emerald-600",
+        "priority": "fast",
+        "site_url": "https://openai.com",
+    },
+    "anthropic": {
+        "name": "Anthropic",
+        "color": "bg-amber-700",
+        "priority": "fast",
+        "site_url": "https://anthropic.com",
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "color": "bg-blue-500",
+        "priority": "fast",
+        "site_url": "https://openrouter.ai",
+    },
+    "groq": {
+        "name": "Groq",
+        "color": "bg-orange-500",
+        "priority": "fast",
+        "icon": "zap",
+        "site_url": "https://groq.com",
+    },
+    "together": {
+        "name": "Together",
+        "color": "bg-indigo-500",
+        "priority": "fast",
+        "site_url": "https://together.ai",
+    },
+    "fireworks": {
+        "name": "Fireworks",
+        "color": "bg-red-500",
+        "priority": "fast",
+        "site_url": "https://fireworks.ai",
+    },
+    "vercel-ai-gateway": {
+        "name": "Vercel AI",
+        "color": "bg-slate-900",
+        "priority": "fast",
+        "site_url": "https://vercel.com/ai",
+    },
+    # Slow gateways (deferred loading)
+    "featherless": {
+        "name": "Featherless",
+        "color": "bg-green-500",
+        "priority": "slow",
+        "site_url": "https://featherless.ai",
+    },
+    "chutes": {
+        "name": "Chutes",
+        "color": "bg-yellow-500",
+        "priority": "slow",
+        "site_url": "https://chutes.ai",
+    },
+    "deepinfra": {
+        "name": "DeepInfra",
+        "color": "bg-cyan-500",
+        "priority": "slow",
+        "site_url": "https://deepinfra.com",
+    },
+    "google-vertex": {
+        "name": "Google",
+        "color": "bg-blue-600",
+        "priority": "slow",
+        "site_url": "https://cloud.google.com/vertex-ai",
+        "aliases": ["google"],
+    },
+    "cerebras": {
+        "name": "Cerebras",
+        "color": "bg-amber-600",
+        "priority": "slow",
+        "site_url": "https://cerebras.ai",
+    },
+    "nebius": {
+        "name": "Nebius",
+        "color": "bg-slate-600",
+        "priority": "slow",
+        "site_url": "https://nebius.ai",
+    },
+    "xai": {
+        "name": "xAI",
+        "color": "bg-black",
+        "priority": "slow",
+        "site_url": "https://x.ai",
+    },
+    "novita": {
+        "name": "Novita",
+        "color": "bg-violet-600",
+        "priority": "slow",
+        "site_url": "https://novita.ai",
+    },
+    "huggingface": {
+        "name": "Hugging Face",
+        "color": "bg-yellow-600",
+        "priority": "slow",
+        "site_url": "https://huggingface.co",
+        "aliases": ["hug"],
+    },
+    "aimo": {
+        "name": "AiMo",
+        "color": "bg-pink-600",
+        "priority": "slow",
+        "site_url": "https://aimo.network",
+    },
+    "near": {
+        "name": "NEAR",
+        "color": "bg-teal-600",
+        "priority": "slow",
+        "site_url": "https://near.ai",
+    },
+    "fal": {
+        "name": "Fal",
+        "color": "bg-emerald-600",
+        "priority": "slow",
+        "site_url": "https://fal.ai",
+    },
+    "helicone": {
+        "name": "Helicone",
+        "color": "bg-indigo-600",
+        "priority": "slow",
+        "site_url": "https://helicone.ai",
+    },
+    "alpaca": {
+        "name": "Alpaca Network",
+        "color": "bg-green-700",
+        "priority": "slow",
+        "site_url": "https://alpaca.network",
+    },
+    "alibaba": {
+        "name": "Alibaba",
+        "color": "bg-orange-700",
+        "priority": "slow",
+        "site_url": "https://dashscope.aliyun.com",
+    },
+    "clarifai": {
+        "name": "Clarifai",
+        "color": "bg-purple-600",
+        "priority": "slow",
+        "site_url": "https://clarifai.com",
+    },
+    "onerouter": {
+        "name": "OneRouter",
+        "color": "bg-emerald-500",
+        "priority": "slow",
+        "site_url": "https://onerouter.pro",
+    },
+    "simplismart": {
+        "name": "SimpliSmart",
+        "color": "bg-sky-500",
+        "priority": "slow",
+        "site_url": "https://simplismart.ai",
+    },
+    "aihubmix": {
+        "name": "AiHubMix",
+        "color": "bg-rose-500",
+        "priority": "slow",
+        "site_url": "https://aihubmix.com",
+    },
+    "anannas": {
+        "name": "Anannas",
+        "color": "bg-lime-600",
+        "priority": "slow",
+        "site_url": "https://anannas.ai",
+    },
+    "cloudflare-workers-ai": {
+        "name": "Cloudflare Workers AI",
+        "color": "bg-orange-500",
+        "priority": "slow",
+        "site_url": "https://developers.cloudflare.com/workers-ai",
+    },
+}
+
+
+@router.get("/gateways", tags=["gateways"])
+async def get_gateways():
+    """
+    Get all available gateway providers with their display configuration.
+
+    This endpoint enables frontend auto-discovery of gateways, eliminating
+    the need to manually update the frontend when new gateways are added.
+
+    Returns a list of gateway configurations including:
+    - id: Unique gateway identifier
+    - name: Display name for UI
+    - color: Tailwind CSS color class for badges
+    - priority: 'fast' or 'slow' for loading order
+    - site_url: Gateway's website URL
+    - logo_url: Auto-generated favicon URL
+    - aliases: Alternative IDs that map to this gateway
+    """
+    try:
+        gateways = []
+        for gateway_id, config in GATEWAY_REGISTRY.items():
+            site_url = config.get("site_url", "")
+            # Generate logo URL from site_url
+            logo_url = None
+            if site_url:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(site_url)
+                    domain = parsed.netloc or parsed.path
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+                    logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+                except Exception:
+                    pass
+
+            gateways.append({
+                "id": gateway_id,
+                "name": config.get("name", gateway_id.title()),
+                "color": config.get("color", "bg-gray-500"),
+                "priority": config.get("priority", "slow"),
+                "site_url": site_url,
+                "logo_url": logo_url,
+                "icon": config.get("icon"),
+                "aliases": config.get("aliases", []),
+            })
+
+        # Sort by priority (fast first), then by name
+        gateways.sort(key=lambda g: (0 if g["priority"] == "fast" else 1, g["name"]))
+
+        return {
+            "data": gateways,
+            "total": len(gateways),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching gateways: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch gateways: {str(e)}",
+        )
+
 
 def normalize_developer_segment(value: str | None) -> str | None:
     """Align developer/provider identifiers with Hugging Face style slugs."""

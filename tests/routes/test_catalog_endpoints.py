@@ -321,3 +321,105 @@ class TestMergeModelsBySlug:
 
         response = client.get("/v1/provider?gateway=all")
         assert response.status_code in [200, 503, 500]
+
+
+class TestGetGatewaysEndpoint:
+    """Test /v1/gateways endpoint for gateway auto-discovery"""
+
+    def test_get_gateways_returns_list(self):
+        """Test that gateways endpoint returns a list of gateways"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "data" in data
+        assert "total" in data
+        assert "timestamp" in data
+        assert isinstance(data["data"], list)
+        assert data["total"] > 0
+
+    def test_get_gateways_has_required_fields(self):
+        """Test that each gateway has required fields"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        for gateway in data["data"]:
+            assert "id" in gateway
+            assert "name" in gateway
+            assert "color" in gateway
+            assert "priority" in gateway
+            # priority should be 'fast' or 'slow'
+            assert gateway["priority"] in ["fast", "slow"]
+
+    def test_get_gateways_includes_simplismart(self):
+        """Test that SimpliSmart is in the gateway list"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        gateway_ids = [g["id"] for g in data["data"]]
+        assert "simplismart" in gateway_ids
+
+        # Check SimpliSmart has correct config
+        simplismart = next(g for g in data["data"] if g["id"] == "simplismart")
+        assert simplismart["name"] == "SimpliSmart"
+        assert simplismart["color"] == "bg-sky-500"
+
+    def test_get_gateways_includes_major_providers(self):
+        """Test that major providers are included"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        gateway_ids = [g["id"] for g in data["data"]]
+        expected_gateways = [
+            "openai", "anthropic", "openrouter", "groq",
+            "together", "fireworks", "deepinfra", "huggingface"
+        ]
+        for gw in expected_gateways:
+            assert gw in gateway_ids, f"Expected gateway '{gw}' not found"
+
+    def test_get_gateways_fast_gateways_first(self):
+        """Test that fast gateways are sorted before slow gateways"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        gateways = data["data"]
+        found_slow = False
+        for gw in gateways:
+            if gw["priority"] == "slow":
+                found_slow = True
+            elif gw["priority"] == "fast" and found_slow:
+                pytest.fail("Fast gateway found after slow gateway - sorting is wrong")
+
+    def test_get_gateways_logo_urls(self):
+        """Test that gateways have logo URLs generated from site URLs"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check that gateways with site_url have logo_url generated
+        for gateway in data["data"]:
+            if gateway.get("site_url"):
+                assert gateway.get("logo_url") is not None
+                assert "favicon" in gateway["logo_url"]
+
+    def test_get_gateways_aliases(self):
+        """Test that gateways with aliases include them"""
+        response = client.get("/v1/gateways")
+        assert response.status_code == 200
+        data = response.json()
+
+        # huggingface should have 'hug' alias
+        huggingface = next((g for g in data["data"] if g["id"] == "huggingface"), None)
+        assert huggingface is not None
+        assert "aliases" in huggingface
+        assert "hug" in huggingface["aliases"]
+
+        # google-vertex should have 'google' alias
+        google = next((g for g in data["data"] if g["id"] == "google-vertex"), None)
+        assert google is not None
+        assert "aliases" in google
+        assert "google" in google["aliases"]
