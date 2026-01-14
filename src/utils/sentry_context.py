@@ -5,6 +5,7 @@ This module provides helper functions and decorators to add structured context
 to errors captured by Sentry across the application.
 """
 
+import asyncio
 import functools
 import logging
 from collections.abc import Callable
@@ -421,7 +422,3 @@ def capture_model_health_error(
             'operation': operation,
         }
     )
-
-
-# Import asyncio for async detection
-import asyncio

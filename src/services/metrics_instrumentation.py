@@ -353,6 +353,4 @@ def track_request(
         else:
             return sync_wrapper
 
-        return async_wrapper
-
     return decorator
