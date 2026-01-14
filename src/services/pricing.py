@@ -122,9 +122,9 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
     try:
         pricing = get_model_pricing(model_id)
 
-        # Pricing is per 1K tokens, so divide by 1,000
-        prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000
-        completion_cost = (completion_tokens * pricing["completion"]) / 1_000
+        # FIXED: Pricing is per single token, so just multiply (no division)
+        prompt_cost = prompt_tokens * pricing["prompt"]
+        completion_cost = completion_tokens * pricing["completion"]
         total_cost = prompt_cost + completion_cost
 
         logger.info(
@@ -138,6 +138,6 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
 
     except Exception as e:
         logger.error(f"Error calculating cost for {model_id}: {e}")
-        # Fallback to simple calculation (assuming $0.02 per 1K tokens)
+        # Fallback to simple calculation (assuming $0.00002 per token)
         total_tokens = prompt_tokens + completion_tokens
-        return (total_tokens * 0.02) / 1_000
+        return total_tokens * 0.00002
