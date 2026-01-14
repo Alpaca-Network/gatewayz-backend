@@ -148,6 +148,8 @@ async def get_system_health(
 @router.get("/health/providers", tags=["health"])
 async def get_providers_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
+    limit: int = Query(1000, ge=1, le=5000, description="Number of providers to return (max 5000)"),
+    offset: int = Query(0, ge=0, description="Number of providers to skip for pagination"),
     api_key: str = Depends(get_api_key),
     force_refresh: bool = False,
 ):
@@ -165,32 +167,51 @@ async def get_providers_health(
 
     Query Parameters:
     - gateway: Filter by specific gateway
+    - limit: Number of providers to return (default 1000, max 5000)
+    - offset: Number of providers to skip for pagination (default 0)
     - force_refresh: Currently ignored (data comes from health-service cache)
     """
     try:
         # Get system health to get total provider count
         system_health = simple_health_cache.get_system_health() or {}
         total_providers = system_health.get("total_providers", 0)
-        
+
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_providers_health()
         tracked_providers = len(cached) if cached else 0
-        
+
         if cached:
             logger.debug(f"Returning cached providers health from health-service ({tracked_providers} tracked of {total_providers} total)")
+
             # Apply gateway filter if specified
+            filtered = cached
             if gateway:
-                cached = [p for p in cached if p.get("gateway") == gateway]
-            
-            # Return format that frontend expects
+                filtered = [p for p in cached if p.get("gateway") == gateway]
+
+            # Apply pagination
+            total_filtered = len(filtered)
+            paginated = filtered[offset:offset + limit]
+            has_more = (offset + limit) < total_filtered
+
+            # Return format that frontend expects with pagination metadata
             return {
-                "data": cached,
-                "providers": cached,  # Also include as 'providers' for compatibility
+                "data": paginated,
+                "providers": paginated,  # Also include as 'providers' for compatibility
+                "total": total_providers,
                 "total_providers": total_providers,
                 "tracked_providers": tracked_providers,
+                "returned_count": len(paginated),
+                "has_more": has_more,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "total_filtered": total_filtered,
+                    "has_more": has_more
+                },
                 "metadata": {
                     "total_providers": total_providers,
                     "tracked_providers": tracked_providers,
+                    "returned_count": len(paginated),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             }
@@ -200,8 +221,17 @@ async def get_providers_health(
         return {
             "data": [],
             "providers": [],
+            "total": total_providers,
             "total_providers": total_providers,
             "tracked_providers": 0,
+            "returned_count": 0,
+            "has_more": False,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total_filtered": 0,
+                "has_more": False
+            },
             "metadata": {
                 "total_providers": total_providers,
                 "tracked_providers": 0,
@@ -219,8 +249,17 @@ async def get_providers_health(
         return {
             "data": [],
             "providers": [],
+            "total": 0,
             "total_providers": 0,
             "tracked_providers": 0,
+            "returned_count": 0,
+            "has_more": False,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total_filtered": 0,
+                "has_more": False
+            },
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
@@ -234,6 +273,8 @@ async def get_models_health(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     provider: str | None = Query(None, description="Filter by specific provider"),
     status: str | None = Query(None, description="Filter by health status"),
+    limit: int = Query(1000, ge=1, le=5000, description="Number of models to return (max 5000)"),
+    offset: int = Query(0, ge=0, description="Number of models to skip for pagination"),
     api_key: str = Depends(get_api_key),
     force_refresh: bool = False,
 ):
@@ -253,36 +294,55 @@ async def get_models_health(
     - gateway: Filter by specific gateway
     - provider: Filter by specific provider
     - status: Filter by health status
+    - limit: Number of models to return (default 1000, max 5000)
+    - offset: Number of models to skip for pagination (default 0)
     - force_refresh: Currently ignored (data comes from health-service cache)
     """
     try:
         # Get system health to get total model count
         system_health = simple_health_cache.get_system_health() or {}
         total_models = system_health.get("total_models", 0)
-        
+
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_models_health()
         tracked_models = len(cached) if cached else 0
-        
+
         if cached:
             logger.debug(f"Returning cached models health from health-service ({tracked_models} tracked of {total_models} total)")
+
             # Apply filters
+            filtered = cached
             if gateway:
-                cached = [m for m in cached if m.get("gateway") == gateway]
+                filtered = [m for m in filtered if m.get("gateway") == gateway]
             if provider:
-                cached = [m for m in cached if m.get("provider") == provider]
+                filtered = [m for m in filtered if m.get("provider") == provider]
             if status:
-                cached = [m for m in cached if m.get("status") == status]
-            
-            # Return format that frontend expects
+                filtered = [m for m in filtered if m.get("status") == status]
+
+            # Apply pagination
+            total_filtered = len(filtered)
+            paginated = filtered[offset:offset + limit]
+            has_more = (offset + limit) < total_filtered
+
+            # Return format that frontend expects with pagination metadata
             return {
-                "data": cached,
-                "models": cached,  # Also include as 'models' for compatibility
+                "data": paginated,
+                "models": paginated,  # Also include as 'models' for compatibility
+                "total": total_models,
                 "total_models": total_models,
                 "tracked_models": tracked_models,
+                "returned_count": len(paginated),
+                "has_more": has_more,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "total_filtered": total_filtered,
+                    "has_more": has_more
+                },
                 "metadata": {
                     "total_models": total_models,
                     "tracked_models": tracked_models,
+                    "returned_count": len(paginated),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             }
@@ -292,8 +352,17 @@ async def get_models_health(
         return {
             "data": [],
             "models": [],
+            "total": total_models,
             "total_models": total_models,
             "tracked_models": 0,
+            "returned_count": 0,
+            "has_more": False,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total_filtered": 0,
+                "has_more": False
+            },
             "metadata": {
                 "total_models": total_models,
                 "tracked_models": 0,
@@ -311,8 +380,17 @@ async def get_models_health(
         return {
             "data": [],
             "models": [],
+            "total": 0,
             "total_models": 0,
             "tracked_models": 0,
+            "returned_count": 0,
+            "has_more": False,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total_filtered": 0,
+                "has_more": False
+            },
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
