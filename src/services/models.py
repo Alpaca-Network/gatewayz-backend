@@ -3348,12 +3348,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     - input: cost per 1K input tokens
     - output: cost per 1K output tokens
 
-    The frontend expects AiHubMix pricing in "per-billion" format, which means:
-    - API value 0.15 (per 1K) = $150/MTok = stored as 150.0 (per-billion format)
-    - Frontend divides by 1000 to get per-million for display: 150 / 1000 = $0.15/MTok
+    We convert to per-token pricing (divide by 1000) to match the format used by
+    all other gateways (OpenRouter, DeepInfra, etc.) and expected by calculate_cost().
 
-    So we multiply the per-1K price by 1000 to convert to the per-billion format
-    that the frontend expects.
+    Example: $1.25/1K tokens -> $0.00125/token (same as OpenRouter format)
 
     Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
     """
@@ -3367,19 +3365,19 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     try:
         # Extract pricing from the API response
         # AiHubMix returns pricing per 1K tokens
-        # Frontend expects "per-billion" format: multiply by 1000 to convert
-        # Example: $1.25/1K tokens -> 1250.0 (frontend will display as $1.25/MTok after dividing by 1000)
+        # Convert to per-token by dividing by 1000 to match OpenRouter format
+        # Example: $1.25/1K tokens -> $0.00125/token
         pricing_data = model.get("pricing", {})
         input_price_per_1k = pricing_data.get("input", 0)
         output_price_per_1k = pricing_data.get("output", 0)
 
-        # Convert from per-1K to per-billion format (multiply by 1000)
-        # This matches what the frontend expects for aihubmix gateway
-        input_price_per_billion = float(input_price_per_1k) * 1000 if input_price_per_1k else 0
-        output_price_per_billion = float(output_price_per_1k) * 1000 if output_price_per_1k else 0
+        # Convert from per-1K to per-token pricing (divide by 1000)
+        # This matches the format used by OpenRouter and expected by calculate_cost()
+        input_price_per_token = float(input_price_per_1k) / 1000 if input_price_per_1k else 0
+        output_price_per_token = float(output_price_per_1k) / 1000 if output_price_per_1k else 0
 
         # Filter out models with zero pricing (free models can drain credits)
-        if input_price_per_billion == 0 and output_price_per_billion == 0:
+        if input_price_per_token == 0 and output_price_per_token == 0:
             logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
             return None
 
@@ -3412,8 +3410,8 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
                 "instruct_type": "chat",
             },
             "pricing": {
-                "prompt": str(input_price_per_billion),
-                "completion": str(output_price_per_billion),
+                "prompt": str(input_price_per_token),
+                "completion": str(output_price_per_token),
                 "request": "0",
                 "image": "0",
             },
