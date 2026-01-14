@@ -7,15 +7,14 @@ provides options for language hints, prompt context, and output formatting.
 
 import base64
 import logging
+import os
 import tempfile
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
-from openai import OpenAI
 
-from src.config import Config
 from src.security.deps import get_optional_api_key
 from src.services.connection_pool import get_openai_pooled_client
 
@@ -63,6 +62,8 @@ async def create_transcription(
     ),
     temperature: float = Form(
         default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Sampling temperature (0-1). Lower values are more deterministic."
     ),
     api_key: Optional[str] = Depends(get_optional_api_key),
@@ -92,9 +93,9 @@ async def create_transcription(
     """
     request_id = str(uuid.uuid4())[:8]
 
-    # Validate content type
+    # Validate content type - only accept known supported formats
     content_type = file.content_type or "application/octet-stream"
-    if content_type not in SUPPORTED_FORMATS and not content_type.startswith("audio/"):
+    if content_type not in SUPPORTED_FORMATS:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported audio format: {content_type}. "
@@ -128,10 +129,11 @@ async def create_transcription(
     extension = SUPPORTED_FORMATS.get(content_type, ".webm")
 
     # Create temporary file for the API
+    tmp_file_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp_file:
-            tmp_file.write(content)
             tmp_file_path = tmp_file.name
+            tmp_file.write(content)
 
         # Get OpenAI client
         try:
@@ -174,7 +176,8 @@ async def create_transcription(
 
         # Return response based on format
         if response_format == "text":
-            return JSONResponse(content={"text": response})
+            # When response_format is "text", Whisper returns a plain string
+            return JSONResponse(content={"text": response if isinstance(response, str) else str(response)})
         elif response_format in ("json", "verbose_json"):
             # OpenAI returns a Transcription object
             if hasattr(response, "text"):
@@ -200,12 +203,11 @@ async def create_transcription(
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         # Clean up temp file
-        import os
-        try:
-            if 'tmp_file_path' in locals():
+        if tmp_file_path:
+            try:
                 os.unlink(tmp_file_path)
-        except Exception:
-            pass
+            except OSError as cleanup_err:
+                logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
 
 
 @router.post("/transcriptions/base64")
@@ -219,7 +221,7 @@ async def create_transcription_base64(
     language: Optional[str] = Form(default=None),
     prompt: Optional[str] = Form(default=None),
     response_format: str = Form(default="json"),
-    temperature: float = Form(default=0.0),
+    temperature: float = Form(default=0.0, ge=0.0, le=1.0),
     api_key: Optional[str] = Depends(get_optional_api_key),
 ):
     """
@@ -284,10 +286,11 @@ async def create_transcription_base64(
     extension = SUPPORTED_FORMATS.get(content_type, ".webm")
 
     # Create temporary file and transcribe
+    tmp_file_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp_file:
-            tmp_file.write(content)
             tmp_file_path = tmp_file.name
+            tmp_file.write(content)
 
         # Get OpenAI client
         try:
@@ -343,9 +346,9 @@ async def create_transcription_base64(
         logger.error(f"[{request_id}] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
-        import os
-        try:
-            if 'tmp_file_path' in locals():
+        # Clean up temp file
+        if tmp_file_path:
+            try:
                 os.unlink(tmp_file_path)
-        except Exception:
-            pass
+            except OSError as cleanup_err:
+                logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
