@@ -329,7 +329,31 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
 
         return processed
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # Save failed request for HTTPException errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = int((time.monotonic() - start_time) * 1000) if 'start_time' in dir() else 0
+
+                # Save failed request to database
+                background_tasks.add_task(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=request.model,
+                    input_tokens=0,  # Unknown at error time
+                    output_tokens=0,
+                    processing_time_ms=error_elapsed,
+                    status="failed",
+                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+                    user_id=None,  # AI SDK endpoint doesn't require authentication
+                    provider_name="openrouter" if '/' not in request.model else request.model.split("/")[0],
+                    model_id=None,
+                    api_key_id=None,
+                    is_anonymous=True,  # AI SDK endpoint is anonymous
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
         # Re-raise HTTPExceptions without modification (e.g., from _handle_openrouter_stream)
         raise
     except ValueError as e:
@@ -341,12 +365,58 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
         else:
             logger.error(f"AI SDK configuration error: {e}", exc_info=True)
             detail = "AI SDK service is not configured. Please contact support."
+
+        # Save failed request
+        if request_id:
+            try:
+                error_elapsed = int((time.monotonic() - start_time) * 1000) if 'start_time' in dir() else 0
+                background_tasks.add_task(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=request.model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    processing_time_ms=error_elapsed,
+                    status="failed",
+                    error_message=f"ValueError: {str(e)[:500]}",
+                    user_id=None,
+                    provider_name="openrouter" if '/' not in request.model else request.model.split("/")[0],
+                    model_id=None,
+                    api_key_id=None,
+                    is_anonymous=True,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         # Capture configuration errors to Sentry (503 errors)
         if SENTRY_AVAILABLE:
             sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=503, detail=detail)
     except Exception as e:
         logger.error(f"AI SDK chat completion error: {e}", exc_info=True)
+
+        # Save failed request for unexpected errors
+        if request_id:
+            try:
+                error_elapsed = int((time.monotonic() - start_time) * 1000) if 'start_time' in dir() else 0
+                background_tasks.add_task(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=request.model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    processing_time_ms=error_elapsed,
+                    status="failed",
+                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
+                    user_id=None,
+                    provider_name="openrouter" if '/' not in request.model else request.model.split("/")[0],
+                    model_id=None,
+                    api_key_id=None,
+                    is_anonymous=True,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         # Capture all other errors to Sentry (500 errors)
         if SENTRY_AVAILABLE:
             sentry_sdk.capture_exception(e)

@@ -996,10 +996,58 @@ async def anthropic_messages(
 
         return JSONResponse(content=anthropic_response, headers=headers)
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # Save failed request for HTTPException errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else req.model,
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("Unhandled server error in anthropic_messages")
+
+        # Save failed request for unexpected errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else req.model,
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

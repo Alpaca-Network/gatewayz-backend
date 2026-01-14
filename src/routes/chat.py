@@ -988,6 +988,7 @@ async def stream_generator(
     is_anonymous=False,
     is_async_stream=False,  # PERF: Flag to indicate if stream is async
     request_id=None,
+    api_key_id=None,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -1204,6 +1205,31 @@ async def stream_generator(
             # Include the actual error message but truncate it for safety
             sanitized_msg = str(e)[:300].replace('\n', ' ').replace('\r', ' ')
             error_message = f"Streaming error: {sanitized_msg}"
+
+        # Save failed request to database
+        if request_id:
+            try:
+                # Calculate elapsed time from stream start
+                error_elapsed = time.monotonic() - start_time
+
+                # Save failed streaming request
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model,
+                    input_tokens=prompt_tokens,  # Use tokens accumulated so far
+                    output_tokens=completion_tokens,  # May be partial
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"{error_type}: {error_message}",
+                    user_id=user["id"] if user else None,
+                    provider_name=provider,
+                    model_id=None,
+                    api_key_id=api_key_id,
+                    is_anonymous=is_anonymous,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed streaming request: {save_err}")
 
         yield create_error_sse_chunk(
             error_message=error_message,
@@ -1650,6 +1676,7 @@ async def chat_completions(
                             is_anonymous,
                             is_async_stream=is_async_stream,
                             request_id=request_id,
+                            api_key_id=api_key_id,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
@@ -2157,13 +2184,63 @@ async def chat_completions(
 
         return JSONResponse(content=processed, headers=headers)
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # Save failed request for HTTPException errors (rate limits, auth errors, etc.)
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    is_anonymous=is_anonymous if 'is_anonymous' in dir() else False,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
         raise
     except Exception as e:
         logger.exception(
             f"[{request_id}] Unhandled server error: {type(e).__name__}",
             extra={"request_id": request_id, "error_type": type(e).__name__},
         )
+
+        # Save failed request for unexpected errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    is_anonymous=is_anonymous if 'is_anonymous' in dir() else False,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         # Don't leak internal details, but include request ID for support
         raise HTTPException(
             status_code=500, detail=f"Internal server error (request ID: {request_id})"
@@ -2572,6 +2649,10 @@ async def unified_responses(
                             rate_limit_mgr,
                             provider=attempt_provider,
                             tracker=None,
+                            is_anonymous=False,  # /v1/responses requires authentication
+                            is_async_stream=False,
+                            request_id=request_id,
+                            api_key_id=api_key_id,
                         ):
                             if chunk_data.startswith("data: "):
                                 data_str = chunk_data[6:].strip()
@@ -3258,10 +3339,60 @@ async def unified_responses(
 
         return response
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # Save failed request for HTTPException errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    is_anonymous=False,  # /v1/responses requires authentication
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("Unhandled server error in unified_responses")
+
+        # Save failed request for unexpected errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    is_anonymous=False,  # /v1/responses requires authentication
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         raise APIExceptions.internal_error(operation="unified_responses")
     finally:
         if (
