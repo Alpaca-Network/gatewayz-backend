@@ -2146,3 +2146,104 @@ async def get_chat_requests_plot_data_admin(
     except Exception as e:
         logger.error(f"Failed to get plot data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get plot data: {str(e)}")
+
+
+@router.get("/admin/model-usage-analytics", tags=["admin"])
+async def get_model_usage_analytics(
+    admin_user: dict = Depends(require_admin),
+    page: int = Query(1, ge=1, description="Page number (starts at 1)"),
+    limit: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
+    model_name: str = Query(None, description="Search by model name (partial match)"),
+    sort_by: str = Query("total_cost_usd", description="Sort by field (total_cost_usd, successful_requests, etc.)"),
+    sort_order: str = Query("desc", description="Sort order (asc or desc)"),
+):
+    """
+    Admin endpoint to get model usage analytics with pagination and search.
+
+    Returns data from the model_usage_analytics view including:
+    - Model identification (name, provider, etc.)
+    - Request counts
+    - Token usage (input/output totals and averages)
+    - Pricing per token
+    - Cost calculations (total, input, output, per-request average)
+    - Performance metrics
+    - Model metadata
+
+    Supports:
+    - Pagination: ?page=1&limit=50
+    - Search: ?model_name=gpt (partial match, case-insensitive)
+    - Sorting: ?sort_by=total_cost_usd&sort_order=desc
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Calculate offset for pagination
+        offset = (page - 1) * limit
+
+        # Build the query
+        query = client.table("model_usage_analytics").select("*", count="exact")
+
+        # Apply search filter if provided
+        if model_name:
+            # Use ilike for case-insensitive partial match
+            query = query.ilike("model_name", f"%{model_name}%")
+
+        # Validate sort_by field (prevent SQL injection)
+        valid_sort_fields = [
+            "model_name", "provider_name", "successful_requests",
+            "total_cost_usd", "avg_cost_per_request_usd",
+            "total_input_tokens", "total_output_tokens", "total_tokens",
+            "avg_processing_time_ms", "first_request_at", "last_request_at"
+        ]
+        if sort_by not in valid_sort_fields:
+            sort_by = "total_cost_usd"
+
+        # Validate sort order
+        if sort_order.lower() not in ["asc", "desc"]:
+            sort_order = "desc"
+
+        # Apply sorting
+        query = query.order(sort_by, desc=(sort_order.lower() == "desc"))
+
+        # Apply pagination
+        query = query.range(offset, offset + limit - 1)
+
+        # Execute query
+        result = query.execute()
+
+        # Get total count from the query
+        total_count = result.count if result.count is not None else 0
+
+        # Calculate pagination metadata
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+        has_next = page < total_pages
+        has_prev = page > 1
+
+        return {
+            "success": True,
+            "data": result.data or [],
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total_items": total_count,
+                "total_pages": total_pages,
+                "has_next": has_next,
+                "has_prev": has_prev,
+                "offset": offset
+            },
+            "filters": {
+                "model_name": model_name,
+                "sort_by": sort_by,
+                "sort_order": sort_order
+            },
+            "metadata": {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "items_in_page": len(result.data or [])
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get model usage analytics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get model usage analytics: {str(e)}")
