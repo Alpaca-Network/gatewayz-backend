@@ -46,7 +46,6 @@ from src.utils.sentry_context import capture_payment_error, capture_provider_err
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Make braintrust optional for test environments
 try:
-    from braintrust import current_span
     from braintrust import flush as braintrust_flush
     from braintrust import start_span, traced
 
