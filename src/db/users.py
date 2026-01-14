@@ -7,8 +7,8 @@ from typing import Any
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key
 from src.services.prometheus_metrics import track_database_query
+from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
 from src.utils.security_validators import sanitize_for_logging
-from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
 
 logger = logging.getLogger(__name__)
 
@@ -679,7 +679,10 @@ def deduct_credits(
 
     try:
         from src.db.credit_transactions import TransactionType, log_credit_transaction
-        from src.services.daily_usage_limiter import enforce_daily_usage_limit, DailyUsageLimitExceeded
+        from src.services.daily_usage_limiter import (
+            DailyUsageLimitExceeded,
+            enforce_daily_usage_limit,
+        )
 
         client = get_supabase_client()
 

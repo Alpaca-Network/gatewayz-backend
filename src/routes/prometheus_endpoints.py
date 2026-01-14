@@ -27,35 +27,29 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import JSONResponse, Response
 from prometheus_client import REGISTRY, generate_latest
 
 from src.config import Config
-from src.services.prometheus_metrics import (
-    # HTTP metrics
-    fastapi_requests_total,
-    fastapi_requests_duration_seconds,
-    fastapi_requests_in_progress,
-    fastapi_exceptions_total,
-    # Model inference metrics
-    model_inference_requests,
-    model_inference_duration,
-    tokens_used,
-    credits_used,
-    # Database metrics
-    database_query_count,
-    database_query_duration,
-    # Cache metrics
+from src.services.prometheus_metrics import (  # HTTP metrics; Model inference metrics; Database metrics; Cache metrics; Provider health metrics; Business metrics
+    active_api_keys,
+    active_connections,
     cache_hits,
     cache_misses,
-    # Provider health metrics
+    credits_used,
+    database_query_count,
+    database_query_duration,
+    fastapi_exceptions_total,
+    fastapi_requests_duration_seconds,
+    fastapi_requests_in_progress,
+    fastapi_requests_total,
+    model_inference_duration,
+    model_inference_requests,
     provider_availability,
     provider_error_rate,
     provider_response_time,
-    # Business metrics
-    active_api_keys,
-    active_connections,
     subscription_count,
+    tokens_used,
 )
 
 logger = logging.getLogger(__name__)

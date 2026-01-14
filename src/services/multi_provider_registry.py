@@ -1,9 +1,9 @@
 """Multi-provider model registry and canonical catalog support."""
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 

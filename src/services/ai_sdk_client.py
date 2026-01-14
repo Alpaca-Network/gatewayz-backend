@@ -19,7 +19,7 @@ from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 from src.services.connection_pool import get_pooled_async_client
-from src.utils.provider_safety import safe_get_choices, safe_get_usage, ProviderError
+from src.utils.provider_safety import ProviderError, safe_get_choices, safe_get_usage
 
 # Initialize logging
 logger = logging.getLogger(__name__)

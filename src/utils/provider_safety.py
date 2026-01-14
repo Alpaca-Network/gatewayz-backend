@@ -7,7 +7,8 @@ Provides retry logic, circuit breakers, and defensive patterns for external prov
 import asyncio
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar

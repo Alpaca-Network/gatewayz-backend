@@ -6,12 +6,6 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from postgrest import APIError
 
-from src.services.auth_rate_limiting import (
-    AuthRateLimitType,
-    check_auth_rate_limit,
-    get_client_ip,
-)
-
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
 import src.enhanced_notification_service as notif_module
@@ -32,13 +26,23 @@ from src.services.auth_cache import (
     get_cached_user_by_username,
     invalidate_user_cache,
 )
+from src.services.auth_rate_limiting import (
+    AuthRateLimitType,
+    check_auth_rate_limit,
+    get_client_ip,
+)
 from src.services.query_timeout import (
     AUTH_QUERY_TIMEOUT,
     USER_LOOKUP_TIMEOUT,
     QueryTimeoutError,
     safe_query_with_timeout,
 )
-from src.utils.security_validators import is_valid_email, is_temporary_email_domain, is_blocked_email_domain, sanitize_for_logging
+from src.utils.security_validators import (
+    is_blocked_email_domain,
+    is_temporary_email_domain,
+    is_valid_email,
+    sanitize_for_logging,
+)
 
 # Initialize logging
 logger = logging.getLogger(__name__)

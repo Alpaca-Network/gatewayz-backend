@@ -1,8 +1,8 @@
 """Pydantic schemas for system health timeline endpoints"""
 from datetime import datetime
-from typing import Optional, Literal
-from pydantic import BaseModel, Field
+from typing import Literal, Optional
 
+from pydantic import BaseModel, Field
 
 # ===========================
 # Incident Schemas

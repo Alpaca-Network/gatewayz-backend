@@ -14,19 +14,20 @@ Key features:
 - Better error handling
 """
 
-from fastapi import APIRouter, Query, Depends, HTTPException
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
-import asyncio
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from .auth import get_api_key
 from .optimized_health import (
     get_optimized_gateway_data,
+    get_optimized_models_data,
     get_optimized_providers_data,
-    get_optimized_models_data
 )
-from .auth import get_api_key
-from .utils.logger import logger
 from .utils.error_tracking import capture_error
+from .utils.logger import logger
 
 router = APIRouter()
 

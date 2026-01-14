@@ -4,13 +4,13 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from src.services.user_lookup_cache import get_user
 from src.security.deps import get_api_key
 from src.services.referral import (
     create_user_referral_code,
     get_referral_stats,
     validate_referral_code,
 )
+from src.services.user_lookup_cache import get_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

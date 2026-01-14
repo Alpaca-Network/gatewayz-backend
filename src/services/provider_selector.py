@@ -8,9 +8,9 @@ with the next available provider.
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
-from collections.abc import Callable
 
 from src.services.multi_provider_registry import (
     get_registry,

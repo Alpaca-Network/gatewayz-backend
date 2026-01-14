@@ -11,7 +11,7 @@ The Railway Grafana stack template comes with Tempo pre-configured to receive:
 
 import logging
 import socket
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:

@@ -8,7 +8,8 @@ This format is compatible with Prometheus scraping and includes:
 - Histograms (latency distributions)
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
+
 from src.services.metrics_instrumentation import get_metrics_collector
 
 

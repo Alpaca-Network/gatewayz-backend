@@ -6,8 +6,8 @@ Learn more at https://www.braintrust.dev/docs
 """
 
 import functools
-import logging
 import inspect
+import logging
 
 try:
     from braintrust import current_span, init_logger, start_span, traced

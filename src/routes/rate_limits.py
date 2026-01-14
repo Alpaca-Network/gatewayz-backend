@@ -16,8 +16,8 @@ from src.db.rate_limits import (
     set_user_rate_limits,
     update_rate_limit_config,
 )
-from src.services.user_lookup_cache import get_user
 from src.security.deps import get_api_key, require_admin
+from src.services.user_lookup_cache import get_user
 
 # Initialize logging
 logger = logging.getLogger(__name__)

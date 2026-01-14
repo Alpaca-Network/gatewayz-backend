@@ -11,8 +11,8 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.services.user_lookup_cache import get_user
 from src.security.security import audit_logger, validate_api_key_security
+from src.services.user_lookup_cache import get_user
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 logger = logging.getLogger(__name__)

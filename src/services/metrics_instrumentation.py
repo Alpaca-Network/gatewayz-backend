@@ -12,12 +12,12 @@ This module provides comprehensive metrics collection for:
 - External API call metrics
 """
 
-import time
 import logging
-from typing import Optional, Dict, Any, Callable
-from functools import wraps
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from functools import wraps
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +352,5 @@ def track_request(
             return async_wrapper
         else:
             return sync_wrapper
-
-        return async_wrapper
 
     return decorator

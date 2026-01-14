@@ -8,8 +8,9 @@ Provides:
 """
 
 from fastapi import APIRouter, HTTPException
-from src.services.prometheus_exporter import PrometheusExporter
+
 from src.services.metrics_instrumentation import get_metrics_collector
+from src.services.prometheus_exporter import PrometheusExporter
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 

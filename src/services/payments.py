@@ -13,7 +13,6 @@ from typing import Any
 import stripe
 
 from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
-from src.utils.sentry_context import capture_payment_error
 from src.db.subscription_products import get_credits_from_tier, get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.db.webhook_events import is_event_processed, record_processed_event
@@ -32,6 +31,7 @@ from src.schemas.payments import (
     SubscriptionCheckoutResponse,
     WebhookProcessingResult,
 )
+from src.utils.sentry_context import capture_payment_error
 
 # Import Stripe SDK with alias to avoid conflict with schema module
 

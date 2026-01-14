@@ -12,13 +12,13 @@ import os
 from contextlib import asynccontextmanager
 
 from src.cache import initialize_fal_cache_from_catalog
+from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
     clear_connection_pools,
     get_pool_stats,
     warmup_provider_connections_async,
 )
-from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.prometheus_remote_write import (
     init_prometheus_remote_write,
     shutdown_prometheus_remote_write,

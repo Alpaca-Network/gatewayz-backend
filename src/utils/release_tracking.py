@@ -10,7 +10,7 @@ from typing import Any
 
 try:
     import sentry_sdk
-    from sentry_sdk import capture_message, set_tag, set_context
+    from sentry_sdk import capture_message, set_context, set_tag
 
     SENTRY_AVAILABLE = True
 except ImportError:

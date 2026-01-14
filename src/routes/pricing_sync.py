@@ -14,12 +14,12 @@ Endpoints:
 
 import logging
 
-from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from src.services.pricing_sync_service import (
     get_pricing_sync_service,
-    run_scheduled_sync,
     run_dry_run_sync,
+    run_scheduled_sync,
 )
 
 logger = logging.getLogger(__name__)

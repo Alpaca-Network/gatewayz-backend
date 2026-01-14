@@ -19,6 +19,7 @@ from src.db.credit_transactions import (
     get_transaction_summary,
     log_credit_transaction,
 )
+
 # Note: Database operations are performed directly via supabase client
 # to maintain consistency within transaction logging
 from src.security.deps import require_admin

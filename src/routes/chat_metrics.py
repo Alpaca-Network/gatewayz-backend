@@ -13,14 +13,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from src.db.chat_completion_requests import (
-    get_top_models_by_requests,
-    get_models_with_min_one_per_provider,
     calculate_tokens_per_second,
     get_all_providers,
+    get_models_with_min_one_per_provider,
+    get_top_models_by_requests,
 )
 
 logger = logging.getLogger(__name__)

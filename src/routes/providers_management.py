@@ -4,30 +4,31 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
+
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from src.schemas.providers import (
-    ProviderCreate,
-    ProviderUpdate,
-    ProviderResponse,
-    ProviderHealthUpdate,
-    ProviderStats,
-)
+from src.db.models_catalog_db import get_models_stats
 from src.db.providers_db import (
+    activate_provider,
+    create_provider,
+    deactivate_provider,
+    delete_provider,
     get_all_providers,
     get_provider_by_id,
     get_provider_by_slug,
-    create_provider,
-    update_provider,
-    delete_provider,
-    deactivate_provider,
-    activate_provider,
-    update_provider_health,
     get_providers_by_health_status,
     get_providers_stats,
     search_providers,
+    update_provider,
+    update_provider_health,
 )
-from src.db.models_catalog_db import get_models_stats
+from src.schemas.providers import (
+    ProviderCreate,
+    ProviderHealthUpdate,
+    ProviderResponse,
+    ProviderStats,
+    ProviderUpdate,
+)
 
 logger = logging.getLogger(__name__)
 

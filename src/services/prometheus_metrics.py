@@ -16,7 +16,7 @@ import os
 import time
 from contextlib import contextmanager
 
-from prometheus_client import Counter, Gauge, Histogram, Summary, Info, REGISTRY
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram, Info, Summary
 
 logger = logging.getLogger(__name__)
 

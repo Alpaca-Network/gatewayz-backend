@@ -14,9 +14,10 @@ Usage:
     raise APIExceptions.unauthorized()
 """
 
-from fastapi import HTTPException
-from typing import Optional, Dict, Any
 import logging
+from typing import Any, Dict, Optional
+
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
