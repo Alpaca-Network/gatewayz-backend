@@ -1417,188 +1417,137 @@ async def clear_all_caches(
 @router.get("/health/gateways", tags=["health"])
 async def check_all_gateways():
     """
-    Check health status of all configured gateways.
+    Get health status of all 28 configured gateways from health-service cache.
 
-    Performs live health checks by making test requests to each gateway's API.
+    **Performance:** Uses cached data from health-service (sub-second response).
+    **Data Source:** Redis cache updated by health-service every 60 seconds.
+    **Coverage:** All 28 gateways from GATEWAY_CONFIG.
 
     **Returns:**
     ```json
     {
-        "openrouter": {
-            "status": "healthy",
-            "latency_ms": 150,
-            "available": true,
-            "last_check": "2025-01-15T10:30:00Z",
-            "error": null
+        "success": true,
+        "data": {
+            "openrouter": {
+                "status": "healthy",
+                "latency_ms": 150,
+                "available": true,
+                "last_check": "2025-01-15T10:30:00Z",
+                "error": null
+            },
+            ...
         },
-        ...
+        "summary": {
+            "total_gateways": 28,
+            "healthy": 20,
+            "degraded": 0,
+            "unhealthy": 0,
+            "unconfigured": 8,
+            "overall_health_percentage": 100.0
+        },
+        "timestamp": "2025-01-15T10:30:00Z",
+        "metadata": {
+            "cache_age_seconds": 45,
+            "data_source": "health-service-cache"
+        }
     }
     ```
+
+    **Note:** If no cached data is available, returns empty data with metadata.
+    Run model sync to populate database if gateways are showing as unconfigured.
     """
     try:
+        from src.services.simple_health_cache import simple_health_cache
+
+        # Get cached gateway health from health-service (fast)
+        cached_gateways = simple_health_cache.get_gateways_health()
+
+        if not cached_gateways:
+            # No cached data - health-service may not be running or no models synced
+            logger.warning("No gateway health data in cache - health-service may not be running or model sync needed")
+            return {
+                "success": True,
+                "data": {},
+                "summary": {
+                    "total_gateways": 0,
+                    "healthy": 0,
+                    "degraded": 0,
+                    "unhealthy": 0,
+                    "unconfigured": 0,
+                    "overall_health_percentage": 0,
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "metadata": {
+                    "cache_age_seconds": None,
+                    "data_source": "none",
+                    "warning": "No cached data available. Ensure health-service is running and model sync has been executed."
+                }
+            }
+
+        # Process cached gateway data
         health_status = {}
+        healthy_count = 0
+        degraded_count = 0
+        unhealthy_count = 0
+        unconfigured_count = 0
 
-        # Define gateway endpoints for health checks
-        gateway_endpoints = {
-            "openrouter": {
-                "url": "https://openrouter.ai/api/v1/models",
-                "api_key": Config.OPENROUTER_API_KEY,
-                "headers": {},
-            },
-            "featherless": {
-                "url": "https://api.featherless.ai/v1/models",
-                "api_key": Config.FEATHERLESS_API_KEY,
-                "headers": (
-                    {"Authorization": f"Bearer {Config.FEATHERLESS_API_KEY}"}
-                    if Config.FEATHERLESS_API_KEY
-                    else {}
-                ),
-            },
-            "deepinfra": {
-                "url": "https://api.deepinfra.com/v1/openai/models",
-                "api_key": Config.DEEPINFRA_API_KEY,
-                "headers": (
-                    {"Authorization": f"Bearer {Config.DEEPINFRA_API_KEY}"}
-                    if Config.DEEPINFRA_API_KEY
-                    else {}
-                ),
-            },
-            "groq": {
-                "url": "https://api.groq.com/openai/v1/models",
-                "api_key": os.environ.get("GROQ_API_KEY"),
-                "headers": (
-                    {"Authorization": f"Bearer {os.environ.get('GROQ_API_KEY')}"}
-                    if os.environ.get("GROQ_API_KEY")
-                    else {}
-                ),
-            },
-            "fireworks": {
-                "url": "https://api.fireworks.ai/inference/v1/models",
-                "api_key": os.environ.get("FIREWORKS_API_KEY"),
-                "headers": (
-                    {"Authorization": f"Bearer {os.environ.get('FIREWORKS_API_KEY')}"}
-                    if os.environ.get("FIREWORKS_API_KEY")
-                    else {}
-                ),
-            },
-            "together": {
-                "url": "https://api.together.xyz/v1/models",
-                "api_key": os.environ.get("TOGETHER_API_KEY"),
-                "headers": (
-                    {"Authorization": f"Bearer {os.environ.get('TOGETHER_API_KEY')}"}
-                    if os.environ.get("TOGETHER_API_KEY")
-                    else {}
-                ),
-            },
-            "aihubmix": {
-                "url": "https://aihubmix.com/v1/models",
-                "api_key": os.environ.get("AIHUBMIX_API_KEY"),
-                "headers": (
-                    {
-                        "Authorization": f"Bearer {os.environ.get('AIHUBMIX_API_KEY')}",
-                        "APP-Code": os.environ.get("AIHUBMIX_APP_CODE", ""),
-                    }
-                    if os.environ.get("AIHUBMIX_API_KEY")
-                    else {}
-                ),
-            },
-            "anannas": {
-                "url": "https://api.anannas.ai/v1/models",
-                "api_key": os.environ.get("ANANNAS_API_KEY"),
-                "headers": (
-                    {"Authorization": f"Bearer {os.environ.get('ANANNAS_API_KEY')}"}
-                    if os.environ.get("ANANNAS_API_KEY")
-                    else {}
-                ),
-            },
-        }
+        for gateway_name, gateway_info in cached_gateways.items():
+            # Normalize status
+            status = gateway_info.get('status', 'unknown').lower()
+            latency_ms = gateway_info.get('latency_ms', 0)
 
-        # Check each gateway
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for gateway_name, config in gateway_endpoints.items():
-                check_time = datetime.now(timezone.utc)
+            if status in ['healthy', 'online']:
+                final_status = 'healthy'
+                healthy_count += 1
+            elif status in ['degraded']:
+                final_status = 'degraded'
+                degraded_count += 1
+            elif status in ['unhealthy', 'offline', 'error', 'timeout']:
+                final_status = 'unhealthy'
+                unhealthy_count += 1
+            else:
+                final_status = 'unconfigured'
+                unconfigured_count += 1
 
-                if not config["api_key"]:
-                    health_status[gateway_name] = {
-                        "status": "unconfigured",
-                        "latency_ms": None,
-                        "available": False,
-                        "last_check": check_time.isoformat(),
-                        "error": "API key not configured",
-                    }
-                    continue
-
-                try:
-                    start_time = datetime.now(timezone.utc)
-                    response = await client.get(
-                        config["url"], headers=config["headers"], timeout=5.0
-                    )
-                    end_time = datetime.now(timezone.utc)
-                    latency_ms = int((end_time - start_time).total_seconds() * 1000)
-
-                    if response.status_code == 200:
-                        health_status[gateway_name] = {
-                            "status": "healthy",
-                            "latency_ms": latency_ms,
-                            "available": True,
-                            "last_check": check_time.isoformat(),
-                            "error": None,
-                        }
-                    else:
-                        health_status[gateway_name] = {
-                            "status": "degraded",
-                            "latency_ms": latency_ms,
-                            "available": False,
-                            "last_check": check_time.isoformat(),
-                            "error": f"HTTP {response.status_code}",
-                        }
-
-                except httpx.TimeoutException:
-                    health_status[gateway_name] = {
-                        "status": "timeout",
-                        "latency_ms": None,
-                        "available": False,
-                        "last_check": check_time.isoformat(),
-                        "error": "Request timed out",
-                    }
-
-                except Exception as e:
-                    health_status[gateway_name] = {
-                        "status": "error",
-                        "latency_ms": None,
-                        "available": False,
-                        "last_check": check_time.isoformat(),
-                        "error": str(e),
-                    }
+            health_status[gateway_name] = {
+                "status": final_status,
+                "latency_ms": latency_ms if latency_ms else None,
+                "available": gateway_info.get('available', final_status == 'healthy'),
+                "last_check": gateway_info.get('last_check', datetime.now(timezone.utc).isoformat()),
+                "error": gateway_info.get('error', None),
+            }
 
         # Calculate overall health
-        healthy_count = sum(1 for g in health_status.values() if g["status"] == "healthy")
-        total_configured = sum(1 for g in health_status.values() if g["status"] != "unconfigured")
+        total_gateways = len(health_status)
+        total_configured = healthy_count + degraded_count + unhealthy_count
 
         return {
             "success": True,
             "data": health_status,
             "summary": {
-                "total_gateways": len(health_status),
+                "total_gateways": total_gateways,
                 "healthy": healthy_count,
-                "degraded": sum(1 for g in health_status.values() if g["status"] == "degraded"),
-                "unhealthy": sum(
-                    1 for g in health_status.values() if g["status"] in ["error", "timeout"]
-                ),
-                "unconfigured": sum(
-                    1 for g in health_status.values() if g["status"] == "unconfigured"
-                ),
-                "overall_health_percentage": (
-                    (healthy_count / total_configured * 100) if total_configured > 0 else 0
+                "degraded": degraded_count,
+                "unhealthy": unhealthy_count,
+                "unconfigured": unconfigured_count,
+                "overall_health_percentage": round(
+                    (healthy_count / total_configured * 100) if total_configured > 0 else 0,
+                    1
                 ),
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metadata": {
+                "cache_age_seconds": None,  # Could be calculated if we store cache timestamp
+                "data_source": "health-service-cache",
+                "note": "Data refreshed every 60 seconds by health-service"
+            }
         }
 
     except Exception as e:
-        logger.error(f"Failed to check gateway health: {e}")
+        logger.error(f"Failed to retrieve gateway health from cache: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Failed to check gateway health: {str(e)}"
+            status_code=500,
+            detail=f"Failed to retrieve gateway health: {str(e)}"
         ) from e
 
 

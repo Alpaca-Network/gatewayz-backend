@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 CACHE_PREFIX_SYSTEM = "health:system"
 CACHE_PREFIX_PROVIDERS = "health:providers"
 CACHE_PREFIX_MODELS = "health:models"
+CACHE_PREFIX_GATEWAYS = "health:gateways"
 CACHE_PREFIX_SUMMARY = "health:summary"
 CACHE_PREFIX_DASHBOARD = "health:dashboard"
 
@@ -24,6 +25,7 @@ CACHE_PREFIX_DASHBOARD = "health:dashboard"
 DEFAULT_TTL_SYSTEM = 60
 DEFAULT_TTL_PROVIDERS = 60
 DEFAULT_TTL_MODELS = 120
+DEFAULT_TTL_GATEWAYS = 60
 DEFAULT_TTL_SUMMARY = 60
 DEFAULT_TTL_DASHBOARD = 30
 
@@ -172,6 +174,14 @@ class SimpleHealthCache:
     def get_health_dashboard(self) -> dict | None:
         """Retrieve cached health dashboard data"""
         return self.get_cache(CACHE_PREFIX_DASHBOARD)
+
+    def cache_gateways_health(self, data: dict, ttl: int = DEFAULT_TTL_GATEWAYS) -> bool:
+        """Cache gateways health data"""
+        return self.set_cache(CACHE_PREFIX_GATEWAYS, data, ttl)
+
+    def get_gateways_health(self) -> dict | None:
+        """Retrieve cached gateways health data"""
+        return self.get_cache(CACHE_PREFIX_GATEWAYS)
 
 
 # Global cache instance

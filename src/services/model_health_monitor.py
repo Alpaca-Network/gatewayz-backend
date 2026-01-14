@@ -822,6 +822,55 @@ class ModelHealthMonitor:
                 simple_health_cache.cache_models_health(models_data)
                 logger.debug(f"Published {len(models_data)} models health to Redis cache")
 
+            # Cache gateways health
+            # Build gateway health from provider data
+            gateway_health = {}
+            for provider_data in self.provider_data.values():
+                gateway_name = provider_data.gateway
+                if gateway_name not in gateway_health:
+                    gateway_health[gateway_name] = {
+                        "healthy": False,
+                        "status": "offline",
+                        "latency_ms": 0,
+                        "available": False,
+                        "last_check": None,
+                        "error": None
+                    }
+
+                if provider_data.status == "online":
+                    gateway_health[gateway_name]["healthy"] = True
+                    gateway_health[gateway_name]["status"] = "online"
+                    gateway_health[gateway_name]["available"] = True
+                    # Extract latency from avg_response_time (format: "123ms")
+                    avg_response = provider_data.avg_response_time.replace("ms", "") if provider_data.avg_response_time else "0"
+                    try:
+                        gateway_health[gateway_name]["latency_ms"] = int(avg_response)
+                    except:
+                        gateway_health[gateway_name]["latency_ms"] = 0
+                    gateway_health[gateway_name]["last_check"] = provider_data.last_checked
+                elif provider_data.status == "degraded" and gateway_health[gateway_name]["status"] == "offline":
+                    gateway_health[gateway_name]["status"] = "degraded"
+
+            # Add all gateways from GATEWAY_CONFIG that aren't tracked
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                for gateway_name in GATEWAY_CONFIG.keys():
+                    if gateway_name not in gateway_health:
+                        gateway_health[gateway_name] = {
+                            "healthy": False,
+                            "status": "unconfigured",
+                            "latency_ms": None,
+                            "available": False,
+                            "last_check": datetime.now(timezone.utc).isoformat(),
+                            "error": "No models synced for this gateway. Run model sync to populate."
+                        }
+            except Exception as e:
+                logger.warning(f"Failed to add unconfigured gateways: {e}")
+
+            if gateway_health:
+                simple_health_cache.cache_gateways_health(gateway_health)
+                logger.debug(f"Published {len(gateway_health)} gateways health to Redis cache")
+
             logger.info("Health data published to Redis cache successfully")
 
         except Exception as e:
