@@ -14,6 +14,8 @@ from src.db.providers_db import (
     get_provider_by_slug,
 )
 from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.clarifai_client import fetch_models_from_clarifai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.models import (
@@ -21,6 +23,7 @@ from src.services.models import (
     fetch_models_from_aimo,
     fetch_models_from_alibaba,
     fetch_models_from_anannas,
+    fetch_models_from_anthropic,
     fetch_models_from_chutes,
     fetch_models_from_deepinfra,
     fetch_models_from_fal,
@@ -29,12 +32,16 @@ from src.services.models import (
     fetch_models_from_groq,
     fetch_models_from_helicone,
     fetch_models_from_near,
+    fetch_models_from_openai,
     fetch_models_from_openrouter,
     fetch_models_from_together,
     fetch_models_from_vercel_ai_gateway,
 )
+from src.services.modelz_client import fetch_models_from_modelz
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
+from src.services.onerouter_client import fetch_models_from_onerouter
+from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.xai_client import fetch_models_from_xai
 
 logger = logging.getLogger(__name__)
@@ -63,6 +70,14 @@ PROVIDER_FETCH_FUNCTIONS = {
     "xai": fetch_models_from_xai,
     "nebius": fetch_models_from_nebius,
     "novita": fetch_models_from_novita,
+    # Additional providers that were missing
+    "openai": fetch_models_from_openai,
+    "anthropic": fetch_models_from_anthropic,
+    "clarifai": fetch_models_from_clarifai,
+    "simplismart": fetch_models_from_simplismart,
+    "onerouter": fetch_models_from_onerouter,
+    "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
+    "modelz": fetch_models_from_modelz,
 }
 
 
@@ -358,6 +373,82 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "base_url": "https://api.x.ai/v1",
                 "api_key_env_var": "XAI_API_KEY",
                 "site_url": "https://x.ai",
+                "supports_streaming": True,
+            },
+            "openai": {
+                "name": "OpenAI",
+                "description": "OpenAI GPT models",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_env_var": "OPENAI_API_KEY",
+                "site_url": "https://openai.com",
+                "supports_streaming": True,
+                "supports_function_calling": True,
+                "supports_vision": True,
+            },
+            "anthropic": {
+                "name": "Anthropic",
+                "description": "Anthropic Claude models",
+                "base_url": "https://api.anthropic.com/v1",
+                "api_key_env_var": "ANTHROPIC_API_KEY",
+                "site_url": "https://anthropic.com",
+                "supports_streaming": True,
+                "supports_function_calling": True,
+                "supports_vision": True,
+            },
+            "clarifai": {
+                "name": "Clarifai",
+                "description": "Clarifai AI platform",
+                "base_url": "https://api.clarifai.com",
+                "api_key_env_var": "CLARIFAI_API_KEY",
+                "site_url": "https://clarifai.com",
+                "supports_streaming": True,
+            },
+            "simplismart": {
+                "name": "SimpliSmart",
+                "description": "SimpliSmart AI inference",
+                "base_url": "https://api.simplismart.ai/v1",
+                "api_key_env_var": "SIMPLISMART_API_KEY",
+                "site_url": "https://simplismart.ai",
+                "supports_streaming": True,
+            },
+            "onerouter": {
+                "name": "OneRouter",
+                "description": "OneRouter multi-provider gateway",
+                "base_url": "https://api.onerouter.pro/v1",
+                "api_key_env_var": "ONEROUTER_API_KEY",
+                "site_url": "https://onerouter.pro",
+                "supports_streaming": True,
+            },
+            "cloudflare-workers-ai": {
+                "name": "Cloudflare Workers AI",
+                "description": "Cloudflare Workers AI inference",
+                "base_url": None,
+                "api_key_env_var": "CLOUDFLARE_API_TOKEN",
+                "site_url": "https://developers.cloudflare.com/workers-ai",
+                "supports_streaming": True,
+            },
+            "nebius": {
+                "name": "Nebius",
+                "description": "Nebius AI Studio",
+                "base_url": "https://api.studio.nebius.ai/v1",
+                "api_key_env_var": "NEBIUS_API_KEY",
+                "site_url": "https://studio.nebius.ai",
+                "supports_streaming": True,
+            },
+            "novita": {
+                "name": "Novita",
+                "description": "Novita AI inference",
+                "base_url": "https://api.novita.ai/v3/openai",
+                "api_key_env_var": "NOVITA_API_KEY",
+                "site_url": "https://novita.ai",
+                "supports_streaming": True,
+            },
+            "modelz": {
+                "name": "Modelz",
+                "description": "Modelz AI model deployment platform",
+                "base_url": "https://backend.alpacanetwork.ai",
+                "api_key_env_var": "MODELZ_API_KEY",
+                "site_url": "https://modelz.ai",
                 "supports_streaming": True,
             },
         }
