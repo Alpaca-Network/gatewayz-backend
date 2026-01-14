@@ -547,6 +547,8 @@ def fetch_models_from_simplismart():
                 "description": model_info.get("description", ""),
                 "provider": "simplismart",
                 "provider_name": "Simplismart",
+                "provider_slug": "simplismart",
+                "source_gateway": "simplismart",
             }
             # Include model type if available (text-to-image, speech-to-text, etc.)
             if "type" in model_info:

@@ -216,6 +216,11 @@ class TestSimplismartModelCatalog:
             model_type = model.get("type")
             if model_type not in ("text-to-image", "image-to-image", "speech-to-text"):
                 assert "context_length" in model
+            # Verify source_gateway is set for proper frontend discovery
+            assert "source_gateway" in model
+            assert model["source_gateway"] == "simplismart"
+            assert "provider_slug" in model
+            assert model["provider_slug"] == "simplismart"
 
     def test_fetch_models_has_llama_models(self):
         """Test that catalog includes Llama models"""
