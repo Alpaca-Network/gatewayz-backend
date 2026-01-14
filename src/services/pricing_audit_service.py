@@ -553,8 +553,8 @@ class PricingAuditService:
 
         for gateway, record in gateway_latest.items():
             monthly_cost = (
-                (prompt_tokens * record.prompt_price) / 1_000_000
-                + (completion_tokens * record.completion_price) / 1_000_000
+                (prompt_tokens * record.prompt_price) / 1_000
+                + (completion_tokens * record.completion_price) / 1_000
             )
             costs_by_gateway[gateway] = monthly_cost
             max_cost = max(max_cost, monthly_cost)

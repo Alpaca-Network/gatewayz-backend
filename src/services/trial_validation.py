@@ -331,9 +331,9 @@ def track_trial_usage(
                 pricing = get_model_pricing(model_id)
 
                 if pricing.get("found", False):
-                    # Model found in catalog - use per-1M-token pricing
-                    prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000_000
-                    completion_cost = (completion_tokens * pricing["completion"]) / 1_000_000
+                    # Model found in catalog - use per-1K-token pricing
+                    prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000
+                    completion_cost = (completion_tokens * pricing["completion"]) / 1_000
                     credit_cost = prompt_cost + completion_cost
                     logger.info(
                         f"Trial usage: Using model-specific pricing for {model_id}: "

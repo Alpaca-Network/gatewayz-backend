@@ -1333,9 +1333,10 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
     model_type = chutes_model.get("type", "LLM")
     pricing_per_hour = chutes_model.get("pricing_per_hour", 0.0)
 
-    # Convert hourly pricing to per-token pricing (rough estimate)
+    # Convert hourly pricing to per-1K-token pricing (rough estimate)
     # Assume ~1M tokens per hour at average speed
-    prompt_price = str(pricing_per_hour / 1000000) if pricing_per_hour > 0 else "0"
+    # pricing_per_hour / 1000 = per-1K-token price (since 1M tokens = 1000 × 1K tokens)
+    prompt_price = str(pricing_per_hour / 1000) if pricing_per_hour > 0 else "0"
 
     display_name = chutes_model.get("name", model_id.replace("-", " ").replace("_", " ").title())
 
@@ -2177,24 +2178,24 @@ def normalize_near_model(near_model: dict) -> dict:
 
     # Extract pricing from Near AI API response
     # Near AI provides pricing as inputCostPerToken and outputCostPerToken with amount and scale
-    # Scale is in powers of 10 (e.g., -9 means 10^-9 = per token, convert to per million tokens)
+    # Scale is in powers of 10 (e.g., -9 means 10^-9 = per token, convert to per 1K tokens)
     input_cost = near_model.get("inputCostPerToken", {})
     output_cost = near_model.get("outputCostPerToken", {})
 
     if input_cost and isinstance(input_cost, dict):
         input_amount = input_cost.get("amount", 0)
         input_scale = input_cost.get("scale", -9)  # Default scale is -9 (per token)
-        # Convert to per million tokens (multiply by 10^6 and adjust for scale)
-        # Price per million = amount * 10^(6 + scale)
+        # Convert to per 1K tokens (multiply by 10^3 and adjust for scale)
+        # Price per 1K = amount * 10^(3 + scale)
         if input_amount > 0:
-            pricing["prompt"] = str(input_amount * (10 ** (6 + input_scale)))
+            pricing["prompt"] = str(input_amount * (10 ** (3 + input_scale)))
 
     if output_cost and isinstance(output_cost, dict):
         output_amount = output_cost.get("amount", 0)
         output_scale = output_cost.get("scale", -9)  # Default scale is -9 (per token)
-        # Convert to per million tokens
+        # Convert to per 1K tokens
         if output_amount > 0:
-            pricing["completion"] = str(output_amount * (10 ** (6 + output_scale)))
+            pricing["completion"] = str(output_amount * (10 ** (3 + output_scale)))
 
     # Fallback to old pricing format for backward compatibility
     if not pricing["prompt"] and not pricing["completion"]:
@@ -3348,7 +3349,8 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     - input: cost per 1K input tokens
     - output: cost per 1K output tokens
 
-    We convert to per 1M tokens format for consistency.
+    FIXED: We store pricing per 1K tokens in the database (not per 1M).
+    No conversion needed - use values as-is.
 
     Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
     """
@@ -3361,18 +3363,19 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
 
     try:
         # Extract pricing from the API response
-        # AiHubMix returns pricing per 1K tokens, we need per 1M tokens
+        # FIXED: AiHubMix returns pricing per 1K tokens, database stores per 1K tokens
+        # No conversion needed - use values directly
         pricing_data = model.get("pricing", {})
         input_price_per_1k = pricing_data.get("input", 0)
         output_price_per_1k = pricing_data.get("output", 0)
 
-        # Convert from per 1K to per 1M tokens (multiply by 1000)
-        # Use round() to avoid floating point precision issues (e.g., 0.0003 * 1000 = 0.30000000000000004)
-        input_price_per_1m = round(float(input_price_per_1k) * 1000, 10) if input_price_per_1k else 0
-        output_price_per_1m = round(float(output_price_per_1k) * 1000, 10) if output_price_per_1k else 0
+        # FIXED: Database stores per 1K tokens (not per 1M), so use values as-is
+        # Convert to float to ensure numeric type for database storage
+        input_price_per_1k = float(input_price_per_1k) if input_price_per_1k else 0
+        output_price_per_1k = float(output_price_per_1k) if output_price_per_1k else 0
 
         # Filter out models with zero pricing (free models can drain credits)
-        if input_price_per_1m == 0 and output_price_per_1m == 0:
+        if input_price_per_1k == 0 and output_price_per_1k == 0:
             logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
             return None
 
@@ -3405,8 +3408,8 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
                 "instruct_type": "chat",
             },
             "pricing": {
-                "prompt": str(input_price_per_1m),
-                "completion": str(output_price_per_1m),
+                "prompt": str(input_price_per_1k),
+                "completion": str(output_price_per_1k),
                 "request": "0",
                 "image": "0",
             },
