@@ -931,18 +931,43 @@ class IntelligentHealthMonitor:
                     gateway_health[gw]["status"] = "degraded"
 
             # Add all gateways from GATEWAY_CONFIG that aren't tracked yet
-            # Mark them as unconfigured if they have no health data
+            # Check cache and API key status to determine appropriate status
             try:
                 from src.services.gateway_health_service import GATEWAY_CONFIG
-                for gateway_name in GATEWAY_CONFIG.keys():
+                for gateway_name, gateway_config in GATEWAY_CONFIG.items():
                     if gateway_name not in gateway_health:
+                        # Check if API key is configured
+                        api_key = gateway_config.get("api_key")
+                        has_api_key = api_key is not None and api_key != "" and api_key != "static_catalog"
+
+                        # Check if cache has models
+                        cache = gateway_config.get("cache", {})
+                        cache_data = cache.get("data") if cache else None
+                        has_cached_models = cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        model_count = len(cache_data) if has_cached_models else 0
+
+                        # Determine status and error based on configuration state
+                        if not has_api_key:
+                            status = "unconfigured"
+                            error_msg = f"API key not configured. Set {gateway_config.get('api_key_env', 'API_KEY')} environment variable."
+                        elif has_cached_models:
+                            # Has API key and models in cache - gateway is available but not being health-monitored
+                            status = "healthy"
+                            error_msg = None
+                        else:
+                            # Has API key but no models in cache - needs sync
+                            status = "pending"
+                            error_msg = "No models synced for this gateway. Run model sync to populate."
+
                         gateway_health[gateway_name] = {
-                            "healthy": False,
-                            "status": "unconfigured",
+                            "healthy": has_cached_models and has_api_key,
+                            "status": status,
                             "latency_ms": None,
-                            "available": False,
+                            "available": has_cached_models and has_api_key,
                             "last_check": datetime.now(timezone.utc).isoformat(),
-                            "error": "No models synced for this gateway. Run model sync to populate."
+                            "error": error_msg,
+                            "total_models": model_count,
+                            "configured": has_api_key,
                         }
             except Exception as e:
                 logger.warning(f"Failed to add unconfigured gateways: {e}")
