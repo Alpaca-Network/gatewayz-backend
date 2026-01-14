@@ -875,6 +875,44 @@ curl https://api.gatewayz.ai/health
 
 ---
 
+## Adding a New Gateway
+
+To add a new gateway provider to the system:
+
+1. **Add to GATEWAY_REGISTRY** in `src/routes/catalog.py`:
+
+```python
+"new-gateway": {
+    "name": "New Gateway",
+    "color": "bg-purple-500",
+    "priority": "slow",
+    "site_url": "https://newgateway.com",
+},
+```
+
+2. **Ensure models include `source_gateway`** field:
+   - When implementing the model fetch function, include `"source_gateway": "new-gateway"` in each model's data
+   - Also include `"provider_slug": "new-gateway"` for consistency
+
+3. **The frontend will automatically discover and display the new gateway!**
+   - The frontend fetches gateway configs from `GET /gateways` endpoint
+   - New gateways appear in the UI without frontend code changes
+   - Gateway name, color, and priority are all configured in the backend
+
+**Example model data structure:**
+```python
+{
+    "id": "provider/model-name",
+    "name": "Model Display Name",
+    "source_gateway": "new-gateway",
+    "provider_slug": "new-gateway",
+    "context_length": 8192,
+    # ... other fields
+}
+```
+
+---
+
 ## Notes for Claude
 
 This codebase is a sophisticated, production-grade AI gateway system. When working on tasks:
