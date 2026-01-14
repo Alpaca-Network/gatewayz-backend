@@ -3348,8 +3348,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     - input: cost per 1K input tokens
     - output: cost per 1K output tokens
 
-    FIXED: We store pricing per 1K tokens in the database (not per 1M).
-    No conversion needed - use values as-is.
+    We convert to per-token pricing (divide by 1000) to match the format used by
+    all other gateways (OpenRouter, DeepInfra, etc.) and expected by calculate_cost().
+
+    Example: $1.25/1K tokens -> $0.00125/token (same as OpenRouter format)
 
     Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
     """
@@ -3362,13 +3364,15 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
 
     try:
         # Extract pricing from the API response
-        # FIXED: AiHubMix returns pricing per 1K tokens, database stores per single token
-        # Convert from per-1K to per-token by dividing by 1000
+        # AiHubMix returns pricing per 1K tokens
+        # Convert to per-token by dividing by 1000 to match OpenRouter format
+        # Example: $1.25/1K tokens -> $0.00125/token
         pricing_data = model.get("pricing", {})
         input_price_per_1k = pricing_data.get("input", 0)
         output_price_per_1k = pricing_data.get("output", 0)
 
-        # FIXED: Convert from per-1K to per-token pricing (divide by 1000)
+        # Convert from per-1K to per-token pricing (divide by 1000)
+        # This matches the format used by OpenRouter and expected by calculate_cost()
         input_price_per_token = float(input_price_per_1k) / 1000 if input_price_per_1k else 0
         output_price_per_token = float(output_price_per_1k) / 1000 if output_price_per_1k else 0
 
