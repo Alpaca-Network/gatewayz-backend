@@ -138,6 +138,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "OpenAI's GPT-OSS 120B - for production, general purpose, high reasoning use-cases",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/openai/gpt-oss-20b",
@@ -145,6 +146,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "OpenAI's GPT-OSS 20B - for lower latency and specialized use-cases",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama 4 Models
@@ -155,6 +157,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 4 Scout with mixture-of-experts, function calling support",
         "context_length": 131072,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama 3.3 Models
@@ -165,6 +168,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Quantized Llama 3.3 70B optimized for speed, supports function calling",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama 3.2 Models
@@ -175,6 +179,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.2 with vision capabilities for image reasoning and captioning",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3.2-3b-instruct",
@@ -182,6 +187,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.2 3B instruction-tuned for multilingual dialogue",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3.2-1b-instruct",
@@ -189,6 +195,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.2 1B lightweight instruction-tuned model",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama 3.1 Models
@@ -199,6 +206,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.1 70B with multilingual dialogue optimization",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3.1-8b-instruct-fast",
@@ -206,6 +214,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Fast variant of Llama 3.1 8B Instruct optimized for speed",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3.1-8b-instruct",
@@ -213,6 +222,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.1 8B with multilingual dialogue optimization",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3.1-8b-instruct-fp8",
@@ -220,6 +230,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.1 8B quantized to FP8 for efficiency",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3.1-8b-instruct-awq",
@@ -227,6 +238,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3.1 8B with AWQ quantization",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama 3 Models
@@ -237,6 +249,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3 8B instruction-tuned model",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3-8b-instruct",
@@ -244,6 +257,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3 8B instruction-tuned model",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-3-8b-instruct-awq",
@@ -251,6 +265,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 3 8B with AWQ quantization",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama 2 Models (Legacy)
@@ -261,6 +276,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 2 7B chat model in FP16 precision",
         "context_length": 4096,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta/llama-2-7b-chat-int8",
@@ -268,6 +284,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 2 7B chat model quantized to INT8",
         "context_length": 4096,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
@@ -275,6 +292,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's Llama 2 7B with LoRA fine-tuning support",
         "context_length": 4096,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Meta Llama Guard (Safety)
@@ -285,6 +303,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Meta's safety classifier for content moderation",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Qwen Models
@@ -295,6 +314,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Alibaba Qwen3 with reasoning, agent capabilities, multilingual support",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/qwen/qwq-32b",
@@ -302,6 +322,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Qwen's specialized reasoning model with LoRA support",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/qwen/qwen2.5-coder-32b-instruct",
@@ -309,6 +330,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Qwen's code-specific LLM with LoRA support",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Google Gemma Models
@@ -319,6 +341,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Google's Gemma 3 - multimodal text/image, 128K context, 140+ languages",
         "context_length": 131072,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/google/gemma-7b-it",
@@ -326,6 +349,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Google's Gemma 7B instruction-tuned model",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/google/gemma-7b-it-lora",
@@ -333,6 +357,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Google's Gemma 7B with LoRA fine-tuning support",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/google/gemma-2b-it-lora",
@@ -340,6 +365,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Google's Gemma 2B with LoRA fine-tuning support",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Mistral Models
@@ -350,6 +376,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "MistralAI's model with vision understanding, 128k context, function calling",
         "context_length": 128000,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/mistralai/mistral-7b-instruct-v0.2",
@@ -357,6 +384,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "MistralAI's Mistral 7B instruction-tuned v0.2",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/mistralai/mistral-7b-instruct-v0.2-lora",
@@ -364,6 +392,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "MistralAI's Mistral 7B v0.2 with LoRA support",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     {
         "id": "@cf/mistralai/mistral-7b-instruct-v0.1",
@@ -371,6 +400,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "MistralAI's Mistral 7B instruction-tuned v0.1",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # DeepSeek Models
@@ -381,6 +411,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "DeepSeek R1 reasoning model distilled to Qwen 32B",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # IBM Granite Models
@@ -391,6 +422,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "IBM's Granite 4.0 micro model for efficient inference",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # AI Singapore Models
@@ -401,6 +433,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "AI Singapore's SEA-LION multilingual model based on Gemma",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # NousResearch Models
@@ -411,6 +444,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "NousResearch's Hermes 2 Pro based on Mistral 7B",
         "context_length": 8192,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
     # ==========================================================================
     # Microsoft Models
@@ -421,6 +455,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "description": "Microsoft's Phi-2 small language model",
         "context_length": 2048,
         "provider": "cloudflare-workers-ai",
+        "source_gateway": "cloudflare-workers-ai",
     },
 ]
 
@@ -541,6 +576,7 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                         "description": model.get("description", ""),
                         "context_length": context_length,
                         "provider": "cloudflare-workers-ai",
+                        "source_gateway": "cloudflare-workers-ai",
                         "task": task_name,
                     })
 
