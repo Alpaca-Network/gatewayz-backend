@@ -4,9 +4,15 @@ Tests for AiHubMix model normalization with direct pricing
 
 Tests cover:
 - Model normalization with pricing from AiHubMix API
-- Price conversion from per 1K tokens to per 1M tokens
+- Price conversion from per 1K tokens to per-billion format (for frontend compatibility)
 - Filtering of zero-priced models
 - Logging behavior for models missing ID fields
+
+Note: The frontend expects AiHubMix pricing in "per-billion" format:
+- API returns: $X per 1K tokens
+- Backend stores: X * 1000 (per-billion format)
+- Frontend divides by 1000 to get per-million for display
+Example: $1.25/1K tokens -> stored as 1250.0 -> displayed as $1.25/MTok
 """
 
 import logging
@@ -41,10 +47,11 @@ class TestAiHubMixNormalizationWithPricing:
         assert normalized["source_gateway"] == "aihubmix"
         assert normalized["pricing_source"] == "aihubmix-api"
 
-        # Verify pricing is converted from per 1K to per 1M tokens
-        # $1.25 per 1K = $1250 per 1M tokens
+        # Verify pricing is converted from per 1K to per-billion format
+        # Frontend will divide by 1000 to get per-million for display
+        # $1.25 per 1K = stored as 1250.0 (frontend shows $1.25/MTok after dividing by 1000)
         assert normalized["pricing"]["prompt"] == "1250.0"
-        # $10 per 1K = $10000 per 1M tokens
+        # $10 per 1K = stored as 10000.0 (frontend shows $10/MTok after dividing by 1000)
         assert normalized["pricing"]["completion"] == "10000.0"
         assert normalized["pricing"]["request"] == "0"
         assert normalized["pricing"]["image"] == "0"
@@ -109,9 +116,9 @@ class TestAiHubMixNormalizationWithPricing:
         normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
 
         assert normalized is not None
-        # $0.0001 per 1K = $0.1 per 1M tokens
+        # $0.0001 per 1K = stored as 0.1 (frontend shows $0.0001/MTok after dividing by 1000)
         assert normalized["pricing"]["prompt"] == "0.1"
-        # $0.0003 per 1K = $0.3 per 1M tokens
+        # $0.0003 per 1K = stored as 0.3 (frontend shows $0.0003/MTok after dividing by 1000)
         assert normalized["pricing"]["completion"] == "0.3"
 
     def test_normalize_model_context_length(self):
@@ -166,7 +173,7 @@ class TestAiHubMixNormalizationWithPricing:
         assert normalized["id"] == "llama-3.2-11b-vision-preview"
         assert normalized["slug"] == "aihubmix/llama-3.2-11b-vision-preview"
         assert normalized["provider_slug"] == "aihubmix"
-        # $0.2 per 1K = $200 per 1M tokens
+        # $0.2 per 1K = stored as 200.0 (frontend shows $0.2/MTok after dividing by 1000)
         assert normalized["pricing"]["prompt"] == "200.0"
         assert normalized["pricing"]["completion"] == "200.0"
         # Description from 'desc' field
@@ -235,8 +242,8 @@ class TestAiHubMixNormalizationWithPricing:
             "developer_id": 11,
             "desc": "Meta's Llama model",
             "pricing": {
-                "input": 4,
-                "output": 4,
+                "input": 4,  # $4 per 1K tokens
+                "output": 4,  # $4 per 1K tokens
             },
         }
 
@@ -246,6 +253,9 @@ class TestAiHubMixNormalizationWithPricing:
         # Should successfully normalize
         assert normalized is not None
         assert normalized["id"] == "llama-3.1-405b-instruct"
+        # $4 per 1K = stored as 4000.0 (frontend shows $4/MTok after dividing by 1000)
+        assert normalized["pricing"]["prompt"] == "4000.0"
+        assert normalized["pricing"]["completion"] == "4000.0"
 
         # Should NOT produce any warnings
         assert len(caplog.records) == 0, "Should not log warnings for valid model_id field"
