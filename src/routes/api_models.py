@@ -7,7 +7,7 @@ path-based endpoint /v1/models/{provider}/{model}.
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -22,9 +22,9 @@ from src.services.models import (
     enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
     fetch_specific_model,
+    get_cached_models,
 )
 from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
-from src.services.models import get_cached_models
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)

@@ -7,13 +7,13 @@ to errors captured by Sentry across the application.
 
 import functools
 import logging
+from collections.abc import Callable
 from contextvars import ContextVar
 from typing import Any, TypeVar
-from collections.abc import Callable
 
 try:
     import sentry_sdk
-    from sentry_sdk import set_context, set_tag, capture_exception
+    from sentry_sdk import capture_exception, set_context, set_tag
     SENTRY_AVAILABLE = True
 except ImportError:
     SENTRY_AVAILABLE = False

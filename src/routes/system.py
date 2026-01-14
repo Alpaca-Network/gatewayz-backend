@@ -38,16 +38,16 @@ from src.services.models import (
     fetch_models_from_openrouter,
     fetch_models_from_together,
 )
-from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
+from src.services.onerouter_client import fetch_models_from_onerouter
+from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 from src.services.providers import (
     fetch_models_from_cerebras,
     fetch_models_from_nebius,
     fetch_models_from_novita,
     fetch_models_from_xai,
 )
-from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 
 # Initialize logging
 logger = logging.getLogger(__name__)

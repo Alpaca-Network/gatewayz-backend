@@ -1,23 +1,24 @@
 """System health timeline endpoints for provider and model uptime tracking"""
-from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
-from fastapi import APIRouter, Query, HTTPException, Depends
-from collections import defaultdict
 import hashlib
 import json
 import logging
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..config.supabase_config import get_supabase_client
 from ..schemas.health_timeline import (
-    ProviderUptimeResponse,
-    ModelUptimeResponse,
-    GatewayUptimeResponse,
-    ProviderUptimeData,
-    ModelUptimeData,
     GatewayUptimeData,
-    UptimeSample,
+    GatewayUptimeResponse,
     IncidentMetadata,
     IncidentSummary,
+    ModelUptimeData,
+    ModelUptimeResponse,
+    ProviderUptimeData,
+    ProviderUptimeResponse,
+    UptimeSample,
 )
 from ..security.deps import require_admin
 

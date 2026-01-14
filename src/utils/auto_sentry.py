@@ -22,9 +22,9 @@ import asyncio
 import functools
 import inspect
 import logging
+from collections.abc import Callable
 from contextvars import ContextVar
 from typing import Any, TypeVar
-from collections.abc import Callable
 
 try:
     import sentry_sdk

@@ -8,6 +8,7 @@ streaming responses without the "No response returned" error.
 """
 
 import logging
+
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)

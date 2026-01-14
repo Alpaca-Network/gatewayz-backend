@@ -18,7 +18,7 @@ Endpoints:
 
 import logging
 
-from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from src.services.pricing_audit_service import get_pricing_audit_service
 from src.services.pricing_lookup import load_manual_pricing

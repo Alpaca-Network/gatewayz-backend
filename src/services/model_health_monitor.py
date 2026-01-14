@@ -797,8 +797,8 @@ class ModelHealthMonitor:
     async def _publish_health_to_cache(self):
         """Publish health data to Redis cache for consumption by main API"""
         try:
-            from src.services.simple_health_cache import simple_health_cache
             from src.config.redis_config import get_redis_config
+            from src.services.simple_health_cache import simple_health_cache
 
             # Debug log to check Redis connection
             redis_config = get_redis_config()

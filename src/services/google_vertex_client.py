@@ -1640,7 +1640,7 @@ def fetch_models_from_google_vertex():
     Falls back to static configuration if the API call fails.
     Merges dynamic models with static config to get accurate pricing.
     """
-    from datetime import timezone, datetime
+    from datetime import datetime, timezone
 
     from src.cache import _google_vertex_models_cache
 

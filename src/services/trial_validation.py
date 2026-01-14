@@ -12,7 +12,11 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client, is_connection_error, refresh_supabase_client
+from src.config.supabase_config import (
+    get_supabase_client,
+    is_connection_error,
+    refresh_supabase_client,
+)
 
 logger = logging.getLogger(__name__)
 

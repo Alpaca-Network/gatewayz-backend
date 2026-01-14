@@ -9,6 +9,7 @@ streaming responses without the "No response returned" error.
 """
 
 import logging
+
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.config.opentelemetry_config import get_current_span_id, get_current_trace_id

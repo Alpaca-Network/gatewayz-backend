@@ -4,9 +4,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.api_keys import validate_api_key_permissions
-from src.services.user_lookup_cache import get_user
 from src.db_security import get_audit_logs
 from src.security.deps import get_api_key
+from src.services.user_lookup_cache import get_user
 
 # Initialize logging
 logger = logging.getLogger(__name__)

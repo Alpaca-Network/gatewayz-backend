@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import json
 import logging
 import secrets
@@ -11,13 +12,10 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from src.utils.performance_tracker import PerformanceTracker
-import importlib
-
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
-import src.db.chat_history as chat_history_module
 import src.db.chat_completion_requests as chat_completion_requests_module
+import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
@@ -25,29 +23,32 @@ from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
 from src.services.passive_health_monitor import capture_model_health
-from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.services.prometheus_metrics import (
-    model_inference_requests,
-    model_inference_duration,
-    tokens_used,
     credits_used,
-    track_time_to_first_chunk,
+    model_inference_duration,
+    model_inference_requests,
     record_free_model_usage,
+    tokens_used,
+    track_time_to_first_chunk,
 )
 from src.services.redis_metrics import get_redis_metrics
 from src.services.stream_normalizer import (
     StreamNormalizer,
-    create_error_sse_chunk,
     create_done_sse,
+    create_error_sse_chunk,
 )
-from src.utils.sentry_context import capture_payment_error, capture_provider_error
 from src.utils.exceptions import APIExceptions
+from src.utils.performance_tracker import PerformanceTracker
+from src.utils.rate_limit_headers import get_rate_limit_headers
+from src.utils.sentry_context import capture_payment_error, capture_provider_error
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Make braintrust optional for test environments
 try:
-    from braintrust import current_span, start_span, traced, flush as braintrust_flush
+    from braintrust import current_span
+    from braintrust import flush as braintrust_flush
+    from braintrust import start_span, traced
 
     BRAINTRUST_AVAILABLE = True
 except ImportError:

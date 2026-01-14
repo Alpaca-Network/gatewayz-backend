@@ -11,6 +11,7 @@ API Documentation: https://platform.openai.com/docs/api-reference
 import logging
 
 from src.config import Config
+
 # NOTE: extract_message_with_tools is a provider-agnostic utility for OpenAI-compatible
 # responses. It lives in anthropic_transformer.py for historical reasons but is used
 # across all provider clients. Consider moving to a shared module in a future refactor.

@@ -174,6 +174,7 @@ class HealthAlertingService:
         """Send alert via email"""
         try:
             import resend
+
             from src.config import Config
 
             # Get admin email from config
@@ -231,8 +232,9 @@ class HealthAlertingService:
     async def _send_slack_alert(self, alert: Alert):
         """Send alert to Slack"""
         try:
-            from src.config import Config
             import httpx
+
+            from src.config import Config
 
             webhook_url = getattr(Config, "SLACK_WEBHOOK_URL", None)
             if not webhook_url:
@@ -277,8 +279,9 @@ class HealthAlertingService:
     async def _send_discord_alert(self, alert: Alert):
         """Send alert to Discord"""
         try:
-            from src.config import Config
             import httpx
+
+            from src.config import Config
 
             webhook_url = getattr(Config, "DISCORD_WEBHOOK_URL", None)
             if not webhook_url:
@@ -321,8 +324,9 @@ class HealthAlertingService:
     async def _send_webhook_alert(self, alert: Alert):
         """Send alert to custom webhook"""
         try:
-            from src.config import Config
             import httpx
+
+            from src.config import Config
 
             webhook_url = getattr(Config, "ALERT_WEBHOOK_URL", None)
             if not webhook_url:
@@ -350,8 +354,9 @@ class HealthAlertingService:
     async def _send_pagerduty_alert(self, alert: Alert):
         """Send alert to PagerDuty"""
         try:
-            from src.config import Config
             import httpx
+
+            from src.config import Config
 
             integration_key = getattr(Config, "PAGERDUTY_INTEGRATION_KEY", None)
             if not integration_key:

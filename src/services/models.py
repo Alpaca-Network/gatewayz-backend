@@ -48,24 +48,23 @@ from src.cache import (
     should_revalidate_in_background,
 )
 from src.config import Config
+from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.clarifai_client import fetch_models_from_clarifai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.google_models_config import register_google_models_in_canonical_registry
+from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
-from src.services.cerebras_client import fetch_models_from_cerebras
-from src.services.clarifai_client import fetch_models_from_clarifai
-from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
-from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
+from src.services.pricing_lookup import enrich_model_with_pricing
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.xai_client import fetch_models_from_xai
-from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
-from src.services.pricing_lookup import enrich_model_with_pricing
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -3799,7 +3798,7 @@ def fetch_models_from_alibaba():
             )
             return _alibaba_models_cache.get("data", [])
 
-        from src.services.alibaba_cloud_client import list_alibaba_models, QuotaExceededError
+        from src.services.alibaba_cloud_client import QuotaExceededError, list_alibaba_models
 
         response = list_alibaba_models()
 

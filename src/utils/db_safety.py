@@ -6,7 +6,7 @@ Prevents common errors like IndexError, KeyError, and type mismatches.
 """
 
 import logging
-from typing import Any, TypeVar, Optional, Callable
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 

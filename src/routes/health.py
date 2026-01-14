@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from src.config.supabase_config import get_initialization_status, supabase
 from src.models.health_models import (
     HealthCheckRequest,
     HealthDashboardResponse,
@@ -27,7 +28,6 @@ from src.models.health_models import (
     SystemHealthResponse,
     UptimeMetricsResponse,
 )
-from src.config.supabase_config import get_initialization_status, supabase
 from src.security.deps import get_api_key
 from src.services.simple_health_cache import (
     simple_health_cache,

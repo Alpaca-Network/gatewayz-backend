@@ -9,8 +9,8 @@ HTTP response is sent and connections become stale.
 import asyncio
 import logging
 import time
-from functools import wraps
 from collections.abc import Callable
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 

@@ -4,8 +4,8 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
-from typing import Any
 from datetime import datetime, timezone
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 

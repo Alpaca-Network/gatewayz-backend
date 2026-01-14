@@ -11,9 +11,9 @@ This module significantly improves performance by:
 
 import json
 import logging
+from collections.abc import Callable
 from functools import wraps
 from typing import Any
-from collections.abc import Callable
 
 from src.config.redis_config import get_redis_client, is_redis_available
 

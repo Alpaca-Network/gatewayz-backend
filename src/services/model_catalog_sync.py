@@ -4,38 +4,38 @@ Fetches models from all provider APIs and syncs to database
 """
 
 import logging
-from typing import Any
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
-from src.db.providers_db import (
-    get_provider_by_slug,
-    create_provider,
-)
 from src.db.models_catalog_db import bulk_upsert_models
-from src.services.models import (
-    fetch_models_from_openrouter,
-    fetch_models_from_deepinfra,
-    fetch_models_from_featherless,
-    fetch_models_from_chutes,
-    fetch_models_from_groq,
-    fetch_models_from_fireworks,
-    fetch_models_from_together,
-    fetch_models_from_aimo,
-    fetch_models_from_near,
-    fetch_models_from_fal,
-    fetch_models_from_vercel_ai_gateway,
-    fetch_models_from_aihubmix,
-    fetch_models_from_helicone,
-    fetch_models_from_anannas,
-    fetch_models_from_alibaba,
+from src.db.providers_db import (
+    create_provider,
+    get_provider_by_slug,
 )
-from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.google_vertex_client import fetch_models_from_google_vertex
-from src.services.xai_client import fetch_models_from_xai
+from src.services.huggingface_models import fetch_models_from_huggingface_api
+from src.services.models import (
+    fetch_models_from_aihubmix,
+    fetch_models_from_aimo,
+    fetch_models_from_alibaba,
+    fetch_models_from_anannas,
+    fetch_models_from_chutes,
+    fetch_models_from_deepinfra,
+    fetch_models_from_fal,
+    fetch_models_from_featherless,
+    fetch_models_from_fireworks,
+    fetch_models_from_groq,
+    fetch_models_from_helicone,
+    fetch_models_from_near,
+    fetch_models_from_openrouter,
+    fetch_models_from_together,
+    fetch_models_from_vercel_ai_gateway,
+)
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
+from src.services.xai_client import fetch_models_from_xai
 
 logger = logging.getLogger(__name__)
 

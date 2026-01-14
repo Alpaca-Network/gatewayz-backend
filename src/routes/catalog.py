@@ -1703,10 +1703,10 @@ async def get_low_latency_models_api(
     - Fireworks optimized models
     """
     from src.services.request_prioritization import (
+        PROVIDER_LATENCY_TIERS,
+        get_fastest_providers,
         get_low_latency_models,
         get_ultra_low_latency_models,
-        get_fastest_providers,
-        PROVIDER_LATENCY_TIERS,
         suggest_low_latency_alternative,
     )
 

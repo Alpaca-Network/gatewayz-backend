@@ -4,7 +4,8 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
-from httpx import RemoteProtocolError, ConnectError, ReadTimeout
+from httpx import ConnectError, ReadTimeout, RemoteProtocolError
+
 from src.config.supabase_config import get_supabase_client
 from src.utils.retry import with_retry
 

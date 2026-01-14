@@ -14,9 +14,10 @@ Features:
 
 import asyncio
 import logging
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
-from dataclasses import dataclass, asdict
+
 import httpx
 
 logger = logging.getLogger(__name__)

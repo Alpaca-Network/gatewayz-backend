@@ -6,8 +6,8 @@ the authentication endpoint from hanging indefinitely.
 
 import logging
 import threading
-from typing import Any, TypeVar
 from collections.abc import Callable
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 

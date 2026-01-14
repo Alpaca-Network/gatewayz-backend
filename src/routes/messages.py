@@ -17,8 +17,8 @@ from fastapi.responses import JSONResponse
 
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
-import src.db.chat_history as chat_history_module
 import src.db.chat_completion_requests as chat_completion_requests_module
+import src.db.chat_history as chat_history_module
 import src.db.model_health as model_health_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
@@ -28,12 +28,6 @@ import src.services.trial_validation as trial_module
 from src.config import Config
 from src.schemas import MessagesRequest
 from src.security.deps import get_api_key
-from src.services.anthropic_transformer import (
-    extract_text_from_content,
-    transform_anthropic_to_openai,
-    transform_openai_to_anthropic,
-)
-from src.services.passive_health_monitor import capture_model_health
 from src.services.aihubmix_client import (
     make_aihubmix_request_openai,
     process_aihubmix_response,
@@ -45,6 +39,11 @@ from src.services.alibaba_cloud_client import (
 from src.services.anannas_client import (
     make_anannas_request_openai,
     process_anannas_response,
+)
+from src.services.anthropic_transformer import (
+    extract_text_from_content,
+    transform_anthropic_to_openai,
+    transform_openai_to_anthropic,
 )
 from src.services.cerebras_client import (
     make_cerebras_request_openai,
@@ -63,15 +62,12 @@ from src.services.huggingface_client import (
     make_huggingface_request_openai,
     process_huggingface_response,
 )
-from src.services.vercel_ai_gateway_client import (
-    make_vercel_ai_gateway_request_openai,
-    process_vercel_ai_gateway_response,
-)
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.openrouter_client import (
     make_openrouter_request_openai,
     process_openrouter_response,
 )
+from src.services.passive_health_monitor import capture_model_health
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
@@ -81,6 +77,10 @@ from src.services.provider_failover import (
     should_failover,
 )
 from src.services.together_client import make_together_request_openai, process_together_response
+from src.services.vercel_ai_gateway_client import (
+    make_vercel_ai_gateway_request_openai,
+    process_vercel_ai_gateway_response,
+)
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging

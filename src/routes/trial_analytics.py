@@ -1,31 +1,32 @@
 """Trial Analytics Routes - Admin endpoints for monitoring trial usage and conversions"""
-import logging
 import json
-from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from src.config.redis_config import get_redis_config
+from src.config.supabase_config import get_supabase_client
 from src.schemas.trial_analytics import (
-    TrialUsersResponse,
-    TrialUser,
-    TrialUsersPagination,
-    DomainAnalysisResponse,
-    DomainAnalysis,
-    ConversionFunnelResponse,
-    ConversionFunnelData,
-    ConversionBreakdown,
-    IPAnalysisResponse,
-    IPAnalysis,
-    SaveConversionMetricsRequest,
-    SaveConversionMetricsResponse,
+    BestWorstCohort,
     CohortAnalysisResponse,
     CohortData,
     CohortSummary,
-    BestWorstCohort,
+    ConversionBreakdown,
+    ConversionFunnelData,
+    ConversionFunnelResponse,
+    DomainAnalysis,
+    DomainAnalysisResponse,
+    IPAnalysis,
+    IPAnalysisResponse,
+    SaveConversionMetricsRequest,
+    SaveConversionMetricsResponse,
+    TrialUser,
+    TrialUsersPagination,
+    TrialUsersResponse,
 )
 from src.security.deps import require_admin
-from src.config.supabase_config import get_supabase_client
-from src.config.redis_config import get_redis_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -1,13 +1,14 @@
 import logging
 import os
-import time
 import threading
+import time
+
 import httpx
 from httpx import RemoteProtocolError
+from supabase.client import ClientOptions
 
 from src.config.config import Config
 from supabase import Client, create_client
-from supabase.client import ClientOptions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

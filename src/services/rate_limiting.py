@@ -584,8 +584,8 @@ class RateLimitManager:
         """Check rate limit for a specific API key (OPTIMIZED: with short-lived caching)"""
         # ADMIN BYPASS: Check if this is an admin tier user (skip rate limits)
         try:
-            from src.services.user_lookup_cache import get_user
             from src.db.plans import is_admin_tier_user
+            from src.services.user_lookup_cache import get_user
 
             user = get_user(api_key)
             if user and is_admin_tier_user(user.get("id")):

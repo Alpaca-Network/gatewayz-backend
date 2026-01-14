@@ -6,16 +6,18 @@ Usage: Call these endpoints with your API key to verify the integration is worki
 """
 
 import asyncio
+import logging
+
 from fastapi import APIRouter, Depends
+
 from src.security.deps import get_api_key
 from src.services.alibaba_cloud_client import (
     get_alibaba_cloud_client,
     make_alibaba_cloud_request_openai,
-    process_alibaba_cloud_response,
     make_alibaba_cloud_request_openai_stream,
+    process_alibaba_cloud_response,
     validate_stream_chunk,
 )
-import logging
 
 router = APIRouter(prefix="/debug/alibaba", tags=["Debug - Alibaba"])
 logger = logging.getLogger(__name__)

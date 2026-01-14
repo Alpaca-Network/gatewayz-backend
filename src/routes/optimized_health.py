@@ -13,16 +13,17 @@ Key optimizations:
 4. Efficient data structures
 """
 
-from fastapi import Query, HTTPException
-from datetime import datetime, timezone
 import asyncio
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from ..services.simple_health_cache import simple_health_cache
+from fastapi import HTTPException, Query
+
 from ..cache import get_models_cache
 from ..routes.system import _run_gateway_check
-from ..utils.logger import logger
+from ..services.simple_health_cache import simple_health_cache
 from ..utils.error_tracking import capture_error
+from ..utils.logger import logger
 
 
 def _normalize_timestamp(timestamp):

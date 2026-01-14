@@ -5,11 +5,11 @@ from typing import Any
 
 from postgrest import APIError
 
-from src.config.supabase_config import get_supabase_client, execute_with_retry
+from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
-from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
+from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)

@@ -741,9 +741,9 @@ class IntelligentHealthMonitor:
     async def _publish_health_to_cache(self):
         """Publish aggregated health data to Redis cache for main API consumption"""
         try:
+            from src.config.redis_config import get_redis_config
             from src.config.supabase_config import supabase
             from src.services.simple_health_cache import simple_health_cache
-            from src.config.redis_config import get_redis_config
 
             # Debug log to check Redis connection
             redis_config = get_redis_config()
