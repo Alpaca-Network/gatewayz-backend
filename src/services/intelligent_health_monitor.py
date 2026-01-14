@@ -913,12 +913,39 @@ class IntelligentHealthMonitor:
             for p in providers_data:
                 gw = p.get("gateway", "unknown")
                 if gw not in gateway_health:
-                    gateway_health[gw] = {"healthy": False, "status": "offline"}
+                    gateway_health[gw] = {
+                        "healthy": False,
+                        "status": "offline",
+                        "latency_ms": 0,
+                        "available": False,
+                        "last_check": None,
+                        "error": None
+                    }
                 if p.get("status") == "online":
                     gateway_health[gw]["healthy"] = True
                     gateway_health[gw]["status"] = "online"
+                    gateway_health[gw]["available"] = True
+                    gateway_health[gw]["latency_ms"] = p.get("avg_response_time_ms", 0)
+                    gateway_health[gw]["last_check"] = p.get("last_checked")
                 elif p.get("status") == "degraded" and gateway_health[gw]["status"] == "offline":
                     gateway_health[gw]["status"] = "degraded"
+
+            # Add all gateways from GATEWAY_CONFIG that aren't tracked yet
+            # Mark them as unconfigured if they have no health data
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                for gateway_name in GATEWAY_CONFIG.keys():
+                    if gateway_name not in gateway_health:
+                        gateway_health[gateway_name] = {
+                            "healthy": False,
+                            "status": "unconfigured",
+                            "latency_ms": None,
+                            "available": False,
+                            "last_check": datetime.now(timezone.utc).isoformat(),
+                            "error": "No models synced for this gateway. Run model sync to populate."
+                        }
+            except Exception as e:
+                logger.warning(f"Failed to add unconfigured gateways: {e}")
 
             healthy_gateways = sum(1 for g in gateway_health.values() if g.get("healthy", False))
 
@@ -941,7 +968,8 @@ class IntelligentHealthMonitor:
             }
 
             simple_health_cache.cache_system_health(system_data)
-            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy), tracked: {tracked_models} models")
+            simple_health_cache.cache_gateways_health(gateway_health)
+            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy / {len(gateway_health)} cached), tracked: {tracked_models} models")
 
         except Exception as e:
             logger.warning(f"Failed to publish health data to Redis cache: {e}")
