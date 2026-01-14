@@ -1,5 +1,8 @@
 """
 Modelz API client for fetching model token data and filtering models.
+
+Note: Modelz uses Alpaca Network's backend API (backend.alpacanetwork.ai) as
+their model registry endpoint. This is the correct production API URL.
 """
 
 import logging
@@ -13,7 +16,68 @@ from src.cache import clear_modelz_cache, get_modelz_cache
 
 logger = logging.getLogger(__name__)
 
+# Modelz uses Alpaca Network's backend API for their model registry
 MODELZ_BASE_URL = "https://backend.alpacanetwork.ai"
+
+
+def _parse_modelz_response(data: Any) -> list[dict[str, Any]]:
+    """
+    Parse Modelz API response into a list of tokens.
+
+    Handles different response formats that the API may return.
+
+    Args:
+        data: Raw response data from Modelz API
+
+    Returns:
+        List of token dictionaries
+    """
+    if isinstance(data, list):
+        return data
+    elif isinstance(data, dict) and "data" in data:
+        return data["data"]
+    elif isinstance(data, dict) and "tokens" in data:
+        return data["tokens"]
+    else:
+        return [data] if data else []
+
+
+def _extract_model_id(token: dict[str, Any]) -> str | None:
+    """
+    Extract model ID from a token dictionary.
+
+    Checks various possible fields for the model identifier.
+
+    Args:
+        token: Token dictionary from Modelz API
+
+    Returns:
+        Model ID string or None if not found
+    """
+    model_id = (
+        token.get("Token")
+        or token.get("model_id")
+        or token.get("modelId")
+        or token.get("id")
+        or token.get("name")
+        or token.get("model")
+    )
+    if model_id and isinstance(model_id, str):
+        return model_id.strip()
+    return None
+
+
+def _update_modelz_cache(tokens: list[dict[str, Any]]) -> None:
+    """
+    Update the Modelz cache with new token data.
+
+    Args:
+        tokens: List of token dictionaries to cache
+    """
+    cache = get_modelz_cache()
+    cache["data"] = tokens
+    cache["timestamp"] = time.time()
+    logger.info(f"Cached {len(tokens)} Modelz tokens for {cache['ttl']}s")
 
 
 async def get_modelz_client() -> httpx.AsyncClient:
@@ -84,23 +148,11 @@ async def fetch_modelz_tokens(
             response.raise_for_status()
 
             data = response.json()
-
-            # Handle different response formats
-            if isinstance(data, list):
-                tokens = data
-            elif isinstance(data, dict) and "data" in data:
-                tokens = data["data"]
-            elif isinstance(data, dict) and "tokens" in data:
-                tokens = data["tokens"]
-            else:
-                tokens = [data] if data else []
+            tokens = _parse_modelz_response(data)
 
             # Cache the full dataset (without filters) for future use
             # Always cache when fetching from API, regardless of use_cache parameter
-            cache = get_modelz_cache()
-            cache["data"] = tokens
-            cache["timestamp"] = time.time()
-            logger.info(f"Cached {len(tokens)} Modelz tokens for {cache['ttl']}s")
+            _update_modelz_cache(tokens)
 
             logger.info(f"Successfully fetched {len(tokens)} tokens from Modelz API")
             return tokens
@@ -140,19 +192,9 @@ async def get_modelz_model_ids(
 
     model_ids = []
     for token in tokens:
-        # Extract model ID from various possible fields
-        # Based on the API response, the field is likely "Token"
-        model_id = (
-            token.get("Token")
-            or token.get("model_id")
-            or token.get("modelId")
-            or token.get("id")
-            or token.get("name")
-            or token.get("model")
-        )
-
-        if model_id and isinstance(model_id, str):
-            model_ids.append(model_id.strip())
+        model_id = _extract_model_id(token)
+        if model_id:
+            model_ids.append(model_id)
 
     # Remove duplicates while preserving order
     unique_model_ids = list(dict.fromkeys(model_ids))
@@ -195,16 +237,8 @@ async def get_modelz_model_details(
     tokens = await fetch_modelz_tokens(use_cache=use_cache)
 
     for token in tokens:
-        token_model_id = (
-            token.get("Token")
-            or token.get("model_id")
-            or token.get("modelId")
-            or token.get("id")
-            or token.get("name")
-            or token.get("model")
-        )
-
-        if token_model_id and token_model_id.strip() == model_id.strip():
+        token_model_id = _extract_model_id(token)
+        if token_model_id and token_model_id == model_id.strip():
             return token
 
     return None
@@ -280,34 +314,14 @@ def fetch_models_from_modelz() -> list[dict[str, Any]]:
             response.raise_for_status()
 
             data = response.json()
-
-            # Handle different response formats
-            if isinstance(data, list):
-                tokens = data
-            elif isinstance(data, dict) and "data" in data:
-                tokens = data["data"]
-            elif isinstance(data, dict) and "tokens" in data:
-                tokens = data["tokens"]
-            else:
-                tokens = [data] if data else []
+            tokens = _parse_modelz_response(data)
 
         # Normalize tokens to catalog format
         normalized_models = []
         for token in tokens:
-            # Extract model ID from various possible fields
-            model_id = (
-                token.get("Token")
-                or token.get("model_id")
-                or token.get("modelId")
-                or token.get("id")
-                or token.get("name")
-                or token.get("model")
-            )
-
-            if not model_id or not isinstance(model_id, str):
+            model_id = _extract_model_id(token)
+            if not model_id:
                 continue
-
-            model_id = model_id.strip()
 
             # Build the model slug with provider prefix
             slug = f"modelz/{model_id}"
@@ -344,10 +358,8 @@ def fetch_models_from_modelz() -> list[dict[str, Any]]:
 
             normalized_models.append(normalized_model)
 
-        # Update the cache
-        cache = get_modelz_cache()
-        cache["data"] = tokens
-        cache["timestamp"] = time.time()
+        # Update the cache using the shared utility for consistency
+        _update_modelz_cache(tokens)
 
         logger.info(f"Successfully fetched {len(normalized_models)} models from Modelz")
         return normalized_models
