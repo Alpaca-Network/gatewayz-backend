@@ -30,7 +30,6 @@ sys.path.insert(0, str(project_root))
 # Import the extraction function from our utility
 from scripts.utilities.extract_model_pricing_warnings import (
     extract_warnings_from_logs,
-    parse_model_warning_line
 )
 
 

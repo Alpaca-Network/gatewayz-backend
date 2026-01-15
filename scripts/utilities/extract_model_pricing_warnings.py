@@ -9,7 +9,6 @@ import os
 import sys
 from collections import defaultdict
 import re
-import json
 from datetime import datetime
 
 # Add parent directory to path for imports

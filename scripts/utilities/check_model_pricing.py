@@ -10,7 +10,6 @@ Usage:
     python scripts/utilities/check_model_pricing.py --from-report REPORT_FILE
 """
 
-import os
 import sys
 import argparse
 import asyncio
@@ -24,8 +23,6 @@ sys.path.insert(0, str(project_root))
 # Import configuration and database modules
 try:
     from src.config.supabase_config import get_supabase_client
-    from src.services.pricing_lookup import get_model_pricing
-    from src.db.models_catalog_db import get_model_by_id
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure to run this script from the project root")
