@@ -4,7 +4,6 @@ Extract model pricing warnings from Railway deployment logs
 """
 import re
 from collections import defaultdict
-import json
 
 def parse_model_warnings(log_text):
     """
