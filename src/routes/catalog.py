@@ -602,6 +602,9 @@ async def get_models(
         vercel_ai_gateway_models: list[dict] = []
         alibaba_models: list[dict] = []
         simplismart_models: list[dict] = []
+        openai_models: list[dict] = []
+        anthropic_models: list[dict] = []
+        clarifai_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -731,6 +734,21 @@ async def get_models(
             if not simplismart_models and gateway_value == "simplismart":
                 logger.warning("Simplismart models unavailable - continuing without them")
 
+        if gateway_value in ("openai", "all"):
+            openai_models = get_cached_models("openai") or []
+            if not openai_models and gateway_value == "openai":
+                logger.warning("OpenAI models unavailable - continuing without them")
+
+        if gateway_value in ("anthropic", "all"):
+            anthropic_models = get_cached_models("anthropic") or []
+            if not anthropic_models and gateway_value == "anthropic":
+                logger.warning("Anthropic models unavailable - continuing without them")
+
+        if gateway_value in ("clarifai", "all"):
+            clarifai_models = get_cached_models("clarifai") or []
+            if not clarifai_models and gateway_value == "clarifai":
+                logger.warning("Clarifai models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "onerouter":
@@ -777,6 +795,12 @@ async def get_models(
             models = google_models
         elif gateway_value == "simplismart":
             models = simplismart_models
+        elif gateway_value == "openai":
+            models = openai_models
+        elif gateway_value == "anthropic":
+            models = anthropic_models
+        elif gateway_value == "clarifai":
+            models = clarifai_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -789,6 +813,11 @@ async def get_models(
                 fireworks_models,
                 together_models,
                 google_models,
+                cerebras_models,
+                nebius_models,
+                xai_models,
+                novita_models,
+                hug_models,
                 aimo_models,
                 near_models,
                 fal_models,
@@ -798,6 +827,9 @@ async def get_models(
                 vercel_ai_gateway_models,
                 alibaba_models,
                 simplismart_models,
+                openai_models,
+                anthropic_models,
+                clarifai_models,
             )
 
         if not models:
