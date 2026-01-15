@@ -17,9 +17,9 @@ BEGIN
     ) THEN
         CREATE TABLE "public"."chat_completion_requests" (
             "id" BIGSERIAL PRIMARY KEY,
-            "model_id" INTEGER REFERENCES "public"."models"("id") ON DELETE SET NULL,
-            "user_id" BIGINT REFERENCES "public"."users"("id") ON DELETE SET NULL,
-            "api_key_id" BIGINT REFERENCES "public"."api_keys_new"("id") ON DELETE SET NULL,
+            "model_id" INTEGER,  -- No FK constraint in stub - will be added by later migration if needed
+            "user_id" BIGINT,    -- No FK constraint in stub - will be added by later migration if needed
+            "api_key_id" BIGINT, -- No FK constraint in stub - will be added by later migration if needed
             "status" TEXT NOT NULL DEFAULT 'pending',
             "input_tokens" BIGINT DEFAULT 0,
             "output_tokens" BIGINT DEFAULT 0,
