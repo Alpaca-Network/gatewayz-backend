@@ -172,9 +172,8 @@ class Config:
     AIMO_MAX_RETRIES = int(os.environ.get("AIMO_MAX_RETRIES", "2"))  # Retry up to 2 times
     AIMO_ENABLE_HTTP_FALLBACK = os.environ.get("AIMO_ENABLE_HTTP_FALLBACK", "true").lower() == "true"
     AIMO_BASE_URLS = [
-        "https://devnet.aimo.network/api/v1",
-        "https://aimo.network/api/v1",
-    ]  # Primary and fallback URLs
+        "https://beta.aimo.network/api/v1",
+    ]  # Primary URL (beta.aimo.network is the active endpoint)
 
     # Near AI Configuration
     NEAR_API_KEY = os.environ.get("NEAR_API_KEY")

@@ -13,13 +13,13 @@ def get_aimo_client():
     """Get AIMO Network client using OpenAI-compatible interface
 
     AIMO Network is a decentralized AI marketplace providing OpenAI-compatible API endpoints
-    Base URL: https://devnet.aimo.network/api/v1/
+    Base URL: https://beta.aimo.network/api/v1/
     """
     try:
         if not Config.AIMO_API_KEY:
             raise ValueError("AIMO API key not configured")
 
-        return OpenAI(base_url="https://devnet.aimo.network/api/v1", api_key=Config.AIMO_API_KEY)
+        return OpenAI(base_url="https://beta.aimo.network/api/v1", api_key=Config.AIMO_API_KEY)
     except Exception as e:
         logger.error(f"Failed to initialize AIMO client: {e}")
         raise
