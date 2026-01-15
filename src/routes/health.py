@@ -281,7 +281,6 @@ async def get_models_health(
             # Return format that frontend expects
             return {
                 "data": cached,
-                "models": cached,  # Also include as 'models' for compatibility
                 "total_models": total_models,
                 "tracked_models": tracked_models,
                 "metadata": {
@@ -295,7 +294,6 @@ async def get_models_health(
         logger.debug("No models health in cache - health-service may not be running")
         return {
             "data": [],
-            "models": [],
             "total_models": total_models,
             "tracked_models": 0,
             "metadata": {
@@ -314,7 +312,6 @@ async def get_models_health(
         )
         return {
             "data": [],
-            "models": [],
             "total_models": 0,
             "tracked_models": 0,
             "metadata": {
@@ -400,10 +397,9 @@ async def get_catalog_models(
             }
             transformed_models.append(transformed)
 
-        # Match /health/models schema
+        # Match /health/models schema exactly
         return {
             "data": transformed_models,
-            "models": transformed_models,
             "total_models": len(all_models),
             "tracked_models": len(all_models),  # All catalog models are "tracked"
             "metadata": {
@@ -420,10 +416,9 @@ async def get_catalog_models(
             context_data={"endpoint": "/health/catalog/models", "operation": "get_catalog_models"},
             tags={"endpoint": "catalog_models", "error_type": type(e).__name__},
         )
-        # Match /health/models schema
+        # Match /health/models schema exactly
         return {
             "data": [],
-            "models": [],
             "total_models": 0,
             "tracked_models": 0,
             "metadata": {
