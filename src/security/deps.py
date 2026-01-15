@@ -190,9 +190,10 @@ async def get_api_key(
 
 async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any]:
     """
-    Get the current authenticated user
+    Get the current authenticated user and validate trial expiration
 
-    Chains with get_api_key to extract full user object.
+    Chains with get_api_key to extract full user object and checks
+    if trial period has expired for trial users.
 
     Args:
         api_key: Validated API key
@@ -201,12 +202,53 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any
         User dictionary with all data
 
     Raises:
-        HTTPException: 404 if user not found
+        HTTPException: 404 if user not found, 402 if trial expired
     """
+    from datetime import datetime, timezone
+
     user = get_user(api_key)
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Check if trial has expired
+    subscription_status = user.get("subscription_status", "")
+    trial_expires_at = user.get("trial_expires_at")
+
+    if subscription_status == "trial" and trial_expires_at:
+        try:
+            # Parse trial_expires_at and compare to current time
+            if isinstance(trial_expires_at, str):
+                # Handle ISO format with or without timezone
+                if trial_expires_at.endswith("Z"):
+                    trial_expires_at = trial_expires_at.replace("Z", "+00:00")
+                expiry_date = datetime.fromisoformat(trial_expires_at)
+            else:
+                expiry_date = trial_expires_at
+
+            # Ensure both datetimes are timezone-aware for comparison
+            if expiry_date.tzinfo is None:
+                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+
+            current_time = datetime.now(timezone.utc)
+
+            if current_time > expiry_date:
+                logger.info(
+                    f"Trial expired for user {user.get('id')}. "
+                    f"Expired at: {expiry_date.isoformat()}, Current time: {current_time.isoformat()}"
+                )
+                raise HTTPException(
+                    status_code=402,
+                    detail="Your 3-day trial period has expired. Please upgrade to continue using the service.",
+                )
+        except HTTPException:
+            # Re-raise HTTPException
+            raise
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Failed to parse trial_expires_at for user {user.get('id')}: {e}. "
+                "Allowing request to proceed."
+            )
 
     return user
 
@@ -338,18 +380,56 @@ async def check_credits(
     user: dict[str, Any] = Depends(get_current_user), min_credits: float = 0.0
 ) -> dict[str, Any]:
     """
-    Check if user has sufficient credits
+    Check if user has sufficient credits and trial hasn't expired
 
     Args:
         user: Current user
         min_credits: Minimum credits required
 
     Returns:
-        User if credits sufficient
+        User if credits sufficient and trial valid
 
     Raises:
-        HTTPException: 402 if insufficient credits
+        HTTPException: 402 if insufficient credits or trial expired
     """
+    from datetime import datetime, timezone
+
+    # Check if trial has expired
+    subscription_status = user.get("subscription_status", "")
+    trial_expires_at = user.get("trial_expires_at")
+
+    if subscription_status == "trial" and trial_expires_at:
+        # Parse trial_expires_at and compare to current time
+        try:
+            if isinstance(trial_expires_at, str):
+                # Handle ISO format with or without timezone
+                if trial_expires_at.endswith("Z"):
+                    trial_expires_at = trial_expires_at.replace("Z", "+00:00")
+                expiry_date = datetime.fromisoformat(trial_expires_at)
+            else:
+                expiry_date = trial_expires_at
+
+            # Ensure both datetimes are timezone-aware for comparison
+            if expiry_date.tzinfo is None:
+                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+
+            current_time = datetime.now(timezone.utc)
+
+            if current_time > expiry_date:
+                logger.info(
+                    f"Trial expired for user {user.get('id')}. "
+                    f"Expired at: {expiry_date.isoformat()}, Current time: {current_time.isoformat()}"
+                )
+                raise HTTPException(
+                    status_code=402,
+                    detail="Your 3-day trial period has expired. Please upgrade to continue using the service.",
+                )
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Failed to parse trial_expires_at for user {user.get('id')}: {e}. "
+                "Allowing request to proceed."
+            )
+
     current_credits = user.get("credits", 0.0)
 
     if current_credits < min_credits:
