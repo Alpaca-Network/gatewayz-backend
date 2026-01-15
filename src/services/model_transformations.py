@@ -141,6 +141,11 @@ MODEL_ID_ALIASES = {
     # Map z-ai/ prefixed GLM models to canonical OpenRouter IDs
     "z-ai/glm-4.5": "z-ai/glm-4-flash",
     "z-ai/glm-4.6": "z-ai/glm-4-flash",
+    # Black Forest Labs FLUX model aliases - ensure consistent pricing lookup
+    # Map dot variant to dash variant for pricing database consistency
+    "bfl/flux-1.1-pro": "bfl/flux-1-1-pro",
+    "bfl/flux1.1-pro": "bfl/flux-1-1-pro",
+    "bfl/flux1-1-pro": "bfl/flux-1-1-pro",
 }
 
 # Provider-specific fallbacks for the OpenRouter auto model.
