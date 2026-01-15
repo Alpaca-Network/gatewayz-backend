@@ -383,16 +383,27 @@ async def get_catalog_models(
         # Apply pagination
         paginated_models = filtered_models[offset : offset + limit]
 
-        # Get gateway summary
-        gateway_counts = {}
-        for model in all_models:
-            gw = model.get("source_gateway") or model.get("gateway") or "unknown"
-            gateway_counts[gw] = gateway_counts.get(gw, 0) + 1
+        # Transform catalog models to match health model format
+        transformed_models = []
+        for model in paginated_models:
+            transformed = {
+                "model_id": model.get("id", "unknown"),
+                "provider": model.get("source_gateway", "unknown"),
+                "gateway": model.get("source_gateway", "unknown"),
+                "status": "unknown",  # Catalog models don't have health status
+                "response_time_ms": None,
+                "avg_response_time_ms": None,
+                "uptime_percentage": None,
+                "error_count": None,
+                "total_requests": None,
+                "last_checked": None,
+            }
+            transformed_models.append(transformed)
 
         # Match /health/models schema
         return {
-            "data": paginated_models,
-            "models": paginated_models,
+            "data": transformed_models,
+            "models": transformed_models,
             "total_models": len(all_models),
             "tracked_models": len(all_models),  # All catalog models are "tracked"
             "metadata": {
@@ -451,7 +462,7 @@ async def get_catalog_providers(
         from src.services.gateway_health_service import GATEWAY_CONFIG
 
         providers = []
-        for gateway_id, config in GATEWAY_REGISTRY.items():
+        for gateway_id, registry_config in GATEWAY_REGISTRY.items():
             # Get additional config from GATEWAY_CONFIG if available
             gateway_config = GATEWAY_CONFIG.get(gateway_id, {})
             cache = gateway_config.get("cache", {})
@@ -459,30 +470,26 @@ async def get_catalog_providers(
             model_count = len(cache_data) if cache_data else 0
             has_api_key = bool(gateway_config.get("api_key"))
 
+            # Apply priority filter early if specified
+            if priority and registry_config.get("priority") != priority:
+                continue
+
+            # Transform to match health provider format exactly
             provider_data = {
-                "id": gateway_id,
-                "name": config.get("name", gateway_id.title()),
-                "color": config.get("color", "bg-gray-500"),
-                "priority": config.get("priority", "slow"),
-                "site_url": config.get("site_url"),
-                "aliases": config.get("aliases", []),
-                "model_count": model_count,
-                "has_api_key": has_api_key,
-                "configured": has_api_key,
-                "status": "configured" if has_api_key else "unconfigured",
+                "provider": gateway_id,
+                "gateway": gateway_id,
+                "status": "online" if has_api_key else "offline",
+                "total_models": model_count,
+                "healthy_models": 0,  # Catalog doesn't track health, default to 0
+                "degraded_models": 0,
+                "unhealthy_models": 0,
+                "avg_response_time_ms": 0.0,  # Default to 0.0 instead of None
+                "overall_uptime": 0,  # Default to 0 instead of None
             }
             providers.append(provider_data)
 
-        # Apply priority filter
-        if priority:
-            providers = [p for p in providers if p.get("priority") == priority]
-
-        # Sort by priority (fast first) then by name
-        providers.sort(key=lambda x: (0 if x.get("priority") == "fast" else 1, x.get("name", "")))
-
-        # Calculate totals
-        total_models = sum(p.get("model_count", 0) for p in providers)
-        configured_count = sum(1 for p in providers if p.get("configured"))
+        # Sort by provider name
+        providers.sort(key=lambda x: x.get("provider", ""))
 
         # Match /health/providers schema
         return {
