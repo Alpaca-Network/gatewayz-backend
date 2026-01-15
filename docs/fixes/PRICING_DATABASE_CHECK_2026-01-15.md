@@ -30,7 +30,7 @@ The following 8 models were reported as "not found in catalog" during the Januar
 ⚠️ **All 8 models triggered "not found in catalog" warnings** during model synchronization, which indicates:
 
 1. **Models exist in provider catalogs** (OpenRouter, Portkey, etc.)
-2. **Models are NOT in the Gatewayz pricing database** (models_catalog table)
+2. **Models are NOT in the Gatewayz pricing database** (models table)
 3. **System is using default pricing fallback** for these models
 
 ### Impact Assessment
@@ -51,29 +51,17 @@ Check if these models are:
 
 ### 2. Add Missing Pricing
 
-For each confirmed model, add pricing entries to the `models_catalog` table:
+For each confirmed model, update pricing entries in the `models` table:
 
 ```sql
 -- Example for google/gemini-2.0-flash
-INSERT INTO models_catalog (
-    id,
-    name,
-    provider,
-    input_cost_per_token,
-    output_cost_per_token,
-    pricing_currency,
-    context_length,
-    updated_at
-) VALUES (
-    'google/gemini-2.0-flash',
-    'Gemini 2.0 Flash',
-    'google',
-    0.00000015,  -- Example: $0.15 per 1M tokens
-    0.000000.60,   -- Example: $0.60 per 1M tokens
-    'USD',
-    1048576,  -- 1M context
-    NOW()
-);
+UPDATE models SET
+    pricing_prompt = 0.0000001,       -- $0.10 per 1M tokens
+    pricing_completion = 0.0000004,   -- $0.40 per 1M tokens
+    context_length = 1048576,         -- 1M context
+    updated_at = NOW()
+WHERE model_id = 'google/gemini-2.0-flash'
+   OR provider_model_id = 'google/gemini-2.0-flash';
 ```
 
 ### 3. Update Model Synchronization

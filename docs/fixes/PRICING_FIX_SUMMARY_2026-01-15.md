@@ -56,7 +56,7 @@ When models are not found in the pricing catalog database, the system falls back
 
 **File**: `/root/repo/supabase/migrations/20260115000001_add_missing_model_pricing.sql`
 
-Added all 8 models to `models_catalog` table with correct pricing from OpenRouter API:
+Updated all 8 models in the `models` table with correct pricing from OpenRouter API:
 
 | Model | Input Cost | Output Cost | vs. Default |
 |-------|------------|-------------|-------------|
@@ -126,9 +126,9 @@ supabase db push
 ```
 
 **What it does**:
-- Adds 8 models with proper pricing to `models_catalog` table
-- Uses `ON CONFLICT DO UPDATE` - safe to run multiple times
-- Creates indexes for faster lookups
+- Updates 8 models with proper pricing in the `models` table
+- Uses UPDATE statements with flexible WHERE clauses
+- Updates pricing_prompt and pricing_completion columns
 
 ### Step 2: Deploy Code Changes
 
@@ -205,7 +205,7 @@ Expected output: All 8 models should show "HAS PRICING" status.
 
 ### After Deployment
 - [ ] Run database migration successfully
-- [ ] Verify 8 models appear in `models_catalog` table with pricing
+- [ ] Verify 8 models have pricing in `models` table (pricing_prompt, pricing_completion)
 - [ ] Test API request with `deepseek/deepseek-chat` - should NOT show warning
 - [ ] Test API request with `google/gemini-2.0-flash` - should NOT show warning
 - [ ] Test API request with `meta/llama-3-8b-instruct` - should route correctly

@@ -43,10 +43,10 @@ psql $DATABASE_URL < supabase/migrations/20260115000001_add_missing_model_pricin
 
 ### What the Migration Does
 
-- Adds 8 models with proper pricing to `models_catalog` table
-- Uses `ON CONFLICT DO UPDATE` - safe to run multiple times
+- Updates 8 models with proper pricing in the `models` table
+- Uses UPDATE statements with flexible WHERE clauses to match model IDs
 - Includes model ID variants (meta/, mistralai/, bfl/ prefixes)
-- Updates existing records if they already exist
+- Updates pricing_prompt and pricing_completion columns
 
 ---
 
@@ -104,10 +104,10 @@ After deployment and migration:
 
 ### Database Verification
 ```sql
--- Check that all 8 models are in catalog with pricing
-SELECT id, name, input_cost_per_token, output_cost_per_token
-FROM models_catalog
-WHERE id IN (
+-- Check that all 8 models have pricing in the models table
+SELECT model_id, model_name, pricing_prompt, pricing_completion
+FROM models
+WHERE model_id IN (
   'deepseek/deepseek-chat',
   'google/gemini-2.0-flash',
   'mistral/mistral-large',
@@ -168,8 +168,9 @@ git push origin terragon/fix-backend-errors-tn4o03
 
 ### Rollback Database Migration
 ```sql
--- Delete the added models (only if needed)
-DELETE FROM models_catalog WHERE id IN (
+-- Reset pricing to NULL for the updated models (only if needed)
+UPDATE models SET pricing_prompt = NULL, pricing_completion = NULL
+WHERE model_id IN (
   'deepseek/deepseek-chat',
   'google/gemini-2.0-flash',
   'mistral/mistral-large',
