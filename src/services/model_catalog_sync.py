@@ -43,6 +43,7 @@ from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.xai_client import fetch_models_from_xai
+from src.services.cohere_client import fetch_models_from_cohere
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ PROVIDER_FETCH_FUNCTIONS = {
     "onerouter": fetch_models_from_onerouter,
     "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
     "modelz": fetch_models_from_modelz,
+    "cohere": fetch_models_from_cohere,
 }
 
 
