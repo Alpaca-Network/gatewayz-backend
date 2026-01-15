@@ -48,6 +48,7 @@ gatewayz/
 !SECURITY_INCIDENT_RESPONSE.md
 !FAILOVER_TESTING_GUIDE.md
 !LIVE_API_TESTING_GUIDE.md
+!SYNC_QUICKSTART.md
 
 # Temp and output files
 tmp/
