@@ -462,7 +462,7 @@ async def get_catalog_providers(
         from src.services.gateway_health_service import GATEWAY_CONFIG
 
         providers = []
-        for gateway_id, config in GATEWAY_REGISTRY.items():
+        for gateway_id, registry_config in GATEWAY_REGISTRY.items():
             # Get additional config from GATEWAY_CONFIG if available
             gateway_config = GATEWAY_CONFIG.get(gateway_id, {})
             cache = gateway_config.get("cache", {})
@@ -470,23 +470,23 @@ async def get_catalog_providers(
             model_count = len(cache_data) if cache_data else 0
             has_api_key = bool(gateway_config.get("api_key"))
 
-            # Transform to match health provider format
+            # Apply priority filter early if specified
+            if priority and registry_config.get("priority") != priority:
+                continue
+
+            # Transform to match health provider format exactly
             provider_data = {
                 "provider": gateway_id,
                 "gateway": gateway_id,
-                "status": "online" if has_api_key else "offline",  # Map configured -> online
+                "status": "online" if has_api_key else "offline",
                 "total_models": model_count,
-                "healthy_models": None,  # Catalog doesn't have health data
-                "degraded_models": None,
-                "unhealthy_models": None,
-                "avg_response_time_ms": None,
-                "overall_uptime": None,
-                "last_check": None,
+                "healthy_models": 0,  # Catalog doesn't track health, default to 0
+                "degraded_models": 0,
+                "unhealthy_models": 0,
+                "avg_response_time_ms": 0.0,  # Default to 0.0 instead of None
+                "overall_uptime": 0,  # Default to 0 instead of None
             }
             providers.append(provider_data)
-
-        # Apply priority filter if needed (though health format doesn't have priority)
-        # Skip priority filter since we're matching health schema
 
         # Sort by provider name
         providers.sort(key=lambda x: x.get("provider", ""))
