@@ -111,11 +111,16 @@ def _get_http_client(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     limits: httpx.Limits = DEFAULT_LIMITS,
 ) -> httpx.Client:
-    """Create an HTTP client with connection pooling and keepalive."""
+    """Create an HTTP client with connection pooling and keepalive.
+
+    Note: HTTP/2 is disabled by default to prevent "Bad file descriptor" errors
+    when servers close idle connections. HTTP/1.1 with keepalive provides better
+    stability for long-running services.
+    """
     return httpx.Client(
         timeout=timeout,
         limits=limits,
-        http2=True,  # Enable HTTP/2 for multiplexing
+        http2=False,  # Disable HTTP/2 to prevent stale connection issues
         follow_redirects=True,
     )
 
@@ -132,11 +137,16 @@ def _get_async_http_client(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     limits: httpx.Limits = DEFAULT_LIMITS,
 ) -> httpx.AsyncClient:
-    """Create an async HTTP client with connection pooling and keepalive."""
+    """Create an async HTTP client with connection pooling and keepalive.
+
+    Note: HTTP/2 is disabled by default to prevent "Bad file descriptor" errors
+    when servers close idle connections. HTTP/1.1 with keepalive provides better
+    stability for long-running services.
+    """
     return httpx.AsyncClient(
         timeout=timeout,
         limits=limits,
-        http2=True,
+        http2=False,  # Disable HTTP/2 to prevent stale connection issues
         follow_redirects=True,
     )
 

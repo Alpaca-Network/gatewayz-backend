@@ -1,6 +1,7 @@
 """Tests for model catalog sync functionality."""
 
 from src.services.model_catalog_sync import (
+    PROVIDER_FETCH_FUNCTIONS,
     transform_normalized_model_to_db_schema,
     extract_modality,
     extract_pricing,
@@ -213,3 +214,85 @@ class TestExtractCapabilities:
         model = {"architecture": {"input_modalities": ["text"]}}
         caps = extract_capabilities(model)
         assert caps["supports_vision"] is False
+
+
+class TestProviderFetchFunctionsRegistry:
+    """Tests for PROVIDER_FETCH_FUNCTIONS registry completeness."""
+
+    def test_openai_registered(self):
+        """Test that OpenAI provider is registered."""
+        assert "openai" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["openai"])
+
+    def test_anthropic_registered(self):
+        """Test that Anthropic provider is registered."""
+        assert "anthropic" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["anthropic"])
+
+    def test_clarifai_registered(self):
+        """Test that Clarifai provider is registered."""
+        assert "clarifai" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["clarifai"])
+
+    def test_simplismart_registered(self):
+        """Test that SimpliSmart provider is registered."""
+        assert "simplismart" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["simplismart"])
+
+    def test_onerouter_registered(self):
+        """Test that OneRouter provider is registered."""
+        assert "onerouter" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["onerouter"])
+
+    def test_cloudflare_workers_ai_registered(self):
+        """Test that Cloudflare Workers AI provider is registered."""
+        assert "cloudflare-workers-ai" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["cloudflare-workers-ai"])
+
+    def test_modelz_registered(self):
+        """Test that Modelz provider is registered."""
+        assert "modelz" in PROVIDER_FETCH_FUNCTIONS
+        assert callable(PROVIDER_FETCH_FUNCTIONS["modelz"])
+
+    def test_all_core_providers_registered(self):
+        """Test that all core providers have fetch functions registered."""
+        expected_providers = [
+            "openrouter",
+            "deepinfra",
+            "featherless",
+            "chutes",
+            "groq",
+            "fireworks",
+            "together",
+            "aimo",
+            "near",
+            "fal",
+            "vercel-ai-gateway",
+            "aihubmix",
+            "helicone",
+            "anannas",
+            "alibaba",
+            "huggingface",
+            "cerebras",
+            "google-vertex",
+            "xai",
+            "nebius",
+            "novita",
+            "openai",
+            "anthropic",
+            "clarifai",
+            "simplismart",
+            "onerouter",
+            "cloudflare-workers-ai",
+            "modelz",
+        ]
+        for provider in expected_providers:
+            assert provider in PROVIDER_FETCH_FUNCTIONS, f"Provider '{provider}' not registered"
+            assert callable(PROVIDER_FETCH_FUNCTIONS[provider]), \
+                f"Provider '{provider}' fetch function is not callable"
+
+    def test_provider_count(self):
+        """Test that we have the expected number of providers registered."""
+        # 28 providers total after adding the missing ones
+        assert len(PROVIDER_FETCH_FUNCTIONS) >= 28, \
+            f"Expected at least 28 providers, got {len(PROVIDER_FETCH_FUNCTIONS)}"

@@ -378,6 +378,7 @@ def create_app() -> FastAPI:
         ("chat", "Chat Completions"),
         ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("images", "Image Generation"),  # Image generation endpoints
+        ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
@@ -409,6 +410,7 @@ def create_app() -> FastAPI:
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
+        ("admin_pricing_analytics", "Admin Pricing Analytics"),  # Cost tracking and analytics
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
         ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),

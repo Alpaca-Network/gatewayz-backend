@@ -209,6 +209,49 @@ async def lifespan(app):
 
         _create_background_task(init_google_models_background(), name="init_google_models")
 
+        # Sync providers from GATEWAY_REGISTRY on startup (ensures DB matches code)
+        async def sync_providers_background():
+            try:
+                from src.services.provider_model_sync_service import sync_providers_on_startup
+
+                result = await sync_providers_on_startup()
+                if result["success"]:
+                    logger.info(f"✓ Synced {result['providers_synced']} providers from GATEWAY_REGISTRY")
+                else:
+                    logger.warning(f"Provider sync warning: {result.get('error')}")
+            except Exception as e:
+                logger.warning(f"Provider sync warning: {e}")
+
+        _create_background_task(sync_providers_background(), name="sync_providers")
+
+        # Optionally sync high-priority models on startup (can be disabled for faster startup)
+        sync_models_on_startup = os.environ.get("SYNC_MODELS_ON_STARTUP", "false").lower() == "true"
+        if sync_models_on_startup:
+            async def sync_initial_models_background():
+                try:
+                    from src.services.provider_model_sync_service import sync_initial_models_on_startup
+
+                    result = await sync_initial_models_on_startup()
+                    if result["success"]:
+                        logger.info(f"✓ Initial model sync: {result['total_models_synced']} models")
+                except Exception as e:
+                    logger.warning(f"Initial model sync warning: {e}")
+
+            _create_background_task(sync_initial_models_background(), name="sync_initial_models")
+
+        # Start background model sync task (runs every N hours)
+        model_sync_interval = int(os.environ.get("MODEL_SYNC_INTERVAL_HOURS", "6"))
+        async def start_model_sync_background():
+            try:
+                from src.services.provider_model_sync_service import start_background_model_sync
+
+                await start_background_model_sync(interval_hours=model_sync_interval)
+                logger.info(f"✓ Background model sync started (every {model_sync_interval}h)")
+            except Exception as e:
+                logger.warning(f"Background model sync warning: {e}")
+
+        _create_background_task(start_model_sync_background(), name="start_model_sync")
+
         # Initialize autonomous error monitoring in background
         async def init_error_monitoring_background():
             try:
@@ -250,6 +293,15 @@ async def lifespan(app):
         _background_tasks.clear()
 
     try:
+        # Stop background model sync
+        try:
+            from src.services.provider_model_sync_service import stop_background_model_sync
+
+            await stop_background_model_sync()
+            logger.info("Background model sync stopped")
+        except Exception as e:
+            logger.warning(f"Model sync shutdown warning: {e}")
+
         # Stop autonomous error monitoring
         try:
             autonomous_monitor = get_autonomous_monitor()

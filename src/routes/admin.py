@@ -97,8 +97,16 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Add credits to a user account (not a specific key)
-        add_credits_to_user(user["id"], req.credits)
+        # Build description with reason if provided
+        description = req.reason if req.reason else "Admin credit adjustment"
+
+        # Add credits to a user account with description
+        add_credits_to_user(
+            user_id=user["id"],
+            credits=req.credits,
+            transaction_type="admin_credit",
+            description=description,
+        )
 
         updated_user = get_user(req.api_key)
 
@@ -107,6 +115,7 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
             "message": f"Added {req.credits} credits to user {user.get('username', user['id'])}",
             "new_balance": updated_user["credits"],
             "user_id": user["id"],
+            "reason": description,
         }
 
     except HTTPException:

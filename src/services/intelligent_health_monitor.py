@@ -931,18 +931,54 @@ class IntelligentHealthMonitor:
                     gateway_health[gw]["status"] = "degraded"
 
             # Add all gateways from GATEWAY_CONFIG that aren't tracked yet
-            # Mark them as unconfigured if they have no health data
+            # Check cache and API key status to determine appropriate status
             try:
                 from src.services.gateway_health_service import GATEWAY_CONFIG
-                for gateway_name in GATEWAY_CONFIG.keys():
+                for gateway_name, gateway_config in GATEWAY_CONFIG.items():
                     if gateway_name not in gateway_health:
+                        # Check if API key is configured (static_catalog is valid for some gateways)
+                        api_key = gateway_config.get("api_key")
+                        url = gateway_config.get("url")
+                        # Gateway is considered configured if it has an API key OR doesn't need one (url is None)
+                        has_api_key = api_key is not None and api_key != ""
+                        needs_api_key = url is not None  # Gateways with url=None use static catalogs
+
+                        # Check if cache has models
+                        cache = gateway_config.get("cache", {})
+                        cache_data = cache.get("data") if cache else None
+                        has_cached_models = cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        model_count = len(cache_data) if has_cached_models else 0
+
+                        # Determine status and error based on configuration state
+                        if needs_api_key and not has_api_key:
+                            status = "unconfigured"
+                            error_msg = f"API key not configured. Set {gateway_config.get('api_key_env', 'API_KEY')} environment variable."
+                            is_healthy = False
+                        elif has_cached_models:
+                            # Has models in cache - gateway is available
+                            status = "healthy"
+                            error_msg = None
+                            is_healthy = True
+                        elif not needs_api_key:
+                            # Static catalog gateway without cached models yet
+                            status = "pending"
+                            error_msg = "Static catalog not yet loaded. Models will appear on first request."
+                            is_healthy = False
+                        else:
+                            # Has API key but no models in cache - needs sync
+                            status = "pending"
+                            error_msg = "Models not yet synced. They will appear when first accessed."
+                            is_healthy = False
+
                         gateway_health[gateway_name] = {
-                            "healthy": False,
-                            "status": "unconfigured",
+                            "healthy": is_healthy,
+                            "status": status,
                             "latency_ms": None,
-                            "available": False,
+                            "available": is_healthy,
                             "last_check": datetime.now(timezone.utc).isoformat(),
-                            "error": "No models synced for this gateway. Run model sync to populate."
+                            "error": error_msg,
+                            "total_models": model_count,
+                            "configured": has_api_key or not needs_api_key,
                         }
             except Exception as e:
                 logger.warning(f"Failed to add unconfigured gateways: {e}")

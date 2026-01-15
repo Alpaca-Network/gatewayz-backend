@@ -159,7 +159,7 @@ GATEWAY_CONFIG = {
     },
     "aimo": {
         "name": "AIMO",
-        "url": "https://devnet.aimo.network/api/v1/models",
+        "url": "https://beta.aimo.network/api/v1/models",
         "api_key_env": "AIMO_API_KEY",
         "api_key": getattr(Config, "AIMO_API_KEY", None),
         "cache": _aimo_models_cache,
