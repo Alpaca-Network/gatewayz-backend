@@ -66,7 +66,7 @@ async def create_transcription(
         le=1.0,
         description="Sampling temperature (0-1). Lower values are more deterministic."
     ),
-    api_key: Optional[str] = Depends(get_optional_api_key),
+    _api_key: Optional[str] = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
 ):
     """
     Transcribe audio using OpenAI Whisper or compatible services.
@@ -222,7 +222,7 @@ async def create_transcription_base64(
     prompt: Optional[str] = Form(default=None),
     response_format: str = Form(default="json"),
     temperature: float = Form(default=0.0, ge=0.0, le=1.0),
-    api_key: Optional[str] = Depends(get_optional_api_key),
+    _api_key: Optional[str] = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
 ):
     """
     Transcribe base64-encoded audio.
