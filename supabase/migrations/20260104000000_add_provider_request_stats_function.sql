@@ -1,13 +1,18 @@
 -- Migration: Add optimized functions for chat completion request statistics
 -- These functions efficiently aggregate chat completion request stats
 -- without fetching all individual records
+-- Note: Only runs if chat_completion_requests table exists (it may not exist in all environments)
 
--- ============================================================================
--- 1. Provider Request Statistics
--- ============================================================================
+DO $$
+BEGIN
+    -- Only proceed if the chat_completion_requests table exists
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_completion_requests') THEN
+        -- ============================================================================
+        -- 1. Provider Request Statistics
+        -- ============================================================================
 
--- Drop function if exists (for re-running migration)
-DROP FUNCTION IF EXISTS get_provider_request_stats();
+        -- Drop function if exists (for re-running migration)
+        DROP FUNCTION IF EXISTS get_provider_request_stats();
 
 -- Create optimized function for provider request statistics
 CREATE OR REPLACE FUNCTION get_provider_request_stats()
@@ -163,6 +168,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION get_model_request_stats(INTEGER) IS
-'Efficiently aggregates chat completion request statistics for a single model.
-Returns aggregated stats (counts, tokens, avg processing time) for the specified model_id.';
+        COMMENT ON FUNCTION get_model_request_stats(INTEGER) IS
+        'Efficiently aggregates chat completion request statistics for a single model.
+        Returns aggregated stats (counts, tokens, avg processing time) for the specified model_id.';
+
+        RAISE NOTICE 'Successfully created chat completion request statistics functions';
+    ELSE
+        RAISE NOTICE 'Table chat_completion_requests does not exist, skipping function creation';
+    END IF;
+END $$;

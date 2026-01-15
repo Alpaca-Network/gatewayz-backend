@@ -3,12 +3,18 @@
 -- Description: Fix critical bug where pricing was divided by 1M instead of 1K,
 -- causing all costs to be calculated 1000x too low.
 -- Pricing in database is per 1,000 tokens (per 1K), not per 1,000,000 (per 1M).
+-- Note: Only runs if chat_completion_requests table exists (it may not exist in all environments)
 
--- Drop the existing view
-DROP VIEW IF EXISTS "public"."model_usage_analytics";
+DO $$
+BEGIN
+    -- Only proceed if the chat_completion_requests table exists
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_completion_requests') THEN
+        -- Drop the existing view
+        DROP VIEW IF EXISTS "public"."model_usage_analytics";
 
--- Recreate the view with correct pricing calculation (divide by 1000, not 1000000)
-CREATE VIEW "public"."model_usage_analytics" AS
+        -- Recreate the view with correct pricing calculation (divide by 1000, not 1000000)
+        EXECUTE '
+        CREATE VIEW "public"."model_usage_analytics" AS
 SELECT
     -- Model identification
     m.id as model_id,
@@ -95,19 +101,19 @@ GROUP BY
     p.name,
     p.slug
 HAVING COUNT(ccr.id) > 0  -- Only models with at least 1 successful request
-ORDER BY successful_requests DESC, total_cost_usd DESC;
+ORDER BY successful_requests DESC, total_cost_usd DESC';
 
--- Update comment to reflect correct pricing
-COMMENT ON VIEW "public"."model_usage_analytics" IS
-    'Comprehensive analytics view showing all models with at least one successful request. '
-    'Includes request counts, token usage breakdown (input/output), pricing per 1K tokens, '
-    'and calculated costs (total, input, output, per-request average). '
-    'Updated in real-time as new requests are completed. '
-    'Useful for cost analysis, usage tracking, and identifying most expensive/popular models. '
-    'Note: Pricing is per 1,000 tokens (per 1K), not per 1,000,000 (per 1M).';
+        -- Update comment to reflect correct pricing
+        COMMENT ON VIEW "public"."model_usage_analytics" IS
+            'Comprehensive analytics view showing all models with at least one successful request. '
+            'Includes request counts, token usage breakdown (input/output), pricing per 1K tokens, '
+            'and calculated costs (total, input, output, per-request average). '
+            'Updated in real-time as new requests are completed. '
+            'Useful for cost analysis, usage tracking, and identifying most expensive/popular models. '
+            'Note: Pricing is per 1,000 tokens (per 1K), not per 1,000,000 (per 1M).';
 
--- Log success
-DO $$
-BEGIN
-    RAISE NOTICE 'Successfully fixed model_usage_analytics view pricing calculation (changed from /1000000 to /1000)';
+        RAISE NOTICE 'Successfully fixed model_usage_analytics view pricing calculation (changed from /1000000 to /1000)';
+    ELSE
+        RAISE NOTICE 'Table chat_completion_requests does not exist, skipping model_usage_analytics view fix';
+    END IF;
 END $$;

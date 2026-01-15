@@ -2,12 +2,18 @@
 -- Created: 2026-01-14
 -- Description: Comprehensive view showing model usage statistics with pricing and cost calculations
 -- for all models that have at least one successful request.
+-- Note: Only runs if chat_completion_requests table exists (it may not exist in all environments)
 
--- Drop view if it exists (for idempotency)
-DROP VIEW IF EXISTS "public"."model_usage_analytics";
+DO $$
+BEGIN
+    -- Only proceed if the chat_completion_requests table exists
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_completion_requests') THEN
+        -- Drop view if it exists (for idempotency)
+        DROP VIEW IF EXISTS "public"."model_usage_analytics";
 
--- Create the model_usage_analytics view
-CREATE VIEW "public"."model_usage_analytics" AS
+        -- Create the model_usage_analytics view
+        EXECUTE '
+        CREATE VIEW "public"."model_usage_analytics" AS
 SELECT
     -- Model identification
     m.id as model_id,
@@ -94,33 +100,33 @@ GROUP BY
     p.name,
     p.slug
 HAVING COUNT(ccr.id) > 0  -- Only models with at least 1 successful request
-ORDER BY successful_requests DESC, total_cost_usd DESC;
+ORDER BY successful_requests DESC, total_cost_usd DESC';
 
--- Add helpful comment
-COMMENT ON VIEW "public"."model_usage_analytics" IS
-    'Comprehensive analytics view showing all models with at least one successful request. '
-    'Includes request counts, token usage breakdown (input/output), pricing per 1M tokens, '
-    'and calculated costs (total, input, output, per-request average). '
-    'Updated in real-time as new requests are completed. '
-    'Useful for cost analysis, usage tracking, and identifying most expensive/popular models.';
+        -- Add helpful comment
+        COMMENT ON VIEW "public"."model_usage_analytics" IS
+            'Comprehensive analytics view showing all models with at least one successful request. '
+            'Includes request counts, token usage breakdown (input/output), pricing per 1M tokens, '
+            'and calculated costs (total, input, output, per-request average). '
+            'Updated in real-time as new requests are completed. '
+            'Useful for cost analysis, usage tracking, and identifying most expensive/popular models.';
 
--- Create indexes on underlying tables to optimize view queries (if not already exist)
--- These improve performance when querying the view
-CREATE INDEX IF NOT EXISTS "idx_chat_completion_requests_model_id_status"
-    ON "public"."chat_completion_requests" ("model_id", "status");
+        -- Create indexes on underlying tables to optimize view queries (if not already exist)
+        -- These improve performance when querying the view
+        CREATE INDEX IF NOT EXISTS "idx_chat_completion_requests_model_id_status"
+            ON "public"."chat_completion_requests" ("model_id", "status");
 
-CREATE INDEX IF NOT EXISTS "idx_chat_completion_requests_status_created_at"
-    ON "public"."chat_completion_requests" ("status", "created_at");
+        CREATE INDEX IF NOT EXISTS "idx_chat_completion_requests_status_created_at"
+            ON "public"."chat_completion_requests" ("status", "created_at");
 
-CREATE INDEX IF NOT EXISTS "idx_models_pricing"
-    ON "public"."models" ("pricing_prompt", "pricing_completion");
+        CREATE INDEX IF NOT EXISTS "idx_models_pricing"
+            ON "public"."models" ("pricing_prompt", "pricing_completion");
 
--- Grant appropriate permissions
-GRANT SELECT ON "public"."model_usage_analytics" TO authenticated;
-GRANT SELECT ON "public"."model_usage_analytics" TO anon;
+        -- Grant appropriate permissions
+        GRANT SELECT ON "public"."model_usage_analytics" TO authenticated;
+        GRANT SELECT ON "public"."model_usage_analytics" TO anon;
 
--- Log success
-DO $$
-BEGIN
-    RAISE NOTICE 'Successfully created model_usage_analytics view with comprehensive cost and usage tracking';
+        RAISE NOTICE 'Successfully created model_usage_analytics view with comprehensive cost and usage tracking';
+    ELSE
+        RAISE NOTICE 'Table chat_completion_requests does not exist, skipping model_usage_analytics view creation';
+    END IF;
 END $$;
