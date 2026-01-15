@@ -360,6 +360,11 @@ async def get_catalog_models(
         # Get all models from all gateways
         all_models = get_all_models_parallel()
 
+        # Get health data from cache to merge with catalog data
+        health_models = simple_health_cache.get_models_health() or []
+        health_lookup = {m.get("model_id"): m for m in health_models if m.get("model_id")}
+        logger.debug(f"Loaded {len(health_lookup)} health records for catalog enrichment")
+
         # Apply filters
         filtered_models = all_models
         if gateway:
@@ -380,20 +385,24 @@ async def get_catalog_models(
         # Apply pagination
         paginated_models = filtered_models[offset : offset + limit]
 
-        # Transform catalog models to match health model format
+        # Transform catalog models and merge with health data
         transformed_models = []
         for model in paginated_models:
+            model_id = model.get("id", "unknown")
+            health_data = health_lookup.get(model_id, {})
+
+            # Use health data if available, otherwise default to None/unknown
             transformed = {
-                "model_id": model.get("id", "unknown"),
+                "model_id": model_id,
                 "provider": model.get("source_gateway", "unknown"),
                 "gateway": model.get("source_gateway", "unknown"),
-                "status": "unknown",  # Catalog models don't have health status
-                "response_time_ms": None,
-                "avg_response_time_ms": None,
-                "uptime_percentage": None,
-                "error_count": None,
-                "total_requests": None,
-                "last_checked": None,
+                "status": health_data.get("status", "unknown"),
+                "response_time_ms": health_data.get("response_time_ms"),
+                "avg_response_time_ms": health_data.get("avg_response_time_ms"),
+                "uptime_percentage": health_data.get("uptime_percentage"),
+                "error_count": health_data.get("error_count"),
+                "total_requests": health_data.get("total_requests"),
+                "last_checked": health_data.get("last_checked"),
             }
             transformed_models.append(transformed)
 
@@ -456,6 +465,11 @@ async def get_catalog_providers(
         from src.routes.catalog import GATEWAY_REGISTRY
         from src.services.gateway_health_service import GATEWAY_CONFIG
 
+        # Get health data from cache to merge with catalog data
+        health_providers = simple_health_cache.get_providers_health() or []
+        health_lookup = {p.get("provider"): p for p in health_providers if p.get("provider")}
+        logger.debug(f"Loaded {len(health_lookup)} provider health records for catalog enrichment")
+
         providers = []
         for gateway_id, registry_config in GATEWAY_REGISTRY.items():
             # Get additional config from GATEWAY_CONFIG if available
@@ -469,17 +483,20 @@ async def get_catalog_providers(
             if priority and registry_config.get("priority") != priority:
                 continue
 
-            # Transform to match health provider format exactly
+            # Get health data for this provider if available
+            health_data = health_lookup.get(gateway_id, {})
+
+            # Transform to match health provider format with real health data
             provider_data = {
                 "provider": gateway_id,
                 "gateway": gateway_id,
-                "status": "online" if has_api_key else "offline",
-                "total_models": model_count,
-                "healthy_models": 0,  # Catalog doesn't track health, default to 0
-                "degraded_models": 0,
-                "unhealthy_models": 0,
-                "avg_response_time_ms": 0.0,  # Default to 0.0 instead of None
-                "overall_uptime": 0,  # Default to 0 instead of None
+                "status": health_data.get("status", "online" if has_api_key else "offline"),
+                "total_models": health_data.get("total_models", model_count),
+                "healthy_models": health_data.get("healthy_models", 0),
+                "degraded_models": health_data.get("degraded_models", 0),
+                "unhealthy_models": health_data.get("unhealthy_models", 0),
+                "avg_response_time_ms": health_data.get("avg_response_time_ms", 0.0),
+                "overall_uptime": health_data.get("overall_uptime", 0),
             }
             providers.append(provider_data)
 
