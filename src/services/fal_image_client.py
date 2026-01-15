@@ -167,21 +167,31 @@ def get_fal_models_by_type(model_type: str) -> list[dict[str, Any]]:
     Returns:
         List of models matching the specified type
     """
-    all_models = load_fal_models_catalog()
-    return [model for model in all_models if model.get("type") == model_type]
+    all_models = get_fal_models()
+    # API uses "category", static catalog uses "type"
+    return [
+        model for model in all_models
+        if model.get("type") == model_type or model.get("category") == model_type
+    ]
 
 
 def validate_fal_model(model_id: str) -> bool:
-    """Check if a model ID is valid in the Fal.ai catalog
+    """Check if a model ID is valid in the Fal.ai models list
+
+    Checks both API-fetched models and static catalog.
 
     Args:
         model_id: Model identifier to validate
 
     Returns:
-        True if model exists in catalog, False otherwise
+        True if model exists, False otherwise
     """
-    all_models = load_fal_models_catalog()
-    return any(model.get("id") == model_id for model in all_models)
+    all_models = get_fal_models()
+    # API uses "endpoint_id", static catalog uses "id"
+    return any(
+        model.get("id") == model_id or model.get("endpoint_id") == model_id
+        for model in all_models
+    )
 
 
 def _parse_image_size(size: str) -> tuple[int, int]:
