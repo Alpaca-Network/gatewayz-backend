@@ -321,6 +321,211 @@ async def get_models_health(
         }
 
 
+@router.get("/health/models/data", tags=["health", "catalog"])
+async def get_all_models_data(
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    provider: str | None = Query(None, description="Filter by specific provider"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of models to return"),
+    offset: int = Query(0, ge=0, description="Number of models to skip"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Get ALL models from the model catalog (not just health-tracked ones)
+
+    This endpoint returns the complete model catalog from all gateway caches,
+    including models that are not currently being health-monitored.
+
+    Use this for:
+    - Getting the full list of available models (9000+)
+    - Browsing all models across all gateways
+    - Model discovery and search
+
+    Query Parameters:
+    - gateway: Filter by specific gateway (e.g., 'openrouter', 'anthropic')
+    - provider: Filter by specific provider
+    - limit: Maximum number of models to return (default: 100, max: 1000)
+    - offset: Number of models to skip for pagination
+
+    Note: This returns catalog data, not health/monitoring data.
+    For health metrics, use /health/models instead.
+    """
+    try:
+        from src.services.models import get_all_models_parallel
+        from src.routes.catalog import GATEWAY_REGISTRY
+
+        # Get all models from all gateways
+        all_models = get_all_models_parallel()
+
+        # Apply filters
+        filtered_models = all_models
+        if gateway:
+            filtered_models = [m for m in filtered_models if m.get("source_gateway") == gateway or m.get("gateway") == gateway]
+        if provider:
+            filtered_models = [m for m in filtered_models if m.get("provider_slug") == provider or m.get("provider") == provider]
+
+        total_count = len(filtered_models)
+
+        # Apply pagination
+        paginated_models = filtered_models[offset:offset + limit]
+
+        # Get gateway summary
+        gateway_counts = {}
+        for model in all_models:
+            gw = model.get("source_gateway") or model.get("gateway") or "unknown"
+            gateway_counts[gw] = gateway_counts.get(gw, 0) + 1
+
+        return {
+            "data": paginated_models,
+            "models": paginated_models,
+            "total_models": len(all_models),
+            "filtered_count": total_count,
+            "returned_count": len(paginated_models),
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < total_count,
+            "gateway_counts": gateway_counts,
+            "total_gateways": len(GATEWAY_REGISTRY),
+            "metadata": {
+                "total_models": len(all_models),
+                "filtered_count": total_count,
+                "returned_count": len(paginated_models),
+                "gateways_with_models": len(gateway_counts),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to get all models data: {e}", exc_info=True)
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/models/data', 'operation': 'get_all_models_data'},
+            tags={'endpoint': 'models_data', 'error_type': type(e).__name__}
+        )
+        return {
+            "data": [],
+            "models": [],
+            "total_models": 0,
+            "filtered_count": 0,
+            "returned_count": 0,
+            "limit": limit,
+            "offset": offset,
+            "has_more": False,
+            "gateway_counts": {},
+            "total_gateways": 0,
+            "metadata": {
+                "total_models": 0,
+                "filtered_count": 0,
+                "returned_count": 0,
+                "gateways_with_models": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": str(e)
+            }
+        }
+
+
+@router.get("/health/providers/data", tags=["health", "catalog"])
+async def get_all_providers_data(
+    priority: str | None = Query(None, description="Filter by priority ('fast' or 'slow')"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Get ALL providers/gateways from the gateway registry (not just health-tracked ones)
+
+    This endpoint returns the complete list of all configured gateways/providers,
+    including those that may not have health data available.
+
+    Use this for:
+    - Getting the full list of available providers (30+)
+    - Understanding which gateways are configured
+    - Provider discovery and configuration status
+
+    Query Parameters:
+    - priority: Filter by priority ('fast' or 'slow')
+
+    Note: This returns registry/config data, not health/monitoring data.
+    For health metrics, use /health/providers instead.
+    """
+    try:
+        from src.routes.catalog import GATEWAY_REGISTRY
+        from src.services.gateway_health_service import GATEWAY_CONFIG
+
+        providers = []
+        for gateway_id, config in GATEWAY_REGISTRY.items():
+            # Get additional config from GATEWAY_CONFIG if available
+            gateway_config = GATEWAY_CONFIG.get(gateway_id, {})
+            cache = gateway_config.get("cache", {})
+            cache_data = cache.get("data") if cache else None
+            model_count = len(cache_data) if cache_data else 0
+            has_api_key = bool(gateway_config.get("api_key"))
+
+            provider_data = {
+                "id": gateway_id,
+                "name": config.get("name", gateway_id.title()),
+                "color": config.get("color", "bg-gray-500"),
+                "priority": config.get("priority", "slow"),
+                "site_url": config.get("site_url"),
+                "aliases": config.get("aliases", []),
+                "model_count": model_count,
+                "has_api_key": has_api_key,
+                "configured": has_api_key,
+                "status": "configured" if has_api_key else "unconfigured",
+            }
+            providers.append(provider_data)
+
+        # Apply priority filter
+        if priority:
+            providers = [p for p in providers if p.get("priority") == priority]
+
+        # Sort by priority (fast first) then by name
+        providers.sort(key=lambda x: (0 if x.get("priority") == "fast" else 1, x.get("name", "")))
+
+        # Calculate totals
+        total_models = sum(p.get("model_count", 0) for p in providers)
+        configured_count = sum(1 for p in providers if p.get("configured"))
+
+        return {
+            "data": providers,
+            "providers": providers,
+            "total_providers": len(providers),
+            "configured_count": configured_count,
+            "unconfigured_count": len(providers) - configured_count,
+            "total_models_across_providers": total_models,
+            "fast_providers": len([p for p in providers if p.get("priority") == "fast"]),
+            "slow_providers": len([p for p in providers if p.get("priority") == "slow"]),
+            "metadata": {
+                "total_providers": len(providers),
+                "configured_count": configured_count,
+                "total_models": total_models,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to get all providers data: {e}", exc_info=True)
+        capture_error(
+            e,
+            context_type='health_endpoint',
+            context_data={'endpoint': '/health/providers/data', 'operation': 'get_all_providers_data'},
+            tags={'endpoint': 'providers_data', 'error_type': type(e).__name__}
+        )
+        return {
+            "data": [],
+            "providers": [],
+            "total_providers": 0,
+            "configured_count": 0,
+            "unconfigured_count": 0,
+            "total_models_across_providers": 0,
+            "fast_providers": 0,
+            "slow_providers": 0,
+            "metadata": {
+                "total_providers": 0,
+                "configured_count": 0,
+                "total_models": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": str(e)
+            }
+        }
+
+
 @router.get("/health/model/{model_id}", response_model=ModelHealthResponse, tags=["health"])
 async def get_model_health(
     model_id: str,
