@@ -17,8 +17,6 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, Query
-
 from ..cache import get_models_cache
 from ..routes.system import _run_gateway_check
 from ..services.simple_health_cache import simple_health_cache

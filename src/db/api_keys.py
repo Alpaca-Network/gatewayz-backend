@@ -9,7 +9,7 @@ from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
-from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
+from src.utils.db_safety import DatabaseResultError, safe_get_first
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
