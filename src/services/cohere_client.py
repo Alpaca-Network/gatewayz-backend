@@ -6,10 +6,6 @@ Fetches models from Cohere API for model catalog synchronization
 import logging
 from typing import Optional
 
-import httpx
-
-from src.config import Config
-
 logger = logging.getLogger(__name__)
 
 

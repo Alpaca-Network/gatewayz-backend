@@ -33,6 +33,9 @@ from scripts.utilities.extract_model_pricing_warnings import (
 )
 
 
+# Ensure logs directory exists before configuring file handler
+Path('logs').mkdir(parents=True, exist_ok=True)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
