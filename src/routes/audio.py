@@ -330,15 +330,27 @@ async def create_transcription_base64(
 
         logger.info(f"[{request_id}] Base64 transcription completed successfully")
 
-        # Return response
-        if hasattr(response, "text"):
-            result = {"text": response.text}
-            if hasattr(response, "language"):
-                result["language"] = response.language
-            if hasattr(response, "duration"):
-                result["duration"] = response.duration
-            return JSONResponse(content=result)
-        return JSONResponse(content={"text": str(response)})
+        # Return response based on format (consistent with create_transcription)
+        if response_format == "text":
+            # When response_format is "text", Whisper returns a plain string
+            return JSONResponse(content={"text": response if isinstance(response, str) else str(response)})
+        elif response_format in ("json", "verbose_json"):
+            # OpenAI returns a Transcription object
+            if hasattr(response, "text"):
+                result = {"text": response.text}
+                if hasattr(response, "language"):
+                    result["language"] = response.language
+                if hasattr(response, "duration"):
+                    result["duration"] = response.duration
+                if hasattr(response, "segments") and response_format == "verbose_json":
+                    result["segments"] = response.segments
+                if hasattr(response, "words") and response_format == "verbose_json":
+                    result["words"] = response.words
+                return JSONResponse(content=result)
+            return JSONResponse(content={"text": str(response)})
+        else:
+            # SRT or VTT format - return as text
+            return JSONResponse(content={"text": str(response)})
 
     except HTTPException:
         raise
