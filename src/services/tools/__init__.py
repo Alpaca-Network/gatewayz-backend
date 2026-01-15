@@ -7,10 +7,12 @@ AI model tool calls. Tools follow the OpenAI function calling format.
 
 from src.services.tools.base import BaseTool, ToolDefinition, ToolResult
 from src.services.tools.text_to_speech import TextToSpeechTool
+from src.services.tools.web_search import WebSearchTool
 
 # Registry of available tools
 AVAILABLE_TOOLS: dict[str, type[BaseTool]] = {
     "text_to_speech": TextToSpeechTool,
+    "web_search": WebSearchTool,
 }
 
 
@@ -61,6 +63,7 @@ __all__ = [
     "ToolDefinition",
     "ToolResult",
     "TextToSpeechTool",
+    "WebSearchTool",
     "AVAILABLE_TOOLS",
     "get_tool_definitions",
     "get_tool_by_name",

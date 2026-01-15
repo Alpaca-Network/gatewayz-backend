@@ -197,6 +197,9 @@ class Config:
     # Resemble AI / Chatterbox TTS Configuration
     RESEMBLE_API_KEY = os.environ.get("RESEMBLE_API_KEY")
 
+    # Tavily Web Search Configuration
+    TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+
     # Anannas Configuration
     ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
 
