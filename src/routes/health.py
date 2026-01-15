@@ -321,12 +321,12 @@ async def get_models_health(
         }
 
 
-@router.get("/health/models/data", tags=["health", "catalog"])
-async def get_all_models_data(
+@router.get("/health/catalog/models", tags=["health", "catalog"])
+async def get_catalog_models(
     gateway: str | None = Query(None, description="Filter by specific gateway"),
     provider: str | None = Query(None, description="Filter by specific provider"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of models to return"),
-    offset: int = Query(0, ge=0, description="Number of models to skip"),
+    offset: int = Query(0, ge=0, description="Number of models to skip for pagination"),
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -340,11 +340,14 @@ async def get_all_models_data(
     - Browsing all models across all gateways
     - Model discovery and search
 
+    Pagination:
+    - limit: Maximum records to return per request (default: 100, max: 1000)
+    - offset: Number of records to skip (use for cursor-based pagination)
+    - Example: Page 1 = offset=0, Page 2 = offset=100 (with limit=100)
+
     Query Parameters:
     - gateway: Filter by specific gateway (e.g., 'openrouter', 'anthropic')
     - provider: Filter by specific provider
-    - limit: Maximum number of models to return (default: 100, max: 1000)
-    - offset: Number of models to skip for pagination
 
     Note: This returns catalog data, not health/monitoring data.
     For health metrics, use /health/models instead.
@@ -394,12 +397,12 @@ async def get_all_models_data(
             }
         }
     except Exception as e:
-        logger.error(f"Failed to get all models data: {e}", exc_info=True)
+        logger.error(f"Failed to get catalog models: {e}", exc_info=True)
         capture_error(
             e,
             context_type='health_endpoint',
-            context_data={'endpoint': '/health/models/data', 'operation': 'get_all_models_data'},
-            tags={'endpoint': 'models_data', 'error_type': type(e).__name__}
+            context_data={'endpoint': '/health/catalog/models', 'operation': 'get_catalog_models'},
+            tags={'endpoint': 'catalog_models', 'error_type': type(e).__name__}
         )
         return {
             "data": [],
@@ -423,8 +426,8 @@ async def get_all_models_data(
         }
 
 
-@router.get("/health/providers/data", tags=["health", "catalog"])
-async def get_all_providers_data(
+@router.get("/health/catalog/providers", tags=["health", "catalog"])
+async def get_catalog_providers(
     priority: str | None = Query(None, description="Filter by priority ('fast' or 'slow')"),
     api_key: str = Depends(get_api_key),
 ):
@@ -435,7 +438,7 @@ async def get_all_providers_data(
     including those that may not have health data available.
 
     Use this for:
-    - Getting the full list of available providers (30+)
+    - Getting the full list of available providers (26+)
     - Understanding which gateways are configured
     - Provider discovery and configuration status
 
@@ -500,12 +503,12 @@ async def get_all_providers_data(
             }
         }
     except Exception as e:
-        logger.error(f"Failed to get all providers data: {e}", exc_info=True)
+        logger.error(f"Failed to get catalog providers: {e}", exc_info=True)
         capture_error(
             e,
             context_type='health_endpoint',
-            context_data={'endpoint': '/health/providers/data', 'operation': 'get_all_providers_data'},
-            tags={'endpoint': 'providers_data', 'error_type': type(e).__name__}
+            context_data={'endpoint': '/health/catalog/providers', 'operation': 'get_catalog_providers'},
+            tags={'endpoint': 'catalog_providers', 'error_type': type(e).__name__}
         )
         return {
             "data": [],
@@ -1238,13 +1241,16 @@ async def database_health():
         }
 
 
-@router.get("/health/providers", tags=["health"])
-async def provider_health():
+@router.get("/health/providers/import-status", tags=["health", "admin"])
+async def get_provider_import_status():
     """
-    Check provider import status
+    Check provider import status (for debugging)
 
     Returns which providers successfully imported and which failed.
     This is essential for debugging chat endpoint issues in Railway.
+
+    Note: This is different from /health/providers which returns health metrics.
+    This endpoint shows which provider modules loaded successfully at startup.
     """
     try:
         from src.routes.chat import _provider_import_errors
