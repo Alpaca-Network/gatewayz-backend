@@ -2289,23 +2289,26 @@ def normalize_fal_model(fal_model: dict) -> dict | None:
     - 839+ models across text-to-image, text-to-video, image-to-video, etc.
     - Models include FLUX, Stable Diffusion, Veo, Sora, and many more
     - Supports image, video, audio, and 3D generation
+
+    Handles both static catalog format (uses "id") and API format (uses "endpoint_id")
     """
-    model_id = fal_model.get("id")
+    # API returns "endpoint_id", static catalog uses "id"
+    model_id = fal_model.get("endpoint_id") or fal_model.get("id")
     if not model_id:
-        logger.warning("Fal.ai model missing 'id' field: %s", sanitize_for_logging(str(fal_model)))
+        logger.warning("Fal.ai model missing 'id'/'endpoint_id' field: %s", sanitize_for_logging(str(fal_model)))
         return None
 
     # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")
     provider_slug = model_id.split("/")[0] if "/" in model_id else "fal-ai"
 
-    # Use name or derive from ID
-    display_name = fal_model.get("name") or model_id.split("/")[-1]
+    # Use title (API) or name (catalog) or derive from ID
+    display_name = fal_model.get("title") or fal_model.get("name") or model_id.split("/")[-1]
 
     # Get description
     description = fal_model.get("description", f"Fal.ai {display_name} model")
 
-    # Determine modality based on type
-    model_type = fal_model.get("type", "text-to-image")
+    # Determine modality based on type or category (API uses "category")
+    model_type = fal_model.get("type") or fal_model.get("category", "text-to-image")
     modality_map = {
         "text-to-image": MODALITY_TEXT_TO_IMAGE,
         "text-to-video": "text->video",

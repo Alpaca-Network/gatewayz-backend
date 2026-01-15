@@ -17,9 +17,92 @@ _fal_models_cache: list[dict[str, Any]] | None = None
 # Fal.ai API configuration
 FAL_API_BASE = "https://fal.run"
 FAL_QUEUE_API_BASE = "https://queue.fal.run"
+FAL_MODELS_API_BASE = "https://api.fal.ai/v1/models"
 FAL_REQUEST_TIMEOUT = 120.0  # seconds
 FAL_QUEUE_POLL_INTERVAL = 1.0  # seconds
 FAL_QUEUE_MAX_WAIT = 300.0  # 5 minutes
+
+# Cache for API-fetched models
+_fal_api_models_cache: list[dict[str, Any]] | None = None
+
+
+def fetch_fal_models_from_api() -> list[dict[str, Any]]:
+    """Fetch all available Fal.ai models from the REST API
+
+    Uses pagination to fetch all models from https://api.fal.ai/v1/models
+
+    Returns:
+        List of Fal.ai model definitions with full metadata
+    """
+    global _fal_api_models_cache
+
+    if _fal_api_models_cache is not None:
+        return _fal_api_models_cache
+
+    if not Config.FAL_API_KEY:
+        logger.warning("FAL_API_KEY not configured, falling back to static catalog")
+        return []
+
+    all_models = []
+    page = 1
+    per_page = 100  # Fetch 100 models per page
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            while True:
+                response = client.get(
+                    FAL_MODELS_API_BASE,
+                    params={"page": page, "per_page": per_page},
+                    headers={"Authorization": f"Key {Config.FAL_API_KEY}"},
+                )
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"Fal.ai API returned status {response.status_code}: {response.text[:200]}"
+                    )
+                    break
+
+                data = response.json()
+
+                # Handle both list response and paginated response formats
+                if isinstance(data, list):
+                    models = data
+                elif isinstance(data, dict):
+                    models = data.get("models", data.get("data", data.get("items", [])))
+                else:
+                    models = []
+
+                if not models:
+                    break
+
+                all_models.extend(models)
+                logger.debug(f"Fetched page {page} with {len(models)} models")
+
+                # Check if we've fetched all models
+                if len(models) < per_page:
+                    break
+
+                page += 1
+
+                # Safety limit to prevent infinite loops
+                if page > 50:
+                    logger.warning("Reached maximum page limit for Fal.ai API")
+                    break
+
+        if all_models:
+            _fal_api_models_cache = all_models
+            logger.info(f"Fetched {len(all_models)} Fal.ai models from API")
+        else:
+            logger.warning("No models returned from Fal.ai API")
+
+        return all_models
+
+    except httpx.TimeoutException:
+        logger.error("Timeout fetching Fal.ai models from API")
+        return []
+    except Exception as e:
+        logger.error(f"Failed to fetch Fal.ai models from API: {e}")
+        return []
 
 
 def load_fal_models_catalog() -> list[dict[str, Any]]:
@@ -60,9 +143,18 @@ def load_fal_models_catalog() -> list[dict[str, Any]]:
 def get_fal_models() -> list[dict[str, Any]]:
     """Get list of all available Fal.ai models
 
+    Tries to fetch from the Fal.ai API first, falls back to static catalog if API fails.
+
     Returns:
         List of model dictionaries with id, name, type, and description
     """
+    # Try API first for most complete/up-to-date model list
+    api_models = fetch_fal_models_from_api()
+    if api_models:
+        return api_models
+
+    # Fall back to static catalog
+    logger.info("Falling back to static Fal.ai catalog")
     return load_fal_models_catalog()
 
 
