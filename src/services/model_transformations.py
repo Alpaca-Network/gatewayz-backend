@@ -16,6 +16,11 @@ MODEL_PROVIDER_OVERRIDES = {
     "zai-org/glm-4.6-fp8": "near",
     # Featherless-only models - not available on OpenRouter
     "c10x/longwriter-qwen2.5-7b-instruct": "featherless",
+    # Meta Llama model ID aliases (support both meta/ and meta-llama/)
+    "meta/llama-3-8b-instruct": "openrouter",  # Alias maps to meta-llama/llama-3-8b-instruct
+    # BFL/Black Forest Labs model ID aliases
+    "bfl/flux-1-1-pro": "fal",  # Alias maps to black-forest-labs/flux-1.1-pro
+    "bfl/flux-1.1-pro": "fal",  # Alternative spelling
     # DeepSeek models NOT available on Fireworks - route to OpenRouter instead
     # Fireworks ONLY has: deepseek-v3p1 (V3/V3.1) and deepseek-r1-0528 (R1)
     # All other DeepSeek models must go to OpenRouter
