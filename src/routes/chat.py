@@ -19,6 +19,7 @@ import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
+from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
 from src.config import Config
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
@@ -948,16 +949,27 @@ async def _process_stream_completion_background(
         except Exception as e:
             logger.debug(f"Failed to capture health metric: {e}")
 
-        # Save chat completion request metadata to database
+        # Save chat completion request metadata to database with cost tracking
         if request_id:
             try:
+                # Calculate cost breakdown for analytics
+                from src.services.pricing import get_model_pricing
+                pricing_info = get_model_pricing(model)
+                input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+                output_cost = completion_tokens * pricing_info.get("completion", 0)
+                total_cost = input_cost + output_cost
+
                 await _to_thread(
-                    chat_completion_requests_module.save_chat_completion_request,
+                    save_chat_completion_request_with_cost,
                     request_id=request_id,
                     model_name=model,
                     input_tokens=prompt_tokens,
                     output_tokens=completion_tokens,
                     processing_time_ms=int(elapsed * 1000),
+                    cost_usd=total_cost,
+                    input_cost_usd=input_cost,
+                    output_cost_usd=output_cost,
+                    pricing_source="calculated",
                     status="completed",
                     error_message=None,
                     user_id=user["id"] if user else None,
@@ -1212,14 +1224,18 @@ async def stream_generator(
                 # Calculate elapsed time from stream start
                 error_elapsed = time.monotonic() - start_time
 
-                # Save failed streaming request
+                # Save failed streaming request with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
-                    chat_completion_requests_module.save_chat_completion_request,
+                    save_chat_completion_request_with_cost,
                     request_id=request_id,
                     model_name=model,
                     input_tokens=prompt_tokens,  # Use tokens accumulated so far
                     output_tokens=completion_tokens,  # May be partial
                     processing_time_ms=int(error_elapsed * 1000),
+                    cost_usd=0.0,
+                    input_cost_usd=0.0,
+                    output_cost_usd=0.0,
+                    pricing_source="error",
                     status="failed",
                     error_message=f"{error_type}: {error_message}",
                     user_id=user["id"] if user else None,
@@ -2160,14 +2176,24 @@ async def chat_completions(
             },
         )
 
-        # Save chat completion request metadata to database - run as background task
+        # Save chat completion request metadata to database with cost tracking - run as background task
+        # Calculate cost breakdown for analytics
+        from src.services.pricing import get_model_pricing
+        pricing_info = get_model_pricing(model)
+        input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+        output_cost = completion_tokens * pricing_info.get("completion", 0)
+
         background_tasks.add_task(
-            chat_completion_requests_module.save_chat_completion_request,
+            save_chat_completion_request_with_cost,
             request_id=request_id,
             model_name=model,
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             processing_time_ms=int(elapsed * 1000),
+            cost_usd=cost,
+            input_cost_usd=input_cost,
+            output_cost_usd=output_cost,
+            pricing_source="calculated",
             status="completed",
             error_message=None,
             user_id=user["id"] if not is_anonymous else None,
@@ -2191,14 +2217,18 @@ async def chat_completions(
                 # Calculate elapsed time
                 error_elapsed = time.monotonic() - start if 'start' in dir() else 0
 
-                # Save failed request to database
+                # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
-                    chat_completion_requests_module.save_chat_completion_request,
+                    save_chat_completion_request_with_cost,
                     request_id=request_id,
                     model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
                     input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
+                    cost_usd=0.0,
+                    input_cost_usd=0.0,
+                    output_cost_usd=0.0,
+                    pricing_source="error",
                     status="failed",
                     error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
                     user_id=user["id"] if user and 'user' in dir() else None,
@@ -2222,14 +2252,18 @@ async def chat_completions(
                 # Calculate elapsed time
                 error_elapsed = time.monotonic() - start if 'start' in dir() else 0
 
-                # Save failed request to database
+                # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
-                    chat_completion_requests_module.save_chat_completion_request,
+                    save_chat_completion_request_with_cost,
                     request_id=request_id,
                     model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
                     input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
+                    cost_usd=0.0,
+                    input_cost_usd=0.0,
+                    output_cost_usd=0.0,
+                    pricing_source="error",
                     status="failed",
                     error_message=f"{type(e).__name__}: {str(e)[:500]}",
                     user_id=user["id"] if user and 'user' in dir() else None,
@@ -3320,14 +3354,24 @@ async def unified_responses(
         except Exception as e:
             logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
 
-        # Save chat completion request metadata to database - run as background task
+        # Save chat completion request metadata to database with cost tracking - run as background task
+        # Calculate cost breakdown for analytics
+        from src.services.pricing import get_model_pricing
+        pricing_info = get_model_pricing(model)
+        input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+        output_cost = completion_tokens * pricing_info.get("completion", 0)
+
         background_tasks.add_task(
-            chat_completion_requests_module.save_chat_completion_request,
+            save_chat_completion_request_with_cost,
             request_id=request_id,
             model_name=model,
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             processing_time_ms=int(elapsed * 1000),
+            cost_usd=cost,
+            input_cost_usd=input_cost,
+            output_cost_usd=output_cost,
+            pricing_source="calculated",
             status="completed",
             error_message=None,
             user_id=user["id"],
@@ -3346,14 +3390,18 @@ async def unified_responses(
                 # Calculate elapsed time
                 error_elapsed = time.monotonic() - start if 'start' in dir() else 0
 
-                # Save failed request to database
+                # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
-                    chat_completion_requests_module.save_chat_completion_request,
+                    save_chat_completion_request_with_cost,
                     request_id=request_id,
                     model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
                     input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
+                    cost_usd=0.0,
+                    input_cost_usd=0.0,
+                    output_cost_usd=0.0,
+                    pricing_source="error",
                     status="failed",
                     error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
                     user_id=user["id"] if user and 'user' in dir() else None,
@@ -3374,14 +3422,18 @@ async def unified_responses(
                 # Calculate elapsed time
                 error_elapsed = time.monotonic() - start if 'start' in dir() else 0
 
-                # Save failed request to database
+                # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
-                    chat_completion_requests_module.save_chat_completion_request,
+                    save_chat_completion_request_with_cost,
                     request_id=request_id,
                     model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
                     input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
+                    cost_usd=0.0,
+                    input_cost_usd=0.0,
+                    output_cost_usd=0.0,
+                    pricing_source="error",
                     status="failed",
                     error_message=f"{type(e).__name__}: {str(e)[:500]}",
                     user_id=user["id"] if user and 'user' in dir() else None,
