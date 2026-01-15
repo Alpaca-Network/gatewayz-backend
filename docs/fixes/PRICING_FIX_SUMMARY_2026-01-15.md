@@ -54,7 +54,7 @@ When models are not found in the pricing catalog database, the system falls back
 
 ### ✅ 1. Database Migration - Add Proper Pricing
 
-**File**: `/root/repo/supabase/migrations/20260115000000_add_missing_model_pricing.sql`
+**File**: `/root/repo/supabase/migrations/20260115000001_add_missing_model_pricing.sql`
 
 Added all 8 models to `models_catalog` table with correct pricing from OpenRouter API:
 
@@ -122,7 +122,7 @@ psql $DATABASE_URL
 supabase db push
 
 # Migration file:
-# supabase/migrations/20260115000000_add_missing_model_pricing.sql
+# supabase/migrations/20260115000001_add_missing_model_pricing.sql
 ```
 
 **What it does**:
@@ -145,7 +145,7 @@ git status
 git add src/services/cohere_client.py
 git add src/services/model_catalog_sync.py
 git add src/services/model_transformations.py
-git add supabase/migrations/20260115000000_add_missing_model_pricing.sql
+git add supabase/migrations/20260115000001_add_missing_model_pricing.sql
 
 git commit -m "fix(pricing): add proper pricing for 8 models using defaults
 

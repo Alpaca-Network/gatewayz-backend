@@ -23,7 +23,7 @@ The SQL migration needs to be applied to the Supabase production database.
 3. Navigate to **SQL Editor**
 4. Copy and paste the contents of:
    ```
-   supabase/migrations/20260115000000_add_missing_model_pricing.sql
+   supabase/migrations/20260115000001_add_missing_model_pricing.sql
    ```
 5. Click **Run** to execute the migration
 6. Verify success message
@@ -38,7 +38,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 
 # Or run directly
-psql $DATABASE_URL < supabase/migrations/20260115000000_add_missing_model_pricing.sql
+psql $DATABASE_URL < supabase/migrations/20260115000001_add_missing_model_pricing.sql
 ```
 
 ### What the Migration Does
@@ -58,7 +58,7 @@ The code is already pushed to the branch. Railway should auto-deploy when merged
 1. `src/services/cohere_client.py` - NEW
 2. `src/services/model_catalog_sync.py` - Modified
 3. `src/services/model_transformations.py` - Modified
-4. `supabase/migrations/20260115000000_add_missing_model_pricing.sql` - NEW
+4. `supabase/migrations/20260115000001_add_missing_model_pricing.sql` - NEW
 5. `docs/fixes/PRICING_FIX_SUMMARY_2026-01-15.md` - NEW
 
 ### Deployment Options
