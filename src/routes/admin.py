@@ -788,9 +788,12 @@ async def get_users_stats(
         status_result = status_query.execute()
         status_data = status_result.data if status_result.data else []
 
-        # Count active/inactive
-        active_users = sum(1 for u in status_data if u.get("is_active", True))
+        # Count active/inactive - explicitly check for True (not None or False)
+        active_users = sum(1 for u in status_data if u.get("is_active") is True)
         inactive_users = total_users - active_users
+        logger.info(
+            f"Status breakdown - Total: {total_users}, Active: {active_users}, Inactive: {inactive_users}, Data rows: {len(status_data)}"
+        )
 
         # Credit statistics - fetch all filtered users to calculate accurate totals
         if api_key:
