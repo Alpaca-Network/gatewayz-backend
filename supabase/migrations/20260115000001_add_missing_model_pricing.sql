@@ -2,6 +2,11 @@
 -- Generated: 2026-01-15
 -- Purpose: Fix models showing "not found in catalog" warnings
 -- Fixed: Changed table from models_catalog to models and column names to match actual schema
+--
+-- NOTE: These UPDATE statements will only affect models that already exist in the
+-- database. If models are not yet synced, they will use default pricing until the
+-- next catalog sync populates them, at which point this pricing will apply on
+-- subsequent runs or manual re-application.
 
 -- ============================================================================
 -- Update pricing for models that exist in the models table
@@ -107,3 +112,31 @@ WHERE model_id = 'bytedance/sdxl-lightning-4step'
 -- Add comment explaining this migration
 -- ============================================================================
 COMMENT ON TABLE "public"."models" IS 'AI models with provider relationships, pricing, and health monitoring - Updated 2026-01-15 to fix 8 models using default pricing';
+
+-- ============================================================================
+-- Verification: Log which models now have pricing set
+-- This helps identify if any models were not found during the migration
+-- ============================================================================
+DO $$
+DECLARE
+    updated_count INTEGER;
+    model_list TEXT;
+BEGIN
+    SELECT COUNT(*), STRING_AGG(model_id, ', ')
+    INTO updated_count, model_list
+    FROM "public"."models"
+    WHERE model_id IN (
+        'deepseek/deepseek-chat', 'deepseek-chat',
+        'google/gemini-2.0-flash', 'gemini-2.0-flash',
+        'google/gemini-2.0-flash-exp', 'gemini-2.0-flash-exp',
+        'mistral/mistral-large', 'mistralai/mistral-large', 'mistral-large',
+        'meta-llama/llama-3-8b-instruct', 'meta/llama-3-8b-instruct', 'llama-3-8b-instruct',
+        'cohere/command-r-plus', 'command-r-plus',
+        'alibaba/qwen-3-14b', 'qwen-3-14b',
+        'black-forest-labs/flux-1.1-pro', 'bfl/flux-1-1-pro',
+        'bytedance/sdxl-lightning-4step'
+    )
+    AND pricing_prompt IS NOT NULL;
+
+    RAISE NOTICE 'Migration complete: % models with pricing set. Models: %', updated_count, COALESCE(model_list, 'none found');
+END $$;
