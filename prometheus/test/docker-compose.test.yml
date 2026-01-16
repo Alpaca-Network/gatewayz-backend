@@ -41,6 +41,30 @@ services:
       timeout: 5s
       retries: 5
 
+  grafana-test:
+    image: grafana/grafana:latest
+    container_name: grafana-test
+    ports:
+      - "3001:3000"  # Different port to avoid conflicts
+    volumes:
+      - grafana_test_data:/var/lib/grafana
+      - ./grafana-dashboard-test.json:/etc/grafana/provisioning/dashboards/prometheus-test.json:ro
+      - ./grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    networks:
+      - monitoring-test
+    depends_on:
+      - prometheus-test
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
 networks:
   monitoring-test:
     driver: bridge
@@ -48,3 +72,4 @@ networks:
 volumes:
   prometheus_test_data:
   alertmanager_test_data:
+  grafana_test_data:
