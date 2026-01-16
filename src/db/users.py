@@ -589,7 +589,12 @@ def add_credits(api_key: str, credits: int) -> None:
     if not user:
         raise ValueError(f"User with API key {api_key} not found")
 
-    add_credits_to_user(user["id"], credits)
+    add_credits_to_user(
+        user_id=user["id"],
+        credits=credits,
+        transaction_type="admin_credit",
+        description="Legacy credit addition",
+    )
     # Invalidate cache to ensure fresh credit balance on next get_user call
     invalidate_user_cache(api_key)
 
