@@ -135,7 +135,8 @@ class TestValidateTrialExpiration:
         }
         # Should not raise HTTPException, should log warning
         validate_trial_expiration(user)
-        # Check that warning was logged (if using logging)
+        # Verify that warning was logged
+        assert any("Failed to parse trial_expires_at" in record.message for record in caplog.records)
 
     def test_empty_subscription_status(self):
         """Test handling of empty subscription status"""

@@ -74,9 +74,10 @@ def validate_trial_expiration(user: dict) -> None:
             # Parse trial_expires_at and compare to current time
             if isinstance(trial_expires_at, str):
                 # Handle ISO format with or without timezone
+                trial_expires_at_formatted = trial_expires_at
                 if trial_expires_at.endswith("Z"):
-                    trial_expires_at = trial_expires_at.replace("Z", "+00:00")
-                expiry_date = datetime.fromisoformat(trial_expires_at)
+                    trial_expires_at_formatted = trial_expires_at.replace("Z", "+00:00")
+                expiry_date = datetime.fromisoformat(trial_expires_at_formatted)
             else:
                 expiry_date = trial_expires_at
 
