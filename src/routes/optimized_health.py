@@ -35,7 +35,7 @@ def _normalize_timestamp(timestamp):
     if isinstance(timestamp, str):
         try:
             return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-        except:
+        except (ValueError, TypeError, AttributeError):
             return None
     return None
 
