@@ -12,12 +12,11 @@ global:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []
+        - targets: ['localhost:9093']  # Alertmanager endpoint
 
 # Rule files
 rule_files:
-  # - "alert_rules.yml"
-  # - "recording_rules.yml"
+  - "/etc/prometheus/alert.rules.yml"
 
 # Scrape configurations
 scrape_configs:
