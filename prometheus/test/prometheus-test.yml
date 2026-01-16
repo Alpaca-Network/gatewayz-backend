@@ -1,0 +1,48 @@
+# Prometheus Test Configuration for GatewayZ
+# This configuration fixes the missing alerting section issue
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'gatewayz-test'
+    environment: 'test'
+
+# Alerting configuration - FIXED: Added alertmanager endpoint
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'localhost:9093'  # Alertmanager endpoint
+      timeout: 10s
+      api_version: v2
+
+# Rule files - Load alert rules
+rule_files:
+  - "/etc/prometheus/alert.rules.test.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Backend API metrics
+  - job_name: 'gatewayz-api-test'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+            - 'localhost:8000'  # Backend API
+        labels:
+          service: 'gatewayz-backend'
+          environment: 'test'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+            - 'localhost:9090'
+
+  # Alertmanager monitoring
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets:
+            - 'localhost:9093'
