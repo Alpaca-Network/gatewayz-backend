@@ -13,7 +13,7 @@ from src.config import Config
 
 # Initialize logging with Loki integration
 from src.config.logging_config import configure_logging
-from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL
+from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL, TAURI_DESKTOP_URL
 from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
@@ -150,6 +150,7 @@ def create_app() -> FastAPI:
     base_origins = [
         FRONTEND_BETA_URL,
         FRONTEND_STAGING_URL,
+        TAURI_DESKTOP_URL,  # Tauri desktop app origin (http://tauri.localhost)
         "https://api.gatewayz.ai",  # Added for chat API access from frontend
         "https://docs.gatewayz.ai",  # Added for documentation site access
     ]
