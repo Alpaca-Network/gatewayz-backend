@@ -9,10 +9,11 @@ Tests cover:
 - Different auto_web_search modes (True, False, "auto")
 """
 
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.routes.chat import router
 from src.services.tools.base import ToolResult
@@ -45,7 +46,10 @@ def travel_query_payload():
     return {
         "model": "openrouter/openai/gpt-4",
         "messages": [
-            {"role": "user", "content": "How easy is it to get wifi in El Salvador for remote work and video calls?"}
+            {
+                "role": "user",
+                "content": "How easy is it to get wifi in El Salvador for remote work and video calls?",
+            }
         ],
         "auto_web_search": "auto",
     }
@@ -57,7 +61,10 @@ def code_query_payload():
     return {
         "model": "openrouter/openai/gpt-4",
         "messages": [
-            {"role": "user", "content": "```python\ndef hello():\n    print('world')\n```\nCan you fix this?"}
+            {
+                "role": "user",
+                "content": "```python\ndef hello():\n    print('world')\n```\nCan you fix this?",
+            }
         ],
         "auto_web_search": "auto",
     }
@@ -149,8 +156,9 @@ class TestAutoWebSearchParameter:
 
     def test_web_search_threshold_validation(self):
         """Test that web_search_threshold is validated between 0 and 1."""
-        from src.schemas.proxy import ProxyRequest
         from pydantic import ValidationError
+
+        from src.schemas.proxy import ProxyRequest
 
         # Valid thresholds
         req = ProxyRequest(
@@ -185,7 +193,10 @@ class TestQueryClassifierIntegration:
         from src.services.query_classifier import classify_query
 
         messages = [
-            {"role": "user", "content": "How easy is it to get wifi in El Salvador for remote work?"}
+            {
+                "role": "user",
+                "content": "How easy is it to get wifi in El Salvador for remote work?",
+            }
         ]
         result = classify_query(messages, threshold=0.4)
 
@@ -292,9 +303,7 @@ class TestAutoWebSearchModes:
 
     @patch("src.services.tools.execute_tool")
     @patch("src.services.query_classifier.should_auto_search")
-    def test_auto_mode_uses_classifier(
-        self, mock_classifier, mock_execute_tool
-    ):
+    def test_auto_mode_uses_classifier(self, mock_classifier, mock_execute_tool):
         """Test that 'auto' mode uses the query classifier."""
         from src.services.query_classifier import ClassificationResult, QueryIntent
 
@@ -307,12 +316,13 @@ class TestAutoWebSearchModes:
                 intent=QueryIntent.LOCATION_SPECIFIC,
                 reason="wifi, remote work keywords",
                 extracted_query="wifi in El Salvador",
-            )
+            ),
         )
 
         # Call should_auto_search
         messages = [{"role": "user", "content": "wifi in El Salvador?"}]
         from src.services.query_classifier import should_auto_search
+
         should_search, result = should_auto_search(messages, threshold=0.5, enabled=True)
 
         assert should_search is True
@@ -359,6 +369,7 @@ class TestErrorHandling:
         messages = [{"role": "user", "content": None}]
 
         from src.services.query_classifier import classify_query
+
         # Should not raise, should return safe defaults
         result = classify_query(messages)
         assert result.should_search is False
@@ -381,15 +392,18 @@ class TestErrorHandling:
 class TestRealWorldScenarios:
     """Integration tests for real-world scenarios."""
 
-    @pytest.mark.parametrize("query,expected_search", [
-        ("How easy is it to get wifi in El Salvador for remote work?", True),
-        ("What's the internet like in Bali for video calls?", True),
-        ("Current Bitcoin price", True),
-        ("Latest news about AI", True),
-        ("def hello(): print('world')", False),
-        ("Hello!", False),
-        ("What is 2+2?", False),
-    ])
+    @pytest.mark.parametrize(
+        "query,expected_search",
+        [
+            ("How easy is it to get wifi in El Salvador for remote work?", True),
+            ("What's the internet like in Bali for video calls?", True),
+            ("Current Bitcoin price", True),
+            ("Latest news about AI", True),
+            ("def hello(): print('world')", False),
+            ("Hello!", False),
+            ("What is 2+2?", False),
+        ],
+    )
     def test_various_queries(self, query, expected_search):
         """Test classification of various query types."""
         from src.services.query_classifier import classify_query
@@ -397,7 +411,9 @@ class TestRealWorldScenarios:
         messages = [{"role": "user", "content": query}]
         result = classify_query(messages, threshold=0.4)
 
-        assert result.should_search == expected_search, f"Query '{query}' expected search={expected_search}, got {result.should_search}"
+        assert (
+            result.should_search == expected_search
+        ), f"Query '{query}' expected search={expected_search}, got {result.should_search}"
 
     def test_conversation_context_uses_last_message(self):
         """Test that classification uses the last user message."""
