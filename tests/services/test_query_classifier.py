@@ -21,6 +21,7 @@ from src.services.query_classifier import (
     _matches_patterns,
     _is_code_query,
     _extract_user_query,
+    _calculate_search_score,
     CURRENT_INFO_KEYWORDS,
     LOCATION_KEYWORDS,
     TRAVEL_DESTINATIONS,
@@ -416,6 +417,330 @@ class TestKeywordSets:
             assert keyword == keyword.lower(), f"Keyword not lowercase: {keyword}"
 
 
+class TestCalculateSearchScore:
+    """Tests for the _calculate_search_score function."""
+
+    def test_current_keywords_add_score(self):
+        """Test that current keywords add to score."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, reason = _calculate_search_score(
+            query="What is the current price?",
+            has_current_keywords=True,
+            current_keywords_found=["current", "price"],
+            has_location_keywords=False,
+            location_keywords_found=[],
+            has_destination=False,
+            matches_question_pattern=False,
+        )
+        assert score >= 0.4
+        assert "time-sensitive" in reason
+
+    def test_location_with_destination_adds_high_score(self):
+        """Test that location + destination combination adds high score."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, reason = _calculate_search_score(
+            query="What is the wifi like in Thailand?",
+            has_current_keywords=False,
+            current_keywords_found=[],
+            has_location_keywords=True,
+            location_keywords_found=["wifi"],
+            has_destination=True,
+            matches_question_pattern=False,
+        )
+        assert score >= 0.5
+        assert "location-specific" in reason
+
+    def test_location_without_destination(self):
+        """Test location keywords without destination."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, reason = _calculate_search_score(
+            query="What is good wifi speed?",
+            has_current_keywords=False,
+            current_keywords_found=[],
+            has_location_keywords=True,
+            location_keywords_found=["wifi"],
+            has_destination=False,
+            matches_question_pattern=False,
+        )
+        assert score >= 0.25
+        assert "location-related" in reason
+
+    def test_destination_only(self):
+        """Test destination without location keywords."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, reason = _calculate_search_score(
+            query="Tell me about Thailand",
+            has_current_keywords=False,
+            current_keywords_found=[],
+            has_location_keywords=False,
+            location_keywords_found=[],
+            has_destination=True,
+            matches_question_pattern=False,
+        )
+        assert score >= 0.2
+        assert "travel destination" in reason
+
+    def test_question_pattern_adds_score(self):
+        """Test that question patterns add to score."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, reason = _calculate_search_score(
+            query="How much does it cost to rent an apartment?",
+            has_current_keywords=False,
+            current_keywords_found=[],
+            has_location_keywords=False,
+            location_keywords_found=[],
+            has_destination=False,
+            matches_question_pattern=True,
+        )
+        assert score >= 0.2
+        assert "factual question" in reason
+
+    def test_short_query_reduces_score(self):
+        """Test that very short queries reduce score."""
+        from src.services.query_classifier import _calculate_search_score
+
+        # Short query (< 3 words)
+        score_short, _ = _calculate_search_score(
+            query="price now",
+            has_current_keywords=True,
+            current_keywords_found=["price", "now"],
+            has_location_keywords=False,
+            location_keywords_found=[],
+            has_destination=False,
+            matches_question_pattern=False,
+        )
+
+        # Longer query (same keywords)
+        score_long, _ = _calculate_search_score(
+            query="what is the current price of bitcoin today",
+            has_current_keywords=True,
+            current_keywords_found=["price", "current"],
+            has_location_keywords=False,
+            location_keywords_found=[],
+            has_destination=False,
+            matches_question_pattern=False,
+        )
+
+        assert score_short < score_long
+
+    def test_long_query_adds_bonus(self):
+        """Test that long queries (>10 words) get bonus score."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, _ = _calculate_search_score(
+            query="I am looking for information about the best places to find reliable wifi connection in southeast asia for remote work",
+            has_current_keywords=False,
+            current_keywords_found=[],
+            has_location_keywords=True,
+            location_keywords_found=["wifi", "remote work"],
+            has_destination=False,
+            matches_question_pattern=False,
+        )
+        # Should get bonus for >10 words
+        assert score >= 0.35  # 0.25 + 0.1 bonus
+
+    def test_score_capped_at_one(self):
+        """Test that score is capped at 1.0."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, _ = _calculate_search_score(
+            query="What is the current latest news about wifi prices in Thailand for remote work digital nomads this week",
+            has_current_keywords=True,
+            current_keywords_found=["current", "latest", "news", "prices", "this week"],
+            has_location_keywords=True,
+            location_keywords_found=["wifi", "remote work", "digital nomad"],
+            has_destination=True,
+            matches_question_pattern=True,
+        )
+        assert score <= 1.0
+
+    def test_no_signals_returns_general_query(self):
+        """Test that no signals returns 'general query' reason."""
+        from src.services.query_classifier import _calculate_search_score
+
+        score, reason = _calculate_search_score(
+            query="hello there",
+            has_current_keywords=False,
+            current_keywords_found=[],
+            has_location_keywords=False,
+            location_keywords_found=[],
+            has_destination=False,
+            matches_question_pattern=False,
+        )
+        assert score == 0.0
+        assert reason == "general query"
+
+
+class TestIntentDetermination:
+    """Tests for intent classification logic."""
+
+    def test_intent_factual_timeless(self):
+        """Test FACTUAL_TIMELESS intent when only pattern matches."""
+        messages = [{"role": "user", "content": "How much does a car cost on average?"}]
+        result = classify_query(messages)
+
+        # Should match question pattern but no current/location keywords
+        assert result.intent == QueryIntent.FACTUAL_TIMELESS
+
+    def test_intent_location_specific_with_destination(self):
+        """Test LOCATION_SPECIFIC intent with travel destination."""
+        messages = [{"role": "user", "content": "Tell me about living in Portugal"}]
+        result = classify_query(messages)
+
+        assert result.intent == QueryIntent.LOCATION_SPECIFIC
+
+    def test_intent_factual_current_with_time_keywords(self):
+        """Test FACTUAL_CURRENT intent with time-sensitive keywords."""
+        messages = [{"role": "user", "content": "What's the latest news?"}]
+        result = classify_query(messages)
+
+        assert result.intent == QueryIntent.FACTUAL_CURRENT
+
+    def test_intent_conversational_for_generic(self):
+        """Test CONVERSATIONAL intent for generic queries."""
+        messages = [{"role": "user", "content": "Thank you very much!"}]
+        result = classify_query(messages)
+
+        assert result.intent == QueryIntent.CONVERSATIONAL
+
+
+class TestMoreCodePatterns:
+    """Additional tests for code pattern detection."""
+
+    def test_class_definition(self):
+        """Test detection of class definition."""
+        assert _is_code_query("class MyClass:") is True
+
+    def test_javascript_const(self):
+        """Test detection of JavaScript const."""
+        assert _is_code_query("const foo = 'bar'") is True
+
+    def test_javascript_let(self):
+        """Test detection of JavaScript let."""
+        assert _is_code_query("let counter = 0") is True
+
+    def test_javascript_var(self):
+        """Test detection of JavaScript var."""
+        assert _is_code_query("var oldStyle = true") is True
+
+    def test_html_tags(self):
+        """Test detection of HTML tags."""
+        assert _is_code_query("<div class='container'>") is True
+
+    def test_object_literal(self):
+        """Test detection of object literal."""
+        assert _is_code_query("{ name: 'John', age: 30 }") is True
+
+    def test_arrow_function(self):
+        """Test detection of arrow function."""
+        assert _is_code_query("const fn = () => { return 42; }") is True
+
+    def test_file_extension_py(self):
+        """Test detection of .py file extension."""
+        assert _is_code_query("Check the file main.py") is True
+
+    def test_file_extension_ts(self):
+        """Test detection of .ts file extension."""
+        assert _is_code_query("Edit the component.tsx file") is True
+
+
+class TestMoreFactualPatterns:
+    """Additional tests for factual question patterns."""
+
+    def test_where_can_i_find(self):
+        """Test 'where can I find' pattern."""
+        matches, _ = _matches_patterns(
+            "Where can I find good coffee shops?",
+            FACTUAL_QUESTION_PATTERNS
+        )
+        assert matches is True
+
+    def test_is_it_possible(self):
+        """Test 'is it possible' pattern."""
+        matches, _ = _matches_patterns(
+            "Is it possible to work remotely in Japan?",
+            FACTUAL_QUESTION_PATTERNS
+        )
+        assert matches is True
+
+    def test_can_i_get(self):
+        """Test 'can I get' pattern."""
+        matches, _ = _matches_patterns(
+            "Can I get a visa on arrival?",
+            FACTUAL_QUESTION_PATTERNS
+        )
+        assert matches is True
+
+    def test_does_have(self):
+        """Test 'does X have' pattern."""
+        matches, _ = _matches_patterns(
+            "Does the hotel have wifi?",
+            FACTUAL_QUESTION_PATTERNS
+        )
+        assert matches is True
+
+    def test_how_much_does(self):
+        """Test 'how much does' pattern."""
+        matches, _ = _matches_patterns(
+            "How much does a flight to Paris cost?",
+            FACTUAL_QUESTION_PATTERNS
+        )
+        assert matches is True
+
+
+class TestMultimodalContentExtraction:
+    """Tests for multimodal content extraction edge cases."""
+
+    def test_multimodal_with_string_parts(self):
+        """Test extraction with string parts in content array."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    "First part as string",
+                    {"type": "text", "text": "Second part as dict"},
+                ]
+            }
+        ]
+        result = _extract_user_query(messages)
+        assert "First part as string" in result
+        assert "Second part as dict" in result
+
+    def test_multimodal_with_image_only(self):
+        """Test extraction when content only has image."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "https://example.com/img.jpg"}},
+                ]
+            }
+        ]
+        result = _extract_user_query(messages)
+        assert result == ""  # Empty string since no text parts
+
+    def test_multimodal_mixed_types(self):
+        """Test extraction with various content types."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Look at this image"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/img.jpg"}},
+                    {"type": "text", "text": "and tell me what you see"},
+                ]
+            }
+        ]
+        result = _extract_user_query(messages)
+        assert "Look at this image" in result
+        assert "tell me what you see" in result
+
+
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
@@ -465,3 +790,100 @@ class TestEdgeCases:
 
         result = classify_query(messages)
         assert result.should_search is False
+
+    def test_whitespace_only_content(self):
+        """Test handling of whitespace-only content."""
+        messages = [{"role": "user", "content": "   \n\t  "}]
+
+        result = classify_query(messages)
+        # Should not crash, low/no score expected
+        assert isinstance(result, ClassificationResult)
+
+    def test_special_characters(self):
+        """Test handling of special characters."""
+        messages = [{"role": "user", "content": "!@#$%^&*()"}]
+
+        result = classify_query(messages)
+        assert isinstance(result, ClassificationResult)
+
+    def test_only_system_and_assistant_messages(self):
+        """Test when no user message exists."""
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+
+        result = classify_query(messages)
+        assert result.should_search is False
+        assert result.intent == QueryIntent.CONVERSATIONAL
+        assert "No user message" in result.reason
+
+    def test_extracted_query_none_when_no_search(self):
+        """Test that extracted_query is None when should_search is False."""
+        messages = [{"role": "user", "content": "Hello!"}]
+
+        result = classify_query(messages, threshold=0.9)
+        assert result.should_search is False
+        assert result.extracted_query is None
+
+    def test_extracted_query_set_when_search(self):
+        """Test that extracted_query is set when should_search is True."""
+        messages = [{"role": "user", "content": "What's the current Bitcoin price?"}]
+
+        result = classify_query(messages, threshold=0.3)
+        if result.should_search:
+            assert result.extracted_query is not None
+            assert result.extracted_query == "What's the current Bitcoin price?"
+
+
+class TestAllQueryIntents:
+    """Ensure all QueryIntent enum values are covered."""
+
+    def test_all_intents_exist(self):
+        """Test that all expected intents exist."""
+        assert QueryIntent.FACTUAL_CURRENT
+        assert QueryIntent.FACTUAL_TIMELESS
+        assert QueryIntent.OPINION_SUBJECTIVE
+        assert QueryIntent.CODE_TECHNICAL
+        assert QueryIntent.CREATIVE
+        assert QueryIntent.CONVERSATIONAL
+        assert QueryIntent.LOCATION_SPECIFIC
+        assert QueryIntent.COMPARISON
+
+    def test_intent_enum_values(self):
+        """Test intent enum string values."""
+        assert QueryIntent.FACTUAL_CURRENT.value == "factual_current"
+        assert QueryIntent.CODE_TECHNICAL.value == "code_technical"
+        assert QueryIntent.LOCATION_SPECIFIC.value == "location_specific"
+        assert QueryIntent.CONVERSATIONAL.value == "conversational"
+
+
+class TestClassificationResultDataclass:
+    """Tests for the ClassificationResult dataclass."""
+
+    def test_dataclass_fields(self):
+        """Test that all fields are properly initialized."""
+        result = ClassificationResult(
+            should_search=True,
+            confidence=0.85,
+            intent=QueryIntent.LOCATION_SPECIFIC,
+            reason="test reason",
+            extracted_query="test query",
+        )
+
+        assert result.should_search is True
+        assert result.confidence == 0.85
+        assert result.intent == QueryIntent.LOCATION_SPECIFIC
+        assert result.reason == "test reason"
+        assert result.extracted_query == "test query"
+
+    def test_dataclass_default_extracted_query(self):
+        """Test that extracted_query defaults to None."""
+        result = ClassificationResult(
+            should_search=False,
+            confidence=0.0,
+            intent=QueryIntent.CONVERSATIONAL,
+            reason="test",
+        )
+
+        assert result.extracted_query is None
