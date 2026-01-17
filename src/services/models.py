@@ -31,6 +31,7 @@ from src.cache import (
     _huggingface_cache,
     _huggingface_models_cache,
     _models_cache,
+    _morpheus_models_cache,
     _multi_provider_catalog_cache,
     _near_models_cache,
     _nebius_models_cache,
@@ -59,6 +60,7 @@ from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
+from src.services.morpheus_client import fetch_models_from_morpheus
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
@@ -562,6 +564,7 @@ def get_all_models_sequential():
     openai_models = get_cached_models("openai") or []
     anthropic_models = get_cached_models("anthropic") or []
     simplismart_models = get_cached_models("simplismart") or []
+    morpheus_models = get_cached_models("morpheus") or []
     return (
         openrouter_models
         + featherless_models
@@ -589,6 +592,7 @@ def get_all_models_sequential():
         + openai_models
         + anthropic_models
         + simplismart_models
+        + morpheus_models
     )
 
 
@@ -896,6 +900,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_simplismart()
             _register_canonical_records("simplismart", result)
+            return result if result is not None else []
+
+        if gateway == "morpheus":
+            cached = _get_fresh_or_stale_cached_models(_morpheus_models_cache, "morpheus")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_morpheus()
+            _register_canonical_records("morpheus", result)
             return result if result is not None else []
 
         if gateway == "all":
