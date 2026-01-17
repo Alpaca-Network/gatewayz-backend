@@ -190,6 +190,23 @@ class ProxyRequest(BaseModel):
     provider: str | None = Field(
         default=None, description="Provider selection: 'openrouter', 'featherless', etc"
     )
+    auto_web_search: bool | Literal["auto"] | None = Field(
+        default="auto",
+        description=(
+            "Enable automatic web search for queries that would benefit from real-time information. "
+            "Set to True to always search, False to disable, or 'auto' (default) to let the system "
+            "decide based on query analysis. When enabled, search results are prepended to the context."
+        ),
+    )
+    web_search_threshold: float | None = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Confidence threshold for auto web search (0.0-1.0). Lower values trigger search more often. "
+            "Only used when auto_web_search is 'auto'. Default is 0.5."
+        ),
+    )
 
     class Config:
         extra = "allow"

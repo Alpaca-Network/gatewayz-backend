@@ -19,8 +19,8 @@ import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
 from src.config import Config
+from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
 from src.services.passive_health_monitor import capture_model_health
@@ -78,7 +78,6 @@ except ImportError:
         pass
 
 
-
 # Import provider clients with graceful error handling
 # This prevents a single provider's import failure from breaking the entire chat endpoint
 _provider_import_errors = {}
@@ -112,65 +111,139 @@ def _safe_import_provider(provider_name, imports_list):
             async def async_error(*args, **kwargs):
                 raise HTTPException(
                     status_code=503,
-                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}"
+                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}",
                 )
 
             def sync_error(*args, **kwargs):
                 raise HTTPException(
                     status_code=503,
-                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}"
+                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}",
                 )
 
             # Return the sync version by default (async handling is done elsewhere)
             return sync_error
 
-        return {import_name: make_error_raiser(provider_name, import_name, e) for import_name in imports_list}
+        return {
+            import_name: make_error_raiser(provider_name, import_name, e)
+            for import_name in imports_list
+        }
+
 
 # Load all provider clients using registry pattern
 # Define provider functions to import (reduces boilerplate from ~280 lines to ~60 lines)
 PROVIDER_FUNCTIONS = {
-    "openrouter": ["make_openrouter_request_openai", "process_openrouter_response",
-                   "make_openrouter_request_openai_stream", "make_openrouter_request_openai_stream_async"],
-    "featherless": ["make_featherless_request_openai", "process_featherless_response",
-                    "make_featherless_request_openai_stream"],
-    "fireworks": ["make_fireworks_request_openai", "process_fireworks_response",
-                  "make_fireworks_request_openai_stream"],
-    "together": ["make_together_request_openai", "process_together_response",
-                 "make_together_request_openai_stream"],
-    "huggingface": ["make_huggingface_request_openai", "process_huggingface_response",
-                    "make_huggingface_request_openai_stream"],
-    "aimo": ["make_aimo_request_openai", "process_aimo_response", "make_aimo_request_openai_stream"],
+    "openrouter": [
+        "make_openrouter_request_openai",
+        "process_openrouter_response",
+        "make_openrouter_request_openai_stream",
+        "make_openrouter_request_openai_stream_async",
+    ],
+    "featherless": [
+        "make_featherless_request_openai",
+        "process_featherless_response",
+        "make_featherless_request_openai_stream",
+    ],
+    "fireworks": [
+        "make_fireworks_request_openai",
+        "process_fireworks_response",
+        "make_fireworks_request_openai_stream",
+    ],
+    "together": [
+        "make_together_request_openai",
+        "process_together_response",
+        "make_together_request_openai_stream",
+    ],
+    "huggingface": [
+        "make_huggingface_request_openai",
+        "process_huggingface_response",
+        "make_huggingface_request_openai_stream",
+    ],
+    "aimo": [
+        "make_aimo_request_openai",
+        "process_aimo_response",
+        "make_aimo_request_openai_stream",
+    ],
     "xai": ["make_xai_request_openai", "process_xai_response", "make_xai_request_openai_stream"],
-    "cerebras": ["make_cerebras_request_openai", "process_cerebras_response",
-                 "make_cerebras_request_openai_stream"],
-    "chutes": ["make_chutes_request_openai", "process_chutes_response", "make_chutes_request_openai_stream"],
-    "google_vertex": ["make_google_vertex_request_openai", "process_google_vertex_response",
-                      "make_google_vertex_request_openai_stream"],
-    "near": ["make_near_request_openai", "process_near_response", "make_near_request_openai_stream"],
-    "vercel_ai_gateway": ["make_vercel_ai_gateway_request_openai", "process_vercel_ai_gateway_response",
-                          "make_vercel_ai_gateway_request_openai_stream"],
-    "helicone": ["make_helicone_request_openai", "process_helicone_response",
-                 "make_helicone_request_openai_stream"],
-    "aihubmix": ["make_aihubmix_request_openai", "process_aihubmix_response",
-                 "make_aihubmix_request_openai_stream"],
-    "anannas": ["make_anannas_request_openai", "process_anannas_response",
-                "make_anannas_request_openai_stream"],
-    "alpaca_network": ["make_alpaca_network_request_openai", "process_alpaca_network_response",
-                       "make_alpaca_network_request_openai_stream"],
-    "alibaba_cloud": ["make_alibaba_cloud_request_openai", "process_alibaba_cloud_response",
-                      "make_alibaba_cloud_request_openai_stream"],
-    "clarifai": ["make_clarifai_request_openai", "process_clarifai_response",
-                 "make_clarifai_request_openai_stream"],
-    "groq": ["make_groq_request_openai", "process_groq_response", "make_groq_request_openai_stream"],
-    "cloudflare_workers_ai": ["make_cloudflare_workers_ai_request_openai",
-                              "process_cloudflare_workers_ai_response",
-                              "make_cloudflare_workers_ai_request_openai_stream"],
-    "morpheus": ["make_morpheus_request_openai", "process_morpheus_response",
-                 "make_morpheus_request_openai_stream"],
-    "onerouter": ["make_onerouter_request_openai", "process_onerouter_response",
-                  "make_onerouter_request_openai_stream"],
-    "simplismart": ["make_simplismart_request_openai", "process_simplismart_response",
-                    "make_simplismart_request_openai_stream"],
+    "cerebras": [
+        "make_cerebras_request_openai",
+        "process_cerebras_response",
+        "make_cerebras_request_openai_stream",
+    ],
+    "chutes": [
+        "make_chutes_request_openai",
+        "process_chutes_response",
+        "make_chutes_request_openai_stream",
+    ],
+    "google_vertex": [
+        "make_google_vertex_request_openai",
+        "process_google_vertex_response",
+        "make_google_vertex_request_openai_stream",
+    ],
+    "near": [
+        "make_near_request_openai",
+        "process_near_response",
+        "make_near_request_openai_stream",
+    ],
+    "vercel_ai_gateway": [
+        "make_vercel_ai_gateway_request_openai",
+        "process_vercel_ai_gateway_response",
+        "make_vercel_ai_gateway_request_openai_stream",
+    ],
+    "helicone": [
+        "make_helicone_request_openai",
+        "process_helicone_response",
+        "make_helicone_request_openai_stream",
+    ],
+    "aihubmix": [
+        "make_aihubmix_request_openai",
+        "process_aihubmix_response",
+        "make_aihubmix_request_openai_stream",
+    ],
+    "anannas": [
+        "make_anannas_request_openai",
+        "process_anannas_response",
+        "make_anannas_request_openai_stream",
+    ],
+    "alpaca_network": [
+        "make_alpaca_network_request_openai",
+        "process_alpaca_network_response",
+        "make_alpaca_network_request_openai_stream",
+    ],
+    "alibaba_cloud": [
+        "make_alibaba_cloud_request_openai",
+        "process_alibaba_cloud_response",
+        "make_alibaba_cloud_request_openai_stream",
+    ],
+    "clarifai": [
+        "make_clarifai_request_openai",
+        "process_clarifai_response",
+        "make_clarifai_request_openai_stream",
+    ],
+    "groq": [
+        "make_groq_request_openai",
+        "process_groq_response",
+        "make_groq_request_openai_stream",
+    ],
+    "cloudflare_workers_ai": [
+        "make_cloudflare_workers_ai_request_openai",
+        "process_cloudflare_workers_ai_response",
+        "make_cloudflare_workers_ai_request_openai_stream",
+    ],
+    "morpheus": [
+        "make_morpheus_request_openai",
+        "process_morpheus_response",
+        "make_morpheus_request_openai_stream",
+    ],
+    "onerouter": [
+        "make_onerouter_request_openai",
+        "process_onerouter_response",
+        "make_onerouter_request_openai_stream",
+    ],
+    "simplismart": [
+        "make_simplismart_request_openai",
+        "process_simplismart_response",
+        "make_simplismart_request_openai_stream",
+    ],
 }
 
 # Load all providers and expose functions to global namespace
@@ -533,7 +606,7 @@ async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str,
     """Run a lightweight plan-limit precheck before making upstream calls."""
     plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
     if not plan_check.get("allowed", False):
-        raise APIExceptions.plan_limit_exceeded(reason=plan_check.get('reason', 'unknown'))
+        raise APIExceptions.plan_limit_exceeded(reason=plan_check.get("reason", "unknown"))
     return plan_check
 
 
@@ -614,7 +687,7 @@ async def _handle_credits_and_usage(
                 e,
                 operation="trial_usage_logging",
                 user_id=user.get("id"),
-                details={"model": model, "tokens": total_tokens, "is_trial": True}
+                details={"model": model, "tokens": total_tokens, "is_trial": True},
             )
     else:
         try:
@@ -652,8 +725,8 @@ async def _handle_credits_and_usage(
                     "model": model,
                     "tokens": total_tokens,
                     "cost_usd": cost,
-                    "api_key": api_key[:10] + "..." if api_key else None
-                }
+                    "api_key": api_key[:10] + "..." if api_key else None,
+                },
             )
             raise  # Re-raise to ensure billing errors are not silently ignored
 
@@ -680,39 +753,25 @@ async def _record_inference_metrics_and_health(
         status = "success" if success else "error"
 
         # Request count
-        model_inference_requests.labels(
-            provider=provider,
-            model=model,
-            status=status
-        ).inc()
+        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
 
         # Duration
-        model_inference_duration.labels(
-            provider=provider,
-            model=model
-        ).observe(elapsed_seconds)
+        model_inference_duration.labels(provider=provider, model=model).observe(elapsed_seconds)
 
         # Token usage
         if prompt_tokens > 0:
-            tokens_used.labels(
-                provider=provider,
-                model=model,
-                token_type="input"
-            ).inc(prompt_tokens)
+            tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+                prompt_tokens
+            )
 
         if completion_tokens > 0:
-            tokens_used.labels(
-                provider=provider,
-                model=model,
-                token_type="output"
-            ).inc(completion_tokens)
+            tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+                completion_tokens
+            )
 
         # Credits consumed
         if cost > 0:
-            credits_used.labels(
-                provider=provider,
-                model=model
-            ).inc(cost)
+            credits_used.labels(provider=provider, model=model).inc(cost)
 
         # Record Redis metrics (real-time dashboards)
         redis_metrics = get_redis_metrics()
@@ -724,7 +783,7 @@ async def _record_inference_metrics_and_health(
             cost=cost,
             tokens_input=prompt_tokens,
             tokens_output=completion_tokens,
-            error_message=error_message
+            error_message=error_message,
         )
 
         # Passive health monitoring (background task)
@@ -735,7 +794,7 @@ async def _record_inference_metrics_and_health(
         usage = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
+            "total_tokens": prompt_tokens + completion_tokens,
         }
 
         # Call passive health monitor in background (non-blocking)
@@ -747,7 +806,7 @@ async def _record_inference_metrics_and_health(
                 response_time_ms=response_time_ms,
                 status=health_status,
                 error_message=error_message,
-                usage=usage
+                usage=usage,
             )
         )
 
@@ -803,7 +862,7 @@ async def _process_stream_completion_background(
                 completion_tokens=completion_tokens,
                 cost=cost,
                 success=True,
-                error_message=None
+                error_message=None,
             )
             # Capture health metrics (passive monitoring)
             try:
@@ -846,7 +905,7 @@ async def _process_stream_completion_background(
             completion_tokens=completion_tokens,
             cost=cost,
             success=True,
-            error_message=None
+            error_message=None,
         )
 
         # Log activity
@@ -954,6 +1013,7 @@ async def _process_stream_completion_background(
             try:
                 # Calculate cost breakdown for analytics
                 from src.services.pricing import get_model_pricing
+
                 pricing_info = get_model_pricing(model)
                 input_cost = prompt_tokens * pricing_info.get("prompt", 0)
                 output_cost = completion_tokens * pricing_info.get("completion", 0)
@@ -1117,7 +1177,7 @@ async def stream_generator(
                 error_message=f"Provider returned empty stream for model {model}. Please try again or contact support.",
                 error_type="empty_stream_error",
                 provider=provider,
-                model=model
+                model=model,
             )
             yield create_done_sse()
             return
@@ -1150,11 +1210,13 @@ async def stream_generator(
         # OPTIMIZATION: Quick plan limit check (critical - must be synchronous)
         # Skip plan limit check for anonymous users (user is None)
         if not is_anonymous and user is not None:
-            post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
+            post_plan = await _to_thread(
+                enforce_plan_limits, user["id"], total_tokens, environment_tag
+            )
             if not post_plan.get("allowed", False):
                 yield create_error_sse_chunk(
                     error_message=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
-                    error_type="plan_limit_exceeded"
+                    error_type="plan_limit_exceeded",
                 )
                 yield create_done_sse()
                 return
@@ -1201,7 +1263,12 @@ async def stream_generator(
             error_message = "Authentication failed. Please check your API key or sign in again."
             error_type = "auth_error"
         # Check for provider/upstream errors
-        elif "upstream" in error_str or "provider" in error_str or "503" in error_str or "502" in error_str:
+        elif (
+            "upstream" in error_str
+            or "provider" in error_str
+            or "503" in error_str
+            or "502" in error_str
+        ):
             error_message = f"Provider temporarily unavailable: {str(e)[:200]}"
             error_type = "provider_error"
         # Check for timeout errors
@@ -1215,7 +1282,7 @@ async def stream_generator(
         # For other errors, include a sanitized version of the error message
         else:
             # Include the actual error message but truncate it for safety
-            sanitized_msg = str(e)[:300].replace('\n', ' ').replace('\r', ' ')
+            sanitized_msg = str(e)[:300].replace("\n", " ").replace("\r", " ")
             error_message = f"Streaming error: {sanitized_msg}"
 
         # Save failed request to database
@@ -1250,8 +1317,8 @@ async def stream_generator(
         yield create_error_sse_chunk(
             error_message=error_message,
             error_type=error_type,
-            provider=provider if 'provider' in dir() else None,
-            model=model if 'model' in dir() else None
+            provider=provider if "provider" in dir() else None,
+            model=model if "model" in dir() else None,
         )
         yield create_done_sse()
     finally:
@@ -1331,13 +1398,17 @@ async def chat_completions(
                     logger.debug("Fallback user lookup invoked for %s", mask_key(api_key))
                     user = await _to_thread(_fallback_get_user, api_key)
                 if not user:
-                    logger.warning("Invalid API key or user not found for key %s", mask_key(api_key))
+                    logger.warning(
+                        "Invalid API key or user not found for key %s", mask_key(api_key)
+                    )
                     raise APIExceptions.invalid_api_key()
 
                 # Get API key ID for tracking (if available) - with retry logic
                 from src.utils.api_key_lookup import get_api_key_id_with_retry
 
-                api_key_id = await get_api_key_id_with_retry(api_key, max_retries=3, retry_delay=0.1)
+                api_key_id = await get_api_key_id_with_retry(
+                    api_key, max_retries=3, retry_delay=0.1
+                )
                 if api_key_id is None:
                     logger.warning(
                         "Could not retrieve API key ID for tracking (request_id=%s, key=%s)",
@@ -1380,7 +1451,7 @@ async def chat_completions(
         if not is_anonymous:
             pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
             if not pre_plan.get("allowed", False):
-                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get('reason', 'unknown'))
+                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
 
         # Allow disabling rate limiting for testing (DEV ONLY)
         import os
@@ -1412,8 +1483,7 @@ async def chat_completions(
                     },
                 )
                 raise APIExceptions.rate_limited(
-                    retry_after=rl_pre.retry_after,
-                    reason=rl_pre.reason
+                    retry_after=rl_pre.retry_after, reason=rl_pre.reason
                 )
 
         # Credit check (only for authenticated non-trial users)
@@ -1424,7 +1494,7 @@ async def chat_completions(
         if not is_anonymous:
             pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
             if not pre_plan.get("allowed", False):
-                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get('reason', 'unknown'))
+                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
 
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
@@ -1478,13 +1548,88 @@ async def chat_completions(
         elif session_id and is_anonymous:
             logger.debug("Ignoring session_id for anonymous request")
 
+        # === 2.1.5) Auto Web Search - start search in parallel to hide latency ===
+        web_search_task = None  # Will hold the async task if search is triggered
+
+        # Get auto_web_search setting (default to "auto")
+        auto_web_search = getattr(req, "auto_web_search", "auto")
+        web_search_threshold = getattr(req, "web_search_threshold", None)
+        if web_search_threshold is None:
+            web_search_threshold = 0.5
+
+        # Determine if we should perform web search (classifier is ~0.06ms, negligible)
+        should_search = False
+        search_query = None
+
+        if auto_web_search is True:
+            # Explicit enable - always search
+            should_search = True
+            logger.debug("Auto web search explicitly enabled")
+        elif auto_web_search == "auto":
+            # Auto mode - use query classifier
+            try:
+                from src.services.query_classifier import should_auto_search
+
+                should_search, web_search_classification = should_auto_search(
+                    messages=messages,
+                    threshold=web_search_threshold,
+                    enabled=True,
+                )
+                if should_search:
+                    logger.info(
+                        "Auto web search triggered: confidence=%.2f, reason=%s",
+                        web_search_classification.confidence,
+                        web_search_classification.reason,
+                    )
+            except Exception as e:
+                logger.warning("Query classification failed, skipping auto search: %s", str(e))
+                should_search = False
+
+        # Start web search task in parallel (non-blocking) to hide latency
+        if should_search:
+            # Extract search query
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        search_query = content
+                    elif isinstance(content, list):
+                        text_parts = [
+                            p.get("text", "") if isinstance(p, dict) else str(p)
+                            for p in content
+                            if (isinstance(p, dict) and p.get("type") == "text")
+                            or isinstance(p, str)
+                        ]
+                        search_query = " ".join(text_parts)
+                    break
+
+            if search_query and len(search_query.strip()) > 0:
+                # Start search as background task - runs in parallel with provider detection
+                from src.services.tools import execute_tool
+
+                logger.info("Starting parallel web search for: %s...", search_query[:50])
+                web_search_task = asyncio.create_task(
+                    execute_tool(
+                        "web_search",
+                        {
+                            "query": search_query,
+                            "max_results": 5,
+                            "include_answer": True,
+                            "search_depth": "basic",
+                        },
+                    )
+                )
+
         # === 2.2) Plan limit pre-check with estimated tokens (only for authenticated users) ===
         estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
         if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+            pre_plan = await _to_thread(
+                enforce_plan_limits, user["id"], estimated_tokens, environment_tag
+            )
             if not pre_plan.get("allowed", False):
                 raise HTTPException(
-                    status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+                    status_code=429,
+                    detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
                 )
 
         # Store original model for response
@@ -1607,6 +1752,80 @@ async def chat_completions(
             )
             logger.debug("Tools content: %s", sanitize_for_logging(str(optional["tools"])[:500]))
 
+        # === 2.5) Await web search results if task was started (runs in parallel, minimal added latency) ===
+        if web_search_task is not None:
+            try:
+                # Wait for search with timeout (5s max to avoid blocking too long)
+                search_result = await asyncio.wait_for(web_search_task, timeout=5.0)
+
+                if search_result.success and search_result.result:
+                    results = search_result.result.get("results", [])
+                    answer = search_result.result.get("answer")
+
+                    if results or answer:
+                        context_parts = ["[Web Search Results]"]
+
+                        if answer:
+                            context_parts.append(f"\nSummary: {answer}")
+
+                        if results:
+                            context_parts.append("\nSources:")
+                            for i, item in enumerate(results[:5], 1):
+                                title = item.get("title", "Untitled")
+                                content_snippet = item.get("content", "")
+                                url = item.get("url", "")
+
+                                if len(content_snippet) > 300:
+                                    content_snippet = content_snippet[:297] + "..."
+
+                                context_parts.append(f"\n{i}. {title}")
+                                if content_snippet:
+                                    context_parts.append(f"   {content_snippet}")
+                                if url:
+                                    context_parts.append(f"   {url}")
+
+                        context_parts.append("\n[End of Search Results]\n")
+                        search_context = "\n".join(context_parts)
+
+                        # Prepend search context as a system message
+                        search_system_message = {
+                            "role": "system",
+                            "content": (
+                                f"The following web search results were retrieved to help answer "
+                                f"the user's query. Use this information to provide accurate, "
+                                f"up-to-date responses. Cite sources when appropriate.\n\n{search_context}"
+                            ),
+                        }
+
+                        # Insert after any existing system messages
+                        insert_index = 0
+                        for i, msg in enumerate(messages):
+                            if msg.get("role") == "system":
+                                insert_index = i + 1
+                            else:
+                                break
+
+                        messages.insert(insert_index, search_system_message)
+
+                        logger.info(
+                            "Auto web search augmented messages with %d results (context_length=%d)",
+                            len(results),
+                            len(search_context),
+                        )
+                else:
+                    logger.warning(
+                        "Auto web search returned no results: %s",
+                        search_result.error or "empty results",
+                    )
+
+            except asyncio.TimeoutError:
+                logger.warning("Auto web search timed out after 5s, continuing without results")
+                web_search_task.cancel()
+            except Exception as e:
+                logger.warning(
+                    "Auto web search failed, continuing without augmentation: %s", str(e)
+                )
+
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
             last_http_exc = None
@@ -1646,13 +1865,19 @@ async def chat_completions(
                                 messages, request_model, **optional
                             )
                             is_async_stream = True
-                            logger.debug(f"Using async streaming for OpenRouter model {request_model}")
+                            logger.debug(
+                                f"Using async streaming for OpenRouter model {request_model}"
+                            )
                         except Exception as async_err:
                             # Fallback to sync streaming if async fails
-                            logger.warning(f"Async streaming failed, falling back to sync: {async_err}")
+                            logger.warning(
+                                f"Async streaming failed, falling back to sync: {async_err}"
+                            )
                             stream = await _to_thread(
                                 make_openrouter_request_openai_stream,
-                                messages, request_model, **optional
+                                messages,
+                                request_model,
+                                **optional,
                             )
                             is_async_stream = False
 
@@ -1706,7 +1931,7 @@ async def chat_completions(
                             provider=attempt_provider,
                             model=request_model,
                             endpoint="/v1/chat/completions",
-                            request_id=request_id_var.get()
+                            request_id=request_id_var.get(),
                         )
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
@@ -1716,7 +1941,7 @@ async def chat_completions(
                             provider=attempt_provider,
                             model=request_model,
                             endpoint="/v1/chat/completions",
-                            request_id=request_id_var.get()
+                            request_id=request_id_var.get(),
                         )
                     elif isinstance(exc, httpx.HTTPStatusError):
                         logger.debug(
@@ -1731,7 +1956,7 @@ async def chat_completions(
                                 provider=attempt_provider,
                                 model=request_model,
                                 endpoint="/v1/chat/completions",
-                                request_id=request_id_var.get()
+                                request_id=request_id_var.get(),
                             )
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
@@ -1741,7 +1966,7 @@ async def chat_completions(
                             provider=attempt_provider,
                             model=request_model,
                             endpoint="/v1/chat/completions",
-                            request_id=request_id_var.get()
+                            request_id=request_id_var.get(),
                         )
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
@@ -1828,7 +2053,9 @@ async def chat_completions(
                 else:
                     # Default to OpenRouter
                     resp_raw = await asyncio.wait_for(
-                        _to_thread(make_openrouter_request_openai, messages, request_model, **optional),
+                        _to_thread(
+                            make_openrouter_request_openai, messages, request_model, **optional
+                        ),
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_openrouter_response, resp_raw)
@@ -1896,10 +2123,13 @@ async def chat_completions(
 
         # Plan limits and usage tracking (only for authenticated users)
         if not is_anonymous:
-            post_plan = await _to_thread(enforce_plan_limits, user["id"], total_tokens, environment_tag)
+            post_plan = await _to_thread(
+                enforce_plan_limits, user["id"], total_tokens, environment_tag
+            )
             if not post_plan.get("allowed", False):
                 raise HTTPException(
-                    status_code=429, detail=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}"
+                    status_code=429,
+                    detail=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
                 )
 
             if trial.get("is_trial") and not trial.get("is_expired"):
@@ -1943,7 +2173,9 @@ async def chat_completions(
                         status_code=429,
                         detail=f"Rate limit exceeded: {rl_final.reason}",
                         headers=(
-                            {"Retry-After": str(rl_final.retry_after)} if rl_final.retry_after else None
+                            {"Retry-After": str(rl_final.retry_after)}
+                            if rl_final.retry_after
+                            else None
                         ),
                     )
 
@@ -1972,7 +2204,7 @@ async def chat_completions(
             completion_tokens=completion_tokens,
             cost=cost,
             success=True,
-            error_message=None
+            error_message=None,
         )
 
         # === 4.5) Log activity for tracking and analytics (only for authenticated users) ===
@@ -1988,7 +2220,9 @@ async def chat_completions(
                     tokens=total_tokens,
                     cost=cost if not trial.get("is_trial", False) else 0.0,
                     speed=speed,
-                    finish_reason=(processed.get("choices") or [{}])[0].get("finish_reason", "stop"),
+                    finish_reason=(processed.get("choices") or [{}])[0].get(
+                        "finish_reason", "stop"
+                    ),
                     app="API",
                     metadata={
                         "prompt_tokens": prompt_tokens,
@@ -2000,7 +2234,8 @@ async def chat_completions(
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to log activity for user {user['id']}, model {model}: {e}", exc_info=True
+                    f"Failed to log activity for user {user['id']}, model {model}: {e}",
+                    exc_info=True,
                 )
 
         # === 5) History (use the last user message in this request only) ===
@@ -2073,7 +2308,9 @@ async def chat_completions(
 
         # === 7) Log to Braintrust ===
         try:
-            logger.info(f"[Braintrust] Starting log for request_id={request_id}, model={model}, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}")
+            logger.info(
+                f"[Braintrust] Starting log for request_id={request_id}, model={model}, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}"
+            )
             # Safely convert messages to dicts, filtering out None values and sanitizing content
             messages_for_log = []
             for m in req.messages:
@@ -2109,7 +2346,9 @@ async def chat_completions(
             # Safely extract output content for Braintrust logging
             bt_choices = processed.get("choices") or []
             bt_first_choice = bt_choices[0] if bt_choices else None
-            bt_message = bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
+            bt_message = (
+                bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
+            )
             bt_content = bt_message.get("content") if isinstance(bt_message, dict) else None
             # Handle case where content is None, a string, or a list (multimodal)
             if bt_content is None:
@@ -2135,7 +2374,9 @@ async def chat_completions(
             bt_user_id = user["id"] if user else "anonymous"
             bt_environment = user.get("environment_tag", "live") if user else "live"
             bt_is_trial = trial.get("is_trial", False) if trial else False
-            logger.info(f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}")
+            logger.info(
+                f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}"
+            )
             span.log(
                 input=messages_for_log,
                 output=bt_output,
@@ -2158,7 +2399,9 @@ async def chat_completions(
             span.end()
             # Flush to ensure data is sent to Braintrust
             braintrust_flush()
-            logger.info(f"[Braintrust] Successfully logged and flushed span for request_id={request_id}")
+            logger.info(
+                f"[Braintrust] Successfully logged and flushed span for request_id={request_id}"
+            )
         except Exception as e:
             logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
 
@@ -2179,6 +2422,7 @@ async def chat_completions(
         # Save chat completion request metadata to database with cost tracking - run as background task
         # Calculate cost breakdown for analytics
         from src.services.pricing import get_model_pricing
+
         pricing_info = get_model_pricing(model)
         input_cost = prompt_tokens * pricing_info.get("prompt", 0)
         output_cost = completion_tokens * pricing_info.get("completion", 0)
@@ -2215,14 +2459,18 @@ async def chat_completions(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+                error_elapsed = time.monotonic() - start if "start" in dir() else 0
 
                 # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
                     save_chat_completion_request_with_cost,
                     request_id=request_id,
-                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
-                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    model_name=(
+                        model
+                        if "model" in dir()
+                        else original_model if "original_model" in dir() else "unknown"
+                    ),
+                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
                     cost_usd=0.0,
@@ -2231,11 +2479,11 @@ async def chat_completions(
                     pricing_source="error",
                     status="failed",
                     error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
-                    user_id=user["id"] if user and 'user' in dir() else None,
-                    provider_name=provider if 'provider' in dir() else None,
+                    user_id=user["id"] if user and "user" in dir() else None,
+                    provider_name=provider if "provider" in dir() else None,
                     model_id=None,
-                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
-                    is_anonymous=is_anonymous if 'is_anonymous' in dir() else False,
+                    api_key_id=api_key_id if "api_key_id" in dir() else None,
+                    is_anonymous=is_anonymous if "is_anonymous" in dir() else False,
                 )
             except Exception as save_err:
                 logger.debug(f"Failed to save failed request metadata: {save_err}")
@@ -2250,14 +2498,18 @@ async def chat_completions(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+                error_elapsed = time.monotonic() - start if "start" in dir() else 0
 
                 # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
                     save_chat_completion_request_with_cost,
                     request_id=request_id,
-                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
-                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    model_name=(
+                        model
+                        if "model" in dir()
+                        else original_model if "original_model" in dir() else "unknown"
+                    ),
+                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
                     cost_usd=0.0,
@@ -2266,11 +2518,11 @@ async def chat_completions(
                     pricing_source="error",
                     status="failed",
                     error_message=f"{type(e).__name__}: {str(e)[:500]}",
-                    user_id=user["id"] if user and 'user' in dir() else None,
-                    provider_name=provider if 'provider' in dir() else None,
+                    user_id=user["id"] if user and "user" in dir() else None,
+                    provider_name=provider if "provider" in dir() else None,
                     model_id=None,
-                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
-                    is_anonymous=is_anonymous if 'is_anonymous' in dir() else False,
+                    api_key_id=api_key_id if "api_key_id" in dir() else None,
+                    is_anonymous=is_anonymous if "is_anonymous" in dir() else False,
                 )
             except Exception as save_err:
                 logger.debug(f"Failed to save failed request metadata: {save_err}")
@@ -2390,8 +2642,7 @@ async def unified_responses(
                     },
                 )
                 raise APIExceptions.rate_limited(
-                    retry_after=rl_pre.retry_after,
-                    reason=rl_pre.reason
+                    retry_after=rl_pre.retry_after, reason=rl_pre.reason
                 )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
@@ -2429,7 +2680,9 @@ async def unified_responses(
                                 # Already in correct format
                                 transformed_content.append(item)
                             else:
-                                logger.warning(f"Unknown content type: {item.get('type')}, skipping")
+                                logger.warning(
+                                    f"Unknown content type: {item.get('type')}, skipping"
+                                )
                                 # Skip unknown types instead of passing them through to avoid
                                 # provider API errors like "Unexpected content chunk type"
                         else:
@@ -2479,7 +2732,9 @@ async def unified_responses(
 
         # Plan limit pre-check for unified responses
         estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        pre_plan = await _to_thread(
+            enforce_plan_limits, user["id"], estimated_tokens, environment_tag
+        )
         if not pre_plan.get("allowed", False):
             raise HTTPException(
                 status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
@@ -2645,7 +2900,10 @@ async def unified_responses(
                         stream = await _to_thread(stream_func, messages, request_model, **optional)
                     else:
                         stream = await _to_thread(
-                            make_openrouter_request_openai_stream, messages, request_model, **optional
+                            make_openrouter_request_openai_stream,
+                            messages,
+                            request_model,
+                            **optional,
                         )
 
                     async def response_stream_generator(stream=stream, request_model=request_model):
@@ -2737,7 +2995,12 @@ async def unified_responses(
                                                 "type": "message",
                                                 "role": "assistant",
                                                 "status": "completed",
-                                                "content": [{"type": "output_text", "text": item_state["content"]}],
+                                                "content": [
+                                                    {
+                                                        "type": "output_text",
+                                                        "text": item_state["content"],
+                                                    }
+                                                ],
                                             },
                                         }
                                         yield f"event: response.output_item.done\ndata: {json.dumps(item_done_event)}\n\n"
@@ -2750,7 +3013,12 @@ async def unified_responses(
                                             "type": "message",
                                             "role": "assistant",
                                             "status": "completed",
-                                            "content": [{"type": "output_text", "text": items_by_index[idx]["content"]}],
+                                            "content": [
+                                                {
+                                                    "type": "output_text",
+                                                    "text": items_by_index[idx]["content"],
+                                                }
+                                            ],
                                         }
                                         for idx in sorted(items_by_index.keys())
                                         if items_by_index[idx]["item_added_sent"]
@@ -2793,7 +3061,9 @@ async def unified_responses(
                                         # Handle both dict and string error formats
                                         error_field = chunk_json["error"]
                                         if isinstance(error_field, dict):
-                                            error_message = error_field.get("message", "Unknown error")
+                                            error_message = error_field.get(
+                                                "message", "Unknown error"
+                                            )
                                         else:
                                             error_message = str(error_field)
                                         error_event = {
@@ -2840,7 +3110,10 @@ async def unified_responses(
                                             item_state = items_by_index[choice_index]
 
                                             # Emit response.output_item.added on first content for this choice
-                                            if not item_state["item_added_sent"] and "delta" in choice:
+                                            if (
+                                                not item_state["item_added_sent"]
+                                                and "delta" in choice
+                                            ):
                                                 item_added_event = {
                                                     "type": "response.output_item.added",
                                                     "sequence_number": sequence_number,
@@ -2849,7 +3122,9 @@ async def unified_responses(
                                                     "item": {
                                                         "id": item_state["item_id"],
                                                         "type": "message",
-                                                        "role": choice["delta"].get("role", "assistant"),
+                                                        "role": choice["delta"].get(
+                                                            "role", "assistant"
+                                                        ),
                                                         "status": "in_progress",
                                                         "content": [],
                                                     },
@@ -3007,7 +3282,9 @@ async def unified_responses(
                     processed = await _to_thread(process_func, resp_raw)
                 else:
                     resp_raw = await asyncio.wait_for(
-                        _to_thread(make_openrouter_request_openai, messages, request_model, **optional),
+                        _to_thread(
+                            make_openrouter_request_openai, messages, request_model, **optional
+                        ),
                         timeout=request_timeout,
                     )
                     processed = await _to_thread(process_openrouter_response, resp_raw)
@@ -3131,7 +3408,7 @@ async def unified_responses(
             completion_tokens=completion_tokens,
             cost=cost,
             success=True,
-            error_message=None
+            error_message=None,
         )
 
         # === 4.5) Log activity for tracking and analytics ===
@@ -3192,7 +3469,9 @@ async def unified_responses(
                                     if text is not None:
                                         text_parts.append(str(text))
                             user_content = (
-                                " ".join(t for t in text_parts if t) if text_parts else "[multimodal content]"
+                                " ".join(t for t in text_parts if t)
+                                if text_parts
+                                else "[multimodal content]"
                             )
 
                         await _to_thread(
@@ -3267,7 +3546,9 @@ async def unified_responses(
 
         # === 7) Log to Braintrust ===
         try:
-            logger.info(f"[Braintrust] Starting log for request_id={request_id}, model={model}, endpoint=/v1/responses, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}")
+            logger.info(
+                f"[Braintrust] Starting log for request_id={request_id}, model={model}, endpoint=/v1/responses, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}"
+            )
             # Convert input messages to loggable format, safely handling None values
             input_messages = []
             for inp_msg in req.input:
@@ -3326,7 +3607,9 @@ async def unified_responses(
             bt_user_id = user["id"] if user else "anonymous"
             bt_environment = user.get("environment_tag", "live") if user else "live"
             bt_is_trial = trial.get("is_trial", False) if trial else False
-            logger.info(f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}")
+            logger.info(
+                f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}"
+            )
             span.log(
                 input=input_messages,
                 output=bt_output,
@@ -3350,13 +3633,16 @@ async def unified_responses(
             span.end()
             # Flush to ensure data is sent to Braintrust
             braintrust_flush()
-            logger.info(f"[Braintrust] Successfully logged and flushed span for request_id={request_id}")
+            logger.info(
+                f"[Braintrust] Successfully logged and flushed span for request_id={request_id}"
+            )
         except Exception as e:
             logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
 
         # Save chat completion request metadata to database with cost tracking - run as background task
         # Calculate cost breakdown for analytics
         from src.services.pricing import get_model_pricing
+
         pricing_info = get_model_pricing(model)
         input_cost = prompt_tokens * pricing_info.get("prompt", 0)
         output_cost = completion_tokens * pricing_info.get("completion", 0)
@@ -3388,14 +3674,18 @@ async def unified_responses(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+                error_elapsed = time.monotonic() - start if "start" in dir() else 0
 
                 # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
                     save_chat_completion_request_with_cost,
                     request_id=request_id,
-                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
-                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    model_name=(
+                        model
+                        if "model" in dir()
+                        else original_model if "original_model" in dir() else "unknown"
+                    ),
+                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
                     cost_usd=0.0,
@@ -3404,10 +3694,10 @@ async def unified_responses(
                     pricing_source="error",
                     status="failed",
                     error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
-                    user_id=user["id"] if user and 'user' in dir() else None,
-                    provider_name=provider if 'provider' in dir() else None,
+                    user_id=user["id"] if user and "user" in dir() else None,
+                    provider_name=provider if "provider" in dir() else None,
                     model_id=None,
-                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    api_key_id=api_key_id if "api_key_id" in dir() else None,
                     is_anonymous=False,  # /v1/responses requires authentication
                 )
             except Exception as save_err:
@@ -3420,14 +3710,18 @@ async def unified_responses(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+                error_elapsed = time.monotonic() - start if "start" in dir() else 0
 
                 # Save failed request to database with cost tracking (costs are 0 for failed requests)
                 await _to_thread(
                     save_chat_completion_request_with_cost,
                     request_id=request_id,
-                    model_name=model if 'model' in dir() else original_model if 'original_model' in dir() else "unknown",
-                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    model_name=(
+                        model
+                        if "model" in dir()
+                        else original_model if "original_model" in dir() else "unknown"
+                    ),
+                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
                     cost_usd=0.0,
@@ -3436,10 +3730,10 @@ async def unified_responses(
                     pricing_source="error",
                     status="failed",
                     error_message=f"{type(e).__name__}: {str(e)[:500]}",
-                    user_id=user["id"] if user and 'user' in dir() else None,
-                    provider_name=provider if 'provider' in dir() else None,
+                    user_id=user["id"] if user and "user" in dir() else None,
+                    provider_name=provider if "provider" in dir() else None,
                     model_id=None,
-                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    api_key_id=api_key_id if "api_key_id" in dir() else None,
                     is_anonymous=False,  # /v1/responses requires authentication
                 )
             except Exception as save_err:
