@@ -25,6 +25,15 @@ Endpoints:
 - GET /prometheus/data/model-performance     → Model metrics (TTL: 1min)
 - GET /prometheus/data/trending-models       → Trending models (TTL: 2min)
 - DELETE /prometheus/data/cache/invalidate   → Invalidate all caches
+- GET /prometheus/data/metrics               → Prometheus format metrics for alerts
+
+PROMETHEUS METRICS EXPOSED (for Grafana alerting):
+- health_score{provider="..."} - Provider health score (0-100)
+- circuit_breaker_state{provider="...", model="...", state="..."} - Circuit breaker state (1=active)
+- error_rate{provider="..."} - Provider error rate (0-1)
+- provider_availability{provider="..."} - Provider availability (0-100)
+- total_requests{provider="..."} - Total requests in last hour
+- avg_latency_ms{provider="..."} - Average latency in ms
 """
 
 import json
@@ -276,6 +285,122 @@ async def get_cache_status(api_key: str | None = Depends(get_optional_api_key)):
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+# ============================================================================
+# Prometheus Format Metrics Endpoint (for Grafana Alerting)
+# ============================================================================
+
+@router.get("/metrics")
+async def get_prometheus_metrics(api_key: str | None = Depends(get_optional_api_key)):
+    """
+    Get metrics in Prometheus text exposition format.
+
+    This endpoint is designed to be scraped by Prometheus and provides metrics
+    required for Grafana alerting rules:
+
+    - health_score{provider="..."} - Provider health score (0-100)
+    - circuit_breaker_state{provider="...", model="...", state="..."} - 1 if state matches
+    - error_rate{provider="..."} - Provider error rate (0-1)
+    - provider_availability{provider="..."} - Provider availability (0-100)
+    - total_requests{provider="..."} - Total requests in last hour
+    - avg_latency_ms{provider="..."} - Average latency in ms
+
+    Returns: text/plain in Prometheus format
+    """
+    from fastapi.responses import Response
+
+    try:
+        from src.services.redis_metrics import get_redis_metrics
+        from src.services.model_availability import availability_service
+
+        lines = []
+        now_timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # Add HELP and TYPE declarations
+        lines.append("# HELP health_score Provider health score from 0 to 100")
+        lines.append("# TYPE health_score gauge")
+        lines.append("# HELP circuit_breaker_state Circuit breaker state (1 if state matches)")
+        lines.append("# TYPE circuit_breaker_state gauge")
+        lines.append("# HELP error_rate Provider error rate from 0 to 1")
+        lines.append("# TYPE error_rate gauge")
+        lines.append("# HELP provider_availability Provider availability percentage from 0 to 100")
+        lines.append("# TYPE provider_availability gauge")
+        lines.append("# HELP total_requests Total requests in the last hour")
+        lines.append("# TYPE total_requests gauge")
+        lines.append("# HELP avg_latency_ms Average latency in milliseconds")
+        lines.append("# TYPE avg_latency_ms gauge")
+        lines.append("# HELP gatewayz_data_scrape_success Whether the prometheus data scrape was successful")
+        lines.append("# TYPE gatewayz_data_scrape_success gauge")
+
+        try:
+            redis_metrics = get_redis_metrics()
+            health_scores = await redis_metrics.get_all_provider_health()
+
+            # Emit health_score, error_rate, provider_availability metrics
+            for provider, score in health_scores.items():
+                # Sanitize provider name for Prometheus labels
+                safe_provider = provider.replace('"', '\\"').replace("\\", "\\\\")
+
+                # Get hourly stats for this provider
+                hourly_stats = await redis_metrics.get_hourly_stats(provider, hours=1)
+
+                total_requests = sum(h.get("total_requests", 0) for h in hourly_stats.values())
+                total_errors = sum(h.get("error_count", 0) for h in hourly_stats.values())
+                total_latency = sum(h.get("total_latency", 0) for h in hourly_stats.values())
+
+                error_rate_value = (total_errors / total_requests) if total_requests > 0 else 0.0
+                availability = 100.0 - (error_rate_value * 100)
+                avg_latency = (total_latency / total_requests) if total_requests > 0 else 0.0
+
+                lines.append(f'health_score{{provider="{safe_provider}"}} {score}')
+                lines.append(f'error_rate{{provider="{safe_provider}"}} {error_rate_value:.6f}')
+                lines.append(f'provider_availability{{provider="{safe_provider}"}} {availability:.2f}')
+                lines.append(f'total_requests{{provider="{safe_provider}"}} {total_requests}')
+                lines.append(f'avg_latency_ms{{provider="{safe_provider}"}} {avg_latency:.2f}')
+
+            # Emit circuit_breaker_state metrics
+            for provider_key, circuit_data in availability_service.circuit_breakers.items():
+                parts = provider_key.split(":", 1)
+                if len(parts) != 2:
+                    continue
+
+                provider, model = parts
+                safe_provider = provider.replace('"', '\\"').replace("\\", "\\\\")
+                safe_model = model.replace('"', '\\"').replace("\\", "\\\\")
+                state = circuit_data.state.name.lower()
+
+                # Emit 1 for current state, 0 for other states
+                for check_state in ["open", "closed", "half_open"]:
+                    value = 1 if state == check_state else 0
+                    lines.append(
+                        f'circuit_breaker_state{{provider="{safe_provider}",model="{safe_model}",state="{check_state}"}} {value}'
+                    )
+
+            # Mark scrape as successful
+            lines.append("gatewayz_data_scrape_success 1")
+
+        except Exception as e:
+            logger.error(f"Error collecting metrics: {e}", exc_info=True)
+            # Still return a valid Prometheus response with error indicator
+            lines.append("gatewayz_data_scrape_success 0")
+            lines.append(f'# Error: {str(e)}')
+
+        # Join with newlines and add trailing newline
+        content = "\n".join(lines) + "\n"
+
+        return Response(
+            content=content,
+            media_type="text/plain; version=0.0.4; charset=utf-8"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to generate prometheus metrics: {e}", exc_info=True)
+        return Response(
+            content=f"# Error generating metrics: {str(e)}\ngatewayz_data_scrape_success 0\n",
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+            status_code=500
+        )
 
 
 # ============================================================================
