@@ -208,6 +208,60 @@ class TestMorpheusClient:
         assert models[0]["provider_slug"] == "morpheus"
         assert models[1]["id"] == "morpheus/mistral-7b"
 
+    @patch("httpx.get")
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_updates_cache_on_success(self, mock_config, mock_httpx_get):
+        """Test that cache timestamp is updated after successful fetch"""
+        from src.cache import _morpheus_models_cache, clear_models_cache
+
+        # Clear cache first
+        clear_models_cache("morpheus")
+        assert _morpheus_models_cache["timestamp"] is None
+
+        mock_config.MORPHEUS_API_KEY = "test-key"
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [{"id": "test-model", "context_length": 4096}]
+        }
+        mock_response.raise_for_status = Mock()
+        mock_httpx_get.return_value = mock_response
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Verify cache was updated
+        assert len(models) == 1
+        assert _morpheus_models_cache["data"] == models
+        assert _morpheus_models_cache["timestamp"] is not None
+
+    @patch("httpx.get")
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_updates_cache_on_http_error(self, mock_config, mock_httpx_get):
+        """Test that cache timestamp is updated even when API fails (prevents repeated calls)"""
+        from src.cache import _morpheus_models_cache, clear_models_cache
+        import httpx
+
+        # Clear cache first
+        clear_models_cache("morpheus")
+        assert _morpheus_models_cache["timestamp"] is None
+
+        mock_config.MORPHEUS_API_KEY = "test-key"
+        mock_httpx_get.side_effect = httpx.HTTPStatusError(
+            "Server Error",
+            request=Mock(),
+            response=Mock(status_code=500)
+        )
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Verify cache was updated with empty list and timestamp (prevents repeated API calls)
+        assert models == []
+        assert _morpheus_models_cache["data"] == []
+        assert _morpheus_models_cache["timestamp"] is not None
+
     @patch("src.services.morpheus_client.Config")
     def test_fetch_models_from_morpheus_no_api_key(self, mock_config):
         """Test fetch_models returns empty list without API key"""
@@ -217,6 +271,26 @@ class TestMorpheusClient:
 
         models = fetch_models_from_morpheus()
         assert models == []
+
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_updates_cache_when_no_api_key(self, mock_config):
+        """Test that cache is updated even when API key is missing"""
+        from src.cache import _morpheus_models_cache, clear_models_cache
+
+        # Clear cache first
+        clear_models_cache("morpheus")
+        assert _morpheus_models_cache["timestamp"] is None
+
+        mock_config.MORPHEUS_API_KEY = None
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Verify cache was updated (prevents repeated calls when key is missing)
+        assert models == []
+        assert _morpheus_models_cache["data"] == []
+        assert _morpheus_models_cache["timestamp"] is not None
 
     @patch("httpx.get")
     @patch("src.services.morpheus_client.Config")
