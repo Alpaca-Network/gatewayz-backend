@@ -1478,6 +1478,71 @@ async def chat_completions(
         elif session_id and is_anonymous:
             logger.debug("Ignoring session_id for anonymous request")
 
+        # === 2.1.5) Auto Web Search - start search in parallel to hide latency ===
+        web_search_applied = False
+        web_search_task = None  # Will hold the async task if search is triggered
+
+        # Get auto_web_search setting (default to "auto")
+        auto_web_search = getattr(req, "auto_web_search", "auto")
+        web_search_threshold = getattr(req, "web_search_threshold", 0.5) or 0.5
+
+        # Determine if we should perform web search (classifier is ~0.06ms, negligible)
+        should_search = False
+        search_query = None
+
+        if auto_web_search is True:
+            # Explicit enable - always search
+            should_search = True
+            logger.debug("Auto web search explicitly enabled")
+        elif auto_web_search == "auto":
+            # Auto mode - use query classifier
+            try:
+                from src.services.query_classifier import should_auto_search
+                should_search, web_search_classification = should_auto_search(
+                    messages=messages,
+                    threshold=web_search_threshold,
+                    enabled=True,
+                )
+                if should_search:
+                    logger.info(
+                        "Auto web search triggered: confidence=%.2f, reason=%s",
+                        web_search_classification.confidence,
+                        web_search_classification.reason,
+                    )
+            except Exception as e:
+                logger.warning("Query classification failed, skipping auto search: %s", str(e))
+                should_search = False
+
+        # Start web search task in parallel (non-blocking) to hide latency
+        if should_search:
+            # Extract search query
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        search_query = content
+                    elif isinstance(content, list):
+                        text_parts = [
+                            p.get("text", "") if isinstance(p, dict) else str(p)
+                            for p in content
+                            if isinstance(p, dict) and p.get("type") == "text" or isinstance(p, str)
+                        ]
+                        search_query = " ".join(text_parts)
+                    break
+
+            if search_query and len(search_query.strip()) > 0:
+                # Start search as background task - runs in parallel with provider detection
+                from src.services.tools import execute_tool
+                logger.info("Starting parallel web search for: %s...", search_query[:50])
+                web_search_task = asyncio.create_task(
+                    execute_tool("web_search", {
+                        "query": search_query,
+                        "max_results": 5,
+                        "include_answer": True,
+                        "search_depth": "basic",
+                    })
+                )
+
         # === 2.2) Plan limit pre-check with estimated tokens (only for authenticated users) ===
         estimated_tokens = estimate_message_tokens(messages, getattr(req, "max_tokens", None))
         if not is_anonymous:
@@ -1606,6 +1671,79 @@ async def chat_completions(
                 sanitize_for_logging(original_model),
             )
             logger.debug("Tools content: %s", sanitize_for_logging(str(optional["tools"])[:500]))
+
+        # === 2.5) Await web search results if task was started (runs in parallel, minimal added latency) ===
+        if web_search_task is not None:
+            try:
+                # Wait for search with timeout (5s max to avoid blocking too long)
+                search_result = await asyncio.wait_for(web_search_task, timeout=5.0)
+
+                if search_result.success and search_result.result:
+                    results = search_result.result.get("results", [])
+                    answer = search_result.result.get("answer")
+
+                    if results or answer:
+                        context_parts = ["[Web Search Results]"]
+
+                        if answer:
+                            context_parts.append(f"\nSummary: {answer}")
+
+                        if results:
+                            context_parts.append("\nSources:")
+                            for i, item in enumerate(results[:5], 1):
+                                title = item.get("title", "Untitled")
+                                content_snippet = item.get("content", "")
+                                url = item.get("url", "")
+
+                                if len(content_snippet) > 300:
+                                    content_snippet = content_snippet[:297] + "..."
+
+                                context_parts.append(f"\n{i}. {title}")
+                                if content_snippet:
+                                    context_parts.append(f"   {content_snippet}")
+                                if url:
+                                    context_parts.append(f"   {url}")
+
+                        context_parts.append("\n[End of Search Results]\n")
+                        search_context = "\n".join(context_parts)
+
+                        # Prepend search context as a system message
+                        search_system_message = {
+                            "role": "system",
+                            "content": (
+                                f"The following web search results were retrieved to help answer "
+                                f"the user's query. Use this information to provide accurate, "
+                                f"up-to-date responses. Cite sources when appropriate.\n\n{search_context}"
+                            ),
+                        }
+
+                        # Insert after any existing system messages
+                        insert_index = 0
+                        for i, msg in enumerate(messages):
+                            if msg.get("role") == "system":
+                                insert_index = i + 1
+                            else:
+                                break
+
+                        messages.insert(insert_index, search_system_message)
+                        web_search_applied = True
+
+                        logger.info(
+                            "Auto web search augmented messages with %d results (context_length=%d)",
+                            len(results),
+                            len(search_context),
+                        )
+                else:
+                    logger.warning(
+                        "Auto web search returned no results: %s",
+                        search_result.error or "empty results",
+                    )
+
+            except asyncio.TimeoutError:
+                logger.warning("Auto web search timed out after 5s, continuing without results")
+                web_search_task.cancel()
+            except Exception as e:
+                logger.warning("Auto web search failed, continuing without augmentation: %s", str(e))
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
