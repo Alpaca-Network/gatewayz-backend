@@ -58,6 +58,7 @@ _default_loki_query_url = os.environ.get("LOKI_QUERY_URL") or _derive_loki_query
 _project_root = Path(__file__).resolve().parents[2]
 _src_root = Path(__file__).resolve().parents[1]
 
+
 # Use /tmp for serverless environments (read-only file system), otherwise use src/data
 def _get_data_dir() -> Path:
     """Get data directory, using /tmp in serverless environments."""
@@ -65,6 +66,7 @@ def _get_data_dir() -> Path:
     if os.path.exists("/var/task") and not os.access("/var/task", os.W_OK):
         return Path("/tmp/gatewayz_data")
     return _src_root / "data"
+
 
 _default_data_dir = _get_data_dir()
 
@@ -84,6 +86,7 @@ def _ensure_directory(path: Path) -> Path:
     except (OSError, PermissionError) as e:
         # If we can't create the directory, use /tmp as fallback
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to create directory {path}: {e}. Using /tmp fallback.")
         fallback = Path("/tmp") / path.name
@@ -99,13 +102,9 @@ _pricing_history_dir = _ensure_directory(
 _pricing_backup_dir = _ensure_directory(
     _resolve_path_env("PRICING_BACKUP_DIR", _data_dir / "pricing_backups")
 )
-_pricing_sync_log_file = _resolve_path_env(
-    "PRICING_SYNC_LOG_FILE", _data_dir / "pricing_sync.log"
-)
+_pricing_sync_log_file = _resolve_path_env("PRICING_SYNC_LOG_FILE", _data_dir / "pricing_sync.log")
 _pricing_sync_log_file.parent.mkdir(parents=True, exist_ok=True)
-_manual_pricing_file = _resolve_path_env(
-    "MANUAL_PRICING_FILE", _data_dir / "manual_pricing.json"
-)
+_manual_pricing_file = _resolve_path_env("MANUAL_PRICING_FILE", _data_dir / "manual_pricing.json")
 
 
 class Config:
@@ -168,9 +167,13 @@ class Config:
     # AIMO Configuration
     AIMO_API_KEY = os.environ.get("AIMO_API_KEY")
     AIMO_FETCH_TIMEOUT = float(os.environ.get("AIMO_FETCH_TIMEOUT", "5.0"))  # 5 second timeout
-    AIMO_CONNECT_TIMEOUT = float(os.environ.get("AIMO_CONNECT_TIMEOUT", "3.0"))  # 3 second connect timeout
+    AIMO_CONNECT_TIMEOUT = float(
+        os.environ.get("AIMO_CONNECT_TIMEOUT", "3.0")
+    )  # 3 second connect timeout
     AIMO_MAX_RETRIES = int(os.environ.get("AIMO_MAX_RETRIES", "2"))  # Retry up to 2 times
-    AIMO_ENABLE_HTTP_FALLBACK = os.environ.get("AIMO_ENABLE_HTTP_FALLBACK", "true").lower() == "true"
+    AIMO_ENABLE_HTTP_FALLBACK = (
+        os.environ.get("AIMO_ENABLE_HTTP_FALLBACK", "true").lower() == "true"
+    )
     AIMO_BASE_URLS = [
         "https://beta.aimo.network/api/v1",
     ]  # Primary URL (beta.aimo.network is the active endpoint)
@@ -210,7 +213,9 @@ class Config:
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
     ALIBABA_CLOUD_API_KEY_INTERNATIONAL = os.environ.get("ALIBABA_CLOUD_API_KEY_INTERNATIONAL")
     ALIBABA_CLOUD_API_KEY_CHINA = os.environ.get("ALIBABA_CLOUD_API_KEY_CHINA")
-    ALIBABA_CLOUD_REGION = os.environ.get("ALIBABA_CLOUD_REGION", "international")  # 'international' or 'china'
+    ALIBABA_CLOUD_REGION = os.environ.get(
+        "ALIBABA_CLOUD_REGION", "international"
+    )  # 'international' or 'china'
 
     # Clarifai Configuration
     CLARIFAI_API_KEY = os.environ.get("CLARIFAI_API_KEY")
@@ -240,6 +245,12 @@ class Config:
     # larger models like gemini-2.5-pro and preview models (gemini-3-pro-preview) which
     # may take longer to process complex requests, especially on global endpoints with cold starts.
     GOOGLE_VERTEX_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_TIMEOUT", "180"))
+    # Enable regional fallback for Gemini 3 preview models. When enabled, uses regional
+    # endpoints instead of global endpoints, which may provide faster response times.
+    # Use this for A/B testing or when global endpoints are experiencing high latency.
+    GOOGLE_VERTEX_REGIONAL_FALLBACK = os.environ.get(
+        "GOOGLE_VERTEX_REGIONAL_FALLBACK", "false"
+    ).lower() in {"1", "true", "yes"}
 
     # OpenRouter Analytics Cookie (for transaction analytics API)
     OPENROUTER_COOKIE = os.environ.get("OPENROUTER_COOKIE")
@@ -313,9 +324,7 @@ class Config:
         "yes",
     }
     # Grafana Cloud Prometheus (Metrics)
-    GRAFANA_PROMETHEUS_REMOTE_WRITE_URL = os.environ.get(
-        "GRAFANA_PROMETHEUS_REMOTE_WRITE_URL"
-    )
+    GRAFANA_PROMETHEUS_REMOTE_WRITE_URL = os.environ.get("GRAFANA_PROMETHEUS_REMOTE_WRITE_URL")
     GRAFANA_PROMETHEUS_USERNAME = os.environ.get("GRAFANA_PROMETHEUS_USERNAME")
     GRAFANA_PROMETHEUS_API_KEY = os.environ.get("GRAFANA_PROMETHEUS_API_KEY")
 
@@ -379,7 +388,9 @@ class Config:
 
         # Always validate URL format, even in Vercel
         if cls.SUPABASE_URL and not cls.SUPABASE_URL.startswith(("http://", "https://")):
-            url_preview = cls.SUPABASE_URL[:50] + "..." if len(cls.SUPABASE_URL) > 50 else cls.SUPABASE_URL
+            url_preview = (
+                cls.SUPABASE_URL[:50] + "..." if len(cls.SUPABASE_URL) > 50 else cls.SUPABASE_URL
+            )
             invalid_vars.append(
                 f"SUPABASE_URL must start with 'http://' or 'https://' (got: '{url_preview}'). "
                 f"Example: https://{url_preview}"

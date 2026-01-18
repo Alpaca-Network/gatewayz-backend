@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Any
 
@@ -73,8 +73,12 @@ class CircuitBreaker:
     """Circuit breaker implementation for model availability with slow response detection"""
 
     def __init__(
-        self, failure_threshold: int = 5, recovery_timeout: int = 300, success_threshold: int = 3,
-        slow_response_threshold: float = 30.0, slow_response_limit: int = 3
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: int = 300,
+        success_threshold: int = 3,
+        slow_response_threshold: float = 30.0,
+        slow_response_limit: int = 3,
     ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -256,11 +260,17 @@ class ModelAvailabilityService:
 
         # Track previous state to detect status changes
         previous_availability = self.availability_cache.get(model_key)
-        was_available = previous_availability and previous_availability.status == AvailabilityStatus.AVAILABLE
+        was_available = (
+            previous_availability and previous_availability.status == AvailabilityStatus.AVAILABLE
+        )
 
         # Update circuit breaker based on health
+        # Pass response_time_ms (converted to seconds) to enable slow response detection
         if availability_status == AvailabilityStatus.AVAILABLE:
-            circuit_breaker.record_success()
+            response_time_seconds = (
+                model_health.response_time_ms / 1000.0 if model_health.response_time_ms else None
+            )
+            circuit_breaker.record_success(response_time=response_time_seconds)
         else:
             circuit_breaker.record_failure()
 
@@ -274,17 +284,17 @@ class ModelAvailabilityService:
             )
 
             # Don't capture rate limit errors (429) or expected operational errors
-            error_msg = model_health.error_message or ''
+            error_msg = model_health.error_message or ""
             is_rate_limit_error = (
-                'HTTP 429' in error_msg
-                or '429' in error_msg
-                or 'rate limit' in error_msg.lower()
-                or 'switch models' in error_msg.lower()
+                "HTTP 429" in error_msg
+                or "429" in error_msg
+                or "rate limit" in error_msg.lower()
+                or "switch models" in error_msg.lower()
             )
             is_expected_error = (
-                'non-serverless model' in error_msg.lower()
-                or 'does not exist' in error_msg.lower()
-                or 'no access' in error_msg.lower()
+                "non-serverless model" in error_msg.lower()
+                or "does not exist" in error_msg.lower()
+                or "no access" in error_msg.lower()
             )
 
             if should_capture_error and not is_rate_limit_error and not is_expected_error:
@@ -294,16 +304,20 @@ class ModelAvailabilityService:
                     model_id=model_health.model_id,
                     provider=model_health.provider,
                     gateway=model_health.gateway,
-                    operation='availability_check',
+                    operation="availability_check",
                     status=availability_status.value,
                     response_time_ms=model_health.response_time_ms,
                     details={
-                        'error_count': model_health.error_count,
-                        'success_rate': model_health.success_rate,
-                        'circuit_breaker_state': circuit_breaker.state.value,
-                        'error_message': error_msg,
-                        'last_failure': model_health.last_failure.isoformat() if model_health.last_failure else None,
-                    }
+                        "error_count": model_health.error_count,
+                        "success_rate": model_health.success_rate,
+                        "circuit_breaker_state": circuit_breaker.state.value,
+                        "error_message": error_msg,
+                        "last_failure": (
+                            model_health.last_failure.isoformat()
+                            if model_health.last_failure
+                            else None
+                        ),
+                    },
                 )
 
         # Get fallback models
@@ -315,7 +329,7 @@ class ModelAvailabilityService:
             provider=model_health.provider,
             gateway=model_health.gateway,
             status=availability_status,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=model_health.success_rate,
             response_time_ms=model_health.response_time_ms,
             error_count=model_health.error_count,
@@ -378,9 +392,7 @@ class ModelAvailabilityService:
             return False
 
         # Check maintenance
-        if availability.maintenance_until and availability.maintenance_until > datetime.now(
-            timezone.utc
-        ):
+        if availability.maintenance_until and availability.maintenance_until > datetime.now(UTC):
             return False
 
         return availability.status == AvailabilityStatus.AVAILABLE
@@ -458,7 +470,7 @@ class ModelAvailabilityService:
             ),
             "gateway_stats": gateway_stats,
             "monitoring_active": self.monitoring_active,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
         }
 
     def set_maintenance_mode(self, model_id: str, gateway: str, until: datetime):
