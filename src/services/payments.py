@@ -880,6 +880,8 @@ class StripeService:
 
                 # Only update subscription_status if user is on trial or has expired trial
                 # Users with active subscriptions (Pro/Max) should keep their status
+                # Track whether we updated the users table to ensure api_keys_new stays in sync
+                updated_to_inactive = False
                 if current_status in ("trial", "expired") or current_tier == "basic":
                     # Set to 'inactive' - meaning no active subscription but not on trial
                     # This is the correct status for pay-per-use credit purchasers
@@ -889,6 +891,7 @@ class StripeService:
                             "updated_at": datetime.now(timezone.utc).isoformat(),
                         }
                     ).eq("id", user_id).execute()
+                    updated_to_inactive = True
 
                     logger.info(f"User {user_id} subscription_status updated to 'inactive' after credit purchase")
                 else:
@@ -898,14 +901,14 @@ class StripeService:
                     )
 
                 # Clear trial status for all user's API keys
-                # Only update subscription_status if the user doesn't have an active subscription
+                # Sync subscription_status with users table to maintain consistency
                 api_key_update_data = {
                     "is_trial": False,
                     "trial_converted": True,
                 }
-                # Only set subscription_status to 'inactive' for users without active subscriptions
-                # Pro/Max users should keep their 'active' status on API keys
-                if current_status != "active":
+                # Update api_keys_new subscription_status if we updated users table to 'inactive'
+                # This ensures both tables stay in sync
+                if updated_to_inactive:
                     api_key_update_data["subscription_status"] = "inactive"
 
                 client.table("api_keys_new").update(api_key_update_data).eq("user_id", user_id).execute()
