@@ -1404,22 +1404,27 @@ class TestCheckoutCompletedSubscriptionStatus:
 
         stripe_service._handle_checkout_completed(session)
 
-        # Verify that users table was NOT updated with a new subscription_status
-        # (Only api_keys_new should be updated)
-        users_update_calls = []
+        # Verify that NO update contains subscription_status for Pro/Max users
+        # Both users table and api_keys_new should preserve the 'active' status
         for call in mock_client.table.return_value.update.call_args_list:
             update_data = call[0][0] if call[0] else {}
-            if 'subscription_status' in update_data:
-                # Check if this is a users table update (has 'updated_at' field)
-                if 'updated_at' in update_data:
-                    users_update_calls.append(update_data)
-
-        # For pro users, we should NOT update the users table subscription_status
-        # The logic skips the update when current_status is 'active' and tier is not 'basic'
-        for update_data in users_update_calls:
-            if 'updated_at' in update_data:  # This indicates it's the users table update
+            if isinstance(update_data, dict) and 'subscription_status' in update_data:
                 assert False, \
-                    f"Should not update users table subscription_status for pro users, but got: {update_data}"
+                    f"Should not update subscription_status for pro users, but got: {update_data}"
+
+        # Verify that api_keys_new WAS updated with is_trial=False and trial_converted=True
+        # but NOT with subscription_status
+        found_api_key_update = False
+        for call in mock_client.table.return_value.update.call_args_list:
+            update_data = call[0][0] if call[0] else {}
+            if isinstance(update_data, dict):
+                if update_data.get('is_trial') is False and update_data.get('trial_converted') is True:
+                    found_api_key_update = True
+                    # Ensure subscription_status is NOT in this update
+                    assert 'subscription_status' not in update_data, \
+                        f"api_keys_new should not have subscription_status for pro users, but got: {update_data}"
+        assert found_api_key_update, \
+            "Expected api_keys_new to be updated with is_trial=False and trial_converted=True"
 
     @patch('src.services.payments.get_payment_by_stripe_intent')
     @patch('src.services.payments.add_credits_to_user')

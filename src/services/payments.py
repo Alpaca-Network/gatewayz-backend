@@ -898,14 +898,17 @@ class StripeService:
                     )
 
                 # Clear trial status for all user's API keys
-                # Use 'inactive' to match the user's subscription_status
-                client.table("api_keys_new").update(
-                    {
-                        "is_trial": False,
-                        "trial_converted": True,
-                        "subscription_status": "inactive",
-                    }
-                ).eq("user_id", user_id).execute()
+                # Only update subscription_status if the user doesn't have an active subscription
+                api_key_update_data = {
+                    "is_trial": False,
+                    "trial_converted": True,
+                }
+                # Only set subscription_status to 'inactive' for users without active subscriptions
+                # Pro/Max users should keep their 'active' status on API keys
+                if current_status != "active":
+                    api_key_update_data["subscription_status"] = "inactive"
+
+                client.table("api_keys_new").update(api_key_update_data).eq("user_id", user_id).execute()
 
                 logger.info(f"User {user_id} trial status cleared after credit purchase")
 
