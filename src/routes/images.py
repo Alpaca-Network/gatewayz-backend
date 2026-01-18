@@ -91,6 +91,11 @@ async def generate_images(
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/images/generations")
 
+    # Initialize variables for error handling
+    actual_provider = None
+    model = None
+    start = None
+
     try:
         # Get running event loop for async operations
         loop = asyncio.get_running_loop()
@@ -262,7 +267,7 @@ async def generate_images(
             logger.error(f"Unexpected error in image generation: {e}")
 
             # Record failed model call if we have provider and model info
-            if 'actual_provider' in locals() and 'model' in locals() and 'start' in locals():
+            if actual_provider is not None and model is not None and start is not None:
                 elapsed = max(0.001, time.monotonic() - start)
                 background_tasks.add_task(
                     record_model_call,

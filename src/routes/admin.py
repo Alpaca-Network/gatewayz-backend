@@ -1293,14 +1293,14 @@ async def get_user_by_api_key(
 
         # Build user object
         user = {
-            "id": user_data["user_id"],
-            "username": user_data["username"],
-            "email": user_data["email"],
-            "credits": user_data["credits"],
-            "is_active": user_data["is_active"],
-            "role": user_data["role"],
-            "subscription_status": user_data["subscription_status"],
-            "created_at": user_data["created_at"],
+            "id": user_data.get("user_id"),
+            "username": user_data.get("username"),
+            "email": user_data.get("email"),
+            "credits": user_data.get("credits", 0),
+            "is_active": user_data.get("is_active", True),
+            "role": user_data.get("role", "user"),
+            "subscription_status": user_data.get("subscription_status", "trial"),
+            "created_at": user_data.get("created_at"),
         }
 
         return {

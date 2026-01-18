@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  prometheus-test:
+    image: prom/prometheus:latest
+    container_name: prometheus-test
+    ports:
+      - "9091:9090"  # Different port to avoid conflicts
+    volumes:
+      - ./prometheus-test.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert.rules.test.yml:/etc/prometheus/alert.rules.test.yml:ro
+      - prometheus_test_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - monitoring-test
+
+  alertmanager-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.alertmanager
+    container_name: alertmanager-test
+    ports:
+      - "9094:9093"  # Different port to avoid conflicts
+    volumes:
+      - alertmanager_test_data:/alertmanager
+    environment:
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - monitoring-test
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  grafana-test:
+    image: grafana/grafana:latest
+    container_name: grafana-test
+    ports:
+      - "3001:3000"  # Different port to avoid conflicts
+    volumes:
+      - grafana_test_data:/var/lib/grafana
+      - ./grafana-dashboard-test.json:/etc/grafana/provisioning/dashboards/prometheus-test.json:ro
+      - ./grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    networks:
+      - monitoring-test
+    depends_on:
+      - prometheus-test
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+networks:
+  monitoring-test:
+    driver: bridge
+
+volumes:
+  prometheus_test_data:
+  alertmanager_test_data:
+  grafana_test_data:

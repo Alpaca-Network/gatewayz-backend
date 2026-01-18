@@ -1,0 +1,186 @@
+groups:
+  - name: model_health_alerts_test
+    interval: 1m
+    rules:
+      # FIXED: Model Health Score Alert - Handles NaN/zero division
+      # This alert now fires during total outages by checking if traffic exists
+      - alert: LowModelHealthScore
+        expr: |
+          (
+            # Calculate success rate
+            (
+              sum(rate(model_inference_requests_total{status="success"}[10m]))
+              /
+              sum(rate(model_inference_requests_total[10m]))
+            ) * 100 < 20
+          )
+          or
+          (
+            # Fire if there's ZERO traffic (total outage scenario)
+            sum(rate(model_inference_requests_total[10m])) == 0
+          )
+        for: 5m
+        labels:
+          severity: critical
+          component: model
+          email: "manjeshprasad21@gmail.com"
+        annotations:
+          summary: "Overall model health score critically low or service down"
+          description: >
+            {% raw %}Overall model health score is {{ $value | humanize }}%, below critical threshold of 20%,
+            OR the service is experiencing a total outage with zero requests.
+            This indicates major service degradation or complete failure.
+            Immediate investigation required.{% endraw %}
+          dashboard: "http://localhost:3000/d/model-performance-v1/model-performance-analytics"
+      
+      # FIXED: Individual Provider Health Score - Handles NaN/zero division
+      - alert: LowProviderHealthScore
+        expr: |
+          (
+            # Calculate per-provider success rate
+            (
+              sum(rate(model_inference_requests_total{status="success"}[10m])) by (provider)
+              /
+              sum(rate(model_inference_requests_total[10m])) by (provider)
+            ) * 100 < 20
+          )
+          or
+          (
+            # Fire if provider has zero traffic but was recently active
+            (
+              sum(rate(model_inference_requests_total[10m])) by (provider) == 0
+            )
+            and
+            (
+              sum(rate(model_inference_requests_total[1h] offset 1h)) by (provider) > 0
+            )
+          )
+        for: 5m
+        labels:
+          severity: critical
+          component: provider
+          email: "manjeshprasad21@gmail.com"
+        annotations:
+          summary: "Provider {% raw %}{{ $labels.provider }}{% endraw %} health score critically low or down"
+          description: >
+            {% raw %}Provider {{ $labels.provider }} health score is {{ $value | humanize }}%, 
+            below critical threshold of 20%, OR this provider has gone completely silent.
+            This provider is experiencing major issues or has failed.{% endraw %}
+          dashboard: "http://localhost:3000/d/gateway-comparison-v1/gateway-comparison"
+      
+      # No Traffic Alert - Fires when there's been no traffic for extended period
+      - alert: NoTrafficDetected
+        expr: |
+          sum(rate(model_inference_requests_total[15m])) == 0
+          and
+          sum(rate(model_inference_requests_total[1h] offset 1h)) > 0
+        for: 10m
+        labels:
+          severity: critical
+          component: system
+          email: "manjeshprasad21@gmail.com"
+        annotations:
+          summary: "No API traffic detected for 15 minutes"
+          description: >
+            The GatewayZ API has received zero requests in the last 15 minutes,
+            but was receiving traffic in the previous hour.
+            This indicates a complete service outage or network issue.
+            Check backend health, network connectivity, and DNS.
+          dashboard: "http://localhost:3000/d/model-performance-v1/model-performance-analytics"
+
+  - name: performance_alerts_test
+    interval: 30s
+    rules:
+      # API Error Rate - FIXED: Handles zero traffic
+      - alert: HighAPIErrorRate
+        expr: |
+          (
+            sum(rate(fastapi_requests_total{status_code=~'4..|5..'}[5m]))
+            /
+            sum(rate(fastapi_requests_total[5m]))
+          ) > 0.1
+          and
+          sum(rate(fastapi_requests_total[5m])) > 0
+        for: 3m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High API error rate detected"
+          description: "API error rate is {% raw %}{{ $value | humanizePercentage }}{% endraw %}, exceeding critical threshold of 10%. Immediate investigation required."
+
+      # API Latency
+      - alert: CriticalAPILatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(fastapi_requests_duration_seconds_bucket[5m])) by (le)) > 3.0
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical API latency detected"
+          description: "API latency (p95) is {% raw %}{{ $value }}{% endraw %}s, exceeding critical threshold of 3.0s. Immediate investigation required."
+
+      # Model Inference Latency - FIXED: Handles no traffic
+      - alert: HighModelInferenceLatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(model_inference_duration_seconds_bucket[5m])) by (le, model)) > 5.0
+          and
+          sum(rate(model_inference_requests_total[5m])) by (model) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: model
+        annotations:
+          summary: "High model inference latency for {% raw %}{{ $labels.model }}{% endraw %}"
+          description: "Model {% raw %}{{ $labels.model }}{% endraw %} inference latency (p95) is {% raw %}{{ $value }}{% endraw %}s, exceeding threshold of 5.0s."
+
+      # Model Inference Error Spike - FIXED: Handles zero traffic
+      - alert: ModelInferenceErrorSpike
+        expr: |
+          (
+            sum(rate(model_inference_requests_total{status="error"}[5m]))
+            /
+            sum(rate(model_inference_requests_total[5m]))
+          ) > 0.15
+          and
+          sum(rate(model_inference_requests_total[5m])) > 0
+        for: 3m
+        labels:
+          severity: critical
+          component: model
+        annotations:
+          summary: "High model inference error rate"
+          description: "Model inference error rate is {% raw %}{{ $value | humanizePercentage }}{% endraw %}, exceeding critical threshold of 15%."
+
+      # Provider Response Time - FIXED: Handles no traffic
+      - alert: SlowProviderResponse
+        expr: |
+          histogram_quantile(0.95, sum(rate(model_inference_duration_seconds_bucket{provider!=""}[5m])) by (le, provider)) > 4.0
+          and
+          sum(rate(model_inference_requests_total{provider!=""}[5m])) by (provider) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: provider
+        annotations:
+          summary: "Slow response from provider {% raw %}{{ $labels.provider }}{% endraw %}"
+          description: "Provider {% raw %}{{ $labels.provider }}{% endraw %} response latency (p95) is {% raw %}{{ $value }}{% endraw %}s, exceeding threshold of 4.0s."
+
+      # Provider Error Spike - FIXED: Handles zero traffic
+      - alert: ProviderErrorSpike
+        expr: |
+          (
+            sum(rate(model_inference_requests_total{status="error", provider!=""}[5m])) by (provider)
+            /
+            sum(rate(model_inference_requests_total{provider!=""}[5m])) by (provider)
+          ) > 0.2
+          and
+          sum(rate(model_inference_requests_total{provider!=""}[5m])) by (provider) > 0
+        for: 3m
+        labels:
+          severity: critical
+          component: provider
+        annotations:
+          summary: "High error rate for provider {% raw %}{{ $labels.provider }}{% endraw %}"
+          description: "Provider {% raw %}{{ $labels.provider }}{% endraw %} error rate is {% raw %}{{ $value | humanizePercentage }}{% endraw %}, exceeding critical threshold of 20%."
