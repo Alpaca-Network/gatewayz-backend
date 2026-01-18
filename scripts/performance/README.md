@@ -223,7 +223,7 @@ cat $GOOGLE_APPLICATION_CREDENTIALS
 
 **Solution**: Increase timeout in `src/config/config.py`:
 ```python
-GOOGLE_VERTEX_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_TIMEOUT", "240"))  # 4 minutes
+GOOGLE_VERTEX_TIMEOUT = float(os.environ.get("GOOGLE_VERTEX_TIMEOUT", "180"))  # 3 minutes
 ```
 
 ## Advanced Usage

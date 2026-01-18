@@ -216,11 +216,15 @@ def generate_comparison_report(
     else:
         ttfc_improvement = None
 
-    total_time_improvement = (
-        (global_metrics.avg_total_time - regional_metrics.avg_total_time)
-        / global_metrics.avg_total_time
-        * 100
-    )
+    # Guard against division by zero when all global endpoint requests fail
+    if global_metrics.avg_total_time == 0:
+        total_time_improvement = None
+    else:
+        total_time_improvement = (
+            (global_metrics.avg_total_time - regional_metrics.avg_total_time)
+            / global_metrics.avg_total_time
+            * 100
+        )
 
     return {
         "model": global_metrics.model,
@@ -246,7 +250,7 @@ def generate_comparison_report(
         },
         "performance_improvement": {
             "ttfc_improvement": f"{ttfc_improvement:+.1f}%" if ttfc_improvement else "N/A",
-            "total_time_improvement": f"{total_time_improvement:+.1f}%",
+            "total_time_improvement": f"{total_time_improvement:+.1f}%" if total_time_improvement is not None else "N/A",
             "winner": (
                 "regional" if regional_metrics.avg_total_time < global_metrics.avg_total_time else "global"
             ),
