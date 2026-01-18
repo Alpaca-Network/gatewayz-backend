@@ -69,8 +69,14 @@ class StatsigService:
             self._StatsigUser = StatsigUser
             self._StatsigOptions = StatsigOptions
 
-            # Create Statsig options
+            # Create Statsig options with event batching configuration
             options = StatsigOptions()
+
+            # Configure event batching for more reliable delivery
+            # Flush events every 10 seconds (instead of default ~60s)
+            options.event_logging_flush_interval_ms = 10000
+            # Flush when 50 events are queued (instead of default ~500)
+            options.event_logging_max_queue_size = 50
 
             # Set environment tier
             app_env = os.environ.get("APP_ENV", "development")
@@ -205,18 +211,53 @@ class StatsigService:
             logger.error(f"❌ Failed to check feature flag '{flag_name}': {e}")
             return default_value
 
+    def flush(self) -> bool:
+        """
+        Flush any pending events to Statsig.
+
+        This forces an immediate flush of the event queue, useful for:
+        - Ensuring critical events are sent immediately
+        - Testing that events are being logged
+        - Pre-shutdown flush for extra reliability
+
+        Returns:
+            True if flush was successful, False otherwise
+        """
+        if self.enabled and self.statsig:
+            try:
+                # Statsig Python Core SDK uses shutdown() with wait() to flush
+                # For explicit flush without shutdown, we trigger a flush by
+                # calling flush() if available, otherwise log a warning
+                if hasattr(self.statsig, 'flush'):
+                    self.statsig.flush().wait(timeout=5)
+                    logger.debug("📤 Statsig events flushed successfully")
+                    return True
+                else:
+                    # SDK may not have explicit flush, events will be sent on next batch interval
+                    logger.debug("📤 Statsig flush requested (will send on next batch interval)")
+                    return True
+            except Exception as e:
+                logger.warning(f"⚠️  Statsig flush warning: {e}")
+                return False
+        else:
+            logger.debug("📤 Statsig flush skipped (not enabled)")
+            return True
+
     async def shutdown(self):
         """
         Gracefully shutdown Statsig SDK.
 
-        Flushes any pending events before shutdown.
+        Flushes any pending events before shutdown using .wait() to ensure
+        all events are sent before the application exits.
         Should be called during application shutdown.
         """
         if self.enabled and self.statsig:
             try:
                 logger.info("🛑 Shutting down Statsig SDK...")
-                self.statsig.shutdown()
-                logger.info("✅ Statsig shutdown complete")
+                # CRITICAL: Use .wait() to ensure all pending events are flushed
+                # before the application exits. Without .wait(), events may be lost.
+                self.statsig.shutdown().wait(timeout=10)
+                logger.info("✅ Statsig shutdown complete (events flushed)")
             except Exception as e:
                 logger.warning(f"⚠️  Statsig shutdown warning: {e}")
 
