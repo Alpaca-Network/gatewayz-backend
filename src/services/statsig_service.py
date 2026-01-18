@@ -180,6 +180,72 @@ class StatsigService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             return False
 
+    def log_session_start(
+        self,
+        user_id: str,
+        platform: str = "web",
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Log a session start event for DAU/WAU/MAU tracking.
+
+        This event is used by Statsig to compute Product Growth metrics
+        (Daily/Weekly/Monthly Active Users, stickiness, retention).
+
+        Args:
+            user_id: User identifier (required)
+            platform: Platform identifier (web, ios, android, desktop)
+            metadata: Optional additional session metadata
+
+        Returns:
+            True if logged successfully, False otherwise
+
+        Example:
+            statsig_service.log_session_start(
+                user_id="user123",
+                platform="web",
+                metadata={"version": "2.0.0", "referrer": "google"}
+            )
+        """
+        event_metadata = {"platform": platform}
+        if metadata:
+            event_metadata.update(metadata)
+
+        return self.log_event(
+            user_id=user_id,
+            event_name="session_start",
+            metadata=event_metadata,
+        )
+
+    def log_session_end(
+        self,
+        user_id: str,
+        session_duration_seconds: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Log a session end event.
+
+        Args:
+            user_id: User identifier (required)
+            session_duration_seconds: Optional session duration in seconds
+            metadata: Optional additional session metadata
+
+        Returns:
+            True if logged successfully, False otherwise
+        """
+        event_metadata = {}
+        if session_duration_seconds is not None:
+            event_metadata["duration_seconds"] = str(session_duration_seconds)
+        if metadata:
+            event_metadata.update(metadata)
+
+        return self.log_event(
+            user_id=user_id,
+            event_name="session_end",
+            metadata=event_metadata if event_metadata else None,
+        )
+
     def get_feature_flag(self, flag_name: str, user_id: str, default_value: bool = False) -> bool:
         """
         Get a feature flag value for a user.
