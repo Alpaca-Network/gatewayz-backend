@@ -1139,13 +1139,15 @@ async def stream_generator(
                 first_chunk_sent = True
                 # Record TTFC metric
                 track_time_to_first_chunk(provider=provider, model=model, ttfc=ttfc)
-                # Log TTFC for debugging slow streams
+                # Log TTFC for debugging slow streams with enhanced context
                 if ttfc > 2.0:
+                    severity = "CRITICAL" if ttfc > 10.0 else "WARNING"
                     logger.warning(
-                        f"[TTFC] Slow first chunk: {ttfc:.2f}s for {provider}/{model} (threshold: 2.0s)"
+                        f"⚠️ [TTFC {severity}] Slow first chunk: {ttfc:.2f}s for {provider}/{model} "
+                        f"(threshold: 2.0s, timeout: {Config.GOOGLE_VERTEX_TIMEOUT if provider == 'google-vertex' else 'N/A'}s)"
                     )
                 else:
-                    logger.info(f"[TTFC] First chunk in {ttfc:.2f}s for {provider}/{model}")
+                    logger.info(f"✓ [TTFC] First chunk in {ttfc:.2f}s for {provider}/{model}")
 
             logger.debug(f"[STREAM] Processing chunk {chunk_count} for model {model}")
 

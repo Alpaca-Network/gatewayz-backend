@@ -73,15 +73,18 @@ def _ensure_vertex_imports():
     return _vertexai, _GenerativeModel
 
 
-def _get_model_location(model_name: str) -> str:
+def _get_model_location(model_name: str, try_regional_fallback: bool = False) -> str:
     """
     Determine the appropriate GCP location for a given model.
 
     Some models are only available on global endpoints (e.g., Gemini 3 preview models),
-    while others can use regional endpoints.
+    while others can use regional endpoints. For performance optimization, this function
+    supports regional fallback for preview models if they experience slow response times.
 
     Args:
         model_name: The model name to check
+        try_regional_fallback: If True, attempts regional endpoint even for preview models
+                               (useful for performance testing and fallback scenarios)
 
     Returns:
         The location string to use ('global' or the configured regional location)
@@ -89,6 +92,12 @@ def _get_model_location(model_name: str) -> str:
     # Gemini 3 models are only available on the global endpoint
     # See: https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-flash
     if "gemini-3" in model_name.lower():
+        if try_regional_fallback:
+            logger.info(
+                f"Model {model_name} normally requires global endpoint, but trying regional "
+                f"fallback ({Config.GOOGLE_VERTEX_LOCATION}) for performance optimization"
+            )
+            return Config.GOOGLE_VERTEX_LOCATION
         logger.debug(f"Model {model_name} requires global endpoint (preview model)")
         return "global"
 
