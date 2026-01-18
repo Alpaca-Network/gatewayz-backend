@@ -1146,6 +1146,25 @@ async def stream_generator(
                         f"⚠️ [TTFC {severity}] Slow first chunk: {ttfc:.2f}s for {provider}/{model} "
                         f"(threshold: 2.0s, timeout: {Config.GOOGLE_VERTEX_TIMEOUT if provider == 'google-vertex' else 'N/A'}s)"
                     )
+
+                    # Sentry alerting for critical TTFC (>10s)
+                    if ttfc > 10.0:
+                        try:
+                            import sentry_sdk
+                            sentry_sdk.capture_message(
+                                f"Critical TTFC: {ttfc:.2f}s for {provider}/{model}",
+                                level="warning",
+                                extras={
+                                    "ttfc_seconds": ttfc,
+                                    "provider": provider,
+                                    "model": model,
+                                    "threshold": 10.0,
+                                    "severity": "CRITICAL",
+                                    "timeout_config": Config.GOOGLE_VERTEX_TIMEOUT if provider == "google-vertex" else None,
+                                }
+                            )
+                        except Exception as sentry_error:
+                            logger.debug(f"Failed to send Sentry alert for TTFC: {sentry_error}")
                 else:
                     logger.info(f"✓ [TTFC] First chunk in {ttfc:.2f}s for {provider}/{model}")
 

@@ -70,17 +70,21 @@ class AvailabilityConfig:
 
 
 class CircuitBreaker:
-    """Circuit breaker implementation for model availability"""
+    """Circuit breaker implementation for model availability with slow response detection"""
 
     def __init__(
-        self, failure_threshold: int = 5, recovery_timeout: int = 300, success_threshold: int = 3
+        self, failure_threshold: int = 5, recovery_timeout: int = 300, success_threshold: int = 3,
+        slow_response_threshold: float = 30.0, slow_response_limit: int = 3
     ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.success_threshold = success_threshold
+        self.slow_response_threshold = slow_response_threshold  # seconds
+        self.slow_response_limit = slow_response_limit  # consecutive slow responses before action
 
         self.failure_count = 0
         self.success_count = 0
+        self.slow_response_count = 0
         self.last_failure_time = None
         self.state = CircuitBreakerState.CLOSED
 
@@ -101,19 +105,45 @@ class CircuitBreaker:
             return True
         return False
 
-    def record_success(self):
-        """Record successful request"""
+    def record_success(self, response_time: float | None = None):
+        """Record successful request, optionally tracking response time
+
+        Args:
+            response_time: Response time in seconds (for slow response detection)
+        """
+        # Check for slow response (treat as degraded, not failure)
+        if response_time and response_time > self.slow_response_threshold:
+            self.slow_response_count += 1
+            logger.warning(
+                f"Slow response detected: {response_time:.2f}s (threshold: {self.slow_response_threshold}s), "
+                f"count: {self.slow_response_count}/{self.slow_response_limit}"
+            )
+            # If too many consecutive slow responses, treat as degraded
+            if self.slow_response_count >= self.slow_response_limit:
+                logger.warning(
+                    f"Provider degraded: {self.slow_response_count} consecutive slow responses. "
+                    f"Circuit breaker moving to OPEN state."
+                )
+                self.state = CircuitBreakerState.OPEN
+                self.last_failure_time = time.time()
+                return
+        else:
+            # Reset slow response counter on fast response
+            self.slow_response_count = 0
+
         if self.state == CircuitBreakerState.HALF_OPEN:
             self.success_count += 1
             if self.success_count >= self.success_threshold:
                 self.state = CircuitBreakerState.CLOSED
                 self.failure_count = 0
+                self.slow_response_count = 0
         elif self.state == CircuitBreakerState.CLOSED:
             self.failure_count = max(0, self.failure_count - 1)
 
     def record_failure(self):
         """Record failed request"""
         self.failure_count += 1
+        self.slow_response_count = 0  # Reset slow response counter on actual failure
         self.last_failure_time = time.time()
 
         if self.failure_count >= self.failure_threshold:
