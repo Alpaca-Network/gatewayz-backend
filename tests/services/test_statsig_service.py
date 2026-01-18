@@ -35,6 +35,8 @@ class TestStatsigService:
         service = StatsigService()
         assert hasattr(service, 'initialize')
         assert hasattr(service, 'log_event')
+        assert hasattr(service, 'log_session_start')
+        assert hasattr(service, 'log_session_end')
         assert hasattr(service, 'get_feature_flag')
         assert hasattr(service, 'flush')
         assert hasattr(service, 'shutdown')
@@ -232,3 +234,68 @@ class TestStatsigServiceBatchingConfig:
                 assert mock_options.event_logging_flush_interval_ms == 10000
                 assert mock_options.event_logging_max_queue_size == 50
                 assert mock_options.environment == "production"
+
+
+class TestStatsigServiceSessionTracking:
+    """Test Statsig Service session tracking for DAU/WAU/MAU"""
+
+    def test_log_session_start_in_fallback_mode(self):
+        """Test log_session_start returns True in fallback mode"""
+        from src.services.statsig_service import StatsigService
+
+        with patch.dict('os.environ', {}, clear=True):
+            service = StatsigService()
+            result = service.log_session_start(
+                user_id="test_user",
+                platform="web",
+                metadata={"version": "1.0.0"}
+            )
+            assert result is True
+
+    def test_log_session_start_includes_platform(self):
+        """Test log_session_start includes platform in metadata"""
+        from src.services.statsig_service import StatsigService
+
+        with patch.dict('os.environ', {}, clear=True):
+            service = StatsigService()
+            # Patch log_event to capture the call
+            with patch.object(service, 'log_event', return_value=True) as mock_log:
+                service.log_session_start(
+                    user_id="test_user",
+                    platform="ios",
+                    metadata={"version": "2.0.0"}
+                )
+                mock_log.assert_called_once_with(
+                    user_id="test_user",
+                    event_name="session_start",
+                    metadata={"platform": "ios", "version": "2.0.0"}
+                )
+
+    def test_log_session_end_in_fallback_mode(self):
+        """Test log_session_end returns True in fallback mode"""
+        from src.services.statsig_service import StatsigService
+
+        with patch.dict('os.environ', {}, clear=True):
+            service = StatsigService()
+            result = service.log_session_end(
+                user_id="test_user",
+                session_duration_seconds=300
+            )
+            assert result is True
+
+    def test_log_session_end_includes_duration(self):
+        """Test log_session_end includes duration in metadata"""
+        from src.services.statsig_service import StatsigService
+
+        with patch.dict('os.environ', {}, clear=True):
+            service = StatsigService()
+            with patch.object(service, 'log_event', return_value=True) as mock_log:
+                service.log_session_end(
+                    user_id="test_user",
+                    session_duration_seconds=600
+                )
+                mock_log.assert_called_once_with(
+                    user_id="test_user",
+                    event_name="session_end",
+                    metadata={"duration_seconds": "600"}
+                )
