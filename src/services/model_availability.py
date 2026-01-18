@@ -114,9 +114,32 @@ class CircuitBreaker:
 
         Args:
             response_time: Response time in seconds (for slow response detection)
+
+        Note:
+            In HALF_OPEN state, we prioritize recovery by counting successes first,
+            even if responses are slow. This prevents slow-but-successful responses
+            from blocking circuit recovery.
         """
-        # Check for slow response (treat as degraded, not failure)
-        if response_time and response_time > self.slow_response_threshold:
+        is_slow_response = response_time and response_time > self.slow_response_threshold
+
+        # In HALF_OPEN state, prioritize recovery - count successful responses first
+        # Slow responses should not block recovery, only actual failures should
+        if self.state == CircuitBreakerState.HALF_OPEN:
+            self.success_count += 1
+            if is_slow_response:
+                logger.info(
+                    f"Slow response in HALF_OPEN state: {response_time:.2f}s, but counting as success "
+                    f"({self.success_count}/{self.success_threshold} for recovery)"
+                )
+            if self.success_count >= self.success_threshold:
+                self.state = CircuitBreakerState.CLOSED
+                self.failure_count = 0
+                self.slow_response_count = 0
+                logger.info("Circuit breaker recovered: HALF_OPEN -> CLOSED")
+            return
+
+        # For CLOSED state, track slow responses and potentially degrade
+        if is_slow_response:
             self.slow_response_count += 1
             logger.warning(
                 f"Slow response detected: {response_time:.2f}s (threshold: {self.slow_response_threshold}s), "
@@ -135,13 +158,7 @@ class CircuitBreaker:
             # Reset slow response counter on fast response
             self.slow_response_count = 0
 
-        if self.state == CircuitBreakerState.HALF_OPEN:
-            self.success_count += 1
-            if self.success_count >= self.success_threshold:
-                self.state = CircuitBreakerState.CLOSED
-                self.failure_count = 0
-                self.slow_response_count = 0
-        elif self.state == CircuitBreakerState.CLOSED:
+        if self.state == CircuitBreakerState.CLOSED:
             self.failure_count = max(0, self.failure_count - 1)
 
     def record_failure(self):
