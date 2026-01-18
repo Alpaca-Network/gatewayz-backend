@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.security.deps import get_current_admin_user
+from src.security.deps import require_admin
 from src.services.pricing_analytics import (
     get_cost_breakdown_by_provider,
     get_cost_trend,
@@ -31,7 +31,7 @@ async def get_model_pricing_analytics(
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     sort_by: str = Query("cost", description="Sort by: cost, requests, tokens"),
     include_free: bool = Query(False, description="Include models with zero cost"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get comprehensive model usage analytics with cost tracking
@@ -96,7 +96,7 @@ async def get_model_pricing_analytics(
 @router.get("/providers")
 async def get_provider_cost_breakdown(
     time_range: str = Query("30d", description="Time range: 1h, 24h, 7d, 30d, all"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get cost breakdown aggregated by provider
@@ -136,7 +136,7 @@ async def get_cost_trend_data(
     granularity: str = Query("day", description="Time granularity: hour, day, week, month"),
     time_range: str = Query("30d", description="Time range: 1h, 24h, 7d, 30d"),
     provider: Optional[str] = Query(None, description="Filter by provider slug"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get cost trend over time
@@ -176,7 +176,7 @@ async def get_cost_trend_data(
 async def get_most_expensive_models_endpoint(
     limit: int = Query(10, ge=1, le=100, description="Number of models to return"),
     time_range: str = Query("30d", description="Time range: 1h, 24h, 7d, 30d, all"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get the most expensive models by total cost
@@ -198,7 +198,7 @@ async def get_most_expensive_models_endpoint(
 async def get_most_used_models_endpoint(
     limit: int = Query(10, ge=1, le=100, description="Number of models to return"),
     time_range: str = Query("30d", description="Time range: 1h, 24h, 7d, 30d, all"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get the most used models by request count
@@ -220,7 +220,7 @@ async def get_most_used_models_endpoint(
 async def get_efficiency_report(
     provider: Optional[str] = Query(None, description="Filter by provider slug"),
     time_range: str = Query("30d", description="Time range: 1h, 24h, 7d, 30d, all"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get a comprehensive pricing efficiency report
@@ -289,7 +289,7 @@ async def get_efficiency_report(
 @router.get("/summary")
 async def get_pricing_summary(
     time_range: str = Query("30d", description="Time range: 1h, 24h, 7d, 30d, all"),
-    _admin=Depends(get_current_admin_user)
+    _admin=Depends(require_admin)
 ):
     """
     Get a quick summary of pricing analytics
