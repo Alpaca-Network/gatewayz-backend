@@ -72,10 +72,10 @@ class PrometheusMetricsParser:
             if not line or line.startswith("#"):
                 continue
 
-            # Parse http_request_latency_seconds_bucket
-            if "http_request_latency_seconds_bucket" in line:
+            # Parse http_request_duration_seconds_bucket (histogram buckets for latency)
+            if "http_request_duration_seconds_bucket" in line:
                 match = re.match(
-                    r'http_request_latency_seconds_bucket\{.*?le="([^"]+)".*?endpoint="([^"]+)".*?\}\s+([\d.]+)',
+                    r'http_request_duration_seconds_bucket\{.*?le="([^"]+)".*?endpoint="([^"]+)".*?\}\s+([\d.eE+-]+)',
                     line,
                 )
                 if match:
@@ -84,10 +84,10 @@ class PrometheusMetricsParser:
                     value = float(match.group(3))
                     latency_buckets[endpoint].append((bucket_val, value))
 
-            # Parse http_request_latency_seconds_sum
-            elif "http_request_latency_seconds_sum" in line and "bucket" not in line:
+            # Parse http_request_duration_seconds_sum
+            elif "http_request_duration_seconds_sum" in line and "bucket" not in line:
                 match = re.match(
-                    r'http_request_latency_seconds_sum\{.*?endpoint="([^"]+)".*?\}\s+([\d.]+)',
+                    r'http_request_duration_seconds_sum\{.*?endpoint="([^"]+)".*?\}\s+([\d.eE+-]+)',
                     line,
                 )
                 if match:
@@ -95,10 +95,10 @@ class PrometheusMetricsParser:
                     value = float(match.group(2))
                     latency_sum[endpoint] = value
 
-            # Parse http_request_latency_seconds_count
-            elif "http_request_latency_seconds_count" in line:
+            # Parse http_request_duration_seconds_count
+            elif "http_request_duration_seconds_count" in line:
                 match = re.match(
-                    r'http_request_latency_seconds_count\{.*?endpoint="([^"]+)".*?\}\s+([\d.]+)',
+                    r'http_request_duration_seconds_count\{.*?endpoint="([^"]+)".*?\}\s+([\d.eE+-]+)',
                     line,
                 )
                 if match:
