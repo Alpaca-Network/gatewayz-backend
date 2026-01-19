@@ -16,7 +16,6 @@ API Documentation: https://learn.nosana.com/api
 Swagger UI: https://dashboard.k8s.prd.nos.ci/api/swagger
 """
 
-import asyncio
 import logging
 from typing import Any
 
