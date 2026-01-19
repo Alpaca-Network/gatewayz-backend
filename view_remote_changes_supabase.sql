@@ -74,7 +74,7 @@ ORDER BY count DESC;
 SELECT '4️⃣  BEFORE → AFTER COMPARISON (10 samples)' as section;
 
 SELECT
-    LEFT(id, 45) as model_id,
+    id as model_id,
     source_gateway as provider,
     TO_CHAR(pricing_original_prompt, 'FM$0.000000') as before_original,
     TO_CHAR(pricing_prompt, 'FM$0.000000000000') as after_normalized,
@@ -97,7 +97,7 @@ LIMIT 10;
 SELECT '5️⃣  LOWEST PRICED MODELS (10 samples)' as section;
 
 SELECT
-    LEFT(id, 50) as model_id,
+    id as model_id,
     source_gateway as provider,
     TO_CHAR(pricing_prompt, 'FM$0.000000000000') as price_per_token,
     TO_CHAR((1000 * pricing_prompt), 'FM$0.000000') as cost_per_1k_tokens,
@@ -117,7 +117,7 @@ LIMIT 10;
 SELECT '6️⃣  HIGHEST PRICED MODELS (10 samples)' as section;
 
 SELECT
-    LEFT(id, 50) as model_id,
+    id as model_id,
     source_gateway as provider,
     TO_CHAR(pricing_prompt, 'FM$0.000000000000') as price_per_token,
     TO_CHAR((1000 * pricing_prompt), 'FM$0.000000') as cost_per_1k_tokens,
