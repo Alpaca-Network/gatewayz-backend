@@ -1805,149 +1805,6 @@ async def get_chat_completion_requests_by_api_key_admin(
         ) from e
 
 
-@router.get("/admin/monitoring/chat-requests/by-api-key/summary", tags=["admin", "monitoring"])
-async def get_chat_requests_summary_by_api_key_admin(
-    api_key: str = Query(..., description="API key to get summary for (exact match)"),
-    admin_user: dict = Depends(require_admin),
-):
-    """
-    Get summary statistics for all chat completion requests by API key (Admin only).
-
-    **PURPOSE**: Analytics and monitoring dashboard - shows aggregate metrics without fetching data.
-
-    **OPTIMIZED**: Uses database-side aggregation with no data fetching required.
-
-    **CACHED**: Results cached for 60 seconds in Redis for high performance.
-
-    **Use Cases:**
-    - Dashboard widgets showing usage statistics
-    - API key monitoring and analytics
-    - Cost tracking and budgeting
-    - Performance monitoring (avg processing time)
-    - Success rate tracking
-
-    **Query Parameters:**
-    - `api_key`: Full API key string (exact match required)
-
-    **Returns:**
-    ```json
-    {
-      "api_key_info": {
-        "id": 456,
-        "key_name": "Production Key",
-        "user_id": 789,
-        "environment_tag": "live",
-        "is_active": true,
-        "created_at": "2025-01-01T00:00:00Z"
-      },
-      "summary": {
-        "total_requests": 50000,
-        "total_input_tokens": 125000000,
-        "total_output_tokens": 85000000,
-        "total_tokens": 210000000,
-        "avg_input_tokens": 2500.0,
-        "avg_output_tokens": 1700.0,
-        "avg_processing_time_ms": 1250.5,
-        "completed_requests": 49800,
-        "failed_requests": 200,
-        "success_rate": 99.6,
-        "first_request_at": "2025-01-01T00:00:00Z",
-        "last_request_at": "2026-01-19T10:30:00Z",
-        "total_cost_usd": 42.50
-      },
-      "timestamp": "2026-01-19T10:30:00Z",
-      "cached": false,
-      "cache_ttl_seconds": 60
-    }
-    ```
-
-    **Performance:**
-    - With database RPC: 30-50ms
-    - With cache hit: 5-10ms
-    - With fallback: 60-120ms
-
-    **Note**: For browsing individual requests, use the pagination endpoint instead:
-    `/admin/monitoring/chat-requests/by-api-key?api_key=xxx&limit=100&offset=0`
-    """
-    try:
-        from src.db.api_keys import get_api_key_by_key
-        from src.db.chat_completion_requests import get_chat_completion_summary_by_api_key
-        from src.config.redis_config import get_redis_client
-        import json
-
-        # Look up API key by the actual key string
-        api_key_data = get_api_key_by_key(api_key)
-        if not api_key_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"API key not found. Please verify the key is correct. Key preview: {api_key[:20]}...",
-            )
-
-        api_key_id = api_key_data.get("id")
-        if not api_key_id:
-            raise HTTPException(status_code=500, detail="API key found but missing ID field")
-
-        # Try to get from cache first
-        cache_key = f"chat_summary:api_key:{api_key_id}"
-        redis_client = get_redis_client()
-        cached = False
-
-        if redis_client:
-            try:
-                cached_data = redis_client.get(cache_key)
-                if cached_data:
-                    logger.info(f"Cache HIT for chat summary: api_key_id={api_key_id}")
-                    result = json.loads(cached_data)
-                    result["cached"] = True
-                    result["timestamp"] = datetime.now(timezone.utc).isoformat()
-                    return result
-            except Exception as cache_error:
-                logger.warning(f"Redis cache read failed: {cache_error}")
-
-        # Cache miss - fetch from database
-        logger.info(f"Cache MISS for chat summary: api_key_id={api_key_id}, fetching from database")
-        summary = get_chat_completion_summary_by_api_key(api_key_id)
-
-        # Build response
-        response = {
-            "api_key_info": {
-                "id": api_key_data.get("id"),
-                "key_name": api_key_data.get("key_name"),
-                "user_id": api_key_data.get("user_id"),
-                "environment_tag": api_key_data.get("environment_tag"),
-                "is_active": api_key_data.get("is_active", True),
-                "created_at": api_key_data.get("created_at"),
-            },
-            "summary": summary,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "cached": cached,
-            "cache_ttl_seconds": 60,
-        }
-
-        # Cache the result (60 second TTL)
-        if redis_client:
-            try:
-                redis_client.setex(
-                    cache_key,
-                    60,  # 60 second TTL
-                    json.dumps(response, default=str)  # default=str handles datetime serialization
-                )
-                logger.info(f"Cached chat summary for api_key_id={api_key_id} (TTL: 60s)")
-            except Exception as cache_error:
-                logger.warning(f"Redis cache write failed: {cache_error}")
-
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching summary for API key: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch chat request summary"
-        ) from e
-
-
 @router.get("/admin/monitoring/chat-requests/providers", tags=["admin", "monitoring"])
 async def get_providers_with_requests_admin(admin_user: dict = Depends(require_admin)):
     """
@@ -2324,6 +2181,140 @@ async def get_chat_completion_requests_admin(
         raise HTTPException(
             status_code=500, detail=f"Failed to get chat completion requests: {str(e)}"
         )
+
+
+@router.get("/admin/monitoring/chat-requests/summary", tags=["admin", "monitoring"])
+async def get_chat_requests_summary_admin(
+    model_id: int | None = Query(None, description="Filter by model ID"),
+    provider_id: int | None = Query(None, description="Filter by provider ID"),
+    model_name: str | None = Query(None, description="Filter by model name (contains)"),
+    start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
+    end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
+    admin_user: dict = Depends(require_admin),
+):
+    """
+    Get aggregated summary statistics for chat completion requests (Admin only).
+
+    **PURPOSE**: Analytics dashboard - shows aggregate metrics without fetching data.
+
+    **OPTIMIZED**: Uses database-side aggregation with no data fetching required.
+
+    **CACHED**: Results cached for 60 seconds in Redis for high performance.
+
+    **Query Parameters:**
+    - `model_id`: Filter by specific model ID
+    - `provider_id`: Filter by provider ID
+    - `model_name`: Filter by model name (partial match)
+    - `start_date`: Filter by start date (ISO format: YYYY-MM-DDTHH:MM:SS)
+    - `end_date`: Filter by end date (ISO format: YYYY-MM-DDTHH:MM:SS)
+
+    **Returns:**
+    ```json
+    {
+      "summary": {
+        "total_requests": 50000,
+        "total_input_tokens": 125000000,
+        "total_output_tokens": 85000000,
+        "total_tokens": 210000000,
+        "avg_input_tokens": 2500.0,
+        "avg_output_tokens": 1700.0,
+        "avg_processing_time_ms": 1250.5,
+        "completed_requests": 49800,
+        "failed_requests": 200,
+        "success_rate": 99.6,
+        "first_request_at": "2025-01-01T00:00:00Z",
+        "last_request_at": "2026-01-19T10:30:00Z",
+        "total_cost_usd": 42.50
+      },
+      "filters": {
+        "model_id": 4,
+        "provider_id": null,
+        "model_name": null,
+        "start_date": "2026-01-12T00:00:00Z",
+        "end_date": "2026-01-19T00:00:00Z"
+      },
+      "timestamp": "2026-01-19T13:00:00Z",
+      "cached": false
+    }
+    ```
+
+    **Performance:**
+    - With database RPC: 30-50ms
+    - With cache hit: 5-10ms
+
+    **For browsing requests, use:** `/admin/monitoring/chat-requests?model_id=4&...`
+    """
+    try:
+        from src.db.chat_completion_requests import get_chat_completion_summary_by_filters
+        from src.config.redis_config import get_redis_client
+        import json
+        import hashlib
+
+        # Create cache key based on filters
+        filter_str = f"{model_id}:{provider_id}:{model_name}:{start_date}:{end_date}"
+        filter_hash = hashlib.md5(filter_str.encode()).hexdigest()
+        cache_key = f"chat_summary:filters:{filter_hash}"
+
+        redis_client = get_redis_client()
+        cached = False
+
+        # Try to get from cache first
+        if redis_client:
+            try:
+                cached_data = redis_client.get(cache_key)
+                if cached_data:
+                    logger.info(f"Cache HIT for chat summary: filter_hash={filter_hash}")
+                    result = json.loads(cached_data)
+                    result["cached"] = True
+                    result["timestamp"] = datetime.now(timezone.utc).isoformat()
+                    return result
+            except Exception as cache_error:
+                logger.warning(f"Redis cache read failed: {cache_error}")
+
+        # Cache miss - fetch from database
+        logger.info(f"Cache MISS for chat summary: filter_hash={filter_hash}, fetching from database")
+        summary = get_chat_completion_summary_by_filters(
+            model_id=model_id,
+            provider_id=provider_id,
+            model_name=model_name,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        # Build response
+        response = {
+            "summary": summary,
+            "filters": {
+                "model_id": model_id,
+                "provider_id": provider_id,
+                "model_name": model_name,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "cached": cached,
+        }
+
+        # Cache the result (60 second TTL)
+        if redis_client:
+            try:
+                redis_client.setex(
+                    cache_key,
+                    60,  # 60 second TTL
+                    json.dumps(response, default=str)
+                )
+                logger.info(f"Cached chat summary for filter_hash={filter_hash} (TTL: 60s)")
+            except Exception as cache_error:
+                logger.warning(f"Redis cache write failed: {cache_error}")
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error fetching summary: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch chat request summary"
+        ) from e
 
 
 @router.get("/admin/monitoring/chat-requests/plot-data", tags=["admin", "monitoring"])

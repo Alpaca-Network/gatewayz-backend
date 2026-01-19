@@ -587,6 +587,175 @@ def get_chat_completion_summary_by_api_key(api_key_id: int) -> dict[str, Any]:
         }
 
 
+def get_chat_completion_summary_by_filters(
+    model_id: Optional[int] = None,
+    provider_id: Optional[int] = None,
+    model_name: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Get aggregated summary statistics for chat completion requests with flexible filtering.
+
+    Uses database-side aggregation for maximum performance - no data fetching required.
+    Optimized for analytics dashboards and model monitoring endpoints.
+
+    Args:
+        model_id: Optional model ID to filter by
+        provider_id: Optional provider ID to filter by
+        model_name: Optional model name to filter by (partial match)
+        start_date: Optional start date (ISO format) to filter by
+        end_date: Optional end date (ISO format) to filter by
+
+    Returns:
+        Dictionary with aggregated statistics:
+        {
+            "total_requests": int,
+            "total_input_tokens": int,
+            "total_output_tokens": int,
+            "total_tokens": int,
+            "avg_input_tokens": float,
+            "avg_output_tokens": float,
+            "avg_processing_time_ms": float,
+            "completed_requests": int,
+            "failed_requests": int,
+            "success_rate": float (0-100),
+            "first_request_at": str (ISO datetime) or None,
+            "last_request_at": str (ISO datetime) or None,
+            "total_cost_usd": float
+        }
+    """
+    try:
+        client = get_supabase_client()
+
+        # Try to use RPC function first (fastest)
+        try:
+            result = client.rpc(
+                "get_chat_completion_summary_by_filters",
+                {
+                    "p_model_id": model_id,
+                    "p_provider_id": provider_id,
+                    "p_model_name": model_name,
+                    "p_start_date": start_date,
+                    "p_end_date": end_date,
+                }
+            ).execute()
+
+            if result.data and len(result.data) > 0:
+                summary_data = result.data[0]
+                return {
+                    "total_requests": int(summary_data.get("total_requests", 0)),
+                    "total_input_tokens": int(summary_data.get("total_input_tokens", 0)),
+                    "total_output_tokens": int(summary_data.get("total_output_tokens", 0)),
+                    "total_tokens": int(summary_data.get("total_tokens", 0)),
+                    "avg_input_tokens": round(float(summary_data.get("avg_input_tokens", 0)), 2),
+                    "avg_output_tokens": round(float(summary_data.get("avg_output_tokens", 0)), 2),
+                    "avg_processing_time_ms": round(float(summary_data.get("avg_processing_time_ms", 0)), 2),
+                    "completed_requests": int(summary_data.get("completed_requests", 0)),
+                    "failed_requests": int(summary_data.get("failed_requests", 0)),
+                    "success_rate": round(float(summary_data.get("success_rate", 0)), 2),
+                    "first_request_at": summary_data.get("first_request_at"),
+                    "last_request_at": summary_data.get("last_request_at"),
+                    "total_cost_usd": round(float(summary_data.get("total_cost_usd", 0)), 2),
+                }
+            else:
+                raise Exception("RPC returned no data")
+
+        except Exception as rpc_error:
+            logger.debug(f"RPC function not available, using fallback aggregation: {rpc_error}")
+
+            # Fallback: Use direct aggregation (fetch only needed columns)
+            query = (
+                client.table("chat_completion_requests")
+                .select("input_tokens, output_tokens, processing_time_ms, status, created_at, cost_usd, models!inner(id, model_name, provider_id, providers!inner(id))")
+            )
+
+            # Apply filters
+            if model_id is not None:
+                query = query.eq("model_id", model_id)
+            if provider_id is not None:
+                query = query.eq("models.provider_id", provider_id)
+            if model_name is not None:
+                query = query.ilike("models.model_name", f"%{model_name}%")
+            if start_date is not None:
+                query = query.gte("created_at", start_date)
+            if end_date is not None:
+                query = query.lte("created_at", end_date)
+
+            agg_result = query.execute()
+            all_requests = agg_result.data or []
+
+            if not all_requests:
+                # No requests found - return zero summary
+                return {
+                    "total_requests": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_tokens": 0,
+                    "avg_input_tokens": 0,
+                    "avg_output_tokens": 0,
+                    "avg_processing_time_ms": 0,
+                    "completed_requests": 0,
+                    "failed_requests": 0,
+                    "success_rate": 0,
+                    "first_request_at": None,
+                    "last_request_at": None,
+                    "total_cost_usd": 0,
+                }
+
+            # Calculate statistics manually
+            total_requests = len(all_requests)
+            total_input = sum(r.get("input_tokens", 0) for r in all_requests)
+            total_output = sum(r.get("output_tokens", 0) for r in all_requests)
+            total_processing = sum(r.get("processing_time_ms", 0) for r in all_requests)
+            completed = sum(1 for r in all_requests if r.get("status") == "completed")
+            failed = sum(1 for r in all_requests if r.get("status") == "failed")
+            total_cost = sum(float(r.get("cost_usd", 0)) for r in all_requests)
+
+            # Get time range
+            timestamps = [r.get("created_at") for r in all_requests if r.get("created_at")]
+            first_request = min(timestamps) if timestamps else None
+            last_request = max(timestamps) if timestamps else None
+
+            return {
+                "total_requests": total_requests,
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_tokens": total_input + total_output,
+                "avg_input_tokens": round(total_input / total_requests, 2) if total_requests > 0 else 0,
+                "avg_output_tokens": round(total_output / total_requests, 2) if total_requests > 0 else 0,
+                "avg_processing_time_ms": round(total_processing / total_requests, 2) if total_requests > 0 else 0,
+                "completed_requests": completed,
+                "failed_requests": failed,
+                "success_rate": round((completed / total_requests * 100), 2) if total_requests > 0 else 0,
+                "first_request_at": first_request,
+                "last_request_at": last_request,
+                "total_cost_usd": round(total_cost, 2),
+            }
+
+    except Exception as e:
+        logger.error(
+            f"Failed to get chat completion summary with filters: {e}",
+            exc_info=True
+        )
+        # Return zero summary on error
+        return {
+            "total_requests": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_tokens": 0,
+            "avg_input_tokens": 0,
+            "avg_output_tokens": 0,
+            "avg_processing_time_ms": 0,
+            "completed_requests": 0,
+            "failed_requests": 0,
+            "success_rate": 0,
+            "first_request_at": None,
+            "last_request_at": None,
+            "total_cost_usd": 0,
+        }
+
+
 def search_models_with_chat_summary(
     query: str,
     provider_name: Optional[str] = None,
