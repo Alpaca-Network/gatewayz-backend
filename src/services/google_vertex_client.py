@@ -1404,6 +1404,9 @@ def _fetch_models_from_vertex_api() -> list[dict] | None:
 
     Uses the publishers/google/models endpoint to list all available Gemini models.
     Returns None if the API call fails, allowing fallback to static config.
+
+    Note: This function attempts both regional and global endpoints due to inconsistent
+    availability across different regions and API versions.
     """
     try:
         _prepare_vertex_environment()
@@ -1414,32 +1417,55 @@ def _fetch_models_from_vertex_api() -> list[dict] | None:
         location = Config.GOOGLE_VERTEX_LOCATION
         project_id = Config.GOOGLE_PROJECT_ID
 
-        # The publishers/google/models endpoint lists all available Gemini models
-        url = f"https://{location}-aiplatform.googleapis.com/v1/publishers/google/models"
+        # Try multiple endpoint patterns as the API availability varies by region
+        # Pattern 1: Regional endpoint with project context (most accurate for access control)
+        # Pattern 2: Regional endpoint without project (simpler, but may not respect all access)
+        # Pattern 3: Global endpoint (fallback, but doesn't always have all models)
+        endpoint_patterns = [
+            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{location}/publishers/google/models",
+            f"https://{location}-aiplatform.googleapis.com/v1/publishers/google/models",
+            "https://aiplatform.googleapis.com/v1/publishers/google/models",
+        ]
 
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         }
 
-        logger.info(f"Fetching models from Vertex AI API: {url}")
+        last_error = None
+        for url in endpoint_patterns:
+            try:
+                logger.debug(f"Attempting to fetch models from Vertex AI API: {url}")
 
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(url, headers=headers)
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.get(url, headers=headers)
 
-            if response.status_code != 200:
-                logger.warning(
-                    f"Vertex AI models API returned {response.status_code}: {response.text[:500]}"
-                )
-                return None
+                    if response.status_code == 200:
+                        data = response.json()
+                        models = data.get("publisherModels", [])
+                        logger.info(
+                            f"Successfully fetched {len(models)} models from Vertex AI API using endpoint: {url}"
+                        )
+                        return models
+                    else:
+                        last_error = f"Status {response.status_code}: {response.text[:500]}"
+                        logger.debug(f"Endpoint {url} returned {response.status_code}")
+                        continue
 
-            data = response.json()
-            models = data.get("publisherModels", [])
-            logger.info(f"Fetched {len(models)} models from Vertex AI API")
-            return models
+            except Exception as e:
+                last_error = str(e)
+                logger.debug(f"Endpoint {url} failed: {e}")
+                continue
+
+        # All endpoints failed
+        logger.warning(
+            f"Failed to fetch models from all Vertex AI API endpoints. Last error: {last_error}. "
+            "Falling back to static model configuration (12 models)."
+        )
+        return None
 
     except Exception as e:
-        logger.warning(f"Failed to fetch models from Vertex AI API: {e}")
+        logger.warning(f"Failed to fetch models from Vertex AI API: {e}. Using fallback configuration.")
         return None
 
 
