@@ -5,8 +5,6 @@ This test verifies the fix for the issue where startup.py was trying to import
 get_all_models but the function was actually named get_all_models_parallel.
 """
 
-import pytest
-
 
 class TestGetAllModelsImport:
     """Test suite for get_all_models import compatibility."""
@@ -28,20 +26,35 @@ class TestGetAllModelsImport:
     def test_get_all_models_returns_models_including_simplismart(self):
         """Verify get_all_models returns models including SimpliSmart."""
         from src.services.models import get_all_models
+        from unittest.mock import patch
 
-        # Call the function
-        models = get_all_models()
+        # Mock the cache to make test deterministic
+        mock_models = [
+            {
+                "id": "test-model-1",
+                "name": "Test Model 1",
+                "source_gateway": "simplismart",
+                "provider": "simplismart",
+            },
+            {
+                "id": "test-model-2",
+                "name": "Test Model 2",
+                "source_gateway": "openai",
+                "provider": "openai",
+            },
+        ]
 
-        # Should return a list
-        assert isinstance(models, list)
+        with patch("src.services.models.get_cached_models", return_value=mock_models):
+            # Call the function
+            models = get_all_models()
 
-        # Check if we have SimpliSmart models (if cache is populated)
-        simplismart_models = [m for m in models if m.get("source_gateway") == "simplismart"]
+            # Should return a list
+            assert isinstance(models, list)
 
-        # Note: This test may fail if cache is not populated
-        # But the import should work regardless
-        if simplismart_models:
+            # Check if we have SimpliSmart models
+            simplismart_models = [m for m in models if m.get("source_gateway") == "simplismart"]
             assert len(simplismart_models) > 0
+
             # Verify SimpliSmart models have required fields
             for model in simplismart_models:
                 assert "id" in model
@@ -67,29 +80,33 @@ class TestGetAllModelsImport:
         assert callable(get_all_models)
 
     def test_all_provider_gateways_included(self):
-        """Verify all providers are included in the get_all_models_parallel function."""
-        from src.services.models import get_all_models_parallel
-        import inspect
+        """Verify all key providers are supported by get_all_models_parallel."""
+        from src.services.models import get_all_models_parallel, get_cached_models
+        from unittest.mock import patch, MagicMock
 
-        # Get the source code of the function
-        source = inspect.getsource(get_all_models_parallel)
-
-        # Verify key providers are in the gateways list
+        # Test that the function attempts to fetch models from key providers
+        # by mocking get_cached_models and verifying it's called with expected gateways
         expected_providers = [
             "openrouter",
             "simplismart",
             "openai",
             "anthropic",
-            "cerebras",
-            "nebius",
-            "xai",
-            "novita",
-            "huggingface",  # referenced as "hug" in code
-            "aimo",
-            "alpaca",  # may not be in the list
             "clarifai",
         ]
 
-        # Check for providers in source (some use different names)
-        for provider in ["openrouter", "simplismart", "openai", "anthropic", "clarifai"]:
-            assert provider in source, f"Provider {provider} not found in get_all_models_parallel"
+        mock_get_cached = MagicMock(return_value=[])
+
+        with patch("src.services.models.get_cached_models", mock_get_cached):
+            with patch("src.services.models.is_gateway_in_error_state", return_value=False):
+                # Call the function
+                get_all_models_parallel()
+
+                # Verify key providers were requested
+                called_gateways = [call[0][0] for call in mock_get_cached.call_args_list]
+
+                for provider in expected_providers:
+                    # Note: 'huggingface' is referenced as 'hug' in the code
+                    if provider == "huggingface":
+                        assert "hug" in called_gateways, "Provider 'hug' (huggingface) not found in gateway calls"
+                    else:
+                        assert provider in called_gateways, f"Provider {provider} not found in gateway calls"
