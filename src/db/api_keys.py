@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from postgrest import APIError
@@ -179,9 +179,7 @@ def create_api_key(
         # Calculate expiration date if specified
         expiration_date = None
         if expiration_days:
-            expiration_date = (
-                datetime.now(timezone.utc) + timedelta(days=expiration_days)
-            ).isoformat()
+            expiration_date = (datetime.now(UTC) + timedelta(days=expiration_days)).isoformat()
 
         # Set default permissions if none provided
         if scope_permissions is None:
@@ -191,7 +189,7 @@ def create_api_key(
         # Set up trial for new users (if this is their first key)
         trial_data = {}
         if is_primary:
-            trial_start = datetime.now(timezone.utc)
+            trial_start = datetime.now(UTC)
             trial_end = trial_start + timedelta(days=3)
             # Use the provided subscription_status (e.g., "bot" for temp emails, "trial" for normal)
             is_trial = subscription_status == "trial"
@@ -261,7 +259,7 @@ def create_api_key(
             "scope_permissions": scope_permissions,
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
-            "last_used_at": datetime.now(timezone.utc).isoformat(),
+            "last_used_at": datetime.now(UTC).isoformat(),
         }
 
         # Add trial data if this is a primary key
@@ -299,9 +297,7 @@ def create_api_key(
         # Safely get the created API key record
         try:
             api_key_record = safe_get_first(
-                result,
-                error_message="Failed to create API key",
-                validate_keys=["id"]
+                result, error_message="Failed to create API key", validate_keys=["id"]
             )
         except DatabaseResultError as e:
             raise ValueError(str(e))
@@ -350,7 +346,7 @@ def create_api_key(
                         "max_requests": max_requests,
                         "is_primary": is_primary,
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as audit_error:
@@ -410,7 +406,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
                             days_remaining = max(0, (expiration - now).days)
                     except Exception as date_error:
                         logger.warning(
@@ -510,11 +506,11 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                     "action": "delete",
                     "api_key_id": deleted_key["id"],
                     "details": {
-                        "deleted_at": datetime.now(timezone.utc).isoformat(),
+                        "deleted_at": datetime.now(UTC).isoformat(),
                         "key_name": deleted_key.get("key_name", "Unknown"),
                         "environment_tag": deleted_key.get("environment_tag", "unknown"),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as e:
@@ -567,7 +563,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                                 expiration_str = expiration_str + "+00:00"
 
                             expiration = datetime.fromisoformat(expiration_str)
-                            now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                            now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
 
                             if expiration < now:
                                 logger.warning(
@@ -595,9 +591,9 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                                 trial_end_str = trial_end_str + "+00:00"
 
                             trial_end = datetime.fromisoformat(trial_end_str)
-                            now = datetime.now(timezone.utc)
+                            now = datetime.now(UTC)
                             if trial_end.tzinfo is None:
-                                trial_end = trial_end.replace(tzinfo=timezone.utc)
+                                trial_end = trial_end.replace(tzinfo=UTC)
 
                             if trial_end < now:
                                 logger.warning(
@@ -686,8 +682,8 @@ def increment_api_key_usage(api_key: str) -> None:
                 client.table("api_keys_new").update(
                     {
                         "requests_used": current_usage + 1,
-                        "last_used_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "last_used_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("api_key", api_key).execute()
                 return
@@ -790,7 +786,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             key_data = safe_get_first(
                 key_result,
                 error_message="API key not found or not owned by user",
-                validate_keys=["id"]
+                validate_keys=["id"],
             )
         except DatabaseResultError as e:
             raise ValueError(str(e))
@@ -826,7 +822,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         if "expiration_days" in update_data:
             if update_data["expiration_days"] is not None:
                 update_data["expiration_date"] = (
-                    datetime.now(timezone.utc) + timedelta(days=update_data["expiration_days"])
+                    datetime.now(UTC) + timedelta(days=update_data["expiration_days"])
                 ).isoformat()
             else:
                 update_data["expiration_date"] = None
@@ -834,7 +830,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             del update_data["expiration_days"]
 
         # Add timestamp
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Update the API key
         result = client.table("api_keys_new").update(update_data).eq("id", key_id).execute()
@@ -851,7 +847,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                 client.table("rate_limit_configs").update(
                     {
                         "max_requests": updates["max_requests"],
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("api_key_id", key_id).execute()
             except Exception as e:
@@ -874,9 +870,9 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                         "updated_fields": list(updates.keys()),
                         "old_values": {k: key_data.get(k) for k in updates.keys() if k in key_data},
                         "new_values": updates,
-                        "update_timestamp": datetime.now(timezone.utc).isoformat(),
+                        "update_timestamp": datetime.now(UTC).isoformat(),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ).execute()
         except Exception as e:
@@ -1039,7 +1035,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
                         expiration_str = expiration_str + "+00:00"
 
                     expiration = datetime.fromisoformat(expiration_str)
-                    now = datetime.now(timezone.utc).replace(tzinfo=expiration.tzinfo)
+                    now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
                     days_remaining = max(0, (expiration - now).days)
             except Exception as date_error:
                 logger.warning(
@@ -1145,6 +1141,7 @@ def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
     Returns:
         Dictionary with API key data if found, None otherwise
     """
+
     def _fetch_key(client):
         # Query api_keys_new table for the key
         key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
@@ -1157,10 +1154,7 @@ def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
     try:
         # Use execute_with_retry to handle HTTP/2 connection errors
         return execute_with_retry(
-            _fetch_key,
-            max_retries=2,
-            retry_delay=0.2,
-            operation_name="get_api_key_by_key"
+            _fetch_key, max_retries=2, retry_delay=0.2, operation_name="get_api_key_by_key"
         )
 
     except Exception as e:
