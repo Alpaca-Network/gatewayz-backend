@@ -4263,3 +4263,7 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
     except Exception as e:
         logger.error("Failed to normalize Anthropic model: %s", sanitize_for_logging(str(e)))
         return None
+
+
+# Alias for backward compatibility with startup.py and other code that imports get_all_models
+get_all_models = get_all_models_parallel
