@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from src.security.deps import get_optional_api_key
 from src.services.connection_pool import get_openai_pooled_client
+from src.utils.ai_tracing import AITracer, AIRequestType
 
 logger = logging.getLogger(__name__)
 
@@ -44,27 +45,26 @@ async def create_transcription(
     file: UploadFile = File(..., description="Audio file to transcribe"),
     model: str = Form(
         default="whisper-1",
-        description="Model to use for transcription (whisper-1, whisper-large-v3, etc.)"
+        description="Model to use for transcription (whisper-1, whisper-large-v3, etc.)",
     ),
     language: Optional[str] = Form(
         default=None,
         description="Language of the audio in ISO-639-1 format (e.g., 'en', 'es', 'fr'). "
-                    "Providing this improves accuracy and speed."
+        "Providing this improves accuracy and speed.",
     ),
     prompt: Optional[str] = Form(
         default=None,
         description="Optional text to guide the model's style or continue a previous segment. "
-                    "Useful for domain-specific vocabulary or maintaining context."
+        "Useful for domain-specific vocabulary or maintaining context.",
     ),
     response_format: str = Form(
-        default="json",
-        description="Output format: 'json', 'text', 'srt', 'verbose_json', or 'vtt'"
+        default="json", description="Output format: 'json', 'text', 'srt', 'verbose_json', or 'vtt'"
     ),
     temperature: float = Form(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Sampling temperature (0-1). Lower values are more deterministic."
+        description="Sampling temperature (0-1). Lower values are more deterministic.",
     ),
     _api_key: Optional[str] = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
 ):
@@ -99,7 +99,7 @@ async def create_transcription(
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported audio format: {content_type}. "
-                   f"Supported formats: {', '.join(SUPPORTED_FORMATS.keys())}"
+            f"Supported formats: {', '.join(SUPPORTED_FORMATS.keys())}",
         )
 
     # Read file content
@@ -113,7 +113,7 @@ async def create_transcription(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"Audio file too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)}MB"
+            detail=f"Audio file too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)}MB",
         )
 
     if len(content) == 0:
@@ -141,8 +141,7 @@ async def create_transcription(
         except Exception as e:
             logger.error(f"[{request_id}] Failed to get OpenAI client: {e}")
             raise HTTPException(
-                status_code=503,
-                detail="Transcription service temporarily unavailable"
+                status_code=503, detail="Transcription service temporarily unavailable"
             )
 
         # Build transcription parameters
@@ -158,26 +157,39 @@ async def create_transcription(
         if prompt:
             transcription_params["prompt"] = prompt
 
-        # Call Whisper API
-        with open(tmp_file_path, "rb") as audio_file:
-            try:
-                response = client.audio.transcriptions.create(
-                    file=audio_file,
-                    **transcription_params
-                )
-            except Exception as e:
-                logger.error(f"[{request_id}] Whisper API error: {e}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Transcription failed: {str(e)}"
-                )
+        # Call Whisper API with distributed tracing for Tempo
+        async with AITracer.trace_inference(
+            provider="openai",
+            model=model,
+            request_type=AIRequestType.AUDIO_TRANSCRIPTION,
+        ) as trace_ctx:
+            with open(tmp_file_path, "rb") as audio_file:
+                try:
+                    response = client.audio.transcriptions.create(
+                        file=audio_file, **transcription_params
+                    )
+                except Exception as e:
+                    logger.error(f"[{request_id}] Whisper API error: {e}")
+                    raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
 
-        logger.info(f"[{request_id}] Transcription completed successfully")
+            # Add tracing metadata
+            trace_ctx.add_event(
+                "transcription_completed",
+                {
+                    "file_size_bytes": len(content),
+                    "language": language,
+                    "response_format": response_format,
+                },
+            )
+
+            logger.info(f"[{request_id}] Transcription completed successfully")
 
         # Return response based on format
         if response_format == "text":
             # When response_format is "text", Whisper returns a plain string
-            return JSONResponse(content={"text": response if isinstance(response, str) else str(response)})
+            return JSONResponse(
+                content={"text": response if isinstance(response, str) else str(response)}
+            )
         elif response_format in ("json", "verbose_json"):
             # OpenAI returns a Transcription object
             if hasattr(response, "text"):
@@ -214,8 +226,7 @@ async def create_transcription(
 async def create_transcription_base64(
     audio_data: str = Form(..., description="Base64-encoded audio data"),
     content_type: str = Form(
-        default="audio/webm",
-        description="MIME type of the audio (e.g., 'audio/webm', 'audio/wav')"
+        default="audio/webm", description="MIME type of the audio (e.g., 'audio/webm', 'audio/wav')"
     ),
     model: str = Form(default="whisper-1"),
     language: Optional[str] = Form(default=None),
@@ -251,26 +262,20 @@ async def create_transcription_base64(
                 content_type = mime_part.replace("data:", "")
             audio_data = encoded
         except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid data URL format"
-            )
+            raise HTTPException(status_code=400, detail="Invalid data URL format")
 
     # Decode base64
     try:
         content = base64.b64decode(audio_data)
     except Exception as e:
         logger.error(f"[{request_id}] Failed to decode base64 audio: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid base64-encoded audio data"
-        )
+        raise HTTPException(status_code=400, detail="Invalid base64-encoded audio data")
 
     # Validate size
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"Audio data too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)}MB"
+            detail=f"Audio data too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)}MB",
         )
 
     if len(content) == 0:
@@ -298,8 +303,7 @@ async def create_transcription_base64(
         except Exception as e:
             logger.error(f"[{request_id}] Failed to get OpenAI client: {e}")
             raise HTTPException(
-                status_code=503,
-                detail="Transcription service temporarily unavailable"
+                status_code=503, detail="Transcription service temporarily unavailable"
             )
 
         # Build transcription parameters
@@ -318,15 +322,11 @@ async def create_transcription_base64(
         with open(tmp_file_path, "rb") as audio_file:
             try:
                 response = client.audio.transcriptions.create(
-                    file=audio_file,
-                    **transcription_params
+                    file=audio_file, **transcription_params
                 )
             except Exception as e:
                 logger.error(f"[{request_id}] Whisper API error: {e}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Transcription failed: {str(e)}"
-                )
+                raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
 
         logger.info(f"[{request_id}] Base64 transcription completed successfully")
 

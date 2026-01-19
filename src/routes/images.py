@@ -20,6 +20,7 @@ from src.services.image_generation_client import (
     process_image_generation_response,
 )
 from src.utils.performance_tracker import PerformanceTracker
+from src.utils.ai_tracing import AITracer, AIRequestType
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -208,13 +209,33 @@ async def generate_images(
                     detail=f"Provider '{provider}' is not supported for image generation. Use 'deepinfra', 'google-vertex', or 'fal'",
                 )
 
-            response = await loop.run_in_executor(executor, make_request_func)
-            processed_response = await loop.run_in_executor(
-                executor, process_image_generation_response, response, actual_provider, model
-            )
+            # Wrap image generation with distributed tracing for Tempo
+            async with AITracer.trace_inference(
+                provider=actual_provider,
+                model=model,
+                request_type=AIRequestType.IMAGE_GENERATION,
+            ) as trace_ctx:
+                response = await loop.run_in_executor(executor, make_request_func)
+                processed_response = await loop.run_in_executor(
+                    executor, process_image_generation_response, response, actual_provider, model
+                )
 
-            # Calculate inference latency
-            elapsed = max(0.001, time.monotonic() - start)
+                # Calculate inference latency
+                elapsed = max(0.001, time.monotonic() - start)
+
+                # Set cost and metadata on trace
+                tokens_charged = 100 * req.n
+                cost = tokens_charged * 0.02 / 1000
+                trace_ctx.set_cost(cost)
+                trace_ctx.set_user_info(user_id=str(user.get("id")))
+                trace_ctx.add_event(
+                    "image_generated",
+                    {
+                        "num_images": req.n,
+                        "size": req.size,
+                        "prompt_length": len(prompt),
+                    },
+                )
 
             # Record successful model call
             background_tasks.add_task(

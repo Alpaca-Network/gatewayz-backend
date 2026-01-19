@@ -42,6 +42,7 @@ from src.utils.exceptions import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.sentry_context import capture_payment_error, capture_provider_error
+from src.utils.ai_tracing import AITracer, AIRequestType
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -594,7 +595,7 @@ def validate_trial_with_free_model_bypass(
                 headers = {}
                 for k in ("remaining_tokens", "remaining_requests", "remaining_credits"):
                     if k in trial:
-                        headers[f"X-Trial-{k.replace('_','-').title()}"] = str(trial[k])
+                        headers[f"X-Trial-{k.replace('_', '-').title()}"] = str(trial[k])
                 raise HTTPException(status_code=429, detail=trial["error"], headers=headers)
         else:
             raise APIExceptions.forbidden(detail=trial.get("error", "Access denied"))
@@ -859,11 +860,88 @@ async def _process_stream_completion_background(
     For anonymous users, only metrics recording is performed (no credits, usage tracking, or history).
     """
     try:
-        # Skip user-specific operations for anonymous requests
-        if is_anonymous:
-            logger.info("Skipping user-specific post-processing for anonymous request")
-            # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
+        # Add distributed tracing for streaming completion
+        async with AITracer.trace_inference(
+            provider=provider,
+            model=model,
+            request_type=AIRequestType.CHAT_COMPLETION,
+            operation_name=f"stream_completion_{provider}_{model}",
+        ) as trace_ctx:
+            # Calculate cost for tracing
             cost = calculate_cost(model, prompt_tokens, completion_tokens)
+
+            # Set token usage and cost on trace span
+            trace_ctx.set_token_usage(
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            )
+            trace_ctx.set_cost(cost)
+
+            # Set user info if authenticated
+            if not is_anonymous and user:
+                trace_ctx.set_user_info(
+                    user_id=str(user.get("id")),
+                    tier="trial" if trial.get("is_trial") else "paid",
+                )
+
+            # Add streaming-specific event
+            trace_ctx.add_event(
+                "stream_completed",
+                {
+                    "content_length": len(accumulated_content),
+                    "elapsed_seconds": elapsed,
+                },
+            )
+
+            # Skip user-specific operations for anonymous requests
+            if is_anonymous:
+                logger.info("Skipping user-specific post-processing for anonymous request")
+                # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
+                cost = calculate_cost(model, prompt_tokens, completion_tokens)
+                await _record_inference_metrics_and_health(
+                    provider=provider,
+                    model=model,
+                    elapsed_seconds=elapsed,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    cost=cost,
+                    success=True,
+                    error_message=None,
+                )
+                # Capture health metrics (passive monitoring)
+                try:
+                    await capture_model_health(
+                        provider=provider,
+                        model=model,
+                        response_time_ms=elapsed * 1000,
+                        status="success",
+                        usage={
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to capture health metric: {e}")
+                return
+
+            # Handle credits and usage (centralized helper)
+            cost = await _handle_credits_and_usage(
+                api_key=api_key,
+                user=user,
+                model=model,
+                trial=trial,
+                total_tokens=total_tokens,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                elapsed_ms=int(elapsed * 1000),
+            )
+
+            # Increment API key usage counter
+            await _to_thread(increment_api_key_usage, api_key)
+
+            # Record Prometheus metrics and passive health monitoring
             await _record_inference_metrics_and_health(
                 provider=provider,
                 model=model,
@@ -874,6 +952,92 @@ async def _process_stream_completion_background(
                 success=True,
                 error_message=None,
             )
+
+            # Log activity
+            try:
+                provider_name = get_provider_from_model(model)
+                speed = total_tokens / elapsed if elapsed > 0 else 0
+                await _to_thread(
+                    log_activity,
+                    user_id=user["id"],
+                    model=model,
+                    provider=provider_name,
+                    tokens=total_tokens,
+                    cost=cost,
+                    speed=speed,
+                    finish_reason="stop",
+                    app="API",
+                    metadata={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "endpoint": "/v1/chat/completions",
+                        "stream": True,
+                        "session_id": session_id,
+                        "gateway": provider,
+                    },
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to log activity for user {user['id']}, model {model}: {e}",
+                    exc_info=True,
+                )
+
+            # Save chat history
+            # Validate session_id before attempting to save
+            if session_id:
+                if session_id < -2147483648 or session_id > 2147483647:
+                    logger.warning(
+                        "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
+                        sanitize_for_logging(str(session_id)),
+                    )
+                    session_id = None
+
+            if session_id:
+                try:
+                    session = await _to_thread(get_chat_session, session_id, user["id"])
+                    if session:
+                        last_user = None
+                        for m in reversed(messages):
+                            if m.get("role") == "user":
+                                last_user = m
+                                break
+                        if last_user:
+                            user_content = last_user.get("content", "")
+                            if isinstance(user_content, list):
+                                text_parts = []
+                                for item in user_content:
+                                    if isinstance(item, dict) and item.get("type") == "text":
+                                        text_parts.append(item.get("text", ""))
+                                user_content = (
+                                    " ".join(text_parts) if text_parts else "[multimodal content]"
+                                )
+
+                            await _to_thread(
+                                save_chat_message,
+                                session_id,
+                                "user",
+                                user_content,
+                                model,
+                                0,
+                                user["id"],
+                            )
+
+                        if accumulated_content:
+                            await _to_thread(
+                                save_chat_message,
+                                session_id,
+                                "assistant",
+                                accumulated_content,
+                                model,
+                                total_tokens,
+                                user["id"],
+                            )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
+                        exc_info=True,
+                    )
+
             # Capture health metrics (passive monitoring)
             try:
                 await capture_model_health(
@@ -889,167 +1053,39 @@ async def _process_stream_completion_background(
                 )
             except Exception as e:
                 logger.debug(f"Failed to capture health metric: {e}")
-            return
 
-        # Handle credits and usage (centralized helper)
-        cost = await _handle_credits_and_usage(
-            api_key=api_key,
-            user=user,
-            model=model,
-            trial=trial,
-            total_tokens=total_tokens,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            elapsed_ms=int(elapsed * 1000),
-        )
+            # Save chat completion request metadata to database with cost tracking
+            if request_id:
+                try:
+                    # Calculate cost breakdown for analytics
+                    from src.services.pricing import get_model_pricing
 
-        # Increment API key usage counter
-        await _to_thread(increment_api_key_usage, api_key)
+                    pricing_info = get_model_pricing(model)
+                    input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+                    output_cost = completion_tokens * pricing_info.get("completion", 0)
+                    total_cost = input_cost + output_cost
 
-        # Record Prometheus metrics and passive health monitoring
-        await _record_inference_metrics_and_health(
-            provider=provider,
-            model=model,
-            elapsed_seconds=elapsed,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cost=cost,
-            success=True,
-            error_message=None,
-        )
-
-        # Log activity
-        try:
-            provider_name = get_provider_from_model(model)
-            speed = total_tokens / elapsed if elapsed > 0 else 0
-            await _to_thread(
-                log_activity,
-                user_id=user["id"],
-                model=model,
-                provider=provider_name,
-                tokens=total_tokens,
-                cost=cost,
-                speed=speed,
-                finish_reason="stop",
-                app="API",
-                metadata={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "endpoint": "/v1/chat/completions",
-                    "stream": True,
-                    "session_id": session_id,
-                    "gateway": provider,
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to log activity for user {user['id']}, model {model}: {e}", exc_info=True
-            )
-
-        # Save chat history
-        # Validate session_id before attempting to save
-        if session_id:
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None
-
-        if session_id:
-            try:
-                session = await _to_thread(get_chat_session, session_id, user["id"])
-                if session:
-                    last_user = None
-                    for m in reversed(messages):
-                        if m.get("role") == "user":
-                            last_user = m
-                            break
-                    if last_user:
-                        user_content = last_user.get("content", "")
-                        if isinstance(user_content, list):
-                            text_parts = []
-                            for item in user_content:
-                                if isinstance(item, dict) and item.get("type") == "text":
-                                    text_parts.append(item.get("text", ""))
-                            user_content = (
-                                " ".join(text_parts) if text_parts else "[multimodal content]"
-                            )
-
-                        await _to_thread(
-                            save_chat_message,
-                            session_id,
-                            "user",
-                            user_content,
-                            model,
-                            0,
-                            user["id"],
-                        )
-
-                    if accumulated_content:
-                        await _to_thread(
-                            save_chat_message,
-                            session_id,
-                            "assistant",
-                            accumulated_content,
-                            model,
-                            total_tokens,
-                            user["id"],
-                        )
-            except Exception as e:
-                logger.error(
-                    f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
-                    exc_info=True,
-                )
-
-        # Capture health metrics (passive monitoring)
-        try:
-            await capture_model_health(
-                provider=provider,
-                model=model,
-                response_time_ms=elapsed * 1000,
-                status="success",
-                usage={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                },
-            )
-        except Exception as e:
-            logger.debug(f"Failed to capture health metric: {e}")
-
-        # Save chat completion request metadata to database with cost tracking
-        if request_id:
-            try:
-                # Calculate cost breakdown for analytics
-                from src.services.pricing import get_model_pricing
-
-                pricing_info = get_model_pricing(model)
-                input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-                output_cost = completion_tokens * pricing_info.get("completion", 0)
-                total_cost = input_cost + output_cost
-
-                await _to_thread(
-                    save_chat_completion_request_with_cost,
-                    request_id=request_id,
-                    model_name=model,
-                    input_tokens=prompt_tokens,
-                    output_tokens=completion_tokens,
-                    processing_time_ms=int(elapsed * 1000),
-                    cost_usd=total_cost,
-                    input_cost_usd=input_cost,
-                    output_cost_usd=output_cost,
-                    pricing_source="calculated",
-                    status="completed",
-                    error_message=None,
-                    user_id=user["id"] if user else None,
-                    provider_name=provider,
-                    model_id=None,
-                    api_key_id=api_key_id,
-                    is_anonymous=is_anonymous,
-                )
-            except Exception as e:
-                logger.debug(f"Failed to save chat completion request: {e}")
+                    await _to_thread(
+                        save_chat_completion_request_with_cost,
+                        request_id=request_id,
+                        model_name=model,
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        processing_time_ms=int(elapsed * 1000),
+                        cost_usd=total_cost,
+                        input_cost_usd=input_cost,
+                        output_cost_usd=output_cost,
+                        pricing_source="calculated",
+                        status="completed",
+                        error_message=None,
+                        user_id=user["id"] if user else None,
+                        provider_name=provider,
+                        model_id=None,
+                        api_key_id=api_key_id,
+                        is_anonymous=is_anonymous,
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to save chat completion request: {e}")
 
     except Exception as e:
         logger.error(f"Background stream processing error: {e}", exc_info=True)
@@ -1161,6 +1197,7 @@ async def stream_generator(
                     if ttfc > 10.0:
                         try:
                             import sentry_sdk
+
                             sentry_sdk.capture_message(
                                 f"Critical TTFC: {ttfc:.2f}s for {provider}/{model}",
                                 level="warning",
@@ -1170,8 +1207,10 @@ async def stream_generator(
                                     "model": model,
                                     "threshold": 10.0,
                                     "severity": "CRITICAL",
-                                    "timeout_config": Config.GOOGLE_VERTEX_TIMEOUT if provider == "google-vertex" else None,
-                                }
+                                    "timeout_config": Config.GOOGLE_VERTEX_TIMEOUT
+                                    if provider == "google-vertex"
+                                    else None,
+                                },
                             )
                         except Exception as sentry_error:
                             logger.debug(f"Failed to send Sentry alert for TTFC: {sentry_error}")
@@ -1871,6 +1910,7 @@ async def chat_completions(
                 is_async_stream = False  # Default to sync, only OpenRouter uses async currently
                 try:
                     # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
+                    # Note: Streaming tracing is handled in stream_generator to capture final token counts
                     if attempt_provider == "fal":
                         # FAL models are for image/video generation, not chat completions
                         raise HTTPException(
@@ -2058,38 +2098,80 @@ async def chat_completions(
 
             try:
                 # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
-                if attempt_provider == "fal":
-                    # FAL models are for image/video generation, not chat completions
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                "and is not available through the chat completions endpoint. "
-                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                "type": "invalid_request_error",
-                                "code": "model_not_supported_for_chat",
-                            }
-                        },
+                # Wrap provider calls with distributed tracing for Tempo
+                async with AITracer.trace_inference(
+                    provider=attempt_provider,
+                    model=request_model,
+                    request_type=AIRequestType.CHAT_COMPLETION,
+                ) as trace_ctx:
+                    if attempt_provider == "fal":
+                        # FAL models are for image/video generation, not chat completions
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": {
+                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                    "and is not available through the chat completions endpoint. "
+                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                    "type": "invalid_request_error",
+                                    "code": "model_not_supported_for_chat",
+                                }
+                            },
+                        )
+                    elif attempt_provider in PROVIDER_ROUTING:
+                        # Use registry for all registered providers
+                        request_func = PROVIDER_ROUTING[attempt_provider]["request"]
+                        process_func = PROVIDER_ROUTING[attempt_provider]["process"]
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(request_func, messages, request_model, **optional),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_func, resp_raw)
+                    else:
+                        # Default to OpenRouter
+                        resp_raw = await asyncio.wait_for(
+                            _to_thread(
+                                make_openrouter_request_openai, messages, request_model, **optional
+                            ),
+                            timeout=request_timeout,
+                        )
+                        processed = await _to_thread(process_openrouter_response, resp_raw)
+
+                    # Extract token usage from response for tracing
+                    usage = processed.get("usage", {}) or {}
+                    trace_prompt_tokens = usage.get("prompt_tokens", 0)
+                    trace_completion_tokens = usage.get("completion_tokens", 0)
+                    trace_total_tokens = usage.get("total_tokens", 0)
+
+                    # Calculate cost for tracing
+                    trace_cost = calculate_cost(
+                        request_model, trace_prompt_tokens, trace_completion_tokens
                     )
-                elif attempt_provider in PROVIDER_ROUTING:
-                    # Use registry for all registered providers
-                    request_func = PROVIDER_ROUTING[attempt_provider]["request"]
-                    process_func = PROVIDER_ROUTING[attempt_provider]["process"]
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(request_func, messages, request_model, **optional),
-                        timeout=request_timeout,
+
+                    # Set token usage and cost on trace span
+                    trace_ctx.set_token_usage(
+                        input_tokens=trace_prompt_tokens,
+                        output_tokens=trace_completion_tokens,
+                        total_tokens=trace_total_tokens,
                     )
-                    processed = await _to_thread(process_func, resp_raw)
-                else:
-                    # Default to OpenRouter
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_openrouter_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_openrouter_response, resp_raw)
+                    trace_ctx.set_cost(trace_cost)
+
+                    # Set model parameters if available
+                    if optional:
+                        trace_ctx.set_model_parameters(
+                            temperature=optional.get("temperature"),
+                            max_tokens=optional.get("max_tokens"),
+                            top_p=optional.get("top_p"),
+                            frequency_penalty=optional.get("frequency_penalty"),
+                            presence_penalty=optional.get("presence_penalty"),
+                        )
+
+                    # Set user info if authenticated
+                    if not is_anonymous and user:
+                        trace_ctx.set_user_info(
+                            user_id=str(user.get("id")),
+                            tier="trial" if trial.get("is_trial") else "paid",
+                        )
 
                 provider = attempt_provider
                 model = request_model
@@ -2499,7 +2581,9 @@ async def chat_completions(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
+                        else original_model
+                        if "original_model" in dir()
+                        else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -2538,7 +2622,9 @@ async def chat_completions(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
+                        else original_model
+                        if "original_model" in dir()
+                        else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -3714,7 +3800,9 @@ async def unified_responses(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
+                        else original_model
+                        if "original_model" in dir()
+                        else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -3750,7 +3838,9 @@ async def unified_responses(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
+                        else original_model
+                        if "original_model" in dir()
+                        else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
