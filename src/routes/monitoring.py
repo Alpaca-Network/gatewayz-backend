@@ -236,6 +236,7 @@ class RealtimeStatsResponse(BaseModel):
     p50_latency: float = 0.0
     p95_latency: float = 0.0
     p99_latency: float = 0.0
+    avg_latency_ms: float = 0.0  # Average latency (for Executive Overview dashboard)
 
 
 class LatencyPercentilesResponse(BaseModel):
@@ -400,6 +401,7 @@ async def get_realtime_stats(
         p50_latency = 0.0
         p95_latency = 0.0
         p99_latency = 0.0
+        avg_latency_ms = 0.0
 
         try:
             from src.services.metrics_parser import get_metrics_parser
@@ -412,10 +414,11 @@ async def get_realtime_stats(
             latency_data = metrics_data.get("latency", {})
 
             if latency_data:
-                # Aggregate percentiles across all endpoints (weighted average by request count)
+                # Aggregate percentiles and averages across all endpoints
                 total_p50 = 0.0
                 total_p95 = 0.0
                 total_p99 = 0.0
+                total_avg = 0.0
                 total_weight = 0
 
                 for endpoint, endpoint_latency in latency_data.items():
@@ -423,10 +426,11 @@ async def get_realtime_stats(
                     if endpoint == "/metrics":
                         continue
 
-                    # Get percentiles for this endpoint (already calculated by parser)
+                    # Get percentiles and average for this endpoint
                     endpoint_p50 = endpoint_latency.get("p50")
                     endpoint_p95 = endpoint_latency.get("p95")
                     endpoint_p99 = endpoint_latency.get("p99")
+                    endpoint_avg = endpoint_latency.get("avg")
 
                     # Only include if we have valid percentile data
                     if (
@@ -439,6 +443,8 @@ async def get_realtime_stats(
                         total_p50 += endpoint_p50
                         total_p95 += endpoint_p95
                         total_p99 += endpoint_p99
+                        if endpoint_avg is not None:
+                            total_avg += endpoint_avg
                         total_weight += 1
 
                 # Calculate average percentiles across all endpoints
@@ -446,6 +452,7 @@ async def get_realtime_stats(
                     p50_latency = (total_p50 / total_weight) * 1000  # Convert to ms
                     p95_latency = (total_p95 / total_weight) * 1000  # Convert to ms
                     p99_latency = (total_p99 / total_weight) * 1000  # Convert to ms
+                    avg_latency_ms = (total_avg / total_weight) * 1000  # Convert to ms
 
         except Exception as e:
             logger.warning(
@@ -461,6 +468,7 @@ async def get_realtime_stats(
             p50_latency=p50_latency,
             p95_latency=p95_latency,
             p99_latency=p99_latency,
+            avg_latency_ms=avg_latency_ms,
         )
     except Exception as e:
         logger.error(f"Failed to get realtime stats: {e}", exc_info=True)
