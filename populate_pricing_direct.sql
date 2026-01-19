@@ -2,8 +2,10 @@
 -- Direct SQL to Populate Model Pricing Table
 -- Run this in Supabase SQL Editor to bypass PostgREST schema cache
 -- ============================================================================
+-- UPDATED: Now uses correct column names (no source_gateway column)
+-- ============================================================================
 
--- Step 1: Call the RPC function we created
+-- Step 1: Call the RPC function we created (FIXED VERSION)
 SELECT * FROM populate_model_pricing_table();
 
 -- Step 2: Verify the results
