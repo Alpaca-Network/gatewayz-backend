@@ -3380,19 +3380,16 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     try:
         # Extract pricing from the API response
         # AiHubMix returns pricing per 1K tokens
-        # Convert to per-token by dividing by 1000 to match OpenRouter format
-        # Example: $1.25/1K tokens -> $0.00125/token
-        pricing_data = model.get("pricing", {})
-        input_price_per_1k = pricing_data.get("input", 0)
-        output_price_per_1k = pricing_data.get("output", 0)
+        # Use pricing_normalization to convert to per-token format
+        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
 
-        # Convert from per-1K to per-token pricing (divide by 1000)
-        # This matches the format used by OpenRouter and expected by calculate_cost()
-        input_price_per_token = float(input_price_per_1k) / 1000 if input_price_per_1k else 0
-        output_price_per_token = float(output_price_per_1k) / 1000 if output_price_per_1k else 0
+        pricing_data = model.get("pricing", {})
+
+        # Normalize pricing from per-1K to per-token format
+        normalized_pricing = normalize_pricing_dict(pricing_data, PricingFormat.PER_1K_TOKENS)
 
         # Filter out models with zero pricing (free models can drain credits)
-        if input_price_per_token == 0 and output_price_per_token == 0:
+        if float(normalized_pricing.get("prompt", 0)) == 0 and float(normalized_pricing.get("completion", 0)) == 0:
             logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
             return None
 
@@ -3424,12 +3421,7 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
                 "output_modalities": ["text"],
                 "instruct_type": "chat",
             },
-            "pricing": {
-                "prompt": str(input_price_per_token),
-                "completion": str(output_price_per_token),
-                "request": "0",
-                "image": "0",
-            },
+            "pricing": normalized_pricing,
             "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [],
