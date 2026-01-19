@@ -1,7 +1,7 @@
 """Tests for Nosana GPU Computing Network routes"""
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, Depends
 

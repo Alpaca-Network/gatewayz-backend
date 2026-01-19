@@ -395,7 +395,7 @@ async def create_job(
     }
 
     async with await get_nosana_async_http_client() as client:
-        response = await client.post("/jobs/list", json=payload)
+        response = await client.post("/jobs/create-with-credits", json=payload)
         response.raise_for_status()
         return response.json()
 

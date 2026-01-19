@@ -188,7 +188,7 @@ CROSS JOIN (
             false,
             '{"framework": "vllm", "gpu_memory_required": "14GB", "recommended_gpus": ["A10", "RTX 4090"]}'::jsonb
         ),
-        -- DeepSeek models
+        -- DeepSeek models (require multi-GPU setup due to large memory requirements)
         (
             'nosana/deepseek-ai/DeepSeek-R1',
             'DeepSeek R1',
@@ -198,7 +198,7 @@ CROSS JOIN (
             true,
             true,
             false,
-            '{"framework": "vllm", "gpu_memory_required": "640GB", "recommended_gpus": ["H100"]}'::jsonb
+            '{"framework": "vllm", "gpu_memory_required": "640GB", "recommended_gpus": ["8x H100"], "multi_gpu_required": true, "min_gpus": 8, "notes": "Requires 8x H100 GPUs for 640GB total VRAM"}'::jsonb
         ),
         (
             'nosana/deepseek-ai/DeepSeek-V3',
@@ -209,7 +209,7 @@ CROSS JOIN (
             true,
             true,
             false,
-            '{"framework": "vllm", "gpu_memory_required": "640GB", "recommended_gpus": ["H100"]}'::jsonb
+            '{"framework": "vllm", "gpu_memory_required": "640GB", "recommended_gpus": ["8x H100"], "multi_gpu_required": true, "min_gpus": 8, "notes": "Requires 8x H100 GPUs for 640GB total VRAM"}'::jsonb
         ),
         -- Mixtral models
         (
@@ -239,13 +239,13 @@ CROSS JOIN (
         (
             'nosana/openai/whisper-large-v3',
             'Whisper Large V3',
-            'large-v3',
+            'openai/whisper-large-v3',
             0,
             'audio',
             false,
             false,
             false,
-            '{"framework": "whisper", "gpu_memory_required": "10GB", "recommended_gpus": ["A10", "RTX 4090"]}'::jsonb
+            '{"framework": "whisper", "gpu_memory_required": "10GB", "recommended_gpus": ["A10", "RTX 4090"], "whisper_model_size": "large-v3"}'::jsonb
         )
 ) AS m(model_id, model_name, provider_model_id, context_length, modality, supports_streaming, supports_function_calling, supports_vision, metadata)
 WHERE p.slug = 'nosana'

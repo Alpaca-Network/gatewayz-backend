@@ -36,7 +36,6 @@ from src.services.nosana_client import (
     stop_deployment,
     stop_job,
     update_deployment_replicas,
-    build_container_job_definition,
     build_llm_inference_job_definition,
     build_stable_diffusion_job_definition,
     build_whisper_job_definition,
