@@ -395,48 +395,62 @@ async def get_realtime_stats(
         # Calculate average health score
         avg_health = sum(health_scores.values()) / len(health_scores) if health_scores else 0.0
 
-        # Calculate system-wide latency percentiles by aggregating all latency data
-        all_latencies = []
-        try:
-            # Get all latency keys from Redis (pattern: latency:{provider}:{model})
-            latency_keys = redis_metrics.redis.keys("latency:*") if redis_metrics.enabled else []
-
-            for key in latency_keys:
-                # Decode key if it's bytes
-                key_str = key.decode() if isinstance(key, bytes) else key
-
-                # Get all latencies from this key (sorted set)
-                latencies = redis_metrics.redis.zrange(key_str, 0, -1)
-                if latencies:
-                    # Convert to integers and add to aggregated list
-                    all_latencies.extend([int(lat) for lat in latencies])
-        except Exception as e:
-            logger.warning(f"Failed to aggregate latencies for percentile calculation: {e}")
-
-        # Calculate percentiles from aggregated latencies
+        # Calculate user-facing latency percentiles from Prometheus histogram data
+        # This represents the actual user experience (full request-response cycle)
         p50_latency = 0.0
         p95_latency = 0.0
         p99_latency = 0.0
 
-        if all_latencies:
-            all_latencies.sort()
-            n = len(all_latencies)
+        try:
+            from src.services.metrics_parser import get_metrics_parser
 
-            # Use proper percentile calculation with linear interpolation
-            def calculate_percentile(values: list, percentile: float) -> float:
-                if len(values) == 1:
-                    return float(values[0])
-                position = (percentile / 100.0) * (len(values) - 1)
-                lower_idx = int(position)
-                upper_idx = min(lower_idx + 1, len(values) - 1)
-                fraction = position - lower_idx
-                lower_val = values[lower_idx]
-                upper_val = values[upper_idx]
-                return float(lower_val + fraction * (upper_val - lower_val))
+            # Fetch and parse Prometheus metrics
+            parser = get_metrics_parser()
+            metrics_data = await parser.get_metrics()
 
-            p50_latency = calculate_percentile(all_latencies, 50)
-            p95_latency = calculate_percentile(all_latencies, 95)
-            p99_latency = calculate_percentile(all_latencies, 99)
+            # Get all endpoint latencies from http_request_duration_seconds histogram
+            latency_data = metrics_data.get("latency", {})
+
+            if latency_data:
+                # Aggregate percentiles across all endpoints (weighted average by request count)
+                total_p50 = 0.0
+                total_p95 = 0.0
+                total_p99 = 0.0
+                total_weight = 0
+
+                for endpoint, endpoint_latency in latency_data.items():
+                    # Skip metrics endpoint
+                    if endpoint == "/metrics":
+                        continue
+
+                    # Get percentiles for this endpoint (already calculated by parser)
+                    endpoint_p50 = endpoint_latency.get("p50")
+                    endpoint_p95 = endpoint_latency.get("p95")
+                    endpoint_p99 = endpoint_latency.get("p99")
+
+                    # Only include if we have valid percentile data
+                    if (
+                        endpoint_p50 is not None
+                        and endpoint_p95 is not None
+                        and endpoint_p99 is not None
+                    ):
+                        # Use simple average (all endpoints equally weighted)
+                        # Could be enhanced to weight by request count if available
+                        total_p50 += endpoint_p50
+                        total_p95 += endpoint_p95
+                        total_p99 += endpoint_p99
+                        total_weight += 1
+
+                # Calculate average percentiles across all endpoints
+                if total_weight > 0:
+                    p50_latency = (total_p50 / total_weight) * 1000  # Convert to ms
+                    p95_latency = (total_p95 / total_weight) * 1000  # Convert to ms
+                    p99_latency = (total_p99 / total_weight) * 1000  # Convert to ms
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to calculate user-facing latency percentiles from Prometheus: {e}"
+            )
 
         return RealtimeStatsResponse(
             timestamp=datetime.now(timezone.utc).isoformat(),
