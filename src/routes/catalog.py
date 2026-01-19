@@ -279,8 +279,8 @@ async def get_gateways():
                     if domain.startswith("www."):
                         domain = domain[4:]
                     logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to generate logo URL for {gateway_id} from {site_url}: {e}")
 
             gateways.append({
                 "id": gateway_id,

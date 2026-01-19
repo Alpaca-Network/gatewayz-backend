@@ -362,7 +362,11 @@ class TestGetGatewaysEndpoint:
         assert "simplismart" in gateway_ids
 
         # Check SimpliSmart has correct config
-        simplismart = next(g for g in data["data"] if g["id"] == "simplismart")
+        simplismart = next(
+            (g for g in data["data"] if g["id"] == "simplismart"),
+            None
+        )
+        assert simplismart is not None, "SimpliSmart gateway not found in response"
         assert simplismart["name"] == "SimpliSmart"
         assert simplismart["color"] == "bg-sky-500"
 
