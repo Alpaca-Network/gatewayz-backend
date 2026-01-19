@@ -1,5 +1,4 @@
 """Tests for Google Vertex AI multi-endpoint fallback"""
-import pytest
 from unittest.mock import Mock, patch, MagicMock
 import httpx
 

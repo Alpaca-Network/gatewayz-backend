@@ -1,5 +1,4 @@
 """Tests for HuggingFace 400 error handling improvements"""
-import json
 import pytest
 from unittest.mock import Mock, patch
 import httpx
