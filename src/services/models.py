@@ -1442,6 +1442,8 @@ def normalize_groq_model(groq_model: dict) -> dict:
 
     context_length = metadata.get("context_length") or groq_model.get("context_length") or 0
 
+    # Extract pricing information from API response
+    pricing_info = groq_model.get("pricing") or {}
     pricing = {
         "prompt": None,
         "completion": None,
@@ -1450,6 +1452,25 @@ def normalize_groq_model(groq_model: dict) -> dict:
         "web_search": None,
         "internal_reasoning": None,
     }
+
+    # Groq may return pricing in various formats
+    # Check for token-based pricing (cents per token)
+    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
+        cents_input = pricing_info.get("cents_per_input_token", 0)
+        cents_output = pricing_info.get("cents_per_output_token", 0)
+
+        # Convert cents to dollars per token
+        if cents_input:
+            pricing["prompt"] = str(cents_input / 100)
+        if cents_output:
+            pricing["completion"] = str(cents_output / 100)
+
+    # Check for direct dollar-based pricing
+    elif "input" in pricing_info or "output" in pricing_info:
+        if pricing_info.get("input"):
+            pricing["prompt"] = str(pricing_info["input"])
+        if pricing_info.get("output"):
+            pricing["completion"] = str(pricing_info["output"])
 
     architecture = {
         "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
@@ -1563,6 +1584,8 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     metadata = fireworks_model.get("metadata") or {}
     context_length = metadata.get("context_length") or fireworks_model.get("context_length") or 0
 
+    # Extract pricing information from API response
+    pricing_info = fireworks_model.get("pricing") or {}
     pricing = {
         "prompt": None,
         "completion": None,
@@ -1571,6 +1594,25 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
         "web_search": None,
         "internal_reasoning": None,
     }
+
+    # Fireworks may return pricing in various formats
+    # Check for token-based pricing (cents per token)
+    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
+        cents_input = pricing_info.get("cents_per_input_token", 0)
+        cents_output = pricing_info.get("cents_per_output_token", 0)
+
+        # Convert cents to dollars per token
+        if cents_input:
+            pricing["prompt"] = str(cents_input / 100)
+        if cents_output:
+            pricing["completion"] = str(cents_output / 100)
+
+    # Check for direct dollar-based pricing
+    elif "input" in pricing_info or "output" in pricing_info:
+        if pricing_info.get("input"):
+            pricing["prompt"] = str(pricing_info["input"])
+        if pricing_info.get("output"):
+            pricing["completion"] = str(pricing_info["output"])
 
     architecture = {
         "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
