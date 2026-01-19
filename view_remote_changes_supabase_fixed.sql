@@ -1,10 +1,10 @@
 -- ============================================================================
--- VIEW DATABASE CHANGES - For Supabase SQL Editor
+-- VIEW DATABASE CHANGES - For Supabase SQL Editor (FIXED)
 -- ============================================================================
 -- Copy and paste this into Supabase Dashboard > SQL Editor > Run
 -- ============================================================================
 
--- First, check what columns exist
+-- First, let's check what columns exist in the models table
 SELECT '📋 MODELS TABLE COLUMNS' as section;
 
 SELECT column_name, data_type
@@ -80,7 +80,7 @@ SELECT
     TO_CHAR(pricing_prompt, 'FM$0.000000000000') as after_normalized,
     CASE
         WHEN pricing_original_prompt > 0 AND pricing_prompt > 0
-        THEN ROUND((pricing_original_prompt / pricing_prompt)::NUMERIC, 0)::TEXT || 'x smaller'
+        THEN ROUND((pricing_original_prompt / pricing_prompt)::NUMERIC, 0)::TEXT || 'x'
         ELSE 'N/A'
     END as change_factor
 FROM "public"."models"
@@ -132,30 +132,9 @@ ORDER BY pricing_prompt DESC
 LIMIT 10;
 
 -- ============================================================================
--- 7. VERIFICATION VIEW DATA (Created by migration)
+-- 7. SUMMARY STATISTICS
 -- ============================================================================
-SELECT '7️⃣  VERIFICATION VIEW (if exists)' as section;
-
--- Note: This view may not exist if migration hasn't been applied
--- Uncomment below if the view exists:
-/*
-SELECT
-    LEFT(model_name, 40) as model,
-    TO_CHAR(original_prompt, 'FM$0.000000') as before,
-    TO_CHAR(new_prompt, 'FM$0.000000000000') as after,
-    ROUND(change_percent, 1)::TEXT || '%' as change_pct,
-    format_before,
-    format_after
-FROM "public"."pricing_migration_verification"
-LIMIT 10;
-*/
-
-SELECT 'View commented out - uncomment if it exists' as note;
-
--- ============================================================================
--- 8. SUMMARY STATISTICS
--- ============================================================================
-SELECT '8️⃣  SUMMARY STATISTICS' as section;
+SELECT '7️⃣  SUMMARY STATISTICS' as section;
 
 WITH stats AS (
     SELECT
@@ -186,9 +165,9 @@ SELECT
 FROM stats;
 
 -- ============================================================================
--- 9. FINAL VERDICT
+-- 8. FINAL VERDICT
 -- ============================================================================
-SELECT '9️⃣  FINAL VERDICT' as section;
+SELECT '8️⃣  FINAL VERDICT' as section;
 
 WITH verdict AS (
     SELECT
@@ -203,18 +182,21 @@ SELECT
         WHEN normalized_count::FLOAT / total_priced > 0.9 THEN '⚠️  MOSTLY NORMALIZED: ' || normalized_count || '/' || total_priced || ' models (' || ROUND(normalized_count::NUMERIC / total_priced * 100, 1) || '%)'
         ELSE '❌ NOT NORMALIZED: Only ' || normalized_count || '/' || total_priced || ' models normalized (' || ROUND(normalized_count::NUMERIC / total_priced * 100, 1) || '%)'
     END as verdict,
-    normalized_count as "✅ Normalized Models",
+    normalized_count as "✅ Normalized",
     not_normalized_count as "❌ Not Normalized",
-    total_priced as "Total Models w/ Pricing"
+    total_priced as "Total Priced"
 FROM verdict;
 
 -- ============================================================================
--- EXPECTED RESULTS AFTER SUCCESSFUL MIGRATION:
+-- 9. SAMPLE MODEL IDS (for reference)
 -- ============================================================================
--- ✅ pricing_format_migrated = TRUE for migrated models
--- ✅ All prices < $0.000001 (per-token format)
--- ✅ Cost for 1000 tokens = $0.00001 to $0.001 (reasonable range)
--- ✅ Backup columns contain original values
---
--- If you see prices > $0.001, the migration has NOT been applied yet.
--- ============================================================================
+SELECT '9️⃣  SAMPLE MODEL IDS (5 examples)' as section;
+
+SELECT
+    id,
+    source_gateway,
+    pricing_prompt,
+    pricing_format_migrated
+FROM "public"."models"
+WHERE pricing_prompt IS NOT NULL
+LIMIT 5;
