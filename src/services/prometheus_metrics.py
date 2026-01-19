@@ -167,6 +167,37 @@ database_query_duration = get_or_create_metric(Summary,
     ["table"],
 )
 
+# ==================== Connection Pool Metrics ====================
+connection_pool_size = get_or_create_metric(Gauge,
+    "connection_pool_size",
+    "Total number of connections in the pool",
+    ["pool_name"],
+)
+
+connection_pool_active = get_or_create_metric(Gauge,
+    "connection_pool_active_connections",
+    "Number of active connections currently in use",
+    ["pool_name"],
+)
+
+connection_pool_idle = get_or_create_metric(Gauge,
+    "connection_pool_idle_connections",
+    "Number of idle connections available for use",
+    ["pool_name"],
+)
+
+connection_pool_utilization = get_or_create_metric(Gauge,
+    "connection_pool_utilization_ratio",
+    "Connection pool utilization ratio (active/total)",
+    ["pool_name"],
+)
+
+connection_pool_errors = get_or_create_metric(Counter,
+    "connection_pool_errors_total",
+    "Total number of connection pool errors",
+    ["pool_name", "error_type"],
+)
+
 # ==================== Cache Metrics ====================
 cache_hits = get_or_create_metric(Counter,
     "cache_hits_total",
@@ -806,6 +837,45 @@ def track_request_stage(stage: str, endpoint: str, duration: float):
 def record_stage_percentage(stage: str, endpoint: str, percentage: float):
     """Record percentage of total request time spent in a stage."""
     stage_percentage.labels(stage=stage, endpoint=endpoint).set(percentage)
+
+
+def track_connection_pool_stats(pool_name: str, stats: dict):
+    """Track connection pool statistics.
+
+    Args:
+        pool_name: Name of the connection pool (e.g., "supabase", "redis", "provider_http")
+        stats: Dictionary containing pool statistics:
+            - total_connections: Total number of connections
+            - active_connections: Number of active connections
+            - idle_connections: Number of idle connections
+            - max_pool_size: Maximum pool size
+            - connection_errors: Number of connection errors
+            - connection_timeouts: Number of connection timeouts
+    """
+    try:
+        total = stats.get("total_connections", 0)
+        active = stats.get("active_connections", 0)
+        idle = stats.get("idle_connections", 0)
+
+        connection_pool_size.labels(pool_name=pool_name).set(total)
+        connection_pool_active.labels(pool_name=pool_name).set(active)
+        connection_pool_idle.labels(pool_name=pool_name).set(idle)
+
+        # Calculate utilization ratio
+        max_size = stats.get("max_pool_size", 0)
+        if max_size > 0:
+            utilization = active / max_size
+            connection_pool_utilization.labels(pool_name=pool_name).set(utilization)
+
+        # Track errors
+        errors = stats.get("connection_errors", 0)
+        timeouts = stats.get("connection_timeouts", 0)
+        if errors > 0:
+            connection_pool_errors.labels(pool_name=pool_name, error_type="error").inc(errors)
+        if timeouts > 0:
+            connection_pool_errors.labels(pool_name=pool_name, error_type="timeout").inc(timeouts)
+    except Exception as e:
+        logger.warning(f"Failed to track connection pool stats: {e}")
 
 
 def get_metrics_summary() -> dict:

@@ -279,6 +279,16 @@ class TestCloudflareWorkersAIClient:
         assert "@cf/meta/llama-3.1-8b-instruct" in model_ids
         assert "@cf/qwen/qwq-32b" in model_ids
 
+    def test_default_cloudflare_workers_ai_models_have_source_gateway(self):
+        """Test that all default Cloudflare Workers AI models have source_gateway field"""
+        models = DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
+
+        for model in models:
+            assert "source_gateway" in model, f"Model {model['id']} missing source_gateway field"
+            assert model["source_gateway"] == "cloudflare-workers-ai", (
+                f"Model {model['id']} has incorrect source_gateway: {model.get('source_gateway')}"
+            )
+
 
 class TestFetchModelsFromCloudflareAPI:
     """Test fetching models from Cloudflare API with various response formats"""
@@ -329,8 +339,10 @@ class TestFetchModelsFromCloudflareAPI:
             assert models[0]["id"] == "@cf/meta/llama-3.1-8b-instruct"
             assert models[0]["context_length"] == 16384
             assert models[0]["provider"] == "cloudflare-workers-ai"
+            assert models[0]["source_gateway"] == "cloudflare-workers-ai"
             assert models[1]["id"] == "@cf/openai/gpt-oss-120b"
             assert models[1]["context_length"] == 8192
+            assert models[1]["source_gateway"] == "cloudflare-workers-ai"
 
     @pytest.mark.asyncio
     @patch("src.services.cloudflare_workers_ai_client.Config.CLOUDFLARE_API_TOKEN", "test_token")

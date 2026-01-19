@@ -31,6 +31,7 @@ from src.cache import (
     _huggingface_cache,
     _huggingface_models_cache,
     _models_cache,
+    _morpheus_models_cache,
     _multi_provider_catalog_cache,
     _near_models_cache,
     _nebius_models_cache,
@@ -59,6 +60,7 @@ from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
+from src.services.morpheus_client import fetch_models_from_morpheus
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
@@ -562,6 +564,7 @@ def get_all_models_sequential():
     openai_models = get_cached_models("openai") or []
     anthropic_models = get_cached_models("anthropic") or []
     simplismart_models = get_cached_models("simplismart") or []
+    morpheus_models = get_cached_models("morpheus") or []
     return (
         openrouter_models
         + featherless_models
@@ -589,6 +592,7 @@ def get_all_models_sequential():
         + openai_models
         + anthropic_models
         + simplismart_models
+        + morpheus_models
     )
 
 
@@ -896,6 +900,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_simplismart()
             _register_canonical_records("simplismart", result)
+            return result if result is not None else []
+
+        if gateway == "morpheus":
+            cached = _get_fresh_or_stale_cached_models(_morpheus_models_cache, "morpheus")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_morpheus()
+            _register_canonical_records("morpheus", result)
             return result if result is not None else []
 
         if gateway == "all":
@@ -2289,23 +2301,26 @@ def normalize_fal_model(fal_model: dict) -> dict | None:
     - 839+ models across text-to-image, text-to-video, image-to-video, etc.
     - Models include FLUX, Stable Diffusion, Veo, Sora, and many more
     - Supports image, video, audio, and 3D generation
+
+    Handles both static catalog format (uses "id") and API format (uses "endpoint_id")
     """
-    model_id = fal_model.get("id")
+    # API returns "endpoint_id", static catalog uses "id"
+    model_id = fal_model.get("endpoint_id") or fal_model.get("id")
     if not model_id:
-        logger.warning("Fal.ai model missing 'id' field: %s", sanitize_for_logging(str(fal_model)))
+        logger.warning("Fal.ai model missing 'id'/'endpoint_id' field: %s", sanitize_for_logging(str(fal_model)))
         return None
 
     # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")
     provider_slug = model_id.split("/")[0] if "/" in model_id else "fal-ai"
 
-    # Use name or derive from ID
-    display_name = fal_model.get("name") or model_id.split("/")[-1]
+    # Use title (API) or name (catalog) or derive from ID
+    display_name = fal_model.get("title") or fal_model.get("name") or model_id.split("/")[-1]
 
     # Get description
     description = fal_model.get("description", f"Fal.ai {display_name} model")
 
-    # Determine modality based on type
-    model_type = fal_model.get("type", "text-to-image")
+    # Determine modality based on type or category (API uses "category")
+    model_type = fal_model.get("type") or fal_model.get("category", "text-to-image")
     modality_map = {
         "text-to-image": MODALITY_TEXT_TO_IMAGE,
         "text-to-video": "text->video",
@@ -3348,8 +3363,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     - input: cost per 1K input tokens
     - output: cost per 1K output tokens
 
-    FIXED: We store pricing per 1K tokens in the database (not per 1M).
-    No conversion needed - use values as-is.
+    We convert to per-token pricing (divide by 1000) to match the format used by
+    all other gateways (OpenRouter, DeepInfra, etc.) and expected by calculate_cost().
+
+    Example: $1.25/1K tokens -> $0.00125/token (same as OpenRouter format)
 
     Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
     """
@@ -3362,13 +3379,15 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
 
     try:
         # Extract pricing from the API response
-        # FIXED: AiHubMix returns pricing per 1K tokens, database stores per single token
-        # Convert from per-1K to per-token by dividing by 1000
+        # AiHubMix returns pricing per 1K tokens
+        # Convert to per-token by dividing by 1000 to match OpenRouter format
+        # Example: $1.25/1K tokens -> $0.00125/token
         pricing_data = model.get("pricing", {})
         input_price_per_1k = pricing_data.get("input", 0)
         output_price_per_1k = pricing_data.get("output", 0)
 
-        # FIXED: Convert from per-1K to per-token pricing (divide by 1000)
+        # Convert from per-1K to per-token pricing (divide by 1000)
+        # This matches the format used by OpenRouter and expected by calculate_cost()
         input_price_per_token = float(input_price_per_1k) / 1000 if input_price_per_1k else 0
         output_price_per_token = float(output_price_per_1k) / 1000 if output_price_per_1k else 0
 

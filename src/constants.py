@@ -13,6 +13,11 @@ FRONTEND_BASE_URL = os.environ.get("FRONTEND_URL", "https://beta.gatewayz.ai")
 FRONTEND_BETA_URL = "https://beta.gatewayz.ai"
 FRONTEND_STAGING_URL = "https://staging.gatewayz.ai"
 
+# Tauri Desktop App URLs (for CORS)
+# Tauri 2.x uses both tauri:// and http://tauri.localhost as origins for desktop apps
+TAURI_DESKTOP_URL = "http://tauri.localhost"
+TAURI_DESKTOP_PROTOCOL_URL = "tauri://localhost"
+
 # Common frontend paths
 SETTINGS_CREDITS_PATH = "/settings/credits"
 

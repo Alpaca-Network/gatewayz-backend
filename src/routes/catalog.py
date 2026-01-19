@@ -40,13 +40,13 @@ DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
-    "'vercel-ai-gateway', 'google-vertex', 'simplismart', or auto-detect if not specified"
+    "'vercel-ai-gateway', 'google-vertex', 'simplismart', 'morpheus', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
-    "'vercel-ai-gateway', 'google-vertex', 'simplismart', or 'all'"
+    "'vercel-ai-gateway', 'google-vertex', 'simplismart', 'morpheus', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -239,6 +239,12 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://developers.cloudflare.com/workers-ai",
     },
+    "morpheus": {
+        "name": "Morpheus",
+        "color": "bg-cyan-600",
+        "priority": "slow",
+        "site_url": "https://mor.org",
+    },
 }
 
 
@@ -273,8 +279,8 @@ async def get_gateways():
                     if domain.startswith("www."):
                         domain = domain[4:]
                     logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to generate logo URL for {gateway_id} from {site_url}: {e}")
 
             gateways.append({
                 "id": gateway_id,
@@ -602,6 +608,9 @@ async def get_models(
         vercel_ai_gateway_models: list[dict] = []
         alibaba_models: list[dict] = []
         simplismart_models: list[dict] = []
+        openai_models: list[dict] = []
+        anthropic_models: list[dict] = []
+        clarifai_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -731,6 +740,21 @@ async def get_models(
             if not simplismart_models and gateway_value == "simplismart":
                 logger.warning("Simplismart models unavailable - continuing without them")
 
+        if gateway_value in ("openai", "all"):
+            openai_models = get_cached_models("openai") or []
+            if not openai_models and gateway_value == "openai":
+                logger.warning("OpenAI models unavailable - continuing without them")
+
+        if gateway_value in ("anthropic", "all"):
+            anthropic_models = get_cached_models("anthropic") or []
+            if not anthropic_models and gateway_value == "anthropic":
+                logger.warning("Anthropic models unavailable - continuing without them")
+
+        if gateway_value in ("clarifai", "all"):
+            clarifai_models = get_cached_models("clarifai") or []
+            if not clarifai_models and gateway_value == "clarifai":
+                logger.warning("Clarifai models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "onerouter":
@@ -777,6 +801,12 @@ async def get_models(
             models = google_models
         elif gateway_value == "simplismart":
             models = simplismart_models
+        elif gateway_value == "openai":
+            models = openai_models
+        elif gateway_value == "anthropic":
+            models = anthropic_models
+        elif gateway_value == "clarifai":
+            models = clarifai_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -789,6 +819,11 @@ async def get_models(
                 fireworks_models,
                 together_models,
                 google_models,
+                cerebras_models,
+                nebius_models,
+                xai_models,
+                novita_models,
+                hug_models,
                 aimo_models,
                 near_models,
                 fal_models,
@@ -798,6 +833,9 @@ async def get_models(
                 vercel_ai_gateway_models,
                 alibaba_models,
                 simplismart_models,
+                openai_models,
+                anthropic_models,
+                clarifai_models,
             )
 
         if not models:

@@ -106,10 +106,12 @@ def get_supabase_client() -> Client:
             logger.info("Using container-optimized connection pool settings")
 
         # Configure transport with retry for transient connection errors
-        # Use shorter keepalive to prevent stale HTTP/2 connections causing SSL EOF errors
+        # IMPORTANT: Disable HTTP/2 to fix "Bad file descriptor" errors (errno 9)
+        # HTTP/2 connection multiplexing causes issues when Supabase closes idle connections
+        # HTTP/1.1 with connection pooling provides better stability for long-running services
         transport = httpx.HTTPTransport(
-            retries=2,  # Retry transient network errors
-            http2=True,  # Enable HTTP/2 for connection multiplexing
+            retries=3,  # Increased retries for better resilience
+            http2=False,  # Disable HTTP/2 to prevent stale connection issues
         )
 
         httpx_client = httpx.Client(
@@ -122,7 +124,7 @@ def get_supabase_client() -> Client:
             limits=httpx.Limits(
                 max_connections=max_conn,
                 max_keepalive_connections=keepalive_conn,
-                keepalive_expiry=30.0,  # Reduced from 60s to 30s to avoid stale HTTP/2 connections
+                keepalive_expiry=20.0,  # Reduced to 20s to aggressively close idle connections
             ),
             transport=transport,
         )
