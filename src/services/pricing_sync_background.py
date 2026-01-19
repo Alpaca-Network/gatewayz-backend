@@ -195,7 +195,14 @@ class PricingSyncService:
             Normalized pricing dict or None if no pricing
         """
         model_id = model.get("id")
-        source_gateway = model.get("source_gateway", "").lower()
+
+        # Get source_gateway from metadata, top_provider, or provider relationship
+        metadata = model.get("metadata", {})
+        source_gateway = (
+            metadata.get("source_gateway") or
+            model.get("top_provider") or
+            ""
+        ).lower()
 
         # Get pricing fields
         pricing_prompt = model.get("pricing_prompt")
