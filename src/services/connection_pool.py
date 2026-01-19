@@ -564,6 +564,27 @@ def get_simplismart_pooled_client() -> OpenAI:
     )
 
 
+# Nosana base URL constant
+NOSANA_BASE_URL = "https://dashboard.k8s.prd.nos.ci/api/v1"
+
+
+def get_nosana_pooled_client() -> OpenAI:
+    """Get pooled client for Nosana GPU Computing Network.
+
+    Nosana provides a distributed GPU computing network with OpenAI-compatible
+    API endpoints for AI model inference.
+    See: https://learn.nosana.com/api
+    """
+    if not Config.NOSANA_API_KEY:
+        raise ValueError("Nosana API key not configured")
+
+    return get_pooled_client(
+        provider="nosana",
+        base_url=NOSANA_BASE_URL,
+        api_key=Config.NOSANA_API_KEY,
+    )
+
+
 # =============================================================================
 # CONNECTION PRE-WARMING
 # =============================================================================

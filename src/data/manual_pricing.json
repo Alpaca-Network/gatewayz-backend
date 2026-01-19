@@ -1197,8 +1197,81 @@
       "context_length": 128000
     }
   },
+  "nosana": {
+    "meta-llama/Llama-3.3-70B-Instruct": {
+      "prompt": "0.90",
+      "completion": "0.90",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072,
+      "pricing_note": "GPU compute pricing varies by market"
+    },
+    "meta-llama/Llama-3.1-70B-Instruct": {
+      "prompt": "0.90",
+      "completion": "0.90",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "meta-llama/Llama-3.1-8B-Instruct": {
+      "prompt": "0.18",
+      "completion": "0.18",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "Qwen/Qwen2.5-72B-Instruct": {
+      "prompt": "1.20",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "Qwen/Qwen2.5-7B-Instruct": {
+      "prompt": "0.18",
+      "completion": "0.18",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "deepseek-ai/DeepSeek-R1": {
+      "prompt": "3.00",
+      "completion": "7.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 65536
+    },
+    "deepseek-ai/DeepSeek-V3": {
+      "prompt": "1.25",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "mistralai/Mixtral-8x22B-Instruct-v0.1": {
+      "prompt": "1.20",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0",
+      "context_length": 65536
+    },
+    "stabilityai/stable-diffusion-xl-base-1.0": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.02",
+      "image": "0.02",
+      "pricing_model": "per_image"
+    },
+    "whisper-large-v3": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.003",
+      "image": "0",
+      "pricing_model": "per_minute"
+    }
+  },
   "_metadata": {
-    "last_updated": "2026-01-11",
+    "last_updated": "2026-01-20",
     "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",
     "sources": [
       "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference, image generation, and speech-to-text)",
@@ -1216,7 +1289,8 @@
       "https://groq.com/pricing (Groq - LPU inference, API: https://api.groq.com/openai/v1/models)",
       "https://www.together.ai/pricing (Together AI - 200+ models)",
       "https://akashml.com (Akash Network - decentralized AI inference)",
-      "https://developers.cloudflare.com/workers-ai/platform/pricing/ (Cloudflare Workers AI - neuron-based pricing)"
+      "https://developers.cloudflare.com/workers-ai/platform/pricing/ (Cloudflare Workers AI - neuron-based pricing)",
+      "https://nosana.com (Nosana - distributed GPU computing network)"
     ],
     "currency": "USD",
     "units": "per 1M tokens (unless specified otherwise)"

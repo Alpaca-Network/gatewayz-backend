@@ -231,6 +231,10 @@ class Config:
     # Simplismart AI Configuration
     SIMPLISMART_API_KEY = os.environ.get("SIMPLISMART_API_KEY")
 
+    # Nosana GPU Computing Network Configuration
+    NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
+    NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
+
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
     CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")

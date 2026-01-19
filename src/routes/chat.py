@@ -244,6 +244,11 @@ PROVIDER_FUNCTIONS = {
         "process_simplismart_response",
         "make_simplismart_request_openai_stream",
     ],
+    "nosana": [
+        "make_nosana_request_openai",
+        "process_nosana_response",
+        "make_nosana_request_openai_stream",
+    ],
 }
 
 # Load all providers and expose functions to global namespace
@@ -365,6 +370,11 @@ PROVIDER_ROUTING = {
         "request": make_simplismart_request_openai,
         "process": process_simplismart_response,
         "stream": make_simplismart_request_openai_stream,
+    },
+    "nosana": {
+        "request": make_nosana_request_openai,
+        "process": process_nosana_response,
+        "stream": make_nosana_request_openai_stream,
     },
 }
 
