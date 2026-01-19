@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RequestMetrics:
     """Metrics for a single request"""
+
     provider: str
     model: str
     latency_ms: int
@@ -41,6 +42,7 @@ class RequestMetrics:
 @dataclass
 class ProviderStats:
     """Aggregated statistics for a provider"""
+
     provider: str
     total_requests: int
     successful_requests: int
@@ -82,7 +84,7 @@ class RedisMetrics:
         cost: float,
         tokens_input: int = 0,
         tokens_output: int = 0,
-        error_message: str | None = None
+        error_message: str | None = None,
     ):
         """
         Record a single request metrics to Redis.
@@ -139,12 +141,14 @@ class RedisMetrics:
             # 6. Track errors
             if not success and error_message:
                 error_key = f"errors:{provider}"
-                error_data = json.dumps({
-                    "model": model,
-                    "error": error_message[:500],  # Limit error message length
-                    "timestamp": timestamp,
-                    "latency_ms": latency_ms
-                })
+                error_data = json.dumps(
+                    {
+                        "model": model,
+                        "error": error_message[:500],  # Limit error message length
+                        "timestamp": timestamp,
+                        "latency_ms": latency_ms,
+                    }
+                )
                 pipe.lpush(error_key, error_data)
                 pipe.ltrim(error_key, 0, 99)  # Keep last 100 errors
                 pipe.expire(error_key, 3600)  # 1 hour TTL
@@ -244,9 +248,7 @@ class RedisMetrics:
 
             for hour_offset in range(hours):
                 hour_time = (now - timedelta(hours=hour_offset)).replace(
-                    minute=0,
-                    second=0,
-                    microsecond=0
+                    minute=0, second=0, microsecond=0
                 )
                 hour_key = hour_time.strftime("%Y-%m-%d:%H")
                 metrics_key = f"metrics:{provider}:{hour_key}"
@@ -268,10 +270,7 @@ class RedisMetrics:
             return {}
 
     async def get_latency_percentiles(
-        self,
-        provider: str,
-        model: str,
-        percentiles: list[int] = [50, 95, 99]
+        self, provider: str, model: str, percentiles: list[int] = [50, 95, 99]
     ) -> dict[str, float]:
         """
         Calculate latency percentiles from recent data.
@@ -302,11 +301,27 @@ class RedisMetrics:
 
             result = {}
             for p in percentiles:
-                idx = max(0, min(n - 1, int((p / 100.0) * n)))
-                result[f"p{p}"] = float(latency_values[idx])
+                # Use proper percentile calculation with linear interpolation
+                # This fixes the issue where P50 could be > P95 with small sample sizes
+                if n == 1:
+                    result[f"p{p}"] = float(latency_values[0])
+                else:
+                    # Calculate position with fractional index
+                    position = (p / 100.0) * (n - 1)
+                    lower_idx = int(position)
+                    upper_idx = min(lower_idx + 1, n - 1)
+
+                    # Linear interpolation between lower and upper values
+                    fraction = position - lower_idx
+                    lower_val = latency_values[lower_idx]
+                    upper_val = latency_values[upper_idx]
+                    interpolated = lower_val + fraction * (upper_val - lower_val)
+
+                    result[f"p{p}"] = float(interpolated)
 
             result["count"] = n
             result["avg"] = sum(latency_values) / n if n > 0 else 0.0
+            result["values"] = latency_values  # Return raw values for aggregation in monitoring.py
 
             return result
         except Exception as e:
@@ -314,11 +329,7 @@ class RedisMetrics:
             return {}
 
     async def update_circuit_breaker(
-        self,
-        provider: str,
-        model: str,
-        state: str,
-        failure_count: int = 0
+        self, provider: str, model: str, state: str, failure_count: int = 0
     ):
         """
         Update circuit breaker state in Redis.
@@ -334,11 +345,9 @@ class RedisMetrics:
 
         try:
             circuit_key = f"circuit:{provider}:{model}"
-            circuit_data = json.dumps({
-                "state": state,
-                "failure_count": failure_count,
-                "updated_at": time.time()
-            })
+            circuit_data = json.dumps(
+                {"state": state, "failure_count": failure_count, "updated_at": time.time()}
+            )
 
             self.redis.setex(circuit_key, 300, circuit_data)  # 5 min TTL
 
@@ -384,11 +393,7 @@ class RedisMetrics:
         try:
             # Calculate cutoff time
             now = datetime.now(timezone.utc)
-            cutoff_time = (now - timedelta(hours=hours)).replace(
-                minute=0,
-                second=0,
-                microsecond=0
-            )
+            cutoff_time = (now - timedelta(hours=hours)).replace(minute=0, second=0, microsecond=0)
             cutoff_key = cutoff_time.strftime("%Y-%m-%d:%H")
 
             # Scan for old metric keys
