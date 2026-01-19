@@ -2662,8 +2662,27 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
         "internal_reasoning": None,
     }
 
-    # If pricing is time-based (for image generation), convert to image pricing
-    if pricing_info.get("type") == "time" and model_type in ("text-to-image", "image"):
+    # Extract token-based pricing (text-generation, embeddings, etc.)
+    # DeepInfra returns pricing in cents per token, convert to dollars per token
+    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
+        cents_input = pricing_info.get("cents_per_input_token", 0)
+        cents_output = pricing_info.get("cents_per_output_token", 0)
+
+        # Convert cents to dollars per token
+        if cents_input:
+            pricing["prompt"] = str(cents_input / 100)
+        if cents_output:
+            pricing["completion"] = str(cents_output / 100)
+
+    # Extract image unit pricing (text-to-image models)
+    elif pricing_info.get("type") == "image_units" or "cents_per_image_unit" in pricing_info:
+        cents_per_image = pricing_info.get("cents_per_image_unit", 0)
+        # Convert cents to dollars per image
+        if cents_per_image:
+            pricing["image"] = str(cents_per_image / 100)
+
+    # If pricing is time-based (legacy image generation), convert to image pricing
+    elif pricing_info.get("type") == "time" and model_type in ("text-to-image", "image"):
         cents_per_sec = pricing_info.get("cents_per_sec", 0)
         # Convert cents per second to dollars per image (assume ~5 seconds per image)
         pricing["image"] = str(cents_per_sec * 5 / 100) if cents_per_sec else None
