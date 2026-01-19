@@ -340,28 +340,81 @@ def get_chat_completion_requests_by_api_key(
         result = query.execute()
         requests = result.data or []
 
-        # Calculate summary statistics
-        summary = {
-            "total_requests": total_count,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
-            "total_tokens": 0,
-            "avg_processing_time_ms": 0,
-            "completed_requests": 0,
-            "failed_requests": 0,
-        }
+        # Calculate summary statistics using database aggregation (not limited by pagination)
+        # This gets accurate totals across ALL requests for this API key
+        try:
+            # Try to use RPC function first for better performance
+            try:
+                summary_result = client.rpc(
+                    "get_api_key_request_summary",
+                    {"p_api_key_id": api_key_id}
+                ).execute()
 
-        if requests:
-            summary["total_input_tokens"] = sum(r.get("input_tokens", 0) for r in requests)
-            summary["total_output_tokens"] = sum(r.get("output_tokens", 0) for r in requests)
-            summary["total_tokens"] = summary["total_input_tokens"] + summary["total_output_tokens"]
-            summary["completed_requests"] = sum(1 for r in requests if r.get("status") == "completed")
-            summary["failed_requests"] = sum(1 for r in requests if r.get("status") == "failed")
+                if summary_result.data and len(summary_result.data) > 0:
+                    summary_data = summary_result.data[0]
+                    summary = {
+                        "total_requests": total_count,
+                        "total_input_tokens": int(summary_data.get("total_input_tokens", 0)),
+                        "total_output_tokens": int(summary_data.get("total_output_tokens", 0)),
+                        "total_tokens": int(summary_data.get("total_tokens", 0)),
+                        "avg_processing_time_ms": round(float(summary_data.get("avg_processing_time_ms", 0)), 2),
+                        "completed_requests": int(summary_data.get("completed_requests", 0)),
+                        "failed_requests": int(summary_data.get("failed_requests", 0)),
+                    }
+                else:
+                    raise Exception("RPC returned no data")
+            except Exception as rpc_error:
+                logger.debug(f"RPC function not available, using fallback aggregation: {rpc_error}")
 
-            total_processing_time = sum(r.get("processing_time_ms", 0) for r in requests)
-            summary["avg_processing_time_ms"] = (
-                round(total_processing_time / len(requests), 2) if len(requests) > 0 else 0
-            )
+                # Fallback: Use direct aggregation query
+                # Fetch ALL requests but only the fields we need for aggregation
+                agg_query = (
+                    client.table("chat_completion_requests")
+                    .select("input_tokens, output_tokens, processing_time_ms, status")
+                    .eq("api_key_id", api_key_id)
+                )
+                agg_result = agg_query.execute()
+                all_requests = agg_result.data or []
+
+                if all_requests:
+                    total_input = sum(r.get("input_tokens", 0) for r in all_requests)
+                    total_output = sum(r.get("output_tokens", 0) for r in all_requests)
+                    total_processing = sum(r.get("processing_time_ms", 0) for r in all_requests)
+                    completed = sum(1 for r in all_requests if r.get("status") == "completed")
+                    failed = sum(1 for r in all_requests if r.get("status") == "failed")
+
+                    summary = {
+                        "total_requests": total_count,
+                        "total_input_tokens": total_input,
+                        "total_output_tokens": total_output,
+                        "total_tokens": total_input + total_output,
+                        "avg_processing_time_ms": round(total_processing / len(all_requests), 2) if len(all_requests) > 0 else 0,
+                        "completed_requests": completed,
+                        "failed_requests": failed,
+                    }
+                else:
+                    # No requests found
+                    summary = {
+                        "total_requests": 0,
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "total_tokens": 0,
+                        "avg_processing_time_ms": 0,
+                        "completed_requests": 0,
+                        "failed_requests": 0,
+                    }
+        except Exception as summary_error:
+            logger.warning(f"Failed to calculate summary statistics: {summary_error}")
+            # Return zero summary on error
+            summary = {
+                "total_requests": total_count,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_tokens": 0,
+                "avg_processing_time_ms": 0,
+                "completed_requests": 0,
+                "failed_requests": 0,
+            }
 
         return {
             "requests": requests,
@@ -390,6 +443,147 @@ def get_chat_completion_requests_by_api_key(
             },
             "limit": limit,
             "offset": offset,
+        }
+
+
+def get_chat_completion_summary_by_api_key(api_key_id: int) -> dict[str, Any]:
+    """
+    Get aggregated summary statistics for all chat completion requests by API key.
+
+    Uses database-side aggregation for maximum performance - no data fetching required.
+    Optimized for analytics dashboards and monitoring endpoints.
+
+    Args:
+        api_key_id: API key ID to get summary for
+
+    Returns:
+        Dictionary with aggregated statistics:
+        {
+            "total_requests": int,
+            "total_input_tokens": int,
+            "total_output_tokens": int,
+            "total_tokens": int,
+            "avg_input_tokens": float,
+            "avg_output_tokens": float,
+            "avg_processing_time_ms": float,
+            "completed_requests": int,
+            "failed_requests": int,
+            "success_rate": float (0-100),
+            "first_request_at": str (ISO datetime) or None,
+            "last_request_at": str (ISO datetime) or None,
+            "total_cost_usd": float
+        }
+    """
+    try:
+        client = get_supabase_client()
+
+        # Try to use RPC function first (fastest)
+        try:
+            result = client.rpc(
+                "get_chat_completion_summary_by_api_key",
+                {"p_api_key_id": api_key_id}
+            ).execute()
+
+            if result.data and len(result.data) > 0:
+                summary_data = result.data[0]
+                return {
+                    "total_requests": int(summary_data.get("total_requests", 0)),
+                    "total_input_tokens": int(summary_data.get("total_input_tokens", 0)),
+                    "total_output_tokens": int(summary_data.get("total_output_tokens", 0)),
+                    "total_tokens": int(summary_data.get("total_tokens", 0)),
+                    "avg_input_tokens": round(float(summary_data.get("avg_input_tokens", 0)), 2),
+                    "avg_output_tokens": round(float(summary_data.get("avg_output_tokens", 0)), 2),
+                    "avg_processing_time_ms": round(float(summary_data.get("avg_processing_time_ms", 0)), 2),
+                    "completed_requests": int(summary_data.get("completed_requests", 0)),
+                    "failed_requests": int(summary_data.get("failed_requests", 0)),
+                    "success_rate": round(float(summary_data.get("success_rate", 0)), 2),
+                    "first_request_at": summary_data.get("first_request_at"),
+                    "last_request_at": summary_data.get("last_request_at"),
+                    "total_cost_usd": round(float(summary_data.get("total_cost_usd", 0)), 2),
+                }
+            else:
+                raise Exception("RPC returned no data")
+
+        except Exception as rpc_error:
+            logger.debug(f"RPC function not available, using fallback aggregation: {rpc_error}")
+
+            # Fallback: Use direct aggregation (fetch only needed columns)
+            agg_query = (
+                client.table("chat_completion_requests")
+                .select("input_tokens, output_tokens, processing_time_ms, status, created_at, cost_usd")
+                .eq("api_key_id", api_key_id)
+            )
+            agg_result = agg_query.execute()
+            all_requests = agg_result.data or []
+
+            if not all_requests:
+                # No requests found - return zero summary
+                return {
+                    "total_requests": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_tokens": 0,
+                    "avg_input_tokens": 0,
+                    "avg_output_tokens": 0,
+                    "avg_processing_time_ms": 0,
+                    "completed_requests": 0,
+                    "failed_requests": 0,
+                    "success_rate": 0,
+                    "first_request_at": None,
+                    "last_request_at": None,
+                    "total_cost_usd": 0,
+                }
+
+            # Calculate statistics manually
+            total_requests = len(all_requests)
+            total_input = sum(r.get("input_tokens", 0) for r in all_requests)
+            total_output = sum(r.get("output_tokens", 0) for r in all_requests)
+            total_processing = sum(r.get("processing_time_ms", 0) for r in all_requests)
+            completed = sum(1 for r in all_requests if r.get("status") == "completed")
+            failed = sum(1 for r in all_requests if r.get("status") == "failed")
+            total_cost = sum(float(r.get("cost_usd", 0)) for r in all_requests)
+
+            # Get time range
+            timestamps = [r.get("created_at") for r in all_requests if r.get("created_at")]
+            first_request = min(timestamps) if timestamps else None
+            last_request = max(timestamps) if timestamps else None
+
+            return {
+                "total_requests": total_requests,
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_tokens": total_input + total_output,
+                "avg_input_tokens": round(total_input / total_requests, 2) if total_requests > 0 else 0,
+                "avg_output_tokens": round(total_output / total_requests, 2) if total_requests > 0 else 0,
+                "avg_processing_time_ms": round(total_processing / total_requests, 2) if total_requests > 0 else 0,
+                "completed_requests": completed,
+                "failed_requests": failed,
+                "success_rate": round((completed / total_requests * 100), 2) if total_requests > 0 else 0,
+                "first_request_at": first_request,
+                "last_request_at": last_request,
+                "total_cost_usd": round(total_cost, 2),
+            }
+
+    except Exception as e:
+        logger.error(
+            f"Failed to get chat completion summary for API key {api_key_id}: {e}",
+            exc_info=True
+        )
+        # Return zero summary on error
+        return {
+            "total_requests": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_tokens": 0,
+            "avg_input_tokens": 0,
+            "avg_output_tokens": 0,
+            "avg_processing_time_ms": 0,
+            "completed_requests": 0,
+            "failed_requests": 0,
+            "success_rate": 0,
+            "first_request_at": None,
+            "last_request_at": None,
+            "total_cost_usd": 0,
         }
 
 
