@@ -18,7 +18,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
-from supabase import create_client
+from src.config.supabase_config import get_supabase_client
 from src.services.pricing_normalization import (
     normalize_to_per_token,
     auto_detect_format,
@@ -29,15 +29,8 @@ from src.services.pricing_normalization import (
 # Load environment
 load_dotenv()
 
-# Initialize Supabase
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
-
-if not supabase_url or not supabase_key:
-    print("❌ Error: SUPABASE_URL or SUPABASE_KEY not set")
-    sys.exit(1)
-
-supabase = create_client(supabase_url, supabase_key)
+# Initialize Supabase using existing config
+supabase = get_supabase_client()
 
 print("=" * 80)
 print("POPULATE MODEL PRICING TABLE")
@@ -118,11 +111,36 @@ def main():
     # Step 1: Fetch all models with pricing
     print("1️⃣  Fetching models from database...")
     try:
-        response = supabase.table("models").select("*").execute()
-        models = response.data
-        print(f"   ✅ Found {len(models)} models")
+        # Fetch in batches to handle large datasets
+        all_models = []
+        page_size = 1000
+        offset = 0
+
+        while True:
+            response = (
+                supabase.table("models")
+                .select("id, source_gateway, pricing_prompt, pricing_completion, pricing_image, pricing_request, pricing_source")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+
+            if not response.data:
+                break
+
+            all_models.extend(response.data)
+            print(f"   📦 Fetched {len(response.data)} models (total: {len(all_models)})")
+
+            if len(response.data) < page_size:
+                break
+
+            offset += page_size
+
+        models = all_models
+        print(f"   ✅ Found {len(models)} models total")
     except Exception as e:
         print(f"   ❌ Error fetching models: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     print()
