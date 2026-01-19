@@ -85,7 +85,6 @@ from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.token_estimator import estimate_message_tokens
-from src.utils.ai_tracing import AITracer, AIRequestType
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -677,53 +676,6 @@ async def anthropic_messages(
                     response_time_ms=request_elapsed,
                     status="success",
                 )
-
-                # Record distributed trace for Tempo (optional, non-blocking)
-                # Extract token usage from response for tracing
-                trace_usage = processed.get("usage", {}) or {}
-                trace_prompt_tokens = trace_usage.get("prompt_tokens", 0)
-                trace_completion_tokens = trace_usage.get("completion_tokens", 0)
-                trace_total_tokens = trace_usage.get("total_tokens", 0)
-
-                # Record trace in background to avoid blocking response
-                async def _record_trace():
-                    try:
-                        async with AITracer.trace_inference(
-                            provider=attempt_provider,
-                            model=request_model,
-                            request_type=AIRequestType.CHAT_COMPLETION,
-                            operation_name=f"messages_{attempt_provider}",
-                        ) as trace_ctx:
-                            trace_ctx.set_token_usage(
-                                input_tokens=trace_prompt_tokens,
-                                output_tokens=trace_completion_tokens,
-                                total_tokens=trace_total_tokens,
-                            )
-                            # Calculate and set cost
-                            from src.services.pricing import calculate_cost
-                            trace_cost = calculate_cost(request_model, trace_prompt_tokens, trace_completion_tokens)
-                            trace_ctx.set_cost(trace_cost)
-                            # Set model parameters if available
-                            if openai_params:
-                                trace_ctx.set_model_parameters(
-                                    temperature=openai_params.get("temperature"),
-                                    max_tokens=openai_params.get("max_tokens"),
-                                    top_p=openai_params.get("top_p"),
-                                )
-                            # Set user info
-                            trace_ctx.set_user_info(
-                                user_id=str(user.get("id")),
-                                tier="trial" if trial.get("is_trial") else "paid",
-                            )
-                            # Add latency event
-                            trace_ctx.add_event(
-                                "request_completed",
-                                {"latency_ms": request_elapsed},
-                            )
-                    except Exception as trace_err:
-                        logger.debug("Trace recording skipped: %s", trace_err)
-
-                background_tasks.add_task(_record_trace)
                 break
             except Exception as exc:
                 if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):

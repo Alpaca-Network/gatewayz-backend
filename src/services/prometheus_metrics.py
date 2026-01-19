@@ -36,7 +36,6 @@ try:
 except Exception as e:
     logger.warning(f"Could not clear Prometheus registry: {e}")
 
-
 # Helper function to handle metric registration with --reload support
 def get_or_create_metric(metric_class, name, *args, **kwargs):
     """
@@ -46,7 +45,7 @@ def get_or_create_metric(metric_class, name, *args, **kwargs):
     # IMPORTANT: Check for existing metric FIRST (before trying to create)
     # This prevents duplication errors during reload
     for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, "_name") and collector._name == name:
+        if hasattr(collector, '_name') and collector._name == name:
             logger.debug(f"Reusing existing metric: {name}")
             return collector
 
@@ -58,10 +57,13 @@ def get_or_create_metric(metric_class, name, *args, **kwargs):
         logger.warning(f"Unexpected duplicate metric error for {name}: {e}")
         raise
 
-
 # ==================== Application Info ====================
 # This metric helps Grafana dashboard populate the app_name variable dropdown
-fastapi_app_info = get_or_create_metric(Info, "fastapi_app_info", "FastAPI application information")
+fastapi_app_info = get_or_create_metric(
+    Info,
+    "fastapi_app_info",
+    "FastAPI application information"
+)
 # Set the app_name label value after creation (idempotent operation)
 try:
     fastapi_app_info.info({"app_name": APP_NAME})
@@ -77,48 +79,42 @@ fastapi_requests_total = get_or_create_metric(
     ["app_name", "method", "path", "status_code"],
 )
 
-fastapi_requests_duration_seconds = get_or_create_metric(
-    Histogram,
+fastapi_requests_duration_seconds = get_or_create_metric(Histogram,
     "fastapi_requests_duration_seconds",
     "FastAPI request duration in seconds",
     ["app_name", "method", "path"],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2.5, 5, 10),
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
 )
 
-fastapi_requests_in_progress = get_or_create_metric(
-    Gauge,
+fastapi_requests_in_progress = get_or_create_metric(Gauge,
     "fastapi_requests_in_progress",
     "Number of HTTP requests currently being processed",
     ["app_name", "method", "path"],
 )
 
 # Legacy metrics for backward compatibility
-http_request_count = get_or_create_metric(
-    Counter,
+http_request_count = get_or_create_metric(Counter,
     "http_requests_total",
     "Total HTTP requests by method, endpoint and status code",
     ["method", "endpoint", "status_code"],
 )
 
-http_request_duration = get_or_create_metric(
-    Histogram,
+http_request_duration = get_or_create_metric(Histogram,
     "http_request_duration_seconds",
     "HTTP request duration in seconds by method and endpoint",
     ["method", "endpoint"],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2.5, 5, 10),
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
 )
 
 # Additional metrics for request/response size tracking
-fastapi_request_size_bytes = get_or_create_metric(
-    Histogram,
+fastapi_request_size_bytes = get_or_create_metric(Histogram,
     "fastapi_request_size_bytes",
     "HTTP request body size in bytes",
     ["app_name", "method", "path"],
     buckets=(100, 1000, 10000, 100000, 1000000),
 )
 
-fastapi_response_size_bytes = get_or_create_metric(
-    Histogram,
+fastapi_response_size_bytes = get_or_create_metric(Histogram,
     "fastapi_response_size_bytes",
     "HTTP response body size in bytes",
     ["app_name", "method", "path"],
@@ -126,148 +122,128 @@ fastapi_response_size_bytes = get_or_create_metric(
 )
 
 # Exception tracking for Grafana dashboard
-fastapi_exceptions_total = get_or_create_metric(
-    Counter,
+fastapi_exceptions_total = get_or_create_metric(Counter,
     "fastapi_exceptions_total",
     "Total FastAPI exceptions",
     ["app_name", "exception_type"],
 )
 
 # ==================== Model Inference Metrics ====================
-model_inference_requests = get_or_create_metric(
-    Counter,
+model_inference_requests = get_or_create_metric(Counter,
     "model_inference_requests_total",
     "Total model inference requests",
     ["provider", "model", "status"],
 )
 
-model_inference_duration = get_or_create_metric(
-    Histogram,
+model_inference_duration = get_or_create_metric(Histogram,
     "model_inference_duration_seconds",
     "Model inference duration in seconds",
     ["provider", "model"],
     buckets=(0.1, 0.5, 1, 2.5, 5, 10, 25, 60),
 )
 
-tokens_used = get_or_create_metric(
-    Counter,
+tokens_used = get_or_create_metric(Counter,
     "tokens_used_total",
     "Total tokens used (input + output)",
     ["provider", "model", "token_type"],
 )
 
-credits_used = get_or_create_metric(
-    Counter,
+credits_used = get_or_create_metric(Counter,
     "credits_used_total",
     "Total credits consumed",
     ["provider", "model"],
 )
 
 # ==================== Database Metrics ====================
-database_query_count = get_or_create_metric(
-    Counter,
+database_query_count = get_or_create_metric(Counter,
     "database_queries_total",
     "Total database queries",
     ["table", "operation"],
 )
 
-database_query_duration = get_or_create_metric(
-    Summary,
+database_query_duration = get_or_create_metric(Summary,
     "database_query_duration_seconds",
     "Database query duration in seconds",
     ["table"],
 )
 
 # ==================== Connection Pool Metrics ====================
-connection_pool_size = get_or_create_metric(
-    Gauge,
+connection_pool_size = get_or_create_metric(Gauge,
     "connection_pool_size",
     "Total number of connections in the pool",
     ["pool_name"],
 )
 
-connection_pool_active = get_or_create_metric(
-    Gauge,
+connection_pool_active = get_or_create_metric(Gauge,
     "connection_pool_active_connections",
     "Number of active connections currently in use",
     ["pool_name"],
 )
 
-connection_pool_idle = get_or_create_metric(
-    Gauge,
+connection_pool_idle = get_or_create_metric(Gauge,
     "connection_pool_idle_connections",
     "Number of idle connections available for use",
     ["pool_name"],
 )
 
-connection_pool_utilization = get_or_create_metric(
-    Gauge,
+connection_pool_utilization = get_or_create_metric(Gauge,
     "connection_pool_utilization_ratio",
     "Connection pool utilization ratio (active/total)",
     ["pool_name"],
 )
 
-connection_pool_errors = get_or_create_metric(
-    Counter,
+connection_pool_errors = get_or_create_metric(Counter,
     "connection_pool_errors_total",
     "Total number of connection pool errors",
     ["pool_name", "error_type"],
 )
 
 # ==================== Cache Metrics ====================
-cache_hits = get_or_create_metric(
-    Counter,
+cache_hits = get_or_create_metric(Counter,
     "cache_hits_total",
     "Total cache hits",
     ["cache_name"],
 )
 
-cache_misses = get_or_create_metric(
-    Counter,
+cache_misses = get_or_create_metric(Counter,
     "cache_misses_total",
     "Total cache misses",
     ["cache_name"],
 )
 
-cache_size = get_or_create_metric(
-    Gauge,
+cache_size = get_or_create_metric(Gauge,
     "cache_size_bytes",
     "Cache size in bytes",
     ["cache_name"],
 )
 
 # ==================== Rate Limiting Metrics ====================
-rate_limited_requests = get_or_create_metric(
-    Counter,
+rate_limited_requests = get_or_create_metric(Counter,
     "rate_limited_requests_total",
     "Total rate-limited requests",
     ["limit_type"],
 )
 
-current_rate_limit = get_or_create_metric(
-    Gauge,
+current_rate_limit = get_or_create_metric(Gauge,
     "current_rate_limit",
     "Current rate limit status",
     ["limit_type"],
 )
 
 # ==================== Provider Health Metrics ====================
-provider_availability = get_or_create_metric(
-    Gauge,
+provider_availability = get_or_create_metric(Gauge,
     "provider_availability",
     "Provider availability status (1=available, 0=unavailable)",
     ["provider"],
 )
 
-provider_error_rate = get_or_create_metric(
-    Gauge,
+provider_error_rate = get_or_create_metric(Gauge,
     "provider_error_rate",
     "Provider error rate (0-1)",
     ["provider"],
 )
 
-provider_response_time = get_or_create_metric(
-    Histogram,
+provider_response_time = get_or_create_metric(Histogram,
     "provider_response_time_seconds",
     "Provider response time in seconds",
     ["provider"],
@@ -275,44 +251,38 @@ provider_response_time = get_or_create_metric(
 )
 
 # ==================== API Key Tracking Metrics ====================
-api_key_lookup_attempts = get_or_create_metric(
-    Counter,
+api_key_lookup_attempts = get_or_create_metric(Counter,
     "api_key_lookup_attempts_total",
     "Total API key lookup attempts",
     ["status"],  # success, failed, retry
 )
 
-api_key_tracking_success = get_or_create_metric(
-    Counter,
+api_key_tracking_success = get_or_create_metric(Counter,
     "api_key_tracking_success_total",
     "Chat requests with successfully tracked API key",
     ["request_type"],  # authenticated, anonymous
 )
 
-api_key_tracking_failures = get_or_create_metric(
-    Counter,
+api_key_tracking_failures = get_or_create_metric(Counter,
     "api_key_tracking_failures_total",
     "Chat requests with failed API key tracking",
     ["reason"],  # lookup_failed, not_found, anonymous
 )
 
-api_key_tracking_rate = get_or_create_metric(
-    Gauge,
+api_key_tracking_rate = get_or_create_metric(Gauge,
     "api_key_tracking_rate",
     "Current API key tracking success rate (0-1)",
 )
 
 
 # ==================== Authentication & API Key Metrics ====================
-api_key_usage = get_or_create_metric(
-    Counter,
+api_key_usage = get_or_create_metric(Counter,
     "api_key_usage_total",
     "Total API key usage",
     ["status"],
 )
 
-active_api_keys = get_or_create_metric(
-    Gauge,
+active_api_keys = get_or_create_metric(Gauge,
     "active_api_keys",
     "Number of active API keys",
     ["status"],
@@ -320,44 +290,38 @@ active_api_keys = get_or_create_metric(
 
 # ==================== Business Metrics ====================
 # Free model usage tracking for expired trials
-free_model_usage = get_or_create_metric(
-    Counter,
+free_model_usage = get_or_create_metric(Counter,
     "free_model_usage_total",
     "Total free model requests by user status (expired_trial, active_trial, paid)",
     ["user_status", "model"],
 )
 
-user_credit_balance = get_or_create_metric(
-    Gauge,
+user_credit_balance = get_or_create_metric(Gauge,
     "user_credit_balance",
     "Total user credit balance aggregated by plan type",
     ["plan_type"],
 )
 
-trial_status = get_or_create_metric(
-    Gauge,
+trial_status = get_or_create_metric(Gauge,
     "trial_active",
     "Active trials count",
     ["status"],
 )
 
-subscription_count = get_or_create_metric(
-    Gauge,
+subscription_count = get_or_create_metric(Gauge,
     "subscription_count",
     "Active subscriptions",
     ["plan_type", "billing_cycle"],
 )
 
 # ==================== System Metrics ====================
-active_connections = get_or_create_metric(
-    Gauge,
+active_connections = get_or_create_metric(Gauge,
     "active_connections",
     "Number of active connections",
     ["connection_type"],
 )
 
-queue_size = get_or_create_metric(
-    Gauge,
+queue_size = get_or_create_metric(Gauge,
     "queue_size",
     "Queue size for prioritization",
     ["queue_name"],
@@ -365,16 +329,14 @@ queue_size = get_or_create_metric(
 
 # ==================== Performance Stage Metrics ====================
 # Detailed stage breakdown metrics for performance profiling
-backend_ttfb_seconds = get_or_create_metric(
-    Histogram,
+backend_ttfb_seconds = get_or_create_metric(Histogram,
     "backend_ttfb_seconds",
     "Backend API time to first byte (TTFB) in seconds",
     ["provider", "model", "endpoint"],
     buckets=(0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 5.0, 10.0),
 )
 
-streaming_duration_seconds = get_or_create_metric(
-    Histogram,
+streaming_duration_seconds = get_or_create_metric(Histogram,
     "streaming_duration_seconds",
     "Time spent streaming response to client in seconds",
     ["provider", "model", "endpoint"],
@@ -383,24 +345,21 @@ streaming_duration_seconds = get_or_create_metric(
 
 # TTFC (Time to First Chunk) - Critical metric for perceived streaming latency
 # Measures time from stream_generator() entry to first SSE chunk yielded
-time_to_first_chunk_seconds = get_or_create_metric(
-    Histogram,
+time_to_first_chunk_seconds = get_or_create_metric(Histogram,
     "time_to_first_chunk_seconds",
     "Time from stream start to first SSE chunk sent to client (TTFC)",
     ["provider", "model"],
     buckets=(0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 10.0, 15.0),
 )
 
-frontend_processing_seconds = get_or_create_metric(
-    Histogram,
+frontend_processing_seconds = get_or_create_metric(Histogram,
     "frontend_processing_seconds",
     "Frontend processing time (request parsing, auth, preparation) in seconds",
     ["endpoint"],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
 )
 
-request_stage_duration_seconds = get_or_create_metric(
-    Histogram,
+request_stage_duration_seconds = get_or_create_metric(Histogram,
     "request_stage_duration_seconds",
     "Duration of specific request processing stages in seconds",
     ["stage", "endpoint"],
@@ -408,8 +367,7 @@ request_stage_duration_seconds = get_or_create_metric(
 )
 
 # Stage breakdown percentages
-stage_percentage = get_or_create_metric(
-    Gauge,
+stage_percentage = get_or_create_metric(Gauge,
     "stage_percentage",
     "Percentage of total request time spent in each stage",
     ["stage", "endpoint"],
@@ -440,7 +398,9 @@ def record_http_response(method: str, endpoint: str, status_code: int, app_name:
     ).inc()
 
     # Also record in legacy metrics for backward compatibility
-    http_request_count.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
+    http_request_count.labels(
+        method=method, endpoint=endpoint, status_code=status_code
+    ).inc()
 
 
 @contextmanager
@@ -455,17 +415,29 @@ def track_model_inference(provider: str, model: str):
         logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
         duration = time.time() - start_time
-        model_inference_duration.labels(provider=provider, model=model).observe(duration)
-        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
+        model_inference_duration.labels(provider=provider, model=model).observe(
+            duration
+        )
+        model_inference_requests.labels(
+            provider=provider, model=model, status=status
+        ).inc()
 
 
-def record_tokens_used(provider: str, model: str, input_tokens: int, output_tokens: int):
+def record_tokens_used(
+    provider: str, model: str, input_tokens: int, output_tokens: int
+):
     """Record token consumption metrics."""
-    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
-    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
+    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+        input_tokens
+    )
+    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+        output_tokens
+    )
 
 
-def record_credits_used(provider: str, model: str, user_id: str, credits: float):
+def record_credits_used(
+    provider: str, model: str, user_id: str, credits: float
+):
     """Record credit consumption metrics."""
     # Note: user_id parameter kept for backwards compatibility but not used in labels
     # (avoid exposing PII in metric labels)
@@ -490,7 +462,6 @@ def track_database_query(table: str, operation: str, query_description: str | No
     trace_supabase_query = None
     try:
         from src.utils.sentry_insights import trace_supabase_query as _trace_supabase_query
-
         trace_supabase_query = _trace_supabase_query
     except ImportError:
         pass  # Sentry insights not available
@@ -572,9 +543,7 @@ def record_cache_miss(cache_name: str, key: str | None = None):
             pass  # Sentry insights not available
 
 
-def record_cache_set(
-    cache_name: str, key: str, item_size: int | None = None, ttl: int | None = None
-):
+def record_cache_set(cache_name: str, key: str, item_size: int | None = None, ttl: int | None = None):
     """
     Record cache set operation with Sentry Cache Insights.
 
@@ -683,7 +652,9 @@ def record_free_model_usage(user_status: str, model: str):
 
 def set_subscription_count(plan_type: str, billing_cycle: str, count: int):
     """Set subscription count."""
-    subscription_count.labels(plan_type=plan_type, billing_cycle=billing_cycle).set(count)
+    subscription_count.labels(
+        plan_type=plan_type, billing_cycle=billing_cycle
+    ).set(count)
 
 
 def set_active_connections(connection_type: str, count: int):
@@ -734,7 +705,6 @@ def track_queue_publish(
     _trace_queue_publish = None
     try:
         from src.utils.sentry_insights import trace_queue_publish as _tqp
-
         _trace_queue_publish = _tqp
     except ImportError:
         pass  # Sentry insights not available
@@ -795,7 +765,6 @@ def track_queue_process(
     _trace_queue_process = None
     try:
         from src.utils.sentry_insights import trace_queue_process as _tqp
-
         _trace_queue_process = _tqp
     except ImportError:
         pass  # Sentry insights not available
@@ -818,10 +787,11 @@ def track_queue_process(
 
 # ==================== Performance Stage Tracking Functions ====================
 
-
 def track_backend_ttfb(provider: str, model: str, endpoint: str, duration: float):
     """Track backend API time to first byte (TTFB)."""
-    backend_ttfb_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(duration)
+    backend_ttfb_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(
+        duration
+    )
 
 
 def track_streaming_duration(provider: str, model: str, endpoint: str, duration: float):
@@ -914,10 +884,11 @@ def get_metrics_summary() -> dict:
     # In production, use the /metrics endpoint which exports all metrics in Prometheus format.
     # This summary is for diagnostic purposes only.
     try:
+
         summary = {
             "enabled": True,
             "metrics_endpoint": "/metrics",
-            "message": "Use /metrics endpoint for Prometheus format metrics",
+            "message": "Use /metrics endpoint for Prometheus format metrics"
         }
         return summary
     except Exception as e:

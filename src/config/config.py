@@ -297,18 +297,15 @@ class Config:
     }
 
     # Tempo/OpenTelemetry OTLP Configuration
-    # Default to true for distributed tracing observability
-    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "true").lower() in {
+    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "false").lower() in {
         "1",
         "true",
         "yes",
     }
     OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "gatewayz-api")
-    # Default to localhost for local development; Railway deployments should set
-    # TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318
     TEMPO_OTLP_HTTP_ENDPOINT = os.environ.get(
         "TEMPO_OTLP_HTTP_ENDPOINT",
-        "http://localhost:4318",
+        "http://tempo:4318",
     )
     TEMPO_OTLP_GRPC_ENDPOINT = os.environ.get(
         "TEMPO_OTLP_GRPC_ENDPOINT",
