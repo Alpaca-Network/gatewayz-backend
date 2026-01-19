@@ -7,6 +7,7 @@ Documentation: https://apidocs.mor.org/
 """
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
@@ -114,11 +115,21 @@ def fetch_models_from_morpheus():
 
     Morpheus provides a /models endpoint that returns available models
     in OpenAI-compatible format.
+
+    Updates the cache after fetching to prevent repeated API calls on failures.
     """
+    from src.cache import _morpheus_models_cache
+
+    def _cache_and_return(models: list) -> list:
+        """Update cache with models and timestamp, then return models."""
+        _morpheus_models_cache["data"] = models
+        _morpheus_models_cache["timestamp"] = datetime.now(timezone.utc)
+        return models
+
     try:
         if not Config.MORPHEUS_API_KEY:
             logger.warning("Morpheus API key not configured, returning empty model list")
-            return []
+            return _cache_and_return([])
 
         headers = {
             "Authorization": f"Bearer {Config.MORPHEUS_API_KEY}",
@@ -162,11 +173,11 @@ def fetch_models_from_morpheus():
             )
 
         logger.info(f"Fetched {len(transformed_models)} models from Morpheus")
-        return transformed_models
+        return _cache_and_return(transformed_models)
 
     except httpx.HTTPError as e:
         logger.error(f"Failed to fetch models from Morpheus: {e}")
-        return []
+        return _cache_and_return([])
     except Exception as e:
         logger.error(f"Unexpected error fetching Morpheus models: {e}")
-        return []
+        return _cache_and_return([])

@@ -177,6 +177,25 @@ async def lifespan(app):
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
+        # PERF: Pre-warm database connections in background
+        # This ensures the HTTP/2 connection pool is ready and eliminates cold-start latency
+        async def warmup_database_connections():
+            try:
+                if db_initialized:
+                    logger.info("🔥 Pre-warming database connections...")
+                    # Execute a simple query to warm up the connection pool
+                    from src.config.supabase_config import get_supabase_client
+                    client = get_supabase_client()
+                    # Ping the database with a lightweight query
+                    await asyncio.to_thread(
+                        lambda: client.table("plans").select("id").limit(1).execute()
+                    )
+                    logger.info("✅ Database connection pool warmed")
+            except Exception as e:
+                logger.warning(f"Database connection warmup warning: {e}")
+
+        _create_background_task(warmup_database_connections(), name="warmup_database")
+
         # PERF: Pre-warm connections to frequently used AI providers in background
         # This eliminates cold-start penalty (~100-200ms) for first requests
         # Moved to background to not block healthcheck
@@ -196,6 +215,21 @@ async def lifespan(app):
         # Initialize response cache
         get_cache()
         logger.info("Response cache initialized")
+
+        # PERF: Preload frequently accessed model metadata into cache
+        async def preload_hot_models_cache():
+            try:
+                logger.info("🔥 Preloading hot model metadata...")
+                from src.services.models import get_all_models
+
+                # Preload all models to warm up the cache
+                # This prevents cold cache misses on first requests
+                models = await asyncio.to_thread(get_all_models)
+                logger.info(f"✅ Preloaded {len(models)} models into cache")
+            except Exception as e:
+                logger.warning(f"Model cache preload warning: {e}")
+
+        _create_background_task(preload_hot_models_cache(), name="preload_models")
 
         # Initialize Google Vertex AI models catalog in background
         async def init_google_models_background():

@@ -13,7 +13,7 @@ from src.config import Config
 
 # Initialize logging with Loki integration
 from src.config.logging_config import configure_logging
-from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL
+from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL, TAURI_DESKTOP_URL, TAURI_DESKTOP_PROTOCOL_URL
 from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
@@ -150,6 +150,8 @@ def create_app() -> FastAPI:
     base_origins = [
         FRONTEND_BETA_URL,
         FRONTEND_STAGING_URL,
+        TAURI_DESKTOP_URL,  # Tauri desktop app origin (http://tauri.localhost)
+        TAURI_DESKTOP_PROTOCOL_URL,  # Tauri desktop app origin (tauri://localhost)
         "https://api.gatewayz.ai",  # Added for chat API access from frontend
         "https://docs.gatewayz.ai",  # Added for documentation site access
     ]
@@ -325,6 +327,7 @@ def create_app() -> FastAPI:
 
     # ==================== Sentry Debug Endpoint ====================
     if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+
         @app.get("/sentry-debug", tags=["monitoring"], include_in_schema=False)
         async def trigger_sentry_error(raise_exception: bool = False):
             """
@@ -403,7 +406,10 @@ def create_app() -> FastAPI:
             "optimization_monitor",
             "Optimization Monitoring",
         ),  # Connection pool, cache, and priority stats
-        ("health_timeline", "System Health Timeline"),  # Provider and model uptime timeline tracking
+        (
+            "health_timeline",
+            "System Health Timeline",
+        ),  # Provider and model uptime timeline tracking
         ("error_monitor", "Error Monitoring"),  # Error detection and auto-fix system
         ("root", "Root/Home"),
         ("auth", "Authentication"),
@@ -430,6 +436,8 @@ def create_app() -> FastAPI:
         ("pricing_audit", "Pricing Audit Dashboard"),
         ("pricing_sync", "Pricing Sync Service"),
         ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
+        ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
+        ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
     ]
 
     loaded_count = 0
@@ -533,6 +541,16 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
 
+    # ==================== Prometheus/Grafana SimpleJSON Datasource Router ====================
+    # Load Prometheus/Grafana datasource router for dashboard compatibility
+    try:
+        from src.routes.prometheus_grafana import router as prometheus_grafana_router
+
+        app.include_router(prometheus_grafana_router)
+        logger.info("  [OK] Prometheus/Grafana SimpleJSON Datasource (/prometheus/datasource/*)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
+
     # ==================== Exception Handler ====================
 
     @app.exception_handler(Exception)
@@ -558,15 +576,14 @@ def create_app() -> FastAPI:
             elif "authorization" in request.headers:
                 # Use a hash of the auth header as distinct_id if no user_id available
                 import hashlib
-                auth_hash = hashlib.sha256(
-                    request.headers["authorization"].encode()
-                ).hexdigest()[:16]
+
+                auth_hash = hashlib.sha256(request.headers["authorization"].encode()).hexdigest()[
+                    :16
+                ]
                 distinct_id = f"user_{auth_hash}"
 
             posthog_service.capture_exception(
-                exception=exc,
-                distinct_id=distinct_id,
-                properties=properties
+                exception=exc, distinct_id=distinct_id, properties=properties
             )
         except Exception as posthog_error:
             logger.warning(f"Failed to capture exception in PostHog: {posthog_error}")

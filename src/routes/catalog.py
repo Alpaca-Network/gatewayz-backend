@@ -40,13 +40,13 @@ DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
-    "'vercel-ai-gateway', 'google-vertex', 'simplismart', or auto-detect if not specified"
+    "'vercel-ai-gateway', 'google-vertex', 'simplismart', 'morpheus', or auto-detect if not specified"
 )
 DESC_GATEWAY_WITH_ALL = (
     "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
     "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
     "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
-    "'vercel-ai-gateway', 'google-vertex', 'simplismart', or 'all'"
+    "'vercel-ai-gateway', 'google-vertex', 'simplismart', 'morpheus', or 'all'"
 )
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
@@ -239,6 +239,12 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://developers.cloudflare.com/workers-ai",
     },
+    "morpheus": {
+        "name": "Morpheus",
+        "color": "bg-cyan-600",
+        "priority": "slow",
+        "site_url": "https://mor.org",
+    },
 }
 
 
@@ -273,8 +279,8 @@ async def get_gateways():
                     if domain.startswith("www."):
                         domain = domain[4:]
                     logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to generate logo URL for {gateway_id} from {site_url}: {e}")
 
             gateways.append({
                 "id": gateway_id,
