@@ -48,6 +48,11 @@ from src.services.anonymous_rate_limiter import (
 )
 from src.utils.ai_tracing import AITracer, AIRequestType
 
+# Unified chat handler and adapters for chat unification
+from src.handlers.chat_handler import ChatInferenceHandler
+from src.adapters.chat import OpenAIChatAdapter
+from src.schemas.internal.chat import InternalChatRequest
+
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Make braintrust optional for test environments
@@ -1994,6 +1999,7 @@ async def chat_completions(
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
+            # Streaming path - keep existing logic unchanged for now
             last_http_exc = None
             for idx, attempt_provider in enumerate(provider_chain):
                 attempt_model = transform_model_id(original_model, attempt_provider)
@@ -2179,146 +2185,194 @@ async def chat_completions(
         processed = None
         last_http_exc = None
 
-        for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
-            if attempt_model != original_model:
-                logger.info(
-                    f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
-                )
-
-            request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
-                logger.debug(
-                    "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
-                )
-
+        # Use unified handler for authenticated non-streaming requests
+        if not is_anonymous:
             try:
-                # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
-                # Wrap provider calls with distributed tracing for Tempo
-                async with AITracer.trace_inference(
-                    provider=attempt_provider,
-                    model=request_model,
-                    request_type=AIRequestType.CHAT_COMPLETION,
-                ) as trace_ctx:
-                    if attempt_provider == "fal":
-                        # FAL models are for image/video generation, not chat completions
-                        raise HTTPException(
-                            status_code=400,
-                            detail={
-                                "error": {
-                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                    "and is not available through the chat completions endpoint. "
-                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                    "type": "invalid_request_error",
-                                    "code": "model_not_supported_for_chat",
-                                }
-                            },
-                        )
-                    elif attempt_provider in PROVIDER_ROUTING:
-                        # Use registry for all registered providers
-                        request_func = PROVIDER_ROUTING[attempt_provider]["request"]
-                        process_func = PROVIDER_ROUTING[attempt_provider]["process"]
-                        resp_raw = await asyncio.wait_for(
-                            _to_thread(request_func, messages, request_model, **optional),
-                            timeout=request_timeout,
-                        )
-                        processed = await _to_thread(process_func, resp_raw)
-                    else:
-                        # Default to OpenRouter
-                        resp_raw = await asyncio.wait_for(
-                            _to_thread(
-                                make_openrouter_request_openai, messages, request_model, **optional
-                            ),
-                            timeout=request_timeout,
-                        )
-                        processed = await _to_thread(process_openrouter_response, resp_raw)
+                logger.info(
+                    f"[Unified Handler] Processing authenticated non-streaming request for model {original_model}"
+                )
 
-                    # Extract token usage from response for tracing
-                    usage = processed.get("usage", {}) or {}
-                    trace_prompt_tokens = usage.get("prompt_tokens", 0)
-                    trace_completion_tokens = usage.get("completion_tokens", 0)
-                    trace_total_tokens = usage.get("total_tokens", 0)
+                # Convert external OpenAI format to internal format
+                adapter = OpenAIChatAdapter()
+                internal_request = adapter.to_internal_request({
+                    "messages": messages,
+                    "model": original_model,
+                    "stream": False,
+                    **optional
+                })
 
-                    # Calculate cost for tracing
-                    trace_cost = calculate_cost(
-                        request_model, trace_prompt_tokens, trace_completion_tokens
-                    )
+                # Create unified handler with user context
+                handler = ChatInferenceHandler(api_key, background_tasks)
 
-                    # Set token usage and cost on trace span
-                    trace_ctx.set_token_usage(
-                        input_tokens=trace_prompt_tokens,
-                        output_tokens=trace_completion_tokens,
-                        total_tokens=trace_total_tokens,
-                    )
-                    trace_ctx.set_cost(trace_cost)
+                # Process request through unified pipeline (includes provider routing, failover, tracing)
+                internal_response = await handler.process(internal_request)
 
-                    # Set model parameters if available
-                    if optional:
-                        trace_ctx.set_model_parameters(
-                            temperature=optional.get("temperature"),
-                            max_tokens=optional.get("max_tokens"),
-                            top_p=optional.get("top_p"),
-                            frequency_penalty=optional.get("frequency_penalty"),
-                            presence_penalty=optional.get("presence_penalty"),
-                        )
+                # Convert internal response back to OpenAI format
+                processed = adapter.from_internal_response(internal_response)
 
-                    # Set user info if authenticated
-                    if not is_anonymous and user:
-                        trace_ctx.set_user_info(
-                            user_id=str(user.get("id")),
-                            tier="trial" if trial.get("is_trial") else "paid",
-                        )
+                # Extract values for postprocessing (maintain compatibility with existing code)
+                provider = internal_response.provider or "onerouter"
+                model = internal_response.model or original_model
 
-                provider = attempt_provider
-                model = request_model
-                break
+                logger.info(
+                    f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
+                )
+
             except Exception as exc:
-                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
-                    logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
-                elif isinstance(exc, httpx.RequestError):
-                    logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
-                elif isinstance(exc, httpx.HTTPStatusError):
+                # Map any errors to HTTPException
+                logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
+                if isinstance(exc, HTTPException):
+                    raise
+                # Map provider-specific errors
+                from src.services.provider_failover import map_provider_error
+                http_exc = map_provider_error(
+                    provider if 'provider' in locals() else "onerouter",
+                    model if 'model' in locals() else original_model,
+                    exc
+                )
+                raise http_exc
+        else:
+            # Anonymous users: keep existing provider routing logic
+            for idx, attempt_provider in enumerate(provider_chain):
+                attempt_model = transform_model_id(original_model, attempt_provider)
+                if attempt_model != original_model:
+                    logger.info(
+                        f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
+                    )
+
+                request_model = attempt_model
+                request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
+                if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
                     logger.debug(
-                        "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
+                        "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                     )
-                else:
-                    logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
-                http_exc = map_provider_error(attempt_provider, request_model, exc)
 
-                last_http_exc = http_exc
-                if idx < len(provider_chain) - 1 and should_failover(http_exc):
-                    next_provider = provider_chain[idx + 1]
-                    logger.warning(
-                        "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
-                        attempt_provider,
-                        http_exc.status_code,
-                        http_exc.detail,
-                        next_provider,
-                    )
-                    continue
+                try:
+                    # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
+                    # Wrap provider calls with distributed tracing for Tempo
+                    async with AITracer.trace_inference(
+                        provider=attempt_provider,
+                        model=request_model,
+                        request_type=AIRequestType.CHAT_COMPLETION,
+                    ) as trace_ctx:
+                        if attempt_provider == "fal":
+                            # FAL models are for image/video generation, not chat completions
+                            raise HTTPException(
+                                status_code=400,
+                                detail={
+                                    "error": {
+                                        "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                        "and is not available through the chat completions endpoint. "
+                                        "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                        "type": "invalid_request_error",
+                                        "code": "model_not_supported_for_chat",
+                                    }
+                                },
+                            )
+                        elif attempt_provider in PROVIDER_ROUTING:
+                            # Use registry for all registered providers
+                            request_func = PROVIDER_ROUTING[attempt_provider]["request"]
+                            process_func = PROVIDER_ROUTING[attempt_provider]["process"]
+                            resp_raw = await asyncio.wait_for(
+                                _to_thread(request_func, messages, request_model, **optional),
+                                timeout=request_timeout,
+                            )
+                            processed = await _to_thread(process_func, resp_raw)
+                        else:
+                            # Default to OpenRouter
+                            resp_raw = await asyncio.wait_for(
+                                _to_thread(
+                                    make_openrouter_request_openai, messages, request_model, **optional
+                                ),
+                                timeout=request_timeout,
+                            )
+                            processed = await _to_thread(process_openrouter_response, resp_raw)
 
-                # If this is a 402 (Payment Required) error and we've exhausted the chain,
-                # rebuild the chain allowing payment failover to try alternative providers
-                if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
-                    extended_chain = build_provider_failover_chain(provider)
-                    extended_chain = enforce_model_failover_rules(
-                        original_model, extended_chain, allow_payment_failover=True
-                    )
-                    extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
-                    # Find providers we haven't tried yet
-                    new_providers = [p for p in extended_chain if p not in provider_chain]
-                    if new_providers:
-                        logger.warning(
-                            "Provider '%s' returned 402 (Payment Required). "
-                            "Extending failover chain with: %s",
-                            attempt_provider,
-                            new_providers,
+                        # Extract token usage from response for tracing
+                        usage = processed.get("usage", {}) or {}
+                        trace_prompt_tokens = usage.get("prompt_tokens", 0)
+                        trace_completion_tokens = usage.get("completion_tokens", 0)
+                        trace_total_tokens = usage.get("total_tokens", 0)
+
+                        # Calculate cost for tracing
+                        trace_cost = calculate_cost(
+                            request_model, trace_prompt_tokens, trace_completion_tokens
                         )
-                        provider_chain.extend(new_providers)
+
+                        # Set token usage and cost on trace span
+                        trace_ctx.set_token_usage(
+                            input_tokens=trace_prompt_tokens,
+                            output_tokens=trace_completion_tokens,
+                            total_tokens=trace_total_tokens,
+                        )
+                        trace_ctx.set_cost(trace_cost)
+
+                        # Set model parameters if available
+                        if optional:
+                            trace_ctx.set_model_parameters(
+                                temperature=optional.get("temperature"),
+                                max_tokens=optional.get("max_tokens"),
+                                top_p=optional.get("top_p"),
+                                frequency_penalty=optional.get("frequency_penalty"),
+                                presence_penalty=optional.get("presence_penalty"),
+                            )
+
+                        # Set user info if authenticated
+                        if not is_anonymous and user:
+                            trace_ctx.set_user_info(
+                                user_id=str(user.get("id")),
+                                tier="trial" if trial.get("is_trial") else "paid",
+                            )
+
+                    provider = attempt_provider
+                    model = request_model
+                    break
+                except Exception as exc:
+                    if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
+                        logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
+                    elif isinstance(exc, httpx.RequestError):
+                        logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
+                    elif isinstance(exc, httpx.HTTPStatusError):
+                        logger.debug(
+                            "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
+                        )
+                    else:
+                        logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
+                    http_exc = map_provider_error(attempt_provider, request_model, exc)
+
+                    last_http_exc = http_exc
+                    if idx < len(provider_chain) - 1 and should_failover(http_exc):
+                        next_provider = provider_chain[idx + 1]
+                        logger.warning(
+                            "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
+                            attempt_provider,
+                            http_exc.status_code,
+                            http_exc.detail,
+                            next_provider,
+                        )
                         continue
 
-                raise http_exc
+                    # If this is a 402 (Payment Required) error and we've exhausted the chain,
+                    # rebuild the chain allowing payment failover to try alternative providers
+                    if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
+                        extended_chain = build_provider_failover_chain(provider)
+                        extended_chain = enforce_model_failover_rules(
+                            original_model, extended_chain, allow_payment_failover=True
+                        )
+                        extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                        # Find providers we haven't tried yet
+                        new_providers = [p for p in extended_chain if p not in provider_chain]
+                        if new_providers:
+                            logger.warning(
+                                "Provider '%s' returned 402 (Payment Required). "
+                                "Extending failover chain with: %s",
+                                attempt_provider,
+                                new_providers,
+                            )
+                            provider_chain.extend(new_providers)
+                            continue
+
+                    raise http_exc
 
         if processed is None:
             raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
