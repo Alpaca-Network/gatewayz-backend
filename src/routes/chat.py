@@ -41,6 +41,11 @@ from src.utils.exceptions import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.sentry_context import capture_payment_error, capture_provider_error
+from src.services.anonymous_rate_limiter import (
+    validate_anonymous_request,
+    record_anonymous_request,
+    ANONYMOUS_ALLOWED_MODELS,
+)
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -867,6 +872,7 @@ async def _process_stream_completion_background(
     provider,
     is_anonymous=False,
     request_id=None,
+    client_ip=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -880,6 +886,14 @@ async def _process_stream_completion_background(
         # Skip user-specific operations for anonymous requests
         if is_anonymous:
             logger.info("Skipping user-specific post-processing for anonymous request")
+
+            # Record anonymous usage for rate limiting (IMPORTANT: prevents abuse)
+            if client_ip:
+                try:
+                    record_anonymous_request(client_ip, model)
+                except Exception as e:
+                    logger.warning(f"Failed to record anonymous request: {e}")
+
             # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
             cost = calculate_cost(model, prompt_tokens, completion_tokens)
             await _record_inference_metrics_and_health(
@@ -1089,6 +1103,7 @@ async def stream_generator(
     is_async_stream=False,  # PERF: Flag to indicate if stream is async
     request_id=None,
     api_key_id=None,
+    client_ip=None,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -1292,6 +1307,7 @@ async def stream_generator(
                 provider=provider,
                 is_anonymous=is_anonymous,
                 request_id=request_id,
+                client_ip=client_ip,
             )
         )
 
@@ -1425,12 +1441,62 @@ async def chat_completions(
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
         with tracker.stage("auth_validation"):
             if is_anonymous:
-                # Anonymous user - skip user lookup, trial validation, plan limits
+                # Anonymous user - validate model whitelist and rate limits
+                # Get client IP for rate limiting
+                client_ip = "unknown"
+                if request:
+                    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                    if not client_ip:
+                        client_ip = request.headers.get("X-Real-IP", "")
+                    if not client_ip and hasattr(request, "client") and request.client:
+                        client_ip = request.client.host or "unknown"
+
+                # Validate anonymous request (model whitelist + rate limit)
+                anon_validation = validate_anonymous_request(client_ip, req.model)
+                if not anon_validation["allowed"]:
+                    logger.warning(
+                        "Anonymous request denied (request_id=%s, ip=%s, model=%s, reason=%s)",
+                        request_id,
+                        client_ip[:16] + "..." if len(client_ip) > 16 else client_ip,
+                        req.model,
+                        anon_validation["reason"][:50],
+                    )
+                    # Return appropriate error based on failure type
+                    if not anon_validation.get("model_allowed", True):
+                        raise HTTPException(
+                            status_code=403,
+                            detail={
+                                "error": {
+                                    "message": anon_validation["reason"],
+                                    "type": "model_not_allowed",
+                                    "code": "anonymous_model_restricted",
+                                    "allowed_models": ANONYMOUS_ALLOWED_MODELS[:5],
+                                }
+                            }
+                        )
+                    else:
+                        raise HTTPException(
+                            status_code=429,
+                            detail={
+                                "error": {
+                                    "message": anon_validation["reason"],
+                                    "type": "rate_limit_exceeded",
+                                    "code": "anonymous_daily_limit",
+                                }
+                            }
+                        )
+
                 user = None
                 api_key_id = None
-                trial = {"is_valid": True, "is_trial": False}
+                trial = {"is_valid": True, "is_trial": False, "is_anonymous": True}
                 environment_tag = "live"
-                logger.info("Processing anonymous chat request (request_id=%s)", request_id)
+                logger.info(
+                    "Processing anonymous chat request (request_id=%s, ip=%s, model=%s, remaining=%d)",
+                    request_id,
+                    client_ip[:16] + "..." if len(client_ip) > 16 else client_ip,
+                    req.model,
+                    anon_validation.get("remaining_requests", 0),
+                )
 
                 # Track anonymous request (no API key)
                 try:
@@ -1967,6 +2033,7 @@ async def chat_completions(
                             is_async_stream=is_async_stream,
                             request_id=request_id,
                             api_key_id=api_key_id,
+                            client_ip=client_ip if is_anonymous else None,
                         ),
                         media_type="text/event-stream",
                         headers=stream_headers,
