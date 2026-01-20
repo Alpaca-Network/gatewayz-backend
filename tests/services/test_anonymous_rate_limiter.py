@@ -20,7 +20,6 @@ from src.services.anonymous_rate_limiter import (
     increment_anonymous_usage,
     get_anonymous_stats,
     ANONYMOUS_DAILY_LIMIT,
-    ANONYMOUS_ALLOWED_MODELS,
     _anonymous_usage_cache,
     _hash_ip,
 )
