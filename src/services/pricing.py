@@ -120,6 +120,11 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
         Total cost in USD
     """
     try:
+        # Check if this is a free model first (OpenRouter free models end with :free)
+        if model_id and model_id.endswith(":free"):
+            logger.info(f"Free model detected: {model_id}, returning $0 cost")
+            return 0.0
+
         pricing = get_model_pricing(model_id)
 
         # FIXED: Pricing is per single token, so just multiply (no division)
@@ -138,6 +143,10 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
 
     except Exception as e:
         logger.error(f"Error calculating cost for {model_id}: {e}")
+        # Fallback: Check if free model before applying default pricing
+        if model_id and model_id.endswith(":free"):
+            logger.info(f"Free model detected in fallback: {model_id}, returning $0 cost")
+            return 0.0
         # Fallback to simple calculation (assuming $0.00002 per token)
         total_tokens = prompt_tokens + completion_tokens
         return total_tokens * 0.00002

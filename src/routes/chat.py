@@ -658,6 +658,25 @@ async def _handle_credits_and_usage(
     cost = calculate_cost(model, prompt_tokens, completion_tokens)
     is_trial = trial.get("is_trial", False)
 
+    # Defense-in-depth: Override is_trial flag if user has active subscription
+    # This protects against webhook delays or failures that leave is_trial=TRUE
+    if is_trial and user:
+        has_active_subscription = (
+            user.get("stripe_subscription_id") is not None and
+            user.get("subscription_status") == "active"
+        ) or user.get("tier") in ("pro", "max", "admin")
+
+        if has_active_subscription:
+            logger.warning(
+                "BILLING_OVERRIDE: User %s has is_trial=TRUE but has active subscription "
+                "(tier=%s, sub_status=%s, stripe_sub_id=%s). Forcing paid path.",
+                user.get("id"),
+                user.get("tier"),
+                user.get("subscription_status"),
+                user.get("stripe_subscription_id"),
+            )
+            is_trial = False  # Override to paid path
+
     # Track trial usage
     if trial.get("is_trial") and not trial.get("is_expired"):
         try:
