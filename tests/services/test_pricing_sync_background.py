@@ -5,7 +5,6 @@ Verifies that pricing is correctly extracted from model metadata
 after the migration that moved pricing columns to metadata.pricing_raw.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 from src.services.pricing_sync_background import PricingSyncService
@@ -31,8 +30,8 @@ class TestExtractAndNormalizePricing:
                     "completion": "0.040",
                     "image": None,
                     "request": None,
-                }
-            }
+                },
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -50,7 +49,7 @@ class TestExtractAndNormalizePricing:
             "metadata": {
                 "source_gateway": "openrouter",
                 # No pricing_raw field
-            }
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -67,8 +66,8 @@ class TestExtractAndNormalizePricing:
                 "pricing_raw": {
                     "prompt": None,
                     "completion": None,
-                }
-            }
+                },
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -89,11 +88,7 @@ class TestExtractAndNormalizePricing:
 
     def test_handles_none_metadata_gracefully(self):
         """Test that None metadata doesn't cause errors."""
-        model = {
-            "id": 222,
-            "top_provider": "openrouter",
-            "metadata": None
-        }
+        model = {"id": 222, "top_provider": "openrouter", "metadata": None}
 
         result = self.service._extract_and_normalize_pricing(model)
 
@@ -101,13 +96,7 @@ class TestExtractAndNormalizePricing:
 
     def test_handles_none_pricing_raw_gracefully(self):
         """Test that None pricing_raw doesn't cause errors."""
-        model = {
-            "id": 333,
-            "top_provider": "deepinfra",
-            "metadata": {
-                "pricing_raw": None
-            }
-        }
+        model = {"id": 333, "top_provider": "deepinfra", "metadata": {"pricing_raw": None}}
 
         result = self.service._extract_and_normalize_pricing(model)
 
@@ -125,8 +114,8 @@ class TestExtractAndNormalizePricing:
                     "completion": "0.002",
                     "image": "0.01",
                     "request": "0.0001",
-                }
-            }
+                },
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -146,8 +135,8 @@ class TestExtractAndNormalizePricing:
                 "pricing_raw": {
                     "prompt": "0.055",
                     "completion": "0.040",
-                }
-            }
+                },
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -166,7 +155,7 @@ class TestExtractAndNormalizePricing:
                     "prompt": "0.055",
                     "completion": "0.040",
                 }
-            }
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -197,8 +186,8 @@ class TestExtractAndNormalizePricing:
                     "completion": "0.040",
                     "image": None,
                     "request": None,
-                }
-            }
+                },
+            },
         }
 
         result = self.service._extract_and_normalize_pricing(model)
@@ -217,7 +206,7 @@ class TestSyncPricingForModels:
         self.service = PricingSyncService.__new__(PricingSyncService)
         self.service.supabase = MagicMock()
 
-    @patch('src.services.pricing_sync_background.bulk_upsert_pricing')
+    @patch("src.services.pricing_sync_background.bulk_upsert_pricing")
     def test_syncs_pricing_from_metadata(self, mock_bulk_upsert):
         """Test that pricing is synced correctly from metadata.pricing_raw."""
         # Mock the database response
@@ -231,8 +220,8 @@ class TestSyncPricingForModels:
                         "pricing_raw": {
                             "prompt": "0.055",
                             "completion": "0.040",
-                        }
-                    }
+                        },
+                    },
                 }
             ]
         )
@@ -245,7 +234,7 @@ class TestSyncPricingForModels:
         assert stats["skipped"] == 0
         mock_bulk_upsert.assert_called_once()
 
-    @patch('src.services.pricing_sync_background.bulk_upsert_pricing')
+    @patch("src.services.pricing_sync_background.bulk_upsert_pricing")
     def test_skips_models_without_pricing(self, mock_bulk_upsert):
         """Test that models without pricing_raw are skipped."""
         self.service.supabase.table.return_value.select.return_value.in_.return_value.execute.return_value = MagicMock(
@@ -256,7 +245,7 @@ class TestSyncPricingForModels:
                     "metadata": {
                         "source_gateway": "openrouter",
                         # No pricing_raw
-                    }
+                    },
                 }
             ]
         )
