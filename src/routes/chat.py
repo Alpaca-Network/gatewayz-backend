@@ -1489,6 +1489,9 @@ async def chat_completions(
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
         with tracker.stage("auth_validation"):
+            # Initialize client_ip to None for all cases (used later in streaming response)
+            client_ip = None
+
             if is_anonymous:
                 # Anonymous user - validate model whitelist and rate limits
                 # Get client IP for rate limiting
