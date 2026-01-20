@@ -41,7 +41,7 @@ from src.utils.sentry_context import capture_payment_error
 
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.adapters.chat import AiSDKChatAdapter
+from src.adapters.chat import AISDKChatAdapter
 from src.schemas.internal.chat import InternalChatRequest
 
 # Initialize logging
@@ -324,7 +324,7 @@ async def ai_sdk_chat_completion(
         }
 
         # Convert AI SDK format to internal format
-        adapter = AiSDKChatAdapter()
+        adapter = AISDKChatAdapter()
         internal_request = adapter.to_internal_request(ai_sdk_request)
 
         # Create unified handler with user context

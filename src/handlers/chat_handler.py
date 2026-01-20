@@ -20,7 +20,6 @@ from src.schemas.internal.chat import (
     InternalStreamChunk,
     InternalUsage,
 )
-from src.services.model_transformations import apply_transformations
 from src.services.pricing import calculate_cost
 from src.services.provider_selector import get_selector
 from src.services.trial_validation import track_trial_usage, validate_trial_access
@@ -31,12 +30,12 @@ from src.services.openrouter_client import (
     make_openrouter_request_openai_stream_async,
 )
 from src.services.cerebras_client import (
-    make_cerebras_request,
-    make_cerebras_request_stream_async,
+    make_cerebras_request_openai,
+    make_cerebras_request_openai_stream,
 )
 from src.services.groq_client import (
-    make_groq_request,
-    make_groq_request_stream_async,
+    make_groq_request_openai,
+    make_groq_request_openai_stream,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,9 +125,9 @@ class ChatInferenceHandler:
         if provider_name == "openrouter":
             return make_openrouter_request_openai(messages, model_id, **kwargs)
         elif provider_name == "cerebras":
-            return make_cerebras_request(messages, model_id, **kwargs)
+            return make_cerebras_request_openai(messages, model_id, **kwargs)
         elif provider_name == "groq":
-            return make_groq_request(messages, model_id, **kwargs)
+            return make_groq_request_openai(messages, model_id, **kwargs)
         else:
             # Fallback to OpenRouter for unknown providers
             logger.warning(
@@ -171,11 +170,11 @@ class ChatInferenceHandler:
             async for chunk in stream:
                 yield chunk
         elif provider_name == "cerebras":
-            stream = await make_cerebras_request_stream_async(messages, model_id, **kwargs)
+            stream = await make_cerebras_request_openai_stream(messages, model_id, **kwargs)
             async for chunk in stream:
                 yield chunk
         elif provider_name == "groq":
-            stream = await make_groq_request_stream_async(messages, model_id, **kwargs)
+            stream = await make_groq_request_openai_stream(messages, model_id, **kwargs)
             async for chunk in stream:
                 yield chunk
         else:
@@ -373,11 +372,7 @@ class ChatInferenceHandler:
                 f"messages={len(request.messages)}, user_id={self.user.get('id')}"
             )
 
-            # Step 2: Transform model ID to canonical format
-            transformed_model = await asyncio.to_thread(apply_transformations, request.model)
-            logger.debug(f"[ChatHandler] Transformed model: {request.model} → {transformed_model}")
-
-            # Step 3: Select provider and call with failover
+            # Step 2: Select provider and call with failover (provider selector handles model transformation)
             # Convert internal messages to OpenAI format for provider clients
             messages = [
                 {
@@ -410,7 +405,7 @@ class ChatInferenceHandler:
             selector = get_selector()
             result = await asyncio.to_thread(
                 selector.execute_with_failover,
-                model_id=transformed_model,
+                model_id=request.model,
                 execute_fn=lambda provider_name, provider_model_id: self._call_provider(
                     provider_name, provider_model_id, messages, **kwargs
                 ),
@@ -570,13 +565,7 @@ class ChatInferenceHandler:
                 f"messages={len(request.messages)}, user_id={self.user.get('id')}"
             )
 
-            # Step 2: Transform model ID
-            transformed_model = await asyncio.to_thread(apply_transformations, request.model)
-            logger.debug(
-                f"[ChatHandler] Transformed model (streaming): {request.model} → {transformed_model}"
-            )
-
-            # Step 3: Prepare messages and kwargs
+            # Step 2: Prepare messages and kwargs (provider selector handles model transformation)
             messages = [
                 {
                     "role": msg.role,
@@ -606,11 +595,11 @@ class ChatInferenceHandler:
             # TODO: Implement streaming failover in future enhancement
             selector = get_selector()
             primary_provider = await asyncio.to_thread(
-                selector.registry.select_provider, transformed_model
+                selector.registry.select_provider, request.model
             )
 
             if not primary_provider:
-                raise ValueError(f"No provider found for model {transformed_model}")
+                raise ValueError(f"No provider found for model {request.model}")
 
             provider_used = primary_provider.name
             provider_model_id = primary_provider.model_id
