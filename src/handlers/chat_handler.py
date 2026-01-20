@@ -339,5 +339,195 @@ class ChatInferenceHandler:
             f"status={status}, tokens={input_tokens}+{output_tokens}"
         )
 
-    # TODO: Implement process() for non-streaming requests (Task 7)
+    async def process(self, request: InternalChatRequest) -> InternalChatResponse:
+        """
+        Process a non-streaming chat completion request.
+
+        This is the SINGLE implementation used by ALL chat endpoints for
+        non-streaming requests. It handles the complete pipeline:
+        1. User context initialization
+        2. Model transformation
+        3. Provider selection and API call
+        4. Token usage extraction
+        5. Cost calculation
+        6. Credit deduction
+        7. Request logging
+        8. Response formatting
+
+        Args:
+            request: Internal chat request (already converted from external format)
+
+        Returns:
+            InternalChatResponse with all metadata populated
+
+        Raises:
+            ValueError: If user is invalid or has insufficient credits
+            Exception: Provider or system errors
+        """
+        try:
+            # Step 1: Initialize user context
+            await self._initialize_user_context()
+
+            logger.info(
+                f"[ChatHandler] Processing request: model={request.model}, "
+                f"messages={len(request.messages)}, user_id={self.user.get('id')}"
+            )
+
+            # Step 2: Transform model ID to canonical format
+            transformed_model = await asyncio.to_thread(apply_transformations, request.model)
+            logger.debug(f"[ChatHandler] Transformed model: {request.model} → {transformed_model}")
+
+            # Step 3: Select provider and call with failover
+            # Convert internal messages to OpenAI format for provider clients
+            messages = [
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    **({"name": msg.name} if msg.name else {}),
+                    **({"tool_call_id": msg.tool_call_id} if msg.tool_call_id else {}),
+                    **({"tool_calls": msg.tool_calls} if msg.tool_calls else {}),
+                }
+                for msg in request.messages
+            ]
+
+            # Build provider kwargs
+            kwargs = {
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "top_p": request.top_p,
+                "frequency_penalty": request.frequency_penalty,
+                "presence_penalty": request.presence_penalty,
+                "stop": request.stop,
+                "tools": request.tools,
+                "tool_choice": request.tool_choice,
+                "response_format": request.response_format,
+                "user": request.user,
+            }
+            # Remove None values
+            kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
+            # Use provider selector for intelligent routing with failover
+            selector = get_selector()
+            result = await asyncio.to_thread(
+                selector.execute_with_failover,
+                model_id=transformed_model,
+                execute_fn=lambda provider_name, provider_model_id: self._call_provider(
+                    provider_name, provider_model_id, messages, **kwargs
+                ),
+            )
+
+            if not result["success"]:
+                error_msg = result.get("error", "All providers failed")
+                logger.error(f"[ChatHandler] All providers failed: {error_msg}")
+                # Save failed request
+                self._save_request_record(
+                    model_name=request.model,
+                    provider_name="unknown",
+                    input_tokens=0,
+                    output_tokens=0,
+                    status="failed",
+                    error_message=error_msg,
+                )
+                raise Exception(error_msg)
+
+            # Extract provider response
+            provider_response = result["response"]
+            provider_used = result["provider"]
+            provider_model_id = result.get("provider_model_id", transformed_model)
+
+            logger.info(
+                f"[ChatHandler] Provider call successful: provider={provider_used}, "
+                f"model={provider_model_id}"
+            )
+
+            # Step 4: Extract token usage from response
+            usage = getattr(provider_response, "usage", None)
+            if not usage:
+                raise ValueError("Provider response missing usage data")
+
+            prompt_tokens = getattr(usage, "prompt_tokens", 0)
+            completion_tokens = getattr(usage, "completion_tokens", 0)
+            total_tokens = prompt_tokens + completion_tokens
+
+            # Extract response content
+            if hasattr(provider_response, "choices") and provider_response.choices:
+                choice = provider_response.choices[0]
+                message = getattr(choice, "message", None)
+                if not message:
+                    raise ValueError("Provider response missing message")
+
+                content = getattr(message, "content", "")
+                finish_reason = getattr(choice, "finish_reason", "stop")
+                tool_calls = getattr(message, "tool_calls", None)
+            else:
+                raise ValueError("Provider response missing choices")
+
+            # Step 5: Calculate cost
+            cost = await asyncio.to_thread(
+                calculate_cost, request.model, prompt_tokens, completion_tokens
+            )
+            input_cost = await asyncio.to_thread(calculate_cost, request.model, prompt_tokens, 0)
+            output_cost = await asyncio.to_thread(calculate_cost, request.model, 0, completion_tokens)
+
+            logger.debug(
+                f"[ChatHandler] Cost calculation: total=${cost:.6f}, "
+                f"input=${input_cost:.6f}, output=${output_cost:.6f}"
+            )
+
+            # Step 6: Charge user
+            await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
+
+            # Step 7: Save request record
+            self._save_request_record(
+                model_name=request.model,
+                provider_name=provider_used,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                status="completed",
+            )
+
+            # Step 8: Return InternalChatResponse with all metadata
+            elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
+
+            response = InternalChatResponse(
+                id=self.request_id,
+                model=request.model,
+                content=content or "",
+                finish_reason=finish_reason,
+                usage=InternalUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                ),
+                cost_usd=cost,
+                input_cost_usd=input_cost,
+                output_cost_usd=output_cost,
+                provider_used=provider_used,
+                processing_time_ms=elapsed_ms,
+                tool_calls=tool_calls,
+            )
+
+            logger.info(
+                f"[ChatHandler] Request completed successfully: "
+                f"tokens={total_tokens}, cost=${cost:.6f}, time={elapsed_ms}ms"
+            )
+
+            return response
+
+        except Exception as e:
+            # Log error and save failed request
+            logger.error(f"[ChatHandler] Request failed: {e}", exc_info=True)
+
+            # Save failed request metadata
+            self._save_request_record(
+                model_name=request.model,
+                provider_name="unknown",
+                input_tokens=0,
+                output_tokens=0,
+                status="failed",
+                error_message=str(e),
+            )
+
+            raise
+
     # TODO: Implement process_stream() for streaming requests (Task 8)
