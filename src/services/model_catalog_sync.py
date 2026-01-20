@@ -606,6 +606,21 @@ def sync_provider_models(
                         logger.info(f"Pricing sync complete: {pricing_stats}")
                 except Exception as pricing_e:
                     logger.warning(f"Pricing sync failed for {provider_slug}: {pricing_e}")
+
+                # Invalidate caches to ensure fresh data is served immediately
+                try:
+                    from src.services.model_catalog_cache import (
+                        invalidate_full_catalog,
+                        invalidate_provider_catalog,
+                    )
+
+                    # Invalidate provider-specific cache first
+                    invalidate_provider_catalog(provider_slug)
+                    # Then invalidate full catalog (aggregated view)
+                    invalidate_full_catalog()
+                    logger.info(f"Cache invalidated for {provider_slug} after model sync")
+                except Exception as cache_e:
+                    logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
         else:
             models_synced = 0
             logger.info(f"DRY RUN: Would sync {len(db_models)} models for {provider_slug}")
