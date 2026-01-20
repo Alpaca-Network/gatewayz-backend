@@ -38,10 +38,11 @@ def test_bare_openai_model_names_alias_to_canonical():
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
 
 
-def test_bare_openai_model_names_detect_as_openrouter():
-    """Test that bare OpenAI model names are detected as OpenRouter provider.
+def test_bare_openai_model_names_detect_as_native_openai():
+    """Test that bare OpenAI model names are detected as native OpenAI provider.
 
-    After aliasing, these should all be detected as OpenRouter (via the openai/ prefix).
+    After aliasing, these should all be detected as the native 'openai' provider
+    (via the openai/ prefix). The failover to OpenRouter is handled separately.
     """
     test_cases = [
         "gpt-4",
@@ -53,7 +54,7 @@ def test_bare_openai_model_names_detect_as_openrouter():
 
     for model_id in test_cases:
         result = detect_provider_from_model_id(model_id)
-        assert result == "openrouter", f"Expected 'openrouter' for {model_id}, got {result}"
+        assert result == "openai", f"Expected 'openai' for {model_id}, got {result}"
 
 
 def test_bare_anthropic_model_names_alias_to_canonical():
@@ -81,10 +82,11 @@ def test_bare_anthropic_model_names_alias_to_canonical():
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
 
 
-def test_bare_anthropic_model_names_detect_as_openrouter():
-    """Test that bare Anthropic/Claude model names are detected as OpenRouter provider.
+def test_bare_anthropic_model_names_detect_as_native_anthropic():
+    """Test that bare Anthropic/Claude model names are detected as native Anthropic provider.
 
-    After aliasing, these should all be detected as OpenRouter (via the anthropic/ prefix).
+    After aliasing, these should all be detected as the native 'anthropic' provider
+    (via the anthropic/ prefix). The failover to OpenRouter is handled separately.
     """
     test_cases = [
         "claude-3-opus",
@@ -99,7 +101,7 @@ def test_bare_anthropic_model_names_detect_as_openrouter():
 
     for model_id in test_cases:
         result = detect_provider_from_model_id(model_id)
-        assert result == "openrouter", f"Expected 'openrouter' for {model_id}, got {result}"
+        assert result == "anthropic", f"Expected 'anthropic' for {model_id}, got {result}"
 
 
 def test_openrouter_auto_preserves_prefix():

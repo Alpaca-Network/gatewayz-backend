@@ -1506,13 +1506,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
             return "fireworks"
 
-        # OpenAI models go to OpenRouter
+        # OpenAI models go to native OpenAI provider first
+        # Failover to OpenRouter is handled by provider_failover.py
         if org == "openai":
-            return "openrouter"
+            return "openai"
 
-        # Anthropic models go to OpenRouter
+        # Anthropic models go to native Anthropic provider first
+        # Failover to OpenRouter is handled by provider_failover.py
         if org == "anthropic":
-            return "openrouter"
+            return "anthropic"
 
         # Fal.ai models (e.g., "fal-ai/stable-diffusion-v15", "minimax/video-01")
         if org == "fal-ai" or org in [
