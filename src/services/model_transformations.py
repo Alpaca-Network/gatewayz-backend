@@ -61,6 +61,24 @@ MODEL_PROVIDER_OVERRIDES = {
 # Canonical aliases for commonly mistyped or reformatted model IDs.
 # Keep keys in lowercase to simplify lookups.
 MODEL_ID_ALIASES = {
+    # OpenAI GPT models without org prefix - map to canonical openai/ prefix
+    # This ensures proper provider routing (locks to OpenRouter) and failover behavior
+    "gpt-4": "openai/gpt-4",
+    "gpt-4-turbo": "openai/gpt-4-turbo",
+    "gpt-4-turbo-preview": "openai/gpt-4-turbo-preview",
+    "gpt-4o": "openai/gpt-4o",
+    "gpt-4o-mini": "openai/gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18": "openai/gpt-4o-mini-2024-07-18",
+    "gpt-4o-2024-05-13": "openai/gpt-4o-2024-05-13",
+    "gpt-4o-2024-08-06": "openai/gpt-4o-2024-08-06",
+    "gpt-4o-2024-11-20": "openai/gpt-4o-2024-11-20",
+    "gpt-4-0125-preview": "openai/gpt-4-0125-preview",
+    "gpt-4-1106-preview": "openai/gpt-4-1106-preview",
+    "gpt-4-vision-preview": "openai/gpt-4-vision-preview",
+    "gpt-3.5-turbo": "openai/gpt-3.5-turbo",
+    "gpt-3.5-turbo-16k": "openai/gpt-3.5-turbo-16k",
+    "gpt-3.5-turbo-0125": "openai/gpt-3.5-turbo-0125",
+    "gpt-3.5-turbo-1106": "openai/gpt-3.5-turbo-1106",
     # GPT-5.1 variants (hyphen, underscore, missing org, etc.)
     "openai/gpt-5-1": "openai/gpt-5.1",
     "openai/gpt5-1": "openai/gpt-5.1",
@@ -88,7 +106,13 @@ MODEL_ID_ALIASES = {
     "o4-mini-high": "openai/o4-mini-high",
     "o4-mini-deep-research": "openai/o4-mini-deep-research",
     # Anthropic Claude models - aliases for version variants
-    # Claude 3.5 Haiku
+    # This ensures proper provider routing (locks to OpenRouter) and failover behavior
+    # Claude 3 base models
+    "claude-3-opus": "anthropic/claude-3-opus",
+    "claude-3-sonnet": "anthropic/claude-3-sonnet",
+    "claude-3-haiku": "anthropic/claude-3-haiku",
+    # Claude 3.5 models
+    "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
     "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
     # Claude 3.7 Sonnet
     "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
@@ -1380,6 +1404,19 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
             return "openrouter"
 
+    # PRIORITY: Route OpenAI and Anthropic models to their native providers first
+    # This must be checked BEFORE the mapping loop to ensure these models aren't
+    # incorrectly routed to OpenRouter (which also has these models in its mapping)
+    # Failover to OpenRouter is handled separately by provider_failover.py
+    if "/" in model_id:
+        prefix = model_id.split("/", 1)[0].lower()
+        if prefix == "openai":
+            logger.info(f"Routing '{model_id}' to native OpenAI provider")
+            return "openai"
+        if prefix == "anthropic":
+            logger.info(f"Routing '{model_id}' to native Anthropic provider")
+            return "anthropic"
+
     # Check all mappings to see if this model exists
     # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
@@ -1482,13 +1519,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
             return "fireworks"
 
-        # OpenAI models go to OpenRouter
+        # OpenAI models go to native OpenAI provider first
+        # Failover to OpenRouter is handled by provider_failover.py
         if org == "openai":
-            return "openrouter"
+            return "openai"
 
-        # Anthropic models go to OpenRouter
+        # Anthropic models go to native Anthropic provider first
+        # Failover to OpenRouter is handled by provider_failover.py
         if org == "anthropic":
-            return "openrouter"
+            return "anthropic"
 
         # Fal.ai models (e.g., "fal-ai/stable-diffusion-v15", "minimax/video-01")
         if org == "fal-ai" or org in [
