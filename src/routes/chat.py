@@ -1468,7 +1468,11 @@ async def chat_completions(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     # Determine if this is an authenticated or anonymous request
     is_anonymous = api_key is None
