@@ -314,6 +314,43 @@ class TestEnforceModelFailoverRules:
         )
         assert filtered == chain
 
+    def test_bare_anthropic_model_names_are_locked(self):
+        """Test that bare Anthropic/Claude model names (without anthropic/ prefix) are locked to OpenRouter.
+
+        This is critical to prevent Claude models from being incorrectly routed to
+        other providers like HuggingFace during failover.
+        """
+        chain = ["openrouter", "cerebras", "huggingface", "featherless"]
+
+        # All these bare model names should be locked to openrouter
+        bare_anthropic_models = [
+            "claude-3-opus",
+            "claude-3-sonnet",
+            "claude-3-haiku",
+            "claude-3.5-sonnet",
+            "claude-3.5-haiku",
+            "claude-3.7-sonnet",
+            "claude-sonnet-4",
+            "claude-opus-4",
+            "claude-opus-4.5",
+        ]
+
+        for model in bare_anthropic_models:
+            filtered = enforce_model_failover_rules(model, chain.copy())
+            assert filtered == ["openrouter"], (
+                f"Model '{model}' should be locked to openrouter, but got {filtered}"
+            )
+
+    def test_bare_anthropic_model_names_allow_payment_failover(self):
+        """Test that bare Anthropic model names allow failover when payment_failover=True."""
+        chain = ["openrouter", "cerebras", "huggingface"]
+
+        # With payment failover enabled, should return full chain
+        filtered = enforce_model_failover_rules(
+            "claude-3-opus", chain.copy(), allow_payment_failover=True
+        )
+        assert filtered == chain
+
 
 # ============================================================
 # TEST CLASS: Failover Eligibility

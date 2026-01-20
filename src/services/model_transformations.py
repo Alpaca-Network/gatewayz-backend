@@ -106,7 +106,13 @@ MODEL_ID_ALIASES = {
     "o4-mini-high": "openai/o4-mini-high",
     "o4-mini-deep-research": "openai/o4-mini-deep-research",
     # Anthropic Claude models - aliases for version variants
-    # Claude 3.5 Haiku
+    # This ensures proper provider routing (locks to OpenRouter) and failover behavior
+    # Claude 3 base models
+    "claude-3-opus": "anthropic/claude-3-opus",
+    "claude-3-sonnet": "anthropic/claude-3-sonnet",
+    "claude-3-haiku": "anthropic/claude-3-haiku",
+    # Claude 3.5 models
+    "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
     "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
     # Claude 3.7 Sonnet
     "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",

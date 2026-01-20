@@ -56,6 +56,52 @@ def test_bare_openai_model_names_detect_as_openrouter():
         assert result == "openrouter", f"Expected 'openrouter' for {model_id}, got {result}"
 
 
+def test_bare_anthropic_model_names_alias_to_canonical():
+    """Test that bare Anthropic/Claude model names (without anthropic/ prefix) are aliased correctly.
+
+    This is critical to prevent Claude models from being incorrectly routed to
+    other providers like HuggingFace during failover.
+    """
+    from src.services.model_transformations import apply_model_alias
+
+    test_cases = [
+        ("claude-3-opus", "anthropic/claude-3-opus"),
+        ("claude-3-sonnet", "anthropic/claude-3-sonnet"),
+        ("claude-3-haiku", "anthropic/claude-3-haiku"),
+        ("claude-3.5-sonnet", "anthropic/claude-3.5-sonnet"),
+        ("claude-3.5-haiku", "anthropic/claude-3.5-haiku"),
+        ("claude-3.7-sonnet", "anthropic/claude-3.7-sonnet"),
+        ("claude-sonnet-4", "anthropic/claude-sonnet-4"),
+        ("claude-opus-4", "anthropic/claude-opus-4"),
+        ("claude-opus-4.5", "anthropic/claude-opus-4.5"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = apply_model_alias(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_bare_anthropic_model_names_detect_as_openrouter():
+    """Test that bare Anthropic/Claude model names are detected as OpenRouter provider.
+
+    After aliasing, these should all be detected as OpenRouter (via the anthropic/ prefix).
+    """
+    test_cases = [
+        "claude-3-opus",
+        "claude-3-sonnet",
+        "claude-3-haiku",
+        "claude-3.5-sonnet",
+        "claude-3.5-haiku",
+        "claude-3.7-sonnet",
+        "claude-sonnet-4",
+        "claude-opus-4",
+    ]
+
+    for model_id in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == "openrouter", f"Expected 'openrouter' for {model_id}, got {result}"
+
+
 def test_openrouter_auto_preserves_prefix():
     result = transform_model_id("openrouter/auto", "openrouter")
     assert result == "openrouter/auto"
