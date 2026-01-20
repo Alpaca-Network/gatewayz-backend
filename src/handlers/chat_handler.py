@@ -401,34 +401,50 @@ class ChatInferenceHandler:
             # Remove None values
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
-            # Use provider selector for intelligent routing with failover
+            # Try using provider selector for multi-provider models
             selector = get_selector()
-            result = await asyncio.to_thread(
-                selector.execute_with_failover,
-                model_id=request.model,
-                execute_fn=lambda provider_name, provider_model_id: self._call_provider(
-                    provider_name, provider_model_id, messages, **kwargs
-                ),
-            )
 
-            if not result["success"]:
-                error_msg = result.get("error", "All providers failed")
-                logger.error(f"[ChatHandler] All providers failed: {error_msg}")
-                # Save failed request
-                self._save_request_record(
-                    model_name=request.model,
-                    provider_name="unknown",
-                    input_tokens=0,
-                    output_tokens=0,
-                    status="failed",
-                    error_message=error_msg,
+            # Check if model is in multi-provider registry
+            model_in_registry = selector.registry.get_model(request.model) is not None
+
+            if model_in_registry:
+                # Use intelligent routing with failover for multi-provider models
+                result = await asyncio.to_thread(
+                    selector.execute_with_failover,
+                    model_id=request.model,
+                    execute_fn=lambda provider_name, provider_model_id: self._call_provider(
+                        provider_name, provider_model_id, messages, **kwargs
+                    ),
                 )
-                raise Exception(error_msg)
 
-            # Extract provider response
-            provider_response = result["response"]
-            provider_used = result["provider"]
-            provider_model_id = result.get("provider_model_id", transformed_model)
+                if not result["success"]:
+                    error_msg = result.get("error", "All providers failed")
+                    logger.error(f"[ChatHandler] All providers failed: {error_msg}")
+                    # Save failed request
+                    self._save_request_record(
+                        model_name=request.model,
+                        provider_name="unknown",
+                        input_tokens=0,
+                        output_tokens=0,
+                        status="failed",
+                        error_message=error_msg,
+                    )
+                    raise Exception(error_msg)
+
+                # Extract provider response
+                provider_response = result["response"]
+                provider_used = result["provider"]
+                provider_model_id = result.get("provider_model_id", request.model)
+            else:
+                # Fallback to OpenRouter for models not in multi-provider registry
+                logger.info(
+                    f"[ChatHandler] Model {request.model} not in registry, using OpenRouter fallback"
+                )
+                provider_used = "openrouter"
+                provider_model_id = request.model
+                provider_response = self._call_provider(
+                    provider_used, provider_model_id, messages, **kwargs
+                )
 
             logger.info(
                 f"[ChatHandler] Provider call successful: provider={provider_used}, "
@@ -591,24 +607,34 @@ class ChatInferenceHandler:
             }
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
-            # For now, use simple provider routing (no failover for streaming yet)
-            # TODO: Implement streaming failover in future enhancement
+            # Check if model is in multi-provider registry
             selector = get_selector()
-            primary_provider = await asyncio.to_thread(
-                selector.registry.select_provider, request.model
-            )
+            model_in_registry = selector.registry.get_model(request.model) is not None
 
-            if not primary_provider:
-                raise ValueError(f"No provider found for model {request.model}")
+            if model_in_registry:
+                # Use multi-provider routing for models in registry
+                primary_provider = await asyncio.to_thread(
+                    selector.registry.select_provider, request.model
+                )
 
-            provider_used = primary_provider.name
-            provider_model_id = primary_provider.model_id
+                if not primary_provider:
+                    raise ValueError(f"No provider found for model {request.model}")
+
+                provider_used = primary_provider.name
+                provider_model_id = primary_provider.model_id
+            else:
+                # Fallback to OpenRouter for models not in registry
+                logger.info(
+                    f"[ChatHandler] Model {request.model} not in registry, using OpenRouter fallback (streaming)"
+                )
+                provider_used = "openrouter"
+                provider_model_id = request.model
 
             logger.info(
                 f"[ChatHandler] Streaming from provider={provider_used}, model={provider_model_id}"
             )
 
-            # Step 4: Stream from provider
+            # Step 3: Stream from provider
             stream = self._call_provider_stream(
                 provider_used, provider_model_id, messages, **kwargs
             )
