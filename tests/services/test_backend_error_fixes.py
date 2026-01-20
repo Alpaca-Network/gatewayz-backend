@@ -11,7 +11,7 @@ These tests ensure robustness and proper error handling in production.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import os
 
 os.environ['APP_ENV'] = 'testing'
@@ -144,14 +144,14 @@ class TestUnsafeListAccessFixes:
     def test_empty_choices_list_finish_reason(self):
         """Test that empty choices list doesn't crash when accessing finish_reason."""
         # Previously: processed.get("choices", [{}])[0].get("finish_reason", "stop")
-        # Now: Checks if choices list exists before accessing [0]
+        # Now: Checks if choices list exists and has elements before accessing [0]
 
         processed = {"choices": []}  # Empty choices list
 
-        # Our fix pattern
+        # Our fix pattern - must check both existence and length
         finish_reason = (
             processed.get("choices", [{}])[0].get("finish_reason", "stop")
-            if processed.get("choices")
+            if processed.get("choices") and len(processed.get("choices")) > 0
             else "stop"
         )
 
@@ -163,7 +163,7 @@ class TestUnsafeListAccessFixes:
 
         finish_reason = (
             processed.get("choices", [{}])[0].get("finish_reason", "stop")
-            if processed.get("choices")
+            if processed.get("choices") and len(processed.get("choices")) > 0
             else "stop"
         )
 
@@ -177,7 +177,7 @@ class TestUnsafeListAccessFixes:
 
         finish_reason = (
             processed.get("choices", [{}])[0].get("finish_reason", "stop")
-            if processed.get("choices")
+            if processed.get("choices") and len(processed.get("choices")) > 0
             else "stop"
         )
 
@@ -246,11 +246,11 @@ class TestSilentExceptionSwallowingFixes:
         from urllib.parse import urlparse
 
         provider = {"privacy_policy_url": "not-a-valid-url:::invalid"}
-        site_url = None
 
         try:
             parsed = urlparse(provider["privacy_policy_url"])
-            site_url = f"{parsed.scheme}://{parsed.netloc}"
+            # Just parse, don't assign unused variable
+            _ = f"{parsed.scheme}://{parsed.netloc}"
         except Exception as e:
             # Our fix should log the error
             # mock_logger.debug(f"Failed to parse privacy_policy_url for provider: {e}")
@@ -262,7 +262,6 @@ class TestSilentExceptionSwallowingFixes:
         from urllib.parse import urlparse
 
         provider = {"privacy_policy_url": "https://example.com/privacy"}
-        site_url = None
 
         try:
             parsed = urlparse(provider["privacy_policy_url"])

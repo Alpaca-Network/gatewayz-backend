@@ -888,7 +888,7 @@ async def anthropic_messages(
                 speed=speed,
                 finish_reason=(
                     processed.get("choices", [{}])[0].get("finish_reason", "stop")
-                    if processed.get("choices")
+                    if processed.get("choices") and len(processed.get("choices")) > 0
                     else "stop"
                 ),
                 app="API",
