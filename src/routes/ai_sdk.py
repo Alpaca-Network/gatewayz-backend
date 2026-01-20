@@ -153,6 +153,47 @@ def _build_request_kwargs(request: AISDKChatRequest) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+def _check_trial_override(trial: dict, user: dict | None) -> bool:
+    """Check if trial status should be overridden for users with active subscriptions.
+
+    Defense-in-depth: Override is_trial flag if user has active subscription.
+    This protects against webhook delays or failures that leave is_trial=TRUE
+    for paid users.
+
+    Args:
+        trial: Trial status dictionary containing 'is_trial' flag
+        user: User dictionary with subscription details
+
+    Returns:
+        bool: True if user should be treated as trial user, False if they should be billed
+    """
+    is_trial = trial.get("is_trial", False)
+
+    # If not a trial user, no override needed
+    if not is_trial:
+        return False
+
+    # Check for active subscription that should override trial status
+    if user:
+        has_active_subscription = (
+            user.get("stripe_subscription_id") is not None
+            and user.get("subscription_status") == "active"
+        ) or user.get("tier") in ("pro", "max", "admin")
+
+        if has_active_subscription:
+            logger.warning(
+                "BILLING_OVERRIDE: User %s has is_trial=TRUE but has active subscription "
+                "(tier=%s, sub_status=%s, stripe_sub_id=%s). Forcing paid path.",
+                user.get("id"),
+                user.get("tier"),
+                user.get("subscription_status"),
+                user.get("stripe_subscription_id"),
+            )
+            return False  # Override: user should be billed
+
+    return True  # User is a legitimate trial user
+
+
 def _is_openrouter_model(model: str) -> bool:
     """Check if the model should be routed through OpenRouter.
 
@@ -181,7 +222,7 @@ def _is_openrouter_model(model: str) -> bool:
 async def ai_sdk_chat_completion(
     request: AISDKChatRequest,
     background_tasks: BackgroundTasks,
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_api_key),
 ):
     """
     Vercel AI SDK compatible chat completion endpoint.
@@ -255,10 +296,7 @@ async def ai_sdk_chat_completion(
     # Validate trial access
     trial = await asyncio.to_thread(validate_trial_access, api_key)
     if not trial.get("is_valid", False):
-        raise HTTPException(
-            status_code=403,
-            detail=trial.get("error", "Access denied")
-        )
+        raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
     logger.info(
         f"ai_sdk_chat_completion start (request_id={request_id}, model={request.model}, stream={request.stream})"
@@ -300,7 +338,8 @@ async def ai_sdk_chat_completion(
             cost = await asyncio.to_thread(
                 calculate_cost, request.model, prompt_tokens, completion_tokens
             )
-            is_trial = trial.get("is_trial", False)
+            # Defense-in-depth: Override trial status if user has active subscription
+            is_trial = _check_trial_override(trial, user)
 
             # Track trial usage
             if is_trial and not trial.get("is_expired"):
@@ -391,7 +430,8 @@ async def ai_sdk_chat_completion(
         cost = await asyncio.to_thread(
             calculate_cost, request.model, prompt_tokens, completion_tokens
         )
-        is_trial = trial.get("is_trial", False)
+        # Defense-in-depth: Override trial status if user has active subscription
+        is_trial = _check_trial_override(trial, user)
 
         # Track trial usage
         if is_trial and not trial.get("is_expired"):
@@ -465,7 +505,9 @@ async def ai_sdk_chat_completion(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = int((time.monotonic() - start_time) * 1000) if 'start_time' in dir() else 0
+                error_elapsed = (
+                    int((time.monotonic() - start_time) * 1000) if "start_time" in dir() else 0
+                )
 
                 # Save failed request to database
                 background_tasks.add_task(
@@ -477,10 +519,12 @@ async def ai_sdk_chat_completion(
                     processing_time_ms=error_elapsed,
                     status="failed",
                     error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
-                    user_id=user.get("id") if 'user' in locals() and user else None,
-                    provider_name="openrouter" if '/' not in request.model else request.model.split("/")[0],
+                    user_id=user.get("id") if "user" in locals() and user else None,
+                    provider_name=(
+                        "openrouter" if "/" not in request.model else request.model.split("/")[0]
+                    ),
                     model_id=None,
-                    api_key_id=user.get("key_id") if 'user' in locals() and user else None,
+                    api_key_id=user.get("key_id") if "user" in locals() and user else None,
                     is_anonymous=False,
                 )
             except Exception as save_err:
@@ -500,7 +544,9 @@ async def ai_sdk_chat_completion(
         # Save failed request
         if request_id:
             try:
-                error_elapsed = int((time.monotonic() - start_time) * 1000) if 'start_time' in dir() else 0
+                error_elapsed = (
+                    int((time.monotonic() - start_time) * 1000) if "start_time" in dir() else 0
+                )
                 background_tasks.add_task(
                     chat_completion_requests_module.save_chat_completion_request,
                     request_id=request_id,
@@ -510,10 +556,12 @@ async def ai_sdk_chat_completion(
                     processing_time_ms=error_elapsed,
                     status="failed",
                     error_message=f"ValueError: {str(e)[:500]}",
-                    user_id=user.get("id") if 'user' in locals() and user else None,
-                    provider_name="openrouter" if '/' not in request.model else request.model.split("/")[0],
+                    user_id=user.get("id") if "user" in locals() and user else None,
+                    provider_name=(
+                        "openrouter" if "/" not in request.model else request.model.split("/")[0]
+                    ),
                     model_id=None,
-                    api_key_id=user.get("key_id") if 'user' in locals() and user else None,
+                    api_key_id=user.get("key_id") if "user" in locals() and user else None,
                     is_anonymous=False,
                 )
             except Exception as save_err:
@@ -529,7 +577,9 @@ async def ai_sdk_chat_completion(
         # Save failed request for unexpected errors
         if request_id:
             try:
-                error_elapsed = int((time.monotonic() - start_time) * 1000) if 'start_time' in dir() else 0
+                error_elapsed = (
+                    int((time.monotonic() - start_time) * 1000) if "start_time" in dir() else 0
+                )
                 background_tasks.add_task(
                     chat_completion_requests_module.save_chat_completion_request,
                     request_id=request_id,
@@ -539,10 +589,12 @@ async def ai_sdk_chat_completion(
                     processing_time_ms=error_elapsed,
                     status="failed",
                     error_message=f"{type(e).__name__}: {str(e)[:500]}",
-                    user_id=user.get("id") if 'user' in locals() and user else None,
-                    provider_name="openrouter" if '/' not in request.model else request.model.split("/")[0],
+                    user_id=user.get("id") if "user" in locals() and user else None,
+                    provider_name=(
+                        "openrouter" if "/" not in request.model else request.model.split("/")[0]
+                    ),
                     model_id=None,
-                    api_key_id=user.get("key_id") if 'user' in locals() and user else None,
+                    api_key_id=user.get("key_id") if "user" in locals() and user else None,
                     is_anonymous=False,
                 )
             except Exception as save_err:
@@ -551,9 +603,7 @@ async def ai_sdk_chat_completion(
         # Capture all other errors to Sentry (500 errors)
         if SENTRY_AVAILABLE:
             sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to process AI SDK request: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to process AI SDK request: {str(e)}")
 
 
 async def _handle_openrouter_stream(
@@ -623,9 +673,7 @@ async def _handle_openrouter_stream(
                         # Only yield if we have content to send
                         if delta_response:
                             # Format as SSE (Server-Sent Events)
-                            data = {
-                                "choices": [{"delta": {"role": "assistant", **delta_response}}]
-                            }
+                            data = {"choices": [{"delta": {"role": "assistant", **delta_response}}]}
                             yield f"data: {json.dumps(data)}\n\n"
 
                 # Extract usage if available (OpenRouter provides this in the final chunk)
@@ -635,7 +683,9 @@ async def _handle_openrouter_stream(
 
             # If no content was streamed, log a warning for debugging
             if not has_any_content:
-                logger.warning(f"OpenRouter stream completed with no content for model {request.model}")
+                logger.warning(
+                    f"OpenRouter stream completed with no content for model {request.model}"
+                )
 
             # Send completion signal
             completion_data = {"choices": [{"finish_reason": "stop"}]}
@@ -652,7 +702,8 @@ async def _handle_openrouter_stream(
                     cost = await asyncio.to_thread(
                         calculate_cost, request.model, total_prompt_tokens, total_completion_tokens
                     )
-                    is_trial = trial.get("is_trial", False)
+                    # Defense-in-depth: Override trial status if user has active subscription
+                    is_trial = _check_trial_override(trial, user)
 
                     # Track trial usage
                     if is_trial and not trial.get("is_expired"):
@@ -727,7 +778,9 @@ async def _handle_openrouter_stream(
         "Connection": "keep-alive",
     }
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
+    return StreamingResponse(
+        stream_response(), media_type="text/event-stream", headers=stream_headers
+    )
 
 
 async def _handle_ai_sdk_stream(
@@ -787,9 +840,7 @@ async def _handle_ai_sdk_stream(
                         # Only yield if we have content to send
                         if delta_response:
                             # Format as SSE (Server-Sent Events)
-                            data = {
-                                "choices": [{"delta": {"role": "assistant", **delta_response}}]
-                            }
+                            data = {"choices": [{"delta": {"role": "assistant", **delta_response}}]}
                             yield f"data: {json.dumps(data)}\n\n"
 
                 # Extract usage if available (AI SDK provides this in the final chunk)
@@ -816,7 +867,8 @@ async def _handle_ai_sdk_stream(
                     cost = await asyncio.to_thread(
                         calculate_cost, model, total_prompt_tokens, total_completion_tokens
                     )
-                    is_trial = trial.get("is_trial", False)
+                    # Defense-in-depth: Override trial status if user has active subscription
+                    is_trial = _check_trial_override(trial, user)
 
                     # Track trial usage
                     if is_trial and not trial.get("is_expired"):
@@ -885,4 +937,6 @@ async def _handle_ai_sdk_stream(
         "Connection": "keep-alive",
     }
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
+    return StreamingResponse(
+        stream_response(), media_type="text/event-stream", headers=stream_headers
+    )
