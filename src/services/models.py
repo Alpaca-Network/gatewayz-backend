@@ -38,6 +38,7 @@ from src.cache import (
     _novita_models_cache,
     _onerouter_models_cache,
     _simplismart_models_cache,
+    _sybil_models_cache,
     _together_models_cache,
     _vercel_ai_gateway_models_cache,
     _xai_models_cache,
@@ -66,6 +67,7 @@ from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.pricing_lookup import enrich_model_with_pricing
 from src.services.simplismart_client import fetch_models_from_simplismart
+from src.services.sybil_client import fetch_models_from_sybil
 from src.services.xai_client import fetch_models_from_xai
 from src.utils.security_validators import sanitize_for_logging
 
@@ -900,6 +902,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_simplismart()
             _register_canonical_records("simplismart", result)
+            return result if result is not None else []
+
+        if gateway == "sybil":
+            cached = _get_fresh_or_stale_cached_models(_sybil_models_cache, "sybil")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_sybil()
+            _register_canonical_records("sybil", result)
             return result if result is not None else []
 
         if gateway == "morpheus":

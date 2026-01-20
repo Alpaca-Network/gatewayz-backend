@@ -221,6 +221,13 @@ _simplismart_models_cache = {
     "stale_ttl": 7200,
 }
 
+_sybil_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Sybil catalog
+    "stale_ttl": 7200,
+}
+
 _morpheus_models_cache = {
     "data": None,
     "timestamp": None,
@@ -269,6 +276,7 @@ def get_models_cache(gateway: str):
         "openai": _openai_models_cache,
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
+        "sybil": _sybil_models_cache,
         "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }
@@ -311,6 +319,7 @@ def clear_models_cache(gateway: str):
         "openai": _openai_models_cache,
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
+        "sybil": _sybil_models_cache,
         "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }
