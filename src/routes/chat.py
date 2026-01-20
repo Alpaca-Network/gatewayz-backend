@@ -245,6 +245,11 @@ PROVIDER_FUNCTIONS = {
         "process_simplismart_response",
         "make_simplismart_request_openai_stream",
     ],
+    "sybil": [
+        "make_sybil_request_openai",
+        "process_sybil_response",
+        "make_sybil_request_openai_stream",
+    ],
     "nosana": [
         "make_nosana_request_openai",
         "process_nosana_response",
@@ -371,6 +376,11 @@ PROVIDER_ROUTING = {
         "request": make_simplismart_request_openai,
         "process": process_simplismart_response,
         "stream": make_simplismart_request_openai_stream,
+    },
+    "sybil": {
+        "request": make_sybil_request_openai,
+        "process": process_sybil_response,
+        "stream": make_sybil_request_openai_stream,
     },
     "nosana": {
         "request": make_nosana_request_openai,

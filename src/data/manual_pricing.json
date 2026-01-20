@@ -929,6 +929,62 @@
       "pricing_model": "per_minute"
     }
   },
+  "sybil": {
+    "deepseek-ai/DeepSeek-V3-0324": {
+      "prompt": "0.0000019",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 163840
+    },
+    "mistralai/Mistral-7B-Instruct-v0.3": {
+      "prompt": "0.000001",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "moonshotai/Kimi-K2-Thinking": {
+      "prompt": "0.000001",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 262144
+    },
+    "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
+      "prompt": "0.00000125",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 262144
+    },
+    "zai-org/GLM-4.5": {
+      "prompt": "0.00000140",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "zai-org/GLM-4.6": {
+      "prompt": "0.00000150",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 202752
+    },
+    "distilbert/distilbert-base-uncased": {
+      "prompt": "0.000001",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0"
+    },
+    "Qwen/Qwen3-Embedding-8B": {
+      "prompt": "0.0000001",
+      "completion": "0",
+      "request": "0",
+      "image": "0"
+    }
+  },
   "onerouter": {
     "claude-opus-4-5@20251101": {
       "prompt": "5.00",

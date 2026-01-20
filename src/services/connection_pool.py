@@ -564,6 +564,27 @@ def get_simplismart_pooled_client() -> OpenAI:
     )
 
 
+# Sybil base URL constant
+SYBIL_BASE_URL = "https://api.sybil.com/v1"
+
+
+def get_sybil_pooled_client() -> OpenAI:
+    """Get pooled client for Sybil AI.
+
+    Sybil provides an OpenAI-compatible API endpoint for fast, open-source models
+    with GPU infrastructure for efficient inference.
+    See: https://docs.sybil.com/
+    """
+    if not Config.SYBIL_API_KEY:
+        raise ValueError("Sybil API key not configured")
+
+    return get_pooled_client(
+        provider="sybil",
+        base_url=SYBIL_BASE_URL,
+        api_key=Config.SYBIL_API_KEY,
+    )
+
+
 # Nosana base URL constant
 NOSANA_BASE_URL = "https://dashboard.k8s.prd.nos.ci/api/v1"
 
