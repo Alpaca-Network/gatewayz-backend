@@ -13,7 +13,12 @@ def test_openrouter_gpt51_hyphen_alias_transforms():
 
 
 def test_detect_provider_gpt51_alias_without_org():
-    assert detect_provider_from_model_id("gpt-5-1") == "openrouter"
+    """Test that gpt-5-1 alias routes to native OpenAI provider.
+
+    gpt-5-1 gets aliased to openai/gpt-5.1, which should route to native OpenAI first.
+    Failover to OpenRouter is handled by provider_failover.py.
+    """
+    assert detect_provider_from_model_id("gpt-5-1") == "openai"
 
 
 def test_bare_openai_model_names_alias_to_canonical():
@@ -142,10 +147,14 @@ def test_detect_provider_from_model_id_fal_orgs():
 
 
 def test_detect_provider_from_model_id_existing_providers():
-    """Test that existing provider detection still works"""
+    """Test that existing provider detection still works.
+
+    Note: OpenAI and Anthropic models now route to their native providers first,
+    with failover to OpenRouter handled by provider_failover.py.
+    """
     test_cases = [
-        ("anthropic/claude-3-sonnet", "openrouter"),
-        ("openai/gpt-4", "openrouter"),
+        ("anthropic/claude-3-sonnet", "anthropic"),  # Native Anthropic first, OpenRouter as fallback
+        ("openai/gpt-4", "openai"),  # Native OpenAI first, OpenRouter as fallback
         ("meta-llama/llama-2-7b", None),  # This model doesn't match any specific provider
     ]
 

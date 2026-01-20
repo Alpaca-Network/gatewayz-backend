@@ -1404,6 +1404,19 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
             return "openrouter"
 
+    # PRIORITY: Route OpenAI and Anthropic models to their native providers first
+    # This must be checked BEFORE the mapping loop to ensure these models aren't
+    # incorrectly routed to OpenRouter (which also has these models in its mapping)
+    # Failover to OpenRouter is handled separately by provider_failover.py
+    if "/" in model_id:
+        prefix = model_id.split("/", 1)[0].lower()
+        if prefix == "openai":
+            logger.info(f"Routing '{model_id}' to native OpenAI provider")
+            return "openai"
+        if prefix == "anthropic":
+            logger.info(f"Routing '{model_id}' to native Anthropic provider")
+            return "anthropic"
+
     # Check all mappings to see if this model exists
     # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
