@@ -37,6 +37,7 @@ from src.services.openrouter_client import (
 )
 from src.services.pricing import calculate_cost
 from src.services.trial_validation import track_trial_usage, validate_trial_access
+from src.utils.sentry_context import capture_payment_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -633,6 +634,7 @@ async def _handle_openrouter_stream(
     # Track tokens for credit deduction
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    accumulated_content = ""  # For token estimation fallback
     start_time_stream = time.monotonic()
     # Validate OpenRouter API key before starting the stream
     # This ensures we return HTTP 503 instead of streaming an error
@@ -648,7 +650,7 @@ async def _handle_openrouter_stream(
         )
 
     async def stream_response():
-        nonlocal total_prompt_tokens, total_completion_tokens
+        nonlocal total_prompt_tokens, total_completion_tokens, accumulated_content
         try:
             # Make async streaming request directly to OpenRouter
             # PERF: Using async client prevents blocking the event loop while waiting
@@ -669,6 +671,9 @@ async def _handle_openrouter_stream(
                         delta_response, has_content = _extract_delta_content(delta)
                         if has_content:
                             has_any_content = True
+                            # Accumulate content for token estimation fallback
+                            if "content" in delta_response:
+                                accumulated_content += delta_response["content"]
 
                         # Only yield if we have content to send
                         if delta_response:
@@ -693,61 +698,88 @@ async def _handle_openrouter_stream(
             yield "data: [DONE]\n\n"
 
             # After streaming completes, deduct credits
-            if total_prompt_tokens > 0 or total_completion_tokens > 0:
-                try:
-                    total_tokens = total_prompt_tokens + total_completion_tokens
-                    elapsed_ms = int((time.monotonic() - start_time_stream) * 1000)
+            # Token estimation fallback: if provider didn't return usage data,
+            # estimate tokens based on content length (1 token ≈ 4 characters)
+            if total_prompt_tokens == 0 and total_completion_tokens == 0:
+                # Estimate completion tokens from accumulated content
+                total_completion_tokens = max(1, len(accumulated_content) // 4)
+                # Estimate prompt tokens from messages
+                prompt_chars = sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                )
+                total_prompt_tokens = max(1, prompt_chars // 4)
+                logger.info(
+                    f"OpenRouter stream: No usage data, estimated {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens"
+                )
 
-                    # Calculate cost
-                    cost = await asyncio.to_thread(
-                        calculate_cost, request.model, total_prompt_tokens, total_completion_tokens
+            try:
+                total_tokens = total_prompt_tokens + total_completion_tokens
+                elapsed_ms = int((time.monotonic() - start_time_stream) * 1000)
+
+                # Calculate cost
+                cost = await asyncio.to_thread(
+                    calculate_cost, request.model, total_prompt_tokens, total_completion_tokens
+                )
+                # Defense-in-depth: Override trial status if user has active subscription
+                is_trial = _check_trial_override(trial, user)
+
+                # Track trial usage
+                if is_trial and not trial.get("is_expired"):
+                    await asyncio.to_thread(
+                        track_trial_usage,
+                        api_key,
+                        total_tokens,
+                        1,
+                        model_id=request.model,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
                     )
-                    # Defense-in-depth: Override trial status if user has active subscription
-                    is_trial = _check_trial_override(trial, user)
 
-                    # Track trial usage
-                    if is_trial and not trial.get("is_expired"):
-                        await asyncio.to_thread(
-                            track_trial_usage,
-                            api_key,
-                            total_tokens,
-                            1,
-                            model_id=request.model,
-                            prompt_tokens=total_prompt_tokens,
-                            completion_tokens=total_completion_tokens,
-                        )
-
-                    # Deduct credits for non-trial users
-                    if not is_trial:
-                        await asyncio.to_thread(
-                            deduct_credits,
-                            api_key,
-                            cost,
-                            f"AI SDK streaming - {request.model}",
-                            {
-                                "model": request.model,
-                                "total_tokens": total_tokens,
-                                "prompt_tokens": total_prompt_tokens,
-                                "completion_tokens": total_completion_tokens,
-                                "cost_usd": cost,
-                            },
-                        )
-                        await asyncio.to_thread(
-                            record_usage,
-                            user["id"],
-                            api_key,
-                            request.model,
-                            total_tokens,
-                            cost,
-                            elapsed_ms,
-                        )
-
-                    logger.info(
-                        f"OpenRouter stream complete: {total_prompt_tokens} prompt + "
-                        f"{total_completion_tokens} completion tokens, cost=${cost:.6f}"
+                # Deduct credits for non-trial users
+                if not is_trial:
+                    await asyncio.to_thread(
+                        deduct_credits,
+                        api_key,
+                        cost,
+                        f"AI SDK streaming - {request.model}",
+                        {
+                            "model": request.model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": total_prompt_tokens,
+                            "completion_tokens": total_completion_tokens,
+                            "cost_usd": cost,
+                        },
                     )
-                except Exception as e:
-                    logger.error(f"Error deducting credits after stream: {e}", exc_info=True)
+                    await asyncio.to_thread(
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        request.model,
+                        total_tokens,
+                        cost,
+                        elapsed_ms,
+                    )
+
+                logger.info(
+                    f"OpenRouter stream complete: {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens, cost=${cost:.6f}"
+                )
+            except Exception as e:
+                logger.error(f"Error deducting credits after stream: {e}", exc_info=True)
+                # Capture payment errors for monitoring and alerting
+                capture_payment_error(
+                    e,
+                    operation="streaming_credit_deduction",
+                    user_id=user.get("id"),
+                    amount=0.0,  # Cost unknown at this point
+                    details={
+                        "model": request.model,
+                        "total_tokens": total_prompt_tokens + total_completion_tokens,
+                        "endpoint": "ai_sdk_openrouter_stream",
+                    },
+                )
 
         except ValueError as e:
             error_message = str(e).lower()
@@ -805,10 +837,12 @@ async def _handle_ai_sdk_stream(
     # Track tokens for credit deduction
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    accumulated_content = ""  # For token estimation fallback
     start_time_stream = time.monotonic()
 
     async def stream_response():
-        nonlocal total_prompt_tokens, total_completion_tokens
+        nonlocal total_prompt_tokens, total_completion_tokens, accumulated_content
+        messages = []  # Will be populated inside the try block
         try:
             # Validate API key is configured
             validate_ai_sdk_api_key()
@@ -836,6 +870,9 @@ async def _handle_ai_sdk_stream(
                         delta_response, has_content = _extract_delta_content(delta)
                         if has_content:
                             has_any_content = True
+                            # Accumulate content for token estimation fallback
+                            if "content" in delta_response:
+                                accumulated_content += delta_response["content"]
 
                         # Only yield if we have content to send
                         if delta_response:
@@ -858,61 +895,88 @@ async def _handle_ai_sdk_stream(
             yield "data: [DONE]\n\n"
 
             # After streaming completes, deduct credits
-            if total_prompt_tokens > 0 or total_completion_tokens > 0:
-                try:
-                    total_tokens = total_prompt_tokens + total_completion_tokens
-                    elapsed_ms = int((time.monotonic() - start_time_stream) * 1000)
+            # Token estimation fallback: if provider didn't return usage data,
+            # estimate tokens based on content length (1 token ≈ 4 characters)
+            if total_prompt_tokens == 0 and total_completion_tokens == 0:
+                # Estimate completion tokens from accumulated content
+                total_completion_tokens = max(1, len(accumulated_content) // 4)
+                # Estimate prompt tokens from messages
+                prompt_chars = sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                )
+                total_prompt_tokens = max(1, prompt_chars // 4)
+                logger.info(
+                    f"AI SDK stream: No usage data, estimated {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens"
+                )
 
-                    # Calculate cost
-                    cost = await asyncio.to_thread(
-                        calculate_cost, model, total_prompt_tokens, total_completion_tokens
+            try:
+                total_tokens = total_prompt_tokens + total_completion_tokens
+                elapsed_ms = int((time.monotonic() - start_time_stream) * 1000)
+
+                # Calculate cost
+                cost = await asyncio.to_thread(
+                    calculate_cost, model, total_prompt_tokens, total_completion_tokens
+                )
+                # Defense-in-depth: Override trial status if user has active subscription
+                is_trial = _check_trial_override(trial, user)
+
+                # Track trial usage
+                if is_trial and not trial.get("is_expired"):
+                    await asyncio.to_thread(
+                        track_trial_usage,
+                        api_key,
+                        total_tokens,
+                        1,
+                        model_id=model,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
                     )
-                    # Defense-in-depth: Override trial status if user has active subscription
-                    is_trial = _check_trial_override(trial, user)
 
-                    # Track trial usage
-                    if is_trial and not trial.get("is_expired"):
-                        await asyncio.to_thread(
-                            track_trial_usage,
-                            api_key,
-                            total_tokens,
-                            1,
-                            model_id=model,
-                            prompt_tokens=total_prompt_tokens,
-                            completion_tokens=total_completion_tokens,
-                        )
-
-                    # Deduct credits for non-trial users
-                    if not is_trial:
-                        await asyncio.to_thread(
-                            deduct_credits,
-                            api_key,
-                            cost,
-                            f"AI SDK streaming - {model}",
-                            {
-                                "model": model,
-                                "total_tokens": total_tokens,
-                                "prompt_tokens": total_prompt_tokens,
-                                "completion_tokens": total_completion_tokens,
-                                "cost_usd": cost,
-                            },
-                        )
-                        await asyncio.to_thread(
-                            record_usage,
-                            user["id"],
-                            api_key,
-                            model,
-                            total_tokens,
-                            cost,
-                            elapsed_ms,
-                        )
-
-                    logger.info(
-                        f"AI SDK stream complete: {total_prompt_tokens} prompt + "
-                        f"{total_completion_tokens} completion tokens, cost=${cost:.6f}"
+                # Deduct credits for non-trial users
+                if not is_trial:
+                    await asyncio.to_thread(
+                        deduct_credits,
+                        api_key,
+                        cost,
+                        f"AI SDK streaming - {model}",
+                        {
+                            "model": model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": total_prompt_tokens,
+                            "completion_tokens": total_completion_tokens,
+                            "cost_usd": cost,
+                        },
                     )
-                except Exception as e:
-                    logger.error(f"Error deducting credits after stream: {e}", exc_info=True)
+                    await asyncio.to_thread(
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        model,
+                        total_tokens,
+                        cost,
+                        elapsed_ms,
+                    )
+
+                logger.info(
+                    f"AI SDK stream complete: {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens, cost=${cost:.6f}"
+                )
+            except Exception as e:
+                logger.error(f"Error deducting credits after stream: {e}", exc_info=True)
+                # Capture payment errors for monitoring and alerting
+                capture_payment_error(
+                    e,
+                    operation="streaming_credit_deduction",
+                    user_id=user.get("id"),
+                    amount=0.0,  # Cost unknown at this point
+                    details={
+                        "model": model,
+                        "total_tokens": total_prompt_tokens + total_completion_tokens,
+                        "endpoint": "ai_sdk_stream",
+                    },
+                )
 
         except ValueError as e:
             # This handler only processes AI SDK models (non-OpenRouter)

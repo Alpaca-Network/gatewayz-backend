@@ -14,7 +14,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
-import src.db.chat_completion_requests as chat_completion_requests_module
 import src.db.chat_history as chat_history_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
@@ -677,8 +676,8 @@ async def _handle_credits_and_usage(
             )
             is_trial = False  # Override to paid path
 
-    # Track trial usage
-    if trial.get("is_trial") and not trial.get("is_expired"):
+    # Track trial usage (only for legitimate trial users, not paid users with stale flags)
+    if is_trial and not trial.get("is_expired"):
         try:
             await _to_thread(
                 track_trial_usage,
@@ -1868,7 +1867,7 @@ async def chat_completions(
                         search_result.error or "empty results",
                     )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("Auto web search timed out after 5s, continuing without results")
                 web_search_task.cancel()
             except Exception as e:
