@@ -617,6 +617,8 @@ async def get_models(
         openai_models: list[dict] = []
         anthropic_models: list[dict] = []
         clarifai_models: list[dict] = []
+        sybil_models: list[dict] = []
+        morpheus_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -761,6 +763,16 @@ async def get_models(
             if not clarifai_models and gateway_value == "clarifai":
                 logger.warning("Clarifai models unavailable - continuing without them")
 
+        if gateway_value in ("sybil", "all"):
+            sybil_models = get_cached_models("sybil") or []
+            if not sybil_models and gateway_value == "sybil":
+                logger.warning("Sybil models unavailable - continuing without them")
+
+        if gateway_value in ("morpheus", "all"):
+            morpheus_models = get_cached_models("morpheus") or []
+            if not morpheus_models and gateway_value == "morpheus":
+                logger.warning("Morpheus models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "onerouter":
@@ -813,6 +825,10 @@ async def get_models(
             models = anthropic_models
         elif gateway_value == "clarifai":
             models = clarifai_models
+        elif gateway_value == "sybil":
+            models = sybil_models
+        elif gateway_value == "morpheus":
+            models = morpheus_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -842,6 +858,8 @@ async def get_models(
                 openai_models,
                 anthropic_models,
                 clarifai_models,
+                sybil_models,
+                morpheus_models,
             )
 
         if not models:
@@ -995,6 +1013,18 @@ async def get_models(
             simplismart_providers = derive_providers_from_models(models_for_providers, "simplismart")
             annotated_simplismart = annotate_provider_sources(simplismart_providers, "simplismart")
             provider_groups.append(annotated_simplismart)
+
+        if gateway_value in ("sybil", "all"):
+            models_for_providers = sybil_models if gateway_value == "all" else models
+            sybil_providers = derive_providers_from_models(models_for_providers, "sybil")
+            annotated_sybil = annotate_provider_sources(sybil_providers, "sybil")
+            provider_groups.append(annotated_sybil)
+
+        if gateway_value in ("morpheus", "all"):
+            models_for_providers = morpheus_models if gateway_value == "all" else models
+            morpheus_providers = derive_providers_from_models(models_for_providers, "morpheus")
+            annotated_morpheus = annotate_provider_sources(morpheus_providers, "morpheus")
+            provider_groups.append(annotated_morpheus)
 
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")
