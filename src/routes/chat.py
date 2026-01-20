@@ -3576,100 +3576,55 @@ async def unified_responses(
         # Non-streaming response
         start = time.monotonic()
         processed = None
-        last_http_exc = None
+        model = original_model
+        provider = "onerouter"  # Default, will be updated by handler
 
-        for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
-            if attempt_model != original_model:
-                logger.info(
-                    f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
-                )
+        try:
+            logger.info(
+                f"[Unified Handler] Processing Responses API request for model {original_model}"
+            )
 
-            request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
-                logger.debug(
-                    "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
-                )
+            # Convert to OpenAI format for adapter
+            adapter = OpenAIChatAdapter()
+            internal_request = adapter.to_internal_request({
+                "messages": messages,
+                "model": original_model,
+                "stream": False,
+                **optional
+            })
 
-            http_exc = None
-            try:
-                # Registry-based provider dispatch
-                if attempt_provider == "fal":
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                "and is not available through the chat completions endpoint. "
-                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                "type": "invalid_request_error",
-                                "code": "model_not_supported_for_chat",
-                            }
-                        },
-                    )
-                elif attempt_provider in PROVIDER_ROUTING:
-                    request_func = PROVIDER_ROUTING[attempt_provider]["request"]
-                    process_func = PROVIDER_ROUTING[attempt_provider]["process"]
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(request_func, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_func, resp_raw)
-                else:
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_openrouter_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_openrouter_response, resp_raw)
+            # Create unified handler with user context
+            handler = ChatInferenceHandler(api_key, background_tasks)
 
-                provider = attempt_provider
-                model = request_model
-                break
-            except Exception as exc:
-                http_exc = map_provider_error(attempt_provider, request_model, exc)
+            # Process request through unified pipeline
+            internal_response = await handler.process(internal_request)
 
-            if http_exc is None:
-                continue
+            # Convert internal response back to OpenAI format
+            processed = adapter.from_internal_response(internal_response)
 
-            last_http_exc = http_exc
-            if idx < len(provider_chain) - 1 and should_failover(http_exc):
-                next_provider = provider_chain[idx + 1]
-                logger.warning(
-                    "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
-                    attempt_provider,
-                    http_exc.status_code,
-                    http_exc.detail,
-                    next_provider,
-                )
-                continue
+            # Extract values for postprocessing (maintain compatibility)
+            provider = internal_response.provider or "onerouter"
+            model = internal_response.model or original_model
 
-            # If this is a 402 (Payment Required) error and we've exhausted the chain,
-            # rebuild the chain allowing payment failover to try alternative providers
-            if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
-                extended_chain = build_provider_failover_chain(provider)
-                extended_chain = enforce_model_failover_rules(
-                    original_model, extended_chain, allow_payment_failover=True
-                )
-                extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
-                # Find providers we haven't tried yet
-                new_providers = [p for p in extended_chain if p not in provider_chain]
-                if new_providers:
-                    logger.warning(
-                        "Provider '%s' returned 402 (Payment Required). "
-                        "Extending failover chain with: %s",
-                        attempt_provider,
-                        new_providers,
-                    )
-                    provider_chain.extend(new_providers)
-                    continue
+            logger.info(
+                f"[Unified Handler] Successfully processed Responses request: provider={provider}, model={model}"
+            )
 
+        except Exception as exc:
+            # Map any errors to HTTPException
+            logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
+            if isinstance(exc, HTTPException):
+                raise
+            # Map provider-specific errors
+            http_exc = map_provider_error(
+                provider if 'provider' in locals() else "onerouter",
+                model if 'model' in locals() else original_model,
+                exc
+            )
             raise http_exc
 
         if processed is None:
-            raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
+            raise HTTPException(status_code=502, detail="Upstream error")
 
         elapsed = max(0.001, time.monotonic() - start)
 
