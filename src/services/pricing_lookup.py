@@ -68,9 +68,11 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
         model_id: Model ID (e.g., 'meta-llama/Meta-Llama-3.1-8B-Instruct')
 
     Returns:
-        Pricing dictionary or None if not found
+        Pricing dictionary (normalized to per-token format) or None if not found
     """
     try:
+        from src.services.pricing_normalization import normalize_pricing_dict, get_provider_format
+
         pricing_data = load_manual_pricing()
 
         if not pricing_data:
@@ -83,15 +85,25 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
 
         gateway_pricing = pricing_data[gateway_lower]
 
+        raw_pricing = None
         if model_id in gateway_pricing:
-            return gateway_pricing[model_id]
+            raw_pricing = gateway_pricing[model_id]
+        else:
+            # Try case-insensitive match
+            for key, value in gateway_pricing.items():
+                if key.lower() == model_id.lower():
+                    raw_pricing = value
+                    break
 
-        # Try case-insensitive match
-        for key, value in gateway_pricing.items():
-            if key.lower() == model_id.lower():
-                return value
+        if raw_pricing is None:
+            return None
 
-        return None
+        # Normalize pricing based on provider format
+        # Default to per-1M (most common format in manual_pricing.json)
+        provider_format = get_provider_format(gateway_lower)
+        normalized = normalize_pricing_dict(raw_pricing, provider_format)
+
+        return normalized
 
     except Exception as e:
         logger.error(f"Error getting pricing for {gateway}/{model_id}: {e}")
@@ -119,7 +131,7 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
         model_id: Model ID from gateway provider (e.g., "openai/gpt-4o", "gpt-4o-mini")
 
     Returns:
-        Pricing dictionary or None if not found
+        Pricing dictionary (normalized to per-token format) or None if not found
     """
     # Avoid circular dependency during catalog building
     if _is_building_catalog():
@@ -127,6 +139,7 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
 
     try:
         from src.services.models import get_cached_models
+        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
 
         # Get OpenRouter models from cache
         openrouter_models = get_cached_models("openrouter")
@@ -155,24 +168,14 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
             # Check for exact match or suffix match
             # OpenRouter IDs are like "openai/gpt-4o", "anthropic/claude-3-opus-20240229"
             if or_id.endswith(f"/{base_model_id}") or or_id.endswith(f"/{model_id}"):
-                # Return normalized pricing (handle None values explicitly)
-                return {
-                    "prompt": str(or_pricing.get("prompt") or "0"),
-                    "completion": str(or_pricing.get("completion") or "0"),
-                    "request": str(or_pricing.get("request") or "0"),
-                    "image": str(or_pricing.get("image") or "0"),
-                }
+                # Normalize OpenRouter pricing (which is per-1M tokens) to per-token
+                return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
 
             # Also check if the base model ID matches the end of OpenRouter ID
             or_base = or_id.split("/")[-1] if "/" in or_id else or_id
             if or_base == base_model_id:
-                # Return normalized pricing (handle None values explicitly)
-                return {
-                    "prompt": str(or_pricing.get("prompt") or "0"),
-                    "completion": str(or_pricing.get("completion") or "0"),
-                    "request": str(or_pricing.get("request") or "0"),
-                    "image": str(or_pricing.get("image") or "0"),
-                }
+                # Normalize OpenRouter pricing (which is per-1M tokens) to per-token
+                return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
 
             # Handle versioned model IDs (e.g., "claude-3-opus" matching "claude-3-opus-20240229")
             # OpenRouter often uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
@@ -182,22 +185,12 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
                 suffix = or_base[len(base_model_id):]
                 # Only match if suffix is empty or looks like a date version (starts with '-' followed by digits)
                 if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
-                    return {
-                        "prompt": str(or_pricing.get("prompt") or "0"),
-                        "completion": str(or_pricing.get("completion") or "0"),
-                        "request": str(or_pricing.get("request") or "0"),
-                        "image": str(or_pricing.get("image") or "0"),
-                    }
+                    return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
             # Also check reverse: base_model_id starts with or_base (for versioned queries)
             if base_model_id.startswith(or_base):
                 suffix = base_model_id[len(or_base):]
                 if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
-                    return {
-                        "prompt": str(or_pricing.get("prompt") or "0"),
-                        "completion": str(or_pricing.get("completion") or "0"),
-                        "request": str(or_pricing.get("request") or "0"),
-                        "image": str(or_pricing.get("image") or "0"),
-                    }
+                    return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
 
         return None
 

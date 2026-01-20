@@ -585,6 +585,21 @@ def sync_provider_models(
             synced_models = bulk_upsert_models(db_models)
             models_synced = len(synced_models) if synced_models else 0
             logger.info(f"Successfully synced {models_synced} models for {provider_slug}")
+
+            # Sync pricing for the synced models
+            if synced_models:
+                try:
+                    from src.services.pricing_sync_background import sync_pricing_on_model_update
+
+                    # Extract model IDs from synced models
+                    model_ids = [m.get("id") for m in synced_models if m.get("id")]
+
+                    if model_ids:
+                        logger.info(f"Syncing pricing for {len(model_ids)} models...")
+                        pricing_stats = sync_pricing_on_model_update(model_ids)
+                        logger.info(f"Pricing sync complete: {pricing_stats}")
+                except Exception as pricing_e:
+                    logger.warning(f"Pricing sync failed for {provider_slug}: {pricing_e}")
         else:
             models_synced = 0
             logger.info(f"DRY RUN: Would sync {len(db_models)} models for {provider_slug}")

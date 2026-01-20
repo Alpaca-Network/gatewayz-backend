@@ -300,20 +300,27 @@ class Config:
     }
 
     # Tempo/OpenTelemetry OTLP Configuration
-    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "false").lower() in {
+    # Enabled by default for distributed tracing observability
+    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "true").lower() in {
         "1",
         "true",
         "yes",
     }
     OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "gatewayz-api")
+    # Default to localhost for local development with docker-compose monitoring stack
+    # For Railway: set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318
     TEMPO_OTLP_HTTP_ENDPOINT = os.environ.get(
         "TEMPO_OTLP_HTTP_ENDPOINT",
-        "http://tempo:4318",
+        "http://localhost:4318",
     )
     TEMPO_OTLP_GRPC_ENDPOINT = os.environ.get(
         "TEMPO_OTLP_GRPC_ENDPOINT",
         "localhost:4317",
     )
+    # Skip endpoint reachability check during startup (allows async connection)
+    TEMPO_SKIP_REACHABILITY_CHECK = os.environ.get(
+        "TEMPO_SKIP_REACHABILITY_CHECK", "true"
+    ).lower() in {"1", "true", "yes"}
 
     # Grafana Loki Configuration
     LOKI_ENABLED = os.environ.get("LOKI_ENABLED", "false").lower() in {

@@ -1453,6 +1453,8 @@ def normalize_groq_model(groq_model: dict) -> dict:
 
     context_length = metadata.get("context_length") or groq_model.get("context_length") or 0
 
+    # Extract pricing information from API response
+    pricing_info = groq_model.get("pricing") or {}
     pricing = {
         "prompt": None,
         "completion": None,
@@ -1461,6 +1463,25 @@ def normalize_groq_model(groq_model: dict) -> dict:
         "web_search": None,
         "internal_reasoning": None,
     }
+
+    # Groq may return pricing in various formats
+    # Check for token-based pricing (cents per token)
+    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
+        cents_input = pricing_info.get("cents_per_input_token", 0)
+        cents_output = pricing_info.get("cents_per_output_token", 0)
+
+        # Convert cents to dollars per token
+        if cents_input:
+            pricing["prompt"] = str(cents_input / 100)
+        if cents_output:
+            pricing["completion"] = str(cents_output / 100)
+
+    # Check for direct dollar-based pricing
+    elif "input" in pricing_info or "output" in pricing_info:
+        if pricing_info.get("input"):
+            pricing["prompt"] = str(pricing_info["input"])
+        if pricing_info.get("output"):
+            pricing["completion"] = str(pricing_info["output"])
 
     architecture = {
         "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
@@ -1574,6 +1595,8 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     metadata = fireworks_model.get("metadata") or {}
     context_length = metadata.get("context_length") or fireworks_model.get("context_length") or 0
 
+    # Extract pricing information from API response
+    pricing_info = fireworks_model.get("pricing") or {}
     pricing = {
         "prompt": None,
         "completion": None,
@@ -1582,6 +1605,25 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
         "web_search": None,
         "internal_reasoning": None,
     }
+
+    # Fireworks may return pricing in various formats
+    # Check for token-based pricing (cents per token)
+    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
+        cents_input = pricing_info.get("cents_per_input_token", 0)
+        cents_output = pricing_info.get("cents_per_output_token", 0)
+
+        # Convert cents to dollars per token
+        if cents_input:
+            pricing["prompt"] = str(cents_input / 100)
+        if cents_output:
+            pricing["completion"] = str(cents_output / 100)
+
+    # Check for direct dollar-based pricing
+    elif "input" in pricing_info or "output" in pricing_info:
+        if pricing_info.get("input"):
+            pricing["prompt"] = str(pricing_info["input"])
+        if pricing_info.get("output"):
+            pricing["completion"] = str(pricing_info["output"])
 
     architecture = {
         "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
@@ -2673,8 +2715,27 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
         "internal_reasoning": None,
     }
 
-    # If pricing is time-based (for image generation), convert to image pricing
-    if pricing_info.get("type") == "time" and model_type in ("text-to-image", "image"):
+    # Extract token-based pricing (text-generation, embeddings, etc.)
+    # DeepInfra returns pricing in cents per token, convert to dollars per token
+    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
+        cents_input = pricing_info.get("cents_per_input_token", 0)
+        cents_output = pricing_info.get("cents_per_output_token", 0)
+
+        # Convert cents to dollars per token
+        if cents_input:
+            pricing["prompt"] = str(cents_input / 100)
+        if cents_output:
+            pricing["completion"] = str(cents_output / 100)
+
+    # Extract image unit pricing (text-to-image models)
+    elif pricing_info.get("type") == "image_units" or "cents_per_image_unit" in pricing_info:
+        cents_per_image = pricing_info.get("cents_per_image_unit", 0)
+        # Convert cents to dollars per image
+        if cents_per_image:
+            pricing["image"] = str(cents_per_image / 100)
+
+    # If pricing is time-based (legacy image generation), convert to image pricing
+    elif pricing_info.get("type") == "time" and model_type in ("text-to-image", "image"):
         cents_per_sec = pricing_info.get("cents_per_sec", 0)
         # Convert cents per second to dollars per image (assume ~5 seconds per image)
         pricing["image"] = str(cents_per_sec * 5 / 100) if cents_per_sec else None
@@ -3391,19 +3452,16 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     try:
         # Extract pricing from the API response
         # AiHubMix returns pricing per 1K tokens
-        # Convert to per-token by dividing by 1000 to match OpenRouter format
-        # Example: $1.25/1K tokens -> $0.00125/token
-        pricing_data = model.get("pricing", {})
-        input_price_per_1k = pricing_data.get("input", 0)
-        output_price_per_1k = pricing_data.get("output", 0)
+        # Use pricing_normalization to convert to per-token format
+        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
 
-        # Convert from per-1K to per-token pricing (divide by 1000)
-        # This matches the format used by OpenRouter and expected by calculate_cost()
-        input_price_per_token = float(input_price_per_1k) / 1000 if input_price_per_1k else 0
-        output_price_per_token = float(output_price_per_1k) / 1000 if output_price_per_1k else 0
+        pricing_data = model.get("pricing", {})
+
+        # Normalize pricing from per-1K to per-token format
+        normalized_pricing = normalize_pricing_dict(pricing_data, PricingFormat.PER_1K_TOKENS)
 
         # Filter out models with zero pricing (free models can drain credits)
-        if input_price_per_token == 0 and output_price_per_token == 0:
+        if float(normalized_pricing.get("prompt", 0)) == 0 and float(normalized_pricing.get("completion", 0)) == 0:
             logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
             return None
 
@@ -3435,12 +3493,7 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
                 "output_modalities": ["text"],
                 "instruct_type": "chat",
             },
-            "pricing": {
-                "prompt": str(input_price_per_token),
-                "completion": str(output_price_per_token),
-                "request": "0",
-                "image": "0",
-            },
+            "pricing": normalized_pricing,
             "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [],
