@@ -255,7 +255,11 @@ async def anthropic_messages(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     logger.info(
         "anthropic_messages start (request_id=%s, api_key=%s, model=%s)",
@@ -882,7 +886,11 @@ async def anthropic_messages(
                 tokens=total_tokens,
                 cost=cost if not trial.get("is_trial", False) else 0.0,
                 speed=speed,
-                finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                finish_reason=(
+                    processed.get("choices", [{}])[0].get("finish_reason", "stop")
+                    if processed.get("choices")
+                    else "stop"
+                ),
                 app="API",
                 metadata={
                     "prompt_tokens": prompt_tokens,
@@ -923,9 +931,10 @@ async def anthropic_messages(
                             )
 
                         # Save assistant response
-                        assistant_content = (
-                            processed.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        )
+                        choices = processed.get("choices", [])
+                        assistant_content = ""
+                        if choices and len(choices) > 0:
+                            assistant_content = choices[0].get("message", {}).get("content", "")
                         if assistant_content:
                             save_chat_message(
                                 session_id,
