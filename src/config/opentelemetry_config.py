@@ -142,7 +142,13 @@ class OpenTelemetryConfig:
             logger.info(f"   Tempo endpoint: {tempo_endpoint}")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
-            if not _check_endpoint_reachable(tempo_endpoint):
+            # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
+            if Config.TEMPO_SKIP_REACHABILITY_CHECK:
+                logger.info(
+                    f"   Skipping reachability check (TEMPO_SKIP_REACHABILITY_CHECK=true) - "
+                    f"traces will be buffered and sent asynchronously"
+                )
+            elif not _check_endpoint_reachable(tempo_endpoint):
                 logger.warning(
                     f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
                     f"Ensure the Tempo service is deployed and accessible. "
