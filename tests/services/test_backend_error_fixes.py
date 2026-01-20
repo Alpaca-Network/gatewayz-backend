@@ -10,21 +10,21 @@ This test suite validates the fixes for critical backend errors including:
 These tests ensure robustness and proper error handling in production.
 """
 
-import pytest
-from unittest.mock import Mock, patch
 import os
+from unittest.mock import Mock, patch
 
-os.environ['APP_ENV'] = 'testing'
+import pytest
 
-# Import after setting environment
-from src.services.model_health_monitor import get_gateway_health_from_db
-from src.services.providers import get_all_providers
+os.environ["APP_ENV"] = "testing"
+
+# Note: The actual functions being tested are internal to their modules.
+# These tests validate the error handling patterns used in the code.
 
 
 class TestModelHealthMonitorFixes:
     """Tests for model_health_monitor.py error handling fixes."""
 
-    @patch('src.services.model_health_monitor.logger')
+    @patch("src.services.model_health_monitor.logger")
     def test_latency_parsing_with_invalid_format(self, mock_logger):
         """Test that invalid latency formats are handled gracefully without bare except."""
         # This test validates the fix for bare except block at line 848
@@ -51,14 +51,18 @@ class TestModelHealthMonitorFixes:
             # This should NOT be reached - validates we're not using bare except
             pytest.fail("Bare except should not be used, only specific exceptions")
 
-    @patch('src.services.model_health_monitor.logger')
+    @patch("src.services.model_health_monitor.logger")
     def test_latency_parsing_with_none_value(self, mock_logger):
         """Test that None latency values are handled without crashing."""
         # Validates fix for potential None values
         mock_provider_data = Mock()
         mock_provider_data.avg_response_time = None
 
-        avg_response = mock_provider_data.avg_response_time.replace("ms", "") if mock_provider_data.avg_response_time else "0"
+        avg_response = (
+            mock_provider_data.avg_response_time.replace("ms", "")
+            if mock_provider_data.avg_response_time
+            else "0"
+        )
 
         try:
             latency = int(avg_response)
@@ -171,9 +175,7 @@ class TestUnsafeListAccessFixes:
 
     def test_valid_choices_finish_reason(self):
         """Test that valid choices list works correctly."""
-        processed = {
-            "choices": [{"finish_reason": "length", "message": {"content": "test"}}]
-        }
+        processed = {"choices": [{"finish_reason": "length", "message": {"content": "test"}}]}
 
         finish_reason = (
             processed.get("choices", [{}])[0].get("finish_reason", "stop")
@@ -211,9 +213,7 @@ class TestUnsafeListAccessFixes:
 
     def test_valid_choices_assistant_content(self):
         """Test that valid choices extracts content correctly."""
-        processed = {
-            "choices": [{"message": {"content": "Hello, world!", "role": "assistant"}}]
-        }
+        processed = {"choices": [{"message": {"content": "Hello, world!", "role": "assistant"}}]}
 
         choices = processed.get("choices", [])
         assistant_content = ""
@@ -237,7 +237,7 @@ class TestUnsafeListAccessFixes:
 class TestSilentExceptionSwallowingFixes:
     """Tests for silent exception swallowing fixes in providers.py."""
 
-    @patch('src.services.providers.logger')
+    @patch("src.services.providers.logger")
     def test_url_parsing_exception_is_logged(self, mock_logger):
         """Test that URL parsing exceptions are now logged instead of silently ignored."""
         # Previously: except Exception: pass (silent)
