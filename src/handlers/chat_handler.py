@@ -530,4 +530,205 @@ class ChatInferenceHandler:
 
             raise
 
-    # TODO: Implement process_stream() for streaming requests (Task 8)
+    async def process_stream(
+        self, request: InternalChatRequest
+    ) -> AsyncIterator[InternalStreamChunk]:
+        """
+        Process a streaming chat completion request.
+
+        This is the SINGLE implementation used by ALL chat endpoints for
+        streaming requests. It handles:
+        1. User context initialization
+        2. Model transformation and provider selection
+        3. Streaming from provider
+        4. Yielding normalized internal chunks
+        5. Token tracking during stream
+        6. Post-stream cost calculation and charging
+        7. Request logging
+
+        Args:
+            request: Internal chat request with stream=True
+
+        Yields:
+            InternalStreamChunk objects as they arrive from provider
+
+        Raises:
+            ValueError: If user is invalid or has insufficient credits
+            Exception: Provider or system errors
+        """
+        prompt_tokens = 0
+        completion_tokens = 0
+        finish_reason = None
+        provider_used = None
+
+        try:
+            # Step 1: Initialize user context
+            await self._initialize_user_context()
+
+            logger.info(
+                f"[ChatHandler] Processing streaming request: model={request.model}, "
+                f"messages={len(request.messages)}, user_id={self.user.get('id')}"
+            )
+
+            # Step 2: Transform model ID
+            transformed_model = await asyncio.to_thread(apply_transformations, request.model)
+            logger.debug(
+                f"[ChatHandler] Transformed model (streaming): {request.model} → {transformed_model}"
+            )
+
+            # Step 3: Prepare messages and kwargs
+            messages = [
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    **({"name": msg.name} if msg.name else {}),
+                    **({"tool_call_id": msg.tool_call_id} if msg.tool_call_id else {}),
+                    **({"tool_calls": msg.tool_calls} if msg.tool_calls else {}),
+                }
+                for msg in request.messages
+            ]
+
+            kwargs = {
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "top_p": request.top_p,
+                "frequency_penalty": request.frequency_penalty,
+                "presence_penalty": request.presence_penalty,
+                "stop": request.stop,
+                "tools": request.tools,
+                "tool_choice": request.tool_choice,
+                "response_format": request.response_format,
+                "user": request.user,
+            }
+            kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
+            # For now, use simple provider routing (no failover for streaming yet)
+            # TODO: Implement streaming failover in future enhancement
+            selector = get_selector()
+            primary_provider = await asyncio.to_thread(
+                selector.registry.select_provider, transformed_model
+            )
+
+            if not primary_provider:
+                raise ValueError(f"No provider found for model {transformed_model}")
+
+            provider_used = primary_provider.name
+            provider_model_id = primary_provider.model_id
+
+            logger.info(
+                f"[ChatHandler] Streaming from provider={provider_used}, model={provider_model_id}"
+            )
+
+            # Step 4: Stream from provider
+            stream = self._call_provider_stream(
+                provider_used, provider_model_id, messages, **kwargs
+            )
+
+            # Step 5: Yield normalized chunks
+            accumulated_content = ""  # For token estimation fallback
+            chunk_count = 0
+
+            async for provider_chunk in stream:
+                chunk_count += 1
+
+                # Extract delta content
+                if hasattr(provider_chunk, "choices") and provider_chunk.choices:
+                    choice = provider_chunk.choices[0]
+                    delta = getattr(choice, "delta", None)
+
+                    if delta:
+                        content = getattr(delta, "content", None)
+                        role = getattr(delta, "role", None)
+                        tool_calls = getattr(delta, "tool_calls", None)
+                        chunk_finish_reason = getattr(choice, "finish_reason", None)
+
+                        if content:
+                            accumulated_content += content
+
+                        if chunk_finish_reason:
+                            finish_reason = chunk_finish_reason
+
+                        # Extract usage from final chunk if available
+                        if hasattr(provider_chunk, "usage") and provider_chunk.usage:
+                            prompt_tokens = getattr(provider_chunk.usage, "prompt_tokens", 0)
+                            completion_tokens = getattr(
+                                provider_chunk.usage, "completion_tokens", 0
+                            )
+
+                        # Yield internal chunk
+                        internal_chunk = InternalStreamChunk(
+                            id=self.request_id,
+                            model=request.model,
+                            created=int(time.time()),
+                            content=content,
+                            role=role,
+                            finish_reason=chunk_finish_reason,
+                            tool_calls=tool_calls,
+                            usage=(
+                                InternalUsage(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens + completion_tokens,
+                                )
+                                if prompt_tokens > 0 or completion_tokens > 0
+                                else None
+                            ),
+                        )
+
+                        yield internal_chunk
+
+            logger.debug(f"[ChatHandler] Streamed {chunk_count} chunks")
+
+            # Step 6: Token estimation fallback if provider didn't provide usage
+            if prompt_tokens == 0 and completion_tokens == 0:
+                # Estimate tokens from content length (1 token ≈ 4 characters)
+                completion_tokens = max(1, len(accumulated_content) // 4)
+                prompt_chars = sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                )
+                prompt_tokens = max(1, prompt_chars // 4)
+
+                logger.info(
+                    f"[ChatHandler] No usage data from provider, estimated "
+                    f"{prompt_tokens} prompt + {completion_tokens} completion tokens"
+                )
+
+            # Step 7: Calculate cost and charge user after stream completes
+            cost = await asyncio.to_thread(
+                calculate_cost, request.model, prompt_tokens, completion_tokens
+            )
+
+            logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")
+
+            await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
+
+            # Step 8: Save request record
+            self._save_request_record(
+                model_name=request.model,
+                provider_name=provider_used,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                status="completed",
+            )
+
+            logger.info(
+                f"[ChatHandler] Streaming request completed: "
+                f"tokens={prompt_tokens + completion_tokens}, cost=${cost:.6f}"
+            )
+
+        except Exception as e:
+            # Log error and save failed request
+            logger.error(f"[ChatHandler] Streaming request failed: {e}", exc_info=True)
+
+            # Save failed request metadata
+            self._save_request_record(
+                model_name=request.model,
+                provider_name=provider_used or "unknown",
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                status="failed",
+                error_message=str(e),
+            )
+
+            raise
