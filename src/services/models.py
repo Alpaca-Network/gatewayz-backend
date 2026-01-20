@@ -482,6 +482,7 @@ def get_all_models_parallel():
             "openai",
             "anthropic",
             "simplismart",
+            "sybil",
         ]
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
