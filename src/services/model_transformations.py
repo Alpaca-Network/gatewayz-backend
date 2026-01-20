@@ -61,6 +61,24 @@ MODEL_PROVIDER_OVERRIDES = {
 # Canonical aliases for commonly mistyped or reformatted model IDs.
 # Keep keys in lowercase to simplify lookups.
 MODEL_ID_ALIASES = {
+    # OpenAI GPT models without org prefix - map to canonical openai/ prefix
+    # This ensures proper provider routing (locks to OpenRouter) and failover behavior
+    "gpt-4": "openai/gpt-4",
+    "gpt-4-turbo": "openai/gpt-4-turbo",
+    "gpt-4-turbo-preview": "openai/gpt-4-turbo-preview",
+    "gpt-4o": "openai/gpt-4o",
+    "gpt-4o-mini": "openai/gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18": "openai/gpt-4o-mini-2024-07-18",
+    "gpt-4o-2024-05-13": "openai/gpt-4o-2024-05-13",
+    "gpt-4o-2024-08-06": "openai/gpt-4o-2024-08-06",
+    "gpt-4o-2024-11-20": "openai/gpt-4o-2024-11-20",
+    "gpt-4-0125-preview": "openai/gpt-4-0125-preview",
+    "gpt-4-1106-preview": "openai/gpt-4-1106-preview",
+    "gpt-4-vision-preview": "openai/gpt-4-vision-preview",
+    "gpt-3.5-turbo": "openai/gpt-3.5-turbo",
+    "gpt-3.5-turbo-16k": "openai/gpt-3.5-turbo-16k",
+    "gpt-3.5-turbo-0125": "openai/gpt-3.5-turbo-0125",
+    "gpt-3.5-turbo-1106": "openai/gpt-3.5-turbo-1106",
     # GPT-5.1 variants (hyphen, underscore, missing org, etc.)
     "openai/gpt-5-1": "openai/gpt-5.1",
     "openai/gpt5-1": "openai/gpt-5.1",

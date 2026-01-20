@@ -131,7 +131,12 @@ def enforce_model_failover_rules(
         )
         return provider_chain
 
-    normalized = model_id.lower()
+    # Apply model aliases to normalize model IDs (e.g., "gpt-4" -> "openai/gpt-4")
+    # This ensures bare OpenAI/Anthropic model names are correctly locked to OpenRouter
+    from src.services.model_transformations import apply_model_alias
+
+    aliased_model_id = apply_model_alias(model_id)
+    normalized = aliased_model_id.lower()
     locked_provider = None
 
     if normalized.startswith(_OPENROUTER_PREFIX_LOCKS):

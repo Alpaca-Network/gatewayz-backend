@@ -280,6 +280,40 @@ class TestEnforceModelFailoverRules:
         assert filtered_without == chain
         assert filtered_with == chain
 
+    def test_bare_openai_model_names_are_locked(self):
+        """Test that bare OpenAI model names (without openai/ prefix) are locked to OpenRouter.
+
+        This is critical to prevent OpenAI models from being incorrectly routed to
+        other providers like HuggingFace during failover.
+        """
+        chain = ["openrouter", "cerebras", "huggingface", "featherless"]
+
+        # All these bare model names should be locked to openrouter
+        bare_openai_models = [
+            "gpt-4",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo",
+            "gpt-3.5-turbo-16k",
+        ]
+
+        for model in bare_openai_models:
+            filtered = enforce_model_failover_rules(model, chain.copy())
+            assert filtered == ["openrouter"], (
+                f"Model '{model}' should be locked to openrouter, but got {filtered}"
+            )
+
+    def test_bare_openai_model_names_allow_payment_failover(self):
+        """Test that bare OpenAI model names allow failover when payment_failover=True."""
+        chain = ["openrouter", "cerebras", "huggingface"]
+
+        # With payment failover enabled, should return full chain
+        filtered = enforce_model_failover_rules(
+            "gpt-4", chain.copy(), allow_payment_failover=True
+        )
+        assert filtered == chain
+
 
 # ============================================================
 # TEST CLASS: Failover Eligibility

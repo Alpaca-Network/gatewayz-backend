@@ -16,6 +16,46 @@ def test_detect_provider_gpt51_alias_without_org():
     assert detect_provider_from_model_id("gpt-5-1") == "openrouter"
 
 
+def test_bare_openai_model_names_alias_to_canonical():
+    """Test that bare OpenAI model names (without openai/ prefix) are aliased correctly.
+
+    This is critical to prevent OpenAI models from being incorrectly routed to
+    other providers like HuggingFace during failover.
+    """
+    from src.services.model_transformations import apply_model_alias
+
+    test_cases = [
+        ("gpt-4", "openai/gpt-4"),
+        ("gpt-4o", "openai/gpt-4o"),
+        ("gpt-4o-mini", "openai/gpt-4o-mini"),
+        ("gpt-4-turbo", "openai/gpt-4-turbo"),
+        ("gpt-3.5-turbo", "openai/gpt-3.5-turbo"),
+        ("gpt-3.5-turbo-16k", "openai/gpt-3.5-turbo-16k"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = apply_model_alias(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_bare_openai_model_names_detect_as_openrouter():
+    """Test that bare OpenAI model names are detected as OpenRouter provider.
+
+    After aliasing, these should all be detected as OpenRouter (via the openai/ prefix).
+    """
+    test_cases = [
+        "gpt-4",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo",
+    ]
+
+    for model_id in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == "openrouter", f"Expected 'openrouter' for {model_id}, got {result}"
+
+
 def test_openrouter_auto_preserves_prefix():
     result = transform_model_id("openrouter/auto", "openrouter")
     assert result == "openrouter/auto"
