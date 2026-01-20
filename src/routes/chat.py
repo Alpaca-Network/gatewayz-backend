@@ -884,6 +884,7 @@ async def _process_stream_completion_background(
     is_anonymous=False,
     request_id=None,
     client_ip=None,
+    api_key_id=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -1357,6 +1358,7 @@ async def stream_generator(
                 is_anonymous=is_anonymous,
                 request_id=request_id,
                 client_ip=client_ip,
+                api_key_id=api_key_id,
             )
         )
 
@@ -1489,9 +1491,6 @@ async def chat_completions(
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
         with tracker.stage("auth_validation"):
-            # Initialize client_ip to None for all cases (used later in streaming response)
-            client_ip = None
-
             if is_anonymous:
                 # Anonymous user - validate model whitelist and rate limits
                 # Get client IP for rate limiting
