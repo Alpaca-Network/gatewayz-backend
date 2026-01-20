@@ -250,7 +250,8 @@ def transform_normalized_model_to_db_schema(
         # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
         provider_model_id = normalized_model.get("provider_model_id") or model_id
 
-        return {
+        # Build model data - pricing is stored separately in model_pricing table
+        model_data = {
             "provider_id": provider_id,
             "model_id": str(model_id),
             "model_name": str(model_name),
@@ -262,12 +263,6 @@ def transform_normalized_model_to_db_schema(
             "top_provider": top_provider,
             "per_request_limits": per_request_limits,
 
-            # Pricing
-            "pricing_prompt": pricing["prompt"],
-            "pricing_completion": pricing["completion"],
-            "pricing_image": pricing["image"],
-            "pricing_request": pricing["request"],
-
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],
             "supports_function_calling": capabilities["supports_function_calling"],
@@ -277,6 +272,17 @@ def transform_normalized_model_to_db_schema(
             "is_active": True,
             "metadata": metadata,
         }
+
+        # Store pricing info in metadata for later sync to model_pricing table
+        if any(pricing.values()):
+            model_data["metadata"]["pricing_raw"] = {
+                "prompt": str(pricing["prompt"]) if pricing["prompt"] else None,
+                "completion": str(pricing["completion"]) if pricing["completion"] else None,
+                "image": str(pricing["image"]) if pricing["image"] else None,
+                "request": str(pricing["request"]) if pricing["request"] else None,
+            }
+
+        return model_data
 
     except Exception as e:
         logger.error(f"Error transforming model {normalized_model.get('id')} from {provider_slug}: {e}")
