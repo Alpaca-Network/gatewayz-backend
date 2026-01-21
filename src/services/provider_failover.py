@@ -461,3 +461,105 @@ def map_provider_error(
         return HTTPException(status_code=503, detail="Upstream service unavailable")
 
     return HTTPException(status_code=502, detail="Upstream error")
+
+
+def map_provider_error_detailed(
+    provider: str,
+    model: str,
+    exc: Exception,
+    request_id: str | None = None,
+) -> HTTPException:
+    """
+    Map provider errors to detailed error responses with suggestions and context.
+
+    This function wraps map_provider_error and enhances the response with
+    detailed error information including suggestions, context, and documentation links.
+
+    Args:
+        provider: Provider name
+        model: Model ID
+        exc: Exception raised by provider
+        request_id: Optional request ID for tracking
+
+    Returns:
+        HTTPException with detailed error response
+
+    Usage:
+        try:
+            response = provider_client.make_request(...)
+        except Exception as e:
+            raise map_provider_error_detailed(provider, model, e, request_id)
+    """
+    from src.utils.error_factory import DetailedErrorFactory
+
+    # Get the basic HTTP exception from the existing mapper
+    http_exc = map_provider_error(provider, model, exc)
+
+    # Enhance with detailed error response based on status code
+    status_code = http_exc.status_code
+    provider_message = str(exc)
+
+    # Determine the appropriate detailed error type
+    if status_code == 404:
+        # Model not found - add suggestions
+        error_response = DetailedErrorFactory.model_not_found(
+            model_id=model,
+            provider=provider,
+            suggested_models=None,  # Could fetch similar models here
+            request_id=request_id,
+        )
+    elif status_code == 429:
+        # Rate limit exceeded
+        retry_after = None
+        if http_exc.headers and "Retry-After" in http_exc.headers:
+            try:
+                retry_after = int(http_exc.headers["Retry-After"])
+            except ValueError:
+                pass
+
+        error_response = DetailedErrorFactory.rate_limit_exceeded(
+            limit_type="provider_rate_limit",
+            retry_after=retry_after,
+            request_id=request_id,
+        )
+    elif status_code == 401 or status_code == 403:
+        # Authentication/authorization error
+        error_response = DetailedErrorFactory.provider_error(
+            provider=provider,
+            model=model,
+            provider_message=provider_message,
+            status_code=401,
+            request_id=request_id,
+        )
+    elif status_code == 504:
+        # Timeout
+        error_response = DetailedErrorFactory.provider_timeout(
+            provider=provider,
+            model=model,
+            request_id=request_id,
+        )
+    elif status_code in (502, 503):
+        # Provider unavailable
+        error_response = DetailedErrorFactory.provider_error(
+            provider=provider,
+            model=model,
+            provider_message=provider_message,
+            status_code=status_code,
+            request_id=request_id,
+        )
+    else:
+        # Generic provider error
+        error_response = DetailedErrorFactory.provider_error(
+            provider=provider,
+            model=model,
+            provider_message=provider_message,
+            status_code=status_code,
+            request_id=request_id,
+        )
+
+    # Return HTTPException with detailed error response
+    return HTTPException(
+        status_code=error_response.error.status,
+        detail=error_response.dict(exclude_none=True),
+        headers=http_exc.headers,
+    )

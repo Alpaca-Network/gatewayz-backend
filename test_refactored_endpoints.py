@@ -401,13 +401,81 @@ class APITester:
             )
 
             # Should return error status code (400s or 500s)
-            if response.status_code >= 400:
-                self.print_success(f"Correctly returned error status {response.status_code}")
-                return True
-            else:
+            if response.status_code < 400:
                 self.print_failure(f"Expected error status, got {response.status_code}")
                 return False
 
+            # Validate detailed error structure
+            data = response.json()
+            assert "error" in data, "Missing 'error' key in error response"
+            error = data["error"]
+
+            # Required fields
+            assert "type" in error, "Missing 'type' in error"
+            assert "message" in error, "Missing 'message' in error"
+            assert "code" in error, "Missing 'code' in error"
+            assert "status" in error, "Missing 'status' in error"
+            assert "request_id" in error, "Missing 'request_id' in error"
+            assert "timestamp" in error, "Missing 'timestamp' in error"
+
+            # Should have suggestions
+            assert "suggestions" in error, "Missing 'suggestions' in error"
+            if error["suggestions"]:
+                assert isinstance(error["suggestions"], list), "Suggestions should be a list"
+                assert len(error["suggestions"]) > 0, "Suggestions should not be empty"
+
+            # Check X-Request-ID header
+            assert "X-Request-ID" in response.headers, "Missing X-Request-ID header"
+
+            self.print_success(f"Status {response.status_code}, detailed error with request_id={error['request_id'][:12]}...")
+            return True
+
+        except AssertionError as e:
+            self.print_failure(str(e))
+            return False
+        except Exception as e:
+            self.print_failure(str(e))
+            return False
+
+    def test_error_invalid_api_key(self):
+        """Test error handling with invalid API key."""
+        self.print_test("Error handling (invalid API key)")
+
+        try:
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "user", "content": "Test"}
+                ]
+            }
+
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                headers={"Authorization": "Bearer invalid_key_12345", "Content-Type": "application/json"},
+                json=payload,
+                timeout=30
+            )
+
+            # Should return 401
+            assert response.status_code == 401, f"Expected 401, got {response.status_code}"
+
+            # Validate detailed error structure
+            data = response.json()
+            assert "error" in data, "Missing 'error' key"
+            error = data["error"]
+
+            assert error["type"] == "invalid_api_key", f"Expected type 'invalid_api_key', got '{error['type']}'"
+            assert error["code"] == "INVALID_API_KEY", f"Expected code 'INVALID_API_KEY', got '{error['code']}'"
+            assert error["status"] == 401, f"Expected status 401, got {error['status']}"
+            assert error["request_id"] is not None, "Missing request_id"
+            assert error["suggestions"] is not None, "Missing suggestions"
+
+            self.print_success(f"Detailed error with type={error['type']}")
+            return True
+
+        except AssertionError as e:
+            self.print_failure(str(e))
+            return False
         except Exception as e:
             self.print_failure(str(e))
             return False
@@ -436,6 +504,7 @@ class APITester:
 
         self.print_header("5️⃣  Error Handling Tests")
         self.test_error_handling()
+        self.test_error_invalid_api_key()
 
         # Print summary
         return self.print_summary()

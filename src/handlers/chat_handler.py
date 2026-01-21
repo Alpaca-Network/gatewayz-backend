@@ -76,20 +76,80 @@ class ChatInferenceHandler:
 
     async def _initialize_user_context(self) -> None:
         """
-        Load user and trial data.
+        Load user and trial data with detailed error handling.
 
         Raises:
-            ValueError: If API key is invalid or trial access is denied
+            HTTPException: With detailed error response if authentication or authorization fails
         """
+        from fastapi import HTTPException
+        from src.utils.error_factory import DetailedErrorFactory
+
         # Get user
-        self.user = await asyncio.to_thread(get_user, self.api_key)
-        if not self.user:
-            raise ValueError("Invalid API key")
+        try:
+            self.user = await asyncio.to_thread(get_user, self.api_key)
+            if not self.user:
+                # Invalid API key - return detailed error
+                error_response = DetailedErrorFactory.invalid_api_key(
+                    request_id=self.request_id
+                )
+                raise HTTPException(
+                    status_code=error_response.error.status,
+                    detail=error_response.dict(exclude_none=True)
+                )
+        except HTTPException:
+            # Re-raise HTTP exceptions
+            raise
+        except Exception as e:
+            # Unexpected error during user lookup
+            logger.error(f"[ChatHandler] Error fetching user: {e}", exc_info=True)
+            error_response = DetailedErrorFactory.internal_error(
+                operation="user_lookup",
+                error=e,
+                request_id=self.request_id,
+            )
+            raise HTTPException(
+                status_code=error_response.error.status,
+                detail=error_response.dict(exclude_none=True)
+            )
 
         # Validate trial access
-        self.trial = await asyncio.to_thread(validate_trial_access, self.api_key)
-        if not self.trial.get("is_valid", False):
-            raise ValueError(self.trial.get("error", "Access denied"))
+        try:
+            self.trial = await asyncio.to_thread(validate_trial_access, self.api_key)
+            if not self.trial.get("is_valid", False):
+                # Trial validation failed - determine error type
+                trial_error = self.trial.get("error", "Access denied")
+
+                # Check if it's a trial expired error
+                if "trial" in trial_error.lower() and "expired" in trial_error.lower():
+                    error_response = DetailedErrorFactory.trial_expired(
+                        request_id=self.request_id
+                    )
+                else:
+                    # Generic authorization error
+                    error_response = DetailedErrorFactory.invalid_api_key(
+                        reason=trial_error,
+                        request_id=self.request_id,
+                    )
+
+                raise HTTPException(
+                    status_code=error_response.error.status,
+                    detail=error_response.dict(exclude_none=True)
+                )
+        except HTTPException:
+            # Re-raise HTTP exceptions
+            raise
+        except Exception as e:
+            # Unexpected error during trial validation
+            logger.error(f"[ChatHandler] Error validating trial: {e}", exc_info=True)
+            error_response = DetailedErrorFactory.internal_error(
+                operation="trial_validation",
+                error=e,
+                request_id=self.request_id,
+            )
+            raise HTTPException(
+                status_code=error_response.error.status,
+                detail=error_response.dict(exclude_none=True)
+            )
 
         logger.debug(
             f"[ChatHandler] User context loaded: user_id={self.user.get('id')}, "
@@ -104,7 +164,7 @@ class ChatInferenceHandler:
         **kwargs,
     ) -> Any:
         """
-        Route request to the appropriate provider client.
+        Route request to the appropriate provider client with detailed error handling.
 
         Args:
             provider_name: Provider to use (e.g., "openrouter", "cerebras", "groq")
@@ -116,24 +176,50 @@ class ChatInferenceHandler:
             Provider response object
 
         Raises:
-            ValueError: If provider is not supported
-            Exception: Provider-specific errors
+            HTTPException: With detailed error response if provider call fails
         """
+        from fastapi import HTTPException
+        from src.utils.error_factory import DetailedErrorFactory
+
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
-        # Route to appropriate provider
-        if provider_name == "openrouter":
-            return make_openrouter_request_openai(messages, model_id, **kwargs)
-        elif provider_name == "cerebras":
-            return make_cerebras_request_openai(messages, model_id, **kwargs)
-        elif provider_name == "groq":
-            return make_groq_request_openai(messages, model_id, **kwargs)
-        else:
-            # Fallback to OpenRouter for unknown providers
-            logger.warning(
-                f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
+        try:
+            # Route to appropriate provider
+            if provider_name == "openrouter":
+                return make_openrouter_request_openai(messages, model_id, **kwargs)
+            elif provider_name == "cerebras":
+                return make_cerebras_request_openai(messages, model_id, **kwargs)
+            elif provider_name == "groq":
+                return make_groq_request_openai(messages, model_id, **kwargs)
+            else:
+                # Fallback to OpenRouter for unknown providers
+                logger.warning(
+                    f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
+                )
+                return make_openrouter_request_openai(messages, model_id, **kwargs)
+        except HTTPException:
+            # Re-raise HTTP exceptions (already formatted)
+            raise
+        except Exception as e:
+            # Convert provider exceptions to detailed errors
+            logger.error(
+                f"[ChatHandler] Provider error: provider={provider_name}, model={model_id}, error={e}",
+                exc_info=True
             )
-            return make_openrouter_request_openai(messages, model_id, **kwargs)
+
+            # Create detailed provider error
+            error_response = DetailedErrorFactory.provider_error(
+                provider=provider_name,
+                model=model_id,
+                provider_message=str(e),
+                status_code=502,
+                request_id=self.request_id,
+            )
+
+            raise HTTPException(
+                status_code=error_response.error.status,
+                detail=error_response.dict(exclude_none=True)
+            )
 
     async def _call_provider_stream(
         self,
