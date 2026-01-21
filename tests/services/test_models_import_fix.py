@@ -235,3 +235,74 @@ class TestGetAllModelsImport:
                     # Pricing values are strings that can be parsed to floats
                     assert float(pricing["prompt"]) > 0, f"Model {model['id']} has zero prompt pricing"
                     assert float(pricing["completion"]) > 0, f"Model {model['id']} has zero completion pricing"
+
+    def test_get_fallback_models_from_db_function_exists(self):
+        """Verify get_fallback_models_from_db function is available."""
+        from src.services.models import get_fallback_models_from_db
+
+        assert get_fallback_models_from_db is not None
+        assert callable(get_fallback_models_from_db)
+
+    def test_get_fallback_models_from_db_handles_missing_provider(self):
+        """Verify get_fallback_models_from_db returns None for unknown provider."""
+        from unittest.mock import patch, MagicMock
+        from src.services.models import get_fallback_models_from_db
+
+        # Mock the database function to return empty list
+        with patch("src.db.models_catalog_db.get_models_by_provider_slug", return_value=[]):
+            result = get_fallback_models_from_db("nonexistent-provider")
+            assert result is None
+
+    def test_get_fallback_models_from_db_converts_models_correctly(self):
+        """Verify get_fallback_models_from_db converts database models to raw format."""
+        from unittest.mock import patch
+        from src.services.models import get_fallback_models_from_db
+
+        # Mock database response
+        mock_db_models = [
+            {
+                "provider_model_id": "test-model-1",
+                "model_name": "Test Model 1",
+                "description": "A test model",
+                "context_length": 8192,
+                "pricing_prompt": 0.000001,
+                "pricing_completion": 0.000002,
+                "metadata": {},
+            }
+        ]
+
+        with patch("src.db.models_catalog_db.get_models_by_provider_slug", return_value=mock_db_models):
+            result = get_fallback_models_from_db("test-provider")
+
+            assert result is not None
+            assert len(result) == 1
+            assert result[0]["id"] == "test-model-1"
+            assert result[0]["name"] == "Test Model 1"
+            assert result[0]["context_length"] == 8192
+
+    def test_get_fallback_models_from_db_near_pricing_format(self):
+        """Verify Near AI models get correct pricing format with amount and scale."""
+        from unittest.mock import patch
+        from src.services.models import get_fallback_models_from_db
+
+        # Mock database response for Near AI
+        mock_db_models = [
+            {
+                "provider_model_id": "deepseek-ai/DeepSeek-V3.1",
+                "model_name": "DeepSeek V3.1",
+                "context_length": 128000,
+                "pricing_prompt": 0.00000105,  # $1.05 per million tokens
+                "pricing_completion": 0.0000031,  # $3.10 per million tokens
+                "metadata": {"contextLength": 128000},
+            }
+        ]
+
+        with patch("src.db.models_catalog_db.get_models_by_provider_slug", return_value=mock_db_models):
+            result = get_fallback_models_from_db("near")
+
+            assert result is not None
+            assert len(result) == 1
+            # Near AI expects inputCostPerToken/outputCostPerToken format
+            assert "inputCostPerToken" in result[0]
+            assert "outputCostPerToken" in result[0]
+            assert result[0]["inputCostPerToken"]["scale"] == -6

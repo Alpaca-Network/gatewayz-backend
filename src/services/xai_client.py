@@ -205,9 +205,51 @@ def fetch_models_from_xai():
     """Fetch models from xAI API
 
     xAI does not provide a public API to list available models.
-    Returns a hardcoded list of known xAI Grok models instead.
+    Tries database fallback first (from last successful sync),
+    then returns a hardcoded list of known xAI Grok models.
     """
-    logger.info("xAI does not provide a public model listing API, returning known Grok models")
+    logger.info("xAI does not provide a public model listing API, using fallback models")
+
+    # Try database fallback first (dynamic, from last successful sync)
+    try:
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = get_fallback_models_from_db("xai")
+        if db_fallback:
+            normalized_models = []
+            for db_model in db_fallback:
+                model_id = db_model.get("id") or db_model.get("model_id")
+                if not model_id:
+                    continue
+
+                model = {
+                    "id": model_id,
+                    "slug": model_id,
+                    "canonical_slug": model_id,
+                    "name": db_model.get("name") or model_id.replace("-", " ").title(),
+                    "description": db_model.get("description") or f"xAI Grok model: {model_id}",
+                    "context_length": db_model.get("context_length") or 131072,
+                    "architecture": db_model.get("metadata", {}).get("architecture") or {
+                        "modality": "text->text",
+                        "input_modalities": ["text"],
+                        "output_modalities": ["text"],
+                    },
+                    "pricing": db_model.get("pricing") or {
+                        "prompt": "5", "completion": "15", "request": "0", "image": "0",
+                    },
+                    "provider_slug": "xai",
+                    "source_gateway": "xai",
+                }
+                normalized_models.append(model)
+
+            if normalized_models:
+                logger.info(f"Using {len(normalized_models)} xAI models from database fallback")
+                return normalized_models
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for xAI: {e}")
+
+    # Static fallback as last resort
+    logger.warning("Database fallback empty, using static fallback for xAI")
 
     # Hardcoded list of known xAI Grok models
     # These are the models available through xAI's API
