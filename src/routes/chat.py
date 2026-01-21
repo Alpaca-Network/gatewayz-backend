@@ -59,6 +59,8 @@ try:
         is_available as check_braintrust_available,
         NoopSpan,
     )
+    # Import traced decorator from braintrust SDK for route decoration
+    from braintrust import traced
 
     # Wrapper to maintain backward compatibility with existing code
     def start_span(name=None, span_type=None, **kwargs):
