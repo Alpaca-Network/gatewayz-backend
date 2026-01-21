@@ -1,9 +1,23 @@
 """
 Braintrust integration for LLM tracing and observability.
 
-This module provides utilities for tracing LLM calls using Braintrust.
+DEPRECATED: This module is deprecated. Use src.services.braintrust_service instead.
+
+The braintrust_service module provides proper project association by using
+logger.start_span() instead of the standalone start_span() function.
+
+This module is kept for backward compatibility only.
+
 Learn more at https://www.braintrust.dev/docs
 """
+
+import warnings
+
+warnings.warn(
+    "braintrust_tracing is deprecated. Use src.services.braintrust_service instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import functools
 import inspect

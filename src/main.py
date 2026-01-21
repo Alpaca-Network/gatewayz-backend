@@ -685,12 +685,15 @@ def create_app() -> FastAPI:
                 posthog_service.initialize()
                 logger.info("   PostHog analytics initialized")
 
-                # Initialize Braintrust
+                # Initialize Braintrust tracing service
+                # Uses centralized service to ensure spans are properly associated with project
                 try:
-                    from braintrust import init_logger
+                    from src.services.braintrust_service import initialize_braintrust
 
-                    init_logger(project="Gatewayz Backend")
-                    logger.info("   Braintrust tracing initialized")
+                    if initialize_braintrust(project="Gatewayz Backend"):
+                        logger.info("   Braintrust tracing initialized (async_flush=False)")
+                    else:
+                        logger.warning("   Braintrust tracing not available (check BRAINTRUST_API_KEY)")
                 except Exception as bt_e:
                     logger.warning(f"    Braintrust initialization warning: {bt_e}")
 
