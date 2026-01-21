@@ -110,3 +110,81 @@ class TestGetAllModelsImport:
                         assert "hug" in called_gateways, "Provider 'hug' (huggingface) not found in gateway calls"
                     else:
                         assert provider in called_gateways, f"Provider {provider} not found in gateway calls"
+
+    def test_gateway_registry_consistency(self):
+        """Verify all gateways from GATEWAY_REGISTRY are included in parallel fetch."""
+        from src.services.models import get_all_models_parallel
+        from src.routes.catalog import GATEWAY_REGISTRY
+        from unittest.mock import patch, MagicMock
+
+        mock_get_cached = MagicMock(return_value=[])
+
+        with patch("src.services.models.get_cached_models", mock_get_cached):
+            with patch("src.services.models.is_gateway_in_error_state", return_value=False):
+                get_all_models_parallel()
+
+                called_gateways = [call[0][0] for call in mock_get_cached.call_args_list]
+
+                # Check each gateway in the registry
+                missing_gateways = []
+                for gateway_id, config in GATEWAY_REGISTRY.items():
+                    # Handle aliases (e.g., 'huggingface' -> 'hug')
+                    aliases = config.get("aliases", [])
+                    gateway_found = (
+                        gateway_id in called_gateways
+                        or any(alias in called_gateways for alias in aliases)
+                    )
+
+                    # Skip 'alpaca' as it doesn't have a fetch function yet
+                    if gateway_id == "alpaca":
+                        continue
+
+                    if not gateway_found:
+                        missing_gateways.append(gateway_id)
+
+                assert len(missing_gateways) == 0, (
+                    f"Missing gateways in get_all_models_parallel: {missing_gateways}. "
+                    "These gateways are registered but not fetched."
+                )
+
+    def test_morpheus_gateway_included(self):
+        """Verify morpheus gateway is included in parallel fetch."""
+        from src.services.models import get_all_models_parallel
+        from unittest.mock import patch, MagicMock
+
+        mock_get_cached = MagicMock(return_value=[])
+
+        with patch("src.services.models.get_cached_models", mock_get_cached):
+            with patch("src.services.models.is_gateway_in_error_state", return_value=False):
+                get_all_models_parallel()
+
+                called_gateways = [call[0][0] for call in mock_get_cached.call_args_list]
+                assert "morpheus" in called_gateways, "morpheus gateway missing from parallel fetch"
+
+    def test_vercel_ai_gateway_included(self):
+        """Verify vercel-ai-gateway is included in parallel fetch."""
+        from src.services.models import get_all_models_parallel
+        from unittest.mock import patch, MagicMock
+
+        mock_get_cached = MagicMock(return_value=[])
+
+        with patch("src.services.models.get_cached_models", mock_get_cached):
+            with patch("src.services.models.is_gateway_in_error_state", return_value=False):
+                get_all_models_parallel()
+
+                called_gateways = [call[0][0] for call in mock_get_cached.call_args_list]
+                assert "vercel-ai-gateway" in called_gateways, "vercel-ai-gateway missing from parallel fetch"
+
+    def test_sybil_gateway_included(self):
+        """Verify sybil gateway is included in parallel fetch."""
+        from src.services.models import get_all_models_parallel
+        from unittest.mock import patch, MagicMock
+
+        mock_get_cached = MagicMock(return_value=[])
+
+        with patch("src.services.models.get_cached_models", mock_get_cached):
+            with patch("src.services.models.is_gateway_in_error_state", return_value=False):
+                get_all_models_parallel()
+
+                called_gateways = [call[0][0] for call in mock_get_cached.call_args_list]
+                assert "sybil" in called_gateways, "sybil gateway missing from parallel fetch"

@@ -483,6 +483,8 @@ def get_all_models_parallel():
             "anthropic",
             "simplismart",
             "sybil",
+            "morpheus",
+            "vercel-ai-gateway",
         ]
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -568,6 +570,8 @@ def get_all_models_sequential():
     anthropic_models = get_cached_models("anthropic") or []
     simplismart_models = get_cached_models("simplismart") or []
     morpheus_models = get_cached_models("morpheus") or []
+    sybil_models = get_cached_models("sybil") or []
+    vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
     return (
         openrouter_models
         + featherless_models
@@ -596,6 +600,8 @@ def get_all_models_sequential():
         + anthropic_models
         + simplismart_models
         + morpheus_models
+        + sybil_models
+        + vercel_ai_gateway_models
     )
 
 
