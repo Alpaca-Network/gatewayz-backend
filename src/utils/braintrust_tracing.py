@@ -74,7 +74,10 @@ except ModuleNotFoundError:
 
         return decorator
 
-# Initialize logger with your project name
+# NOTE: This module-level logger initialization is DEPRECATED and kept only for
+# backward compatibility. It demonstrates the OLD pattern that caused orphaned spans.
+# New code should use src.services.braintrust_service which properly stores the logger
+# and uses logger.start_span() for correct project association.
 logger = init_logger(project="Gatewayz Backend")
 
 
