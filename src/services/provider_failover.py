@@ -352,7 +352,9 @@ def map_provider_error(
 
         # Fall back to message body if we still have the generic detail
         if detail == "Upstream error":
-            detail = getattr(exc, "message", None) or str(exc)
+            error_msg = getattr(exc, "message", None) or str(exc)
+            # Include provider and model in error message for better error tracking
+            detail = f"Provider '{provider}' error for model '{model}': {error_msg}"
 
         return HTTPException(status_code=status, detail=detail, headers=headers)
 
@@ -421,7 +423,9 @@ def map_provider_error(
 
         # Fall back to message body if we still have the generic detail
         if detail == "Upstream error":
-            detail = getattr(exc, "message", None) or str(exc)
+            error_msg = getattr(exc, "message", None) or str(exc)
+            # Include provider and model in error message for better error tracking
+            detail = f"Provider '{provider}' error for model '{model}': {error_msg}"
 
         return HTTPException(status_code=status, detail=detail, headers=headers)
 
@@ -455,12 +459,13 @@ def map_provider_error(
             except Exception as log_exc:
                 logger.debug("Failed to extract httpx response body: %r", log_exc)
             return HTTPException(status_code=400, detail=error_detail)
-        return HTTPException(status_code=502, detail="Upstream service error")
+        return HTTPException(status_code=502, detail=f"Provider '{provider}' service error for model '{model}'")
 
     if isinstance(exc, httpx.RequestError):
-        return HTTPException(status_code=503, detail="Upstream service unavailable")
+        return HTTPException(status_code=503, detail=f"Provider '{provider}' service unavailable for model '{model}'")
 
-    return HTTPException(status_code=502, detail="Upstream error")
+    # Final fallback - include provider and model for better error tracking
+    return HTTPException(status_code=502, detail=f"Provider '{provider}' error for model '{model}': {str(exc)}")
 
 
 def map_provider_error_detailed(
