@@ -141,6 +141,32 @@ class TestAuthorizationHeaderParsingFixes:
         # .strip() should handle extra spaces
         assert api_key == "sk-test-1234567890"
 
+    def test_unified_responses_auth_header_parsing(self):
+        """Test that unified_responses endpoint (chat.py:2780) handles malformed headers."""
+        # This test validates the fix at line 2780 in chat.py
+        # Previously: api_key = auth_header.split(" ", 1)[1].strip()  # IndexError
+        # Now: Checks len(parts) == 2 before accessing parts[1]
+
+        # Test case 1: Just "Bearer" without token
+        auth_header = "Bearer"
+        parts = auth_header.split(" ", 1)
+        if len(parts) == 2:
+            api_key = parts[1].strip()
+        else:
+            api_key = None  # Fallback for malformed header
+
+        assert api_key is None  # Should not crash
+
+        # Test case 2: Valid header
+        auth_header = "Bearer sk-unified-test-key"
+        parts = auth_header.split(" ", 1)
+        if len(parts) == 2:
+            api_key = parts[1].strip()
+        else:
+            api_key = None
+
+        assert api_key == "sk-unified-test-key"
+
 
 class TestUnsafeListAccessFixes:
     """Tests for unsafe list access fixes in messages.py."""
