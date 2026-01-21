@@ -16,6 +16,7 @@ from src.db.providers_db import (
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.clarifai_client import fetch_models_from_clarifai
 from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
+from src.services.cohere_client import fetch_models_from_cohere
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.models import (
@@ -43,7 +44,6 @@ from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.xai_client import fetch_models_from_xai
-from src.services.cohere_client import fetch_models_from_cohere
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def safe_decimal(value: Any) -> Decimal | None:
             return Decimal(str(value))
         if isinstance(value, str):
             # Remove any non-numeric characters except decimal point and minus
-            cleaned = ''.join(c for c in value if c.isdigit() or c in '.-')
+            cleaned = "".join(c for c in value if c.isdigit() or c in ".-")
             if cleaned:
                 return Decimal(cleaned)
         return None
@@ -160,9 +160,7 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
 
 def transform_normalized_model_to_db_schema(
-    normalized_model: dict[str, Any],
-    provider_id: int,
-    provider_slug: str
+    normalized_model: dict[str, Any], provider_id: int, provider_slug: str
 ) -> dict[str, Any] | None:
     """
     Transform a normalized model (from fetch functions) to database schema
@@ -178,10 +176,10 @@ def transform_normalized_model_to_db_schema(
     try:
         # Extract model ID - try various fields
         model_id = (
-            normalized_model.get("id") or
-            normalized_model.get("slug") or
-            normalized_model.get("canonical_slug") or
-            normalized_model.get("model_id")
+            normalized_model.get("id")
+            or normalized_model.get("slug")
+            or normalized_model.get("canonical_slug")
+            or normalized_model.get("model_id")
         )
 
         if not model_id:
@@ -262,12 +260,10 @@ def transform_normalized_model_to_db_schema(
             "architecture": architecture_str,
             "top_provider": top_provider,
             "per_request_limits": per_request_limits,
-
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],
             "supports_function_calling": capabilities["supports_function_calling"],
             "supports_vision": capabilities["supports_vision"],
-
             # Status
             "is_active": True,
             "metadata": metadata,
@@ -285,7 +281,9 @@ def transform_normalized_model_to_db_schema(
         return model_data
 
     except Exception as e:
-        logger.error(f"Error transforming model {normalized_model.get('id')} from {provider_slug}: {e}")
+        logger.error(
+            f"Error transforming model {normalized_model.get('id')} from {provider_slug}: {e}"
+        )
         return None
 
 
@@ -462,11 +460,14 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
         }
 
         # Get metadata for this provider or use defaults
-        metadata = provider_metadata.get(provider_slug, {
-            "name": provider_slug.replace("-", " ").replace("_", " ").title(),
-            "description": f"{provider_slug} AI provider",
-            "supports_streaming": True,
-        })
+        metadata = provider_metadata.get(
+            provider_slug,
+            {
+                "name": provider_slug.replace("-", " ").replace("_", " ").title(),
+                "description": f"{provider_slug} AI provider",
+                "supports_streaming": True,
+            },
+        )
 
         provider_data = {
             "name": metadata.get("name"),
@@ -485,7 +486,9 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
 
         created_provider = create_provider(provider_data)
         if created_provider:
-            logger.info(f"Successfully created provider '{provider_slug}' (ID: {created_provider['id']})")
+            logger.info(
+                f"Successfully created provider '{provider_slug}' (ID: {created_provider['id']})"
+            )
         return created_provider
 
     except Exception as e:
@@ -493,10 +496,7 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
         return None
 
 
-def sync_provider_models(
-    provider_slug: str,
-    dry_run: bool = False
-) -> dict[str, Any]:
+def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str, Any]:
     """
     Sync models for a specific provider
 
@@ -515,7 +515,7 @@ def sync_provider_models(
                 "success": False,
                 "error": f"Failed to ensure provider '{provider_slug}' exists",
                 "models_fetched": 0,
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         if not provider.get("is_active"):
@@ -523,7 +523,7 @@ def sync_provider_models(
                 "success": False,
                 "error": f"Provider '{provider_slug}' is inactive",
                 "models_fetched": 0,
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         # Get fetch function for this provider
@@ -533,7 +533,7 @@ def sync_provider_models(
                 "success": False,
                 "error": f"No fetch function configured for '{provider_slug}'",
                 "models_fetched": 0,
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         logger.info(f"Fetching models from {provider_slug}...")
@@ -549,7 +549,7 @@ def sync_provider_models(
                 "provider_id": provider["id"],
                 "models_fetched": 0,
                 "models_synced": 0,
-                "message": "No models fetched (may be API error or empty catalog)"
+                "message": "No models fetched (may be API error or empty catalog)",
             }
 
         logger.info(f"Fetched {len(normalized_models)} models from {provider_slug}")
@@ -560,9 +560,7 @@ def sync_provider_models(
         for model in normalized_models:
             try:
                 db_model = transform_normalized_model_to_db_schema(
-                    model,
-                    provider["id"],
-                    provider_slug
+                    model, provider["id"], provider_slug
                 )
                 if db_model:
                     db_models.append(db_model)
@@ -580,7 +578,7 @@ def sync_provider_models(
                 "provider": provider_slug,
                 "provider_id": provider["id"],
                 "models_fetched": len(normalized_models),
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         logger.info(f"Transformed {len(db_models)} models for {provider_slug} ({skipped} skipped)")
@@ -609,14 +607,17 @@ def sync_provider_models(
 
                 # Invalidate caches to ensure fresh data is served immediately
                 try:
+                    from src.cache import clear_models_cache
                     from src.services.model_catalog_cache import (
                         invalidate_full_catalog,
                         invalidate_provider_catalog,
                     )
 
-                    # Invalidate provider-specific cache first
+                    # Invalidate in-memory cache for this provider
+                    clear_models_cache(provider_slug)
+                    # Invalidate Redis provider-specific cache
                     invalidate_provider_catalog(provider_slug)
-                    # Then invalidate full catalog (aggregated view)
+                    # Then invalidate Redis full catalog (aggregated view)
                     invalidate_full_catalog()
                     logger.info(f"Cache invalidated for {provider_slug} after model sync")
                 except Exception as cache_e:
@@ -633,7 +634,7 @@ def sync_provider_models(
             "models_transformed": len(db_models),
             "models_skipped": skipped,
             "models_synced": models_synced,
-            "dry_run": dry_run
+            "dry_run": dry_run,
         }
 
     except Exception as e:
@@ -643,13 +644,12 @@ def sync_provider_models(
             "error": str(e),
             "provider": provider_slug,
             "models_fetched": 0,
-            "models_synced": 0
+            "models_synced": 0,
         }
 
 
 def sync_all_providers(
-    provider_slugs: list[str] | None = None,
-    dry_run: bool = False
+    provider_slugs: list[str] | None = None, dry_run: bool = False
 ) -> dict[str, Any]:
     """
     Sync models from all providers (or specified list)
@@ -689,10 +689,7 @@ def sync_all_providers(
                 total_skipped += result.get("models_skipped", 0)
                 total_synced += result.get("models_synced", 0)
             else:
-                errors.append({
-                    "provider": provider_slug,
-                    "error": result.get("error")
-                })
+                errors.append({"provider": provider_slug, "error": result.get("error")})
 
         success = len(errors) == 0
 
@@ -717,7 +714,7 @@ def sync_all_providers(
             "errors": errors,
             "results": results,
             "dry_run": dry_run,
-            "synced_at": datetime.now(timezone.utc).isoformat()
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -727,5 +724,5 @@ def sync_all_providers(
             "error": str(e),
             "providers_processed": 0,
             "total_models_fetched": 0,
-            "total_models_synced": 0
+            "total_models_synced": 0,
         }
