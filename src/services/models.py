@@ -2139,23 +2139,23 @@ def fetch_models_from_near():
 
         # Fallback to known Near AI models if API doesn't return results
         # Reference: https://cloud.near.ai/models for current available models
-        # Pricing from https://cloud-api.near.ai/v1/model/list (as of 2025-01)
+        # Pricing from https://cloud-api.near.ai/v1/model/list (as of 2026-01)
         logger.info("Using fallback Near AI model list")
         fallback_models = [
             {
                 "id": "deepseek-ai/DeepSeek-V3.1",
                 "modelId": "deepseek-ai/DeepSeek-V3.1",
                 "owned_by": "DeepSeek",
-                "inputCostPerToken": {"amount": 1, "scale": -6},  # $1.00 per million tokens
-                "outputCostPerToken": {"amount": 2.5, "scale": -6},  # $2.50 per million tokens
+                "inputCostPerToken": {"amount": 1.05, "scale": -6},  # $1.05 per million tokens
+                "outputCostPerToken": {"amount": 3.10, "scale": -6},  # $3.10 per million tokens
                 "metadata": {"contextLength": 128000},
             },
             {
                 "id": "openai/gpt-oss-120b",
                 "modelId": "openai/gpt-oss-120b",
-                "owned_by": "GPT",
-                "inputCostPerToken": {"amount": 0.2, "scale": -6},  # $0.20 per million tokens
-                "outputCostPerToken": {"amount": 0.6, "scale": -6},  # $0.60 per million tokens
+                "owned_by": "OpenAI",
+                "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
+                "outputCostPerToken": {"amount": 0.55, "scale": -6},  # $0.55 per million tokens
                 "metadata": {"contextLength": 131000},
             },
             {
@@ -2163,19 +2163,25 @@ def fetch_models_from_near():
                 "modelId": "Qwen/Qwen3-30B-A3B-Instruct-2507",
                 "owned_by": "Qwen",
                 "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
-                "outputCostPerToken": {"amount": 0.45, "scale": -6},  # $0.45 per million tokens
-                "metadata": {"contextLength": 262000},
+                "outputCostPerToken": {"amount": 0.55, "scale": -6},  # $0.55 per million tokens
+                "metadata": {"contextLength": 262144},
             },
             {
                 "id": "zai-org/GLM-4.6",
                 "modelId": "zai-org/GLM-4.6",
                 "owned_by": "Zhipu AI",
-                "inputCostPerToken": {"amount": 0.75, "scale": -6},  # $0.75 per million tokens
-                "outputCostPerToken": {"amount": 2.0, "scale": -6},  # $2.00 per million tokens
+                "inputCostPerToken": {"amount": 0.85, "scale": -6},  # $0.85 per million tokens
+                "outputCostPerToken": {"amount": 3.30, "scale": -6},  # $3.30 per million tokens
                 "metadata": {"contextLength": 200000},
             },
-            # Note: moonshotai/Kimi-K2-Thinking was removed - model is NOT available on Near AI
-            # Near AI only supports DeepSeek, Qwen, GLM, and GPT-OSS models currently
+            {
+                "id": "zai-org/GLM-4.7",
+                "modelId": "zai-org/GLM-4.7",
+                "owned_by": "Zhipu AI",
+                "inputCostPerToken": {"amount": 0.85, "scale": -6},  # $0.85 per million tokens
+                "outputCostPerToken": {"amount": 3.30, "scale": -6},  # $3.30 per million tokens
+                "metadata": {"contextLength": 131072},
+            },
         ]
 
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
