@@ -73,6 +73,123 @@ from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
+
+def get_fallback_models_from_db(provider_slug: str) -> list[dict] | None:
+    """
+    Get fallback models from the database for a provider.
+
+    This is used when the provider's API is unavailable. Instead of using
+    hardcoded static fallback lists, we use the most recent successfully
+    synced models from the database.
+
+    Args:
+        provider_slug: The provider slug (e.g., 'near', 'cerebras', 'openai')
+
+    Returns:
+        List of model dictionaries in raw format (ready for normalization),
+        or None if no models found in database
+    """
+    try:
+        from src.db.models_catalog_db import get_models_by_provider_slug
+
+        db_models = get_models_by_provider_slug(provider_slug, is_active_only=True)
+
+        if not db_models:
+            logger.info(f"No fallback models found in database for provider: {provider_slug}")
+            return None
+
+        # Convert database models to raw format expected by normalize functions
+        raw_models = []
+        for db_model in db_models:
+            raw_model = _convert_db_model_to_raw(db_model, provider_slug)
+            if raw_model:
+                raw_models.append(raw_model)
+
+        if raw_models:
+            logger.info(
+                f"Using {len(raw_models)} fallback models from database for provider: {provider_slug}"
+            )
+            return raw_models
+
+        return None
+    except Exception as e:
+        logger.warning(
+            f"Failed to get fallback models from database for {provider_slug}: {e}"
+        )
+        return None
+
+
+def _convert_db_model_to_raw(db_model: dict, provider_slug: str) -> dict | None:
+    """
+    Convert a database model to the raw format expected by provider normalize functions.
+
+    Different providers expect different raw formats, so this function handles
+    the conversion based on the provider slug.
+
+    Args:
+        db_model: Model dictionary from the database
+        provider_slug: The provider slug
+
+    Returns:
+        Raw model dictionary ready for normalization, or None if conversion fails
+    """
+    try:
+        provider_model_id = db_model.get("provider_model_id") or db_model.get("model_id")
+        if not provider_model_id:
+            return None
+
+        # Extract pricing from database (stored as per-token pricing)
+        pricing_prompt = db_model.get("pricing_prompt")
+        pricing_completion = db_model.get("pricing_completion")
+
+        # Build base raw model that works for most providers
+        raw_model = {
+            "id": provider_model_id,
+            "modelId": provider_model_id,
+            "model_id": provider_model_id,
+            "name": db_model.get("model_name") or provider_model_id,
+            "description": db_model.get("description"),
+            "context_length": db_model.get("context_length"),
+            "owned_by": db_model.get("top_provider") or provider_slug,
+            "metadata": db_model.get("metadata") or {},
+        }
+
+        # Add context length to metadata for providers that expect it there
+        if raw_model["context_length"]:
+            raw_model["metadata"]["contextLength"] = raw_model["context_length"]
+            raw_model["metadata"]["context_length"] = raw_model["context_length"]
+
+        # Handle pricing based on provider expectations
+        if provider_slug == "near":
+            # Near AI expects inputCostPerToken/outputCostPerToken with amount and scale
+            if pricing_prompt is not None:
+                # Convert per-token price back to amount with scale -6 (per million tokens)
+                raw_model["inputCostPerToken"] = {
+                    "amount": float(pricing_prompt) * 1_000_000,
+                    "scale": -6,
+                }
+            if pricing_completion is not None:
+                raw_model["outputCostPerToken"] = {
+                    "amount": float(pricing_completion) * 1_000_000,
+                    "scale": -6,
+                }
+        else:
+            # Most providers use simple pricing dict or per-token values
+            raw_model["pricing"] = {}
+            if pricing_prompt is not None:
+                raw_model["pricing"]["prompt"] = str(pricing_prompt)
+            if pricing_completion is not None:
+                raw_model["pricing"]["completion"] = str(pricing_completion)
+
+        # Add provider-specific fields
+        if provider_slug in ["openai", "anthropic", "xai"]:
+            raw_model["object"] = "model"
+
+        return raw_model
+    except Exception as e:
+        logger.warning(f"Failed to convert database model: {e}")
+        return None
+
 # Global lock and flag to prevent circular dependencies during catalog building
 # Using a global lock instead of threading.local() to ensure the flag is visible
 # across all threads spawned by ThreadPoolExecutor during parallel model fetching
@@ -483,6 +600,8 @@ def get_all_models_parallel():
             "anthropic",
             "simplismart",
             "sybil",
+            "morpheus",
+            "vercel-ai-gateway",
         ]
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -568,6 +687,8 @@ def get_all_models_sequential():
     anthropic_models = get_cached_models("anthropic") or []
     simplismart_models = get_cached_models("simplismart") or []
     morpheus_models = get_cached_models("morpheus") or []
+    sybil_models = get_cached_models("sybil") or []
+    vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
     return (
         openrouter_models
         + featherless_models
@@ -596,6 +717,8 @@ def get_all_models_sequential():
         + anthropic_models
         + simplismart_models
         + morpheus_models
+        + sybil_models
+        + vercel_ai_gateway_models
     )
 
 
@@ -2131,25 +2254,42 @@ def fetch_models_from_near():
                 sanitize_for_logging(str(e)),
             )
 
-        # Fallback to known Near AI models if API doesn't return results
-        # Reference: https://cloud.near.ai/models for current available models
-        # Pricing from https://cloud-api.near.ai/v1/model/list (as of 2025-01)
+        # Fallback strategy:
+        # 1. First, try to get models from database (most recent successful sync)
+        # 2. If database is empty, use hardcoded static fallback as last resort
         logger.info("Using fallback Near AI model list")
+
+        # Try database fallback first (dynamic, from last successful sync)
+        db_fallback_models = get_fallback_models_from_db("near")
+        if db_fallback_models:
+            normalized_models = [normalize_near_model(model) for model in db_fallback_models if model]
+            normalized_models = [m for m in normalized_models if m]  # Filter out None
+
+            if normalized_models:
+                _near_models_cache["data"] = normalized_models
+                _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+                logger.info(f"Using {len(normalized_models)} Near AI models from database fallback")
+                return _near_models_cache["data"]
+
+        # Static fallback as last resort (if database is empty)
+        # Reference: https://cloud.near.ai/models for current available models
+        # Pricing from https://cloud-api.near.ai/v1/model/list (as of 2026-01)
+        logger.warning("Database fallback empty, using static fallback for Near AI")
         fallback_models = [
             {
                 "id": "deepseek-ai/DeepSeek-V3.1",
                 "modelId": "deepseek-ai/DeepSeek-V3.1",
                 "owned_by": "DeepSeek",
-                "inputCostPerToken": {"amount": 1, "scale": -6},  # $1.00 per million tokens
-                "outputCostPerToken": {"amount": 2.5, "scale": -6},  # $2.50 per million tokens
+                "inputCostPerToken": {"amount": 1.05, "scale": -6},  # $1.05 per million tokens
+                "outputCostPerToken": {"amount": 3.10, "scale": -6},  # $3.10 per million tokens
                 "metadata": {"contextLength": 128000},
             },
             {
                 "id": "openai/gpt-oss-120b",
                 "modelId": "openai/gpt-oss-120b",
-                "owned_by": "GPT",
-                "inputCostPerToken": {"amount": 0.2, "scale": -6},  # $0.20 per million tokens
-                "outputCostPerToken": {"amount": 0.6, "scale": -6},  # $0.60 per million tokens
+                "owned_by": "OpenAI",
+                "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
+                "outputCostPerToken": {"amount": 0.55, "scale": -6},  # $0.55 per million tokens
                 "metadata": {"contextLength": 131000},
             },
             {
@@ -2157,19 +2297,25 @@ def fetch_models_from_near():
                 "modelId": "Qwen/Qwen3-30B-A3B-Instruct-2507",
                 "owned_by": "Qwen",
                 "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
-                "outputCostPerToken": {"amount": 0.45, "scale": -6},  # $0.45 per million tokens
-                "metadata": {"contextLength": 262000},
+                "outputCostPerToken": {"amount": 0.55, "scale": -6},  # $0.55 per million tokens
+                "metadata": {"contextLength": 262144},
             },
             {
                 "id": "zai-org/GLM-4.6",
                 "modelId": "zai-org/GLM-4.6",
                 "owned_by": "Zhipu AI",
-                "inputCostPerToken": {"amount": 0.75, "scale": -6},  # $0.75 per million tokens
-                "outputCostPerToken": {"amount": 2.0, "scale": -6},  # $2.00 per million tokens
+                "inputCostPerToken": {"amount": 0.85, "scale": -6},  # $0.85 per million tokens
+                "outputCostPerToken": {"amount": 3.30, "scale": -6},  # $3.30 per million tokens
                 "metadata": {"contextLength": 200000},
             },
-            # Note: moonshotai/Kimi-K2-Thinking was removed - model is NOT available on Near AI
-            # Near AI only supports DeepSeek, Qwen, GLM, and GPT-OSS models currently
+            {
+                "id": "zai-org/GLM-4.7",
+                "modelId": "zai-org/GLM-4.7",
+                "owned_by": "Zhipu AI",
+                "inputCostPerToken": {"amount": 0.85, "scale": -6},  # $0.85 per million tokens
+                "outputCostPerToken": {"amount": 3.30, "scale": -6},  # $3.30 per million tokens
+                "metadata": {"contextLength": 131072},
+            },
         ]
 
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
@@ -2177,7 +2323,7 @@ def fetch_models_from_near():
         _near_models_cache["data"] = normalized_models
         _near_models_cache["timestamp"] = datetime.now(timezone.utc)
 
-        logger.info(f"Using {len(normalized_models)} fallback Near AI models")
+        logger.info(f"Using {len(normalized_models)} static fallback Near AI models")
         return _near_models_cache["data"]
     except Exception as e:
         logger.error(f"Failed to fetch models from Near AI: {e}")

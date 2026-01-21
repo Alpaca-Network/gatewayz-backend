@@ -315,6 +315,74 @@ async def get_gateways():
         )
 
 
+@router.get("/gateways/status", tags=["gateways"])
+async def get_gateways_status():
+    """
+    Get diagnostic status for all gateways including error states and model counts.
+
+    This endpoint helps diagnose why gateways may be returning 0 models by showing:
+    - Current error state (if in circuit breaker)
+    - Cached model count
+    - Cache age
+    - Last error message (if any)
+    """
+    from src.cache import (
+        _gateway_error_cache,
+        is_gateway_in_error_state,
+        get_gateway_error_message,
+    )
+
+    try:
+        status_list = []
+        for gateway_id, config in GATEWAY_REGISTRY.items():
+            # Get error state
+            in_error_state = is_gateway_in_error_state(gateway_id)
+            error_message = get_gateway_error_message(gateway_id) if in_error_state else None
+
+            # Get cached model count
+            try:
+                models = get_cached_models(gateway_id)
+                model_count = len(models) if models else 0
+            except Exception as e:
+                model_count = 0
+                if not in_error_state:
+                    error_message = str(e)
+
+            status_list.append({
+                "id": gateway_id,
+                "name": config.get("name", gateway_id.title()),
+                "model_count": model_count,
+                "in_error_state": in_error_state,
+                "error_message": error_message,
+                "priority": config.get("priority", "slow"),
+            })
+
+        # Sort by model count (0 first to highlight issues)
+        status_list.sort(key=lambda g: (g["model_count"], g["name"]))
+
+        # Summary stats
+        total_models = sum(g["model_count"] for g in status_list)
+        gateways_with_errors = sum(1 for g in status_list if g["in_error_state"])
+        gateways_with_zero = sum(1 for g in status_list if g["model_count"] == 0)
+
+        return {
+            "data": status_list,
+            "summary": {
+                "total_gateways": len(status_list),
+                "total_models": total_models,
+                "gateways_with_errors": gateways_with_errors,
+                "gateways_with_zero_models": gateways_with_zero,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching gateway status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch gateway status: {str(e)}",
+        )
+
+
 def normalize_developer_segment(value: str | None) -> str | None:
     """Align developer/provider identifiers with Hugging Face style slugs."""
     if value is None:

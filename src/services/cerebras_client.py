@@ -248,7 +248,25 @@ def fetch_models_from_cerebras():
 
 
 def _fallback_cerebras_models(reason: str) -> list[dict[str, Any]] | None:
-    logger.warning("Using static Cerebras model catalog (%s)", reason)
+    logger.warning("Using fallback Cerebras model catalog (%s)", reason)
+
+    # Try database fallback first (dynamic, from last successful sync)
+    try:
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = get_fallback_models_from_db("cerebras")
+        if db_fallback:
+            normalized = [
+                model for model in (_normalize_cerebras_model(entry) for entry in db_fallback) if model
+            ]
+            if normalized:
+                logger.info(f"Using {len(normalized)} Cerebras models from database fallback")
+                return normalized
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for Cerebras: {e}")
+
+    # Static fallback as last resort
+    logger.warning("Database fallback empty, using static fallback for Cerebras")
     normalized = [
         model for model in (_normalize_cerebras_model(entry) for entry in DEFAULT_CEREBRAS_MODELS) if model
     ]

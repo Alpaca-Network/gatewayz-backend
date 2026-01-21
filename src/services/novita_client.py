@@ -148,7 +148,25 @@ def fetch_models_from_novita():
 
 
 def _fallback_novita_models(reason: str) -> list[dict[str, Any]] | None:
-    logger.warning("Using static Novita model catalog (%s)", reason)
+    logger.warning("Using fallback Novita model catalog (%s)", reason)
+
+    # Try database fallback first (dynamic, from last successful sync)
+    try:
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = get_fallback_models_from_db("novita")
+        if db_fallback:
+            normalized = [
+                model for model in (_normalize_novita_model(entry) for entry in db_fallback) if model
+            ]
+            if normalized:
+                logger.info(f"Using {len(normalized)} Novita models from database fallback")
+                return normalized
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for Novita: {e}")
+
+    # Static fallback as last resort
+    logger.warning("Database fallback empty, using static fallback for Novita")
     normalized = [
         model for model in (_normalize_novita_model(entry) for entry in DEFAULT_NOVITA_MODELS) if model
     ]
