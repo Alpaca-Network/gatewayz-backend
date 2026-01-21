@@ -2279,7 +2279,7 @@ async def chat_completions(
                 processed = adapter.from_internal_response(internal_response)
 
                 # Extract values for postprocessing (maintain compatibility with existing code)
-                provider = internal_response.provider or "onerouter"
+                provider = internal_response.provider_used or "onerouter"
                 model = internal_response.model or original_model
 
                 logger.info(
@@ -3603,7 +3603,7 @@ async def unified_responses(
             processed = adapter.from_internal_response(internal_response)
 
             # Extract values for postprocessing (maintain compatibility)
-            provider = internal_response.provider or "onerouter"
+            provider = internal_response.provider_used or "onerouter"
             model = internal_response.model or original_model
 
             logger.info(

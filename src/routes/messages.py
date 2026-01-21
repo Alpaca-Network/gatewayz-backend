@@ -546,7 +546,7 @@ async def anthropic_messages(
             processed = openai_adapter.from_internal_response(internal_response)
 
             # Extract values for postprocessing (maintain compatibility)
-            provider = internal_response.provider or "onerouter"
+            provider = internal_response.provider_used or "onerouter"
             model = internal_response.model or original_model
 
             logger.info(
