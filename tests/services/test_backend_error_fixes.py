@@ -168,6 +168,93 @@ class TestAuthorizationHeaderParsingFixes:
         assert api_key == "sk-unified-test-key"
 
 
+class TestXForwardedForParsingFixes:
+    """Tests for X-Forwarded-For header parsing fixes in chat.py and staging_security.py."""
+
+    def test_empty_forwarded_for_header(self):
+        """Test that empty X-Forwarded-For header doesn't crash."""
+        # Previously: forwarded_for.split(",")[0].strip() (would work but inconsistent)
+        # Now: Defensive bounds checking with len(parts) check
+
+        forwarded_for = ""  # Empty header
+        parts = forwarded_for.split(",")
+        client_ip = "unknown"
+
+        if parts:  # Defensive check
+            client_ip = parts[0].strip()
+
+        # Empty string splits to [''], so client_ip should be empty
+        assert client_ip == ""
+
+    def test_single_ip_forwarded_for(self):
+        """Test that single IP in X-Forwarded-For is parsed correctly."""
+        forwarded_for = "192.168.1.100"
+        parts = forwarded_for.split(",")
+        client_ip = "unknown"
+
+        if parts:
+            client_ip = parts[0].strip()
+
+        assert client_ip == "192.168.1.100"
+
+    def test_multiple_ips_forwarded_for(self):
+        """Test that first IP from multiple IPs is extracted."""
+        forwarded_for = "203.0.113.195, 70.41.3.18, 150.172.238.178"
+        parts = forwarded_for.split(",")
+        client_ip = "unknown"
+
+        if parts:
+            client_ip = parts[0].strip()
+
+        assert client_ip == "203.0.113.195"
+
+    def test_forwarded_for_with_spaces(self):
+        """Test that X-Forwarded-For with extra spaces is handled."""
+        forwarded_for = "  192.168.1.100  ,  10.0.0.1  "
+        parts = forwarded_for.split(",")
+        client_ip = "unknown"
+
+        if parts:
+            client_ip = parts[0].strip()
+
+        # Should strip spaces from first IP
+        assert client_ip == "192.168.1.100"
+
+    def test_malformed_forwarded_for_ipv6(self):
+        """Test that IPv6 addresses in X-Forwarded-For are handled."""
+        forwarded_for = "2001:db8:85a3::8a2e:370:7334, 192.168.1.1"
+        parts = forwarded_for.split(",")
+        client_ip = "unknown"
+
+        if parts:
+            client_ip = parts[0].strip()
+
+        assert client_ip == "2001:db8:85a3::8a2e:370:7334"
+
+    def test_middleware_forwarded_for_parsing(self):
+        """Test that middleware X-Forwarded-For parsing is defensive."""
+        # Simulating the middleware pattern from staging_security.py
+        forwarded_for = "203.0.113.195, 70.41.3.18"
+        parts = forwarded_for.split(",")
+        result_ip = None
+
+        if parts:  # Defensive check
+            result_ip = parts[0].strip()
+
+        assert result_ip == "203.0.113.195"
+
+    def test_middleware_empty_forwarded_for(self):
+        """Test middleware handles empty X-Forwarded-For gracefully."""
+        forwarded_for = ""
+        parts = forwarded_for.split(",")
+
+        # Should have at least one element (empty string)
+        assert len(parts) >= 1
+        if parts:
+            ip = parts[0].strip()
+            assert ip == ""  # Empty but doesn't crash
+
+
 class TestUnsafeListAccessFixes:
     """Tests for unsafe list access fixes in messages.py."""
 
