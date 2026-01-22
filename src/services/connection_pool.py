@@ -606,6 +606,111 @@ def get_nosana_pooled_client() -> OpenAI:
     )
 
 
+# Butter.dev timeout (slightly shorter since caching should be fast)
+BUTTER_DEV_TIMEOUT = httpx.Timeout(
+    connect=5.0,
+    read=float(Config.BUTTER_DEV_TIMEOUT),  # Configurable, default 30s
+    write=10.0,
+    pool=5.0,
+)
+
+
+def get_butter_pooled_client(
+    target_provider: str,
+    target_api_key: str,
+    target_base_url: str | None = None,
+) -> OpenAI:
+    """
+    Get a pooled client that routes through Butter.dev caching proxy.
+
+    Butter.dev is a caching layer for LLM APIs that identifies patterns in
+    responses and serves cached responses to reduce costs and latency.
+
+    Args:
+        target_provider: The actual provider to route to (e.g., 'openrouter')
+        target_api_key: The API key for the target provider
+        target_base_url: Optional base URL override (Butter.dev needs this to route correctly)
+
+    Returns:
+        OpenAI client configured to route through Butter.dev
+
+    Raises:
+        ValueError: If Butter.dev is not enabled
+
+    See: https://butter.dev
+
+    Note:
+        Butter.dev acts as a transparent proxy. It uses the target provider's
+        API key and routes the request through its caching layer before
+        forwarding to the actual provider.
+    """
+    if not Config.BUTTER_DEV_ENABLED:
+        raise ValueError("Butter.dev is not enabled (set BUTTER_DEV_ENABLED=true)")
+
+    # Use a unique cache key that includes the target provider
+    # This ensures we don't accidentally share connections between providers
+    cache_provider = f"butter-{target_provider}"
+
+    # Butter.dev headers to help with routing and analytics
+    default_headers = {
+        "X-Butter-Target-Provider": target_provider,
+    }
+
+    # If we have a target base URL, include it so Butter.dev knows where to route
+    if target_base_url:
+        default_headers["X-Butter-Target-Base-URL"] = target_base_url
+
+    return get_pooled_client(
+        provider=cache_provider,
+        base_url=Config.BUTTER_DEV_BASE_URL,
+        api_key=target_api_key,  # Use the target provider's API key
+        default_headers=default_headers,
+        timeout=BUTTER_DEV_TIMEOUT,
+    )
+
+
+def get_butter_pooled_async_client(
+    target_provider: str,
+    target_api_key: str,
+    target_base_url: str | None = None,
+) -> AsyncOpenAI:
+    """
+    Get a pooled async client that routes through Butter.dev caching proxy.
+
+    Async version of get_butter_pooled_client for use with async request handlers.
+
+    Args:
+        target_provider: The actual provider to route to
+        target_api_key: The API key for the target provider
+        target_base_url: Optional base URL override
+
+    Returns:
+        AsyncOpenAI client configured to route through Butter.dev
+
+    Raises:
+        ValueError: If Butter.dev is not enabled
+    """
+    if not Config.BUTTER_DEV_ENABLED:
+        raise ValueError("Butter.dev is not enabled (set BUTTER_DEV_ENABLED=true)")
+
+    cache_provider = f"butter-{target_provider}"
+
+    default_headers = {
+        "X-Butter-Target-Provider": target_provider,
+    }
+
+    if target_base_url:
+        default_headers["X-Butter-Target-Base-URL"] = target_base_url
+
+    return get_pooled_async_client(
+        provider=cache_provider,
+        base_url=Config.BUTTER_DEV_BASE_URL,
+        api_key=target_api_key,
+        default_headers=default_headers,
+        timeout=BUTTER_DEV_TIMEOUT,
+    )
+
+
 # =============================================================================
 # CONNECTION PRE-WARMING
 # =============================================================================

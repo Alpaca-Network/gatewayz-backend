@@ -32,6 +32,7 @@ def save_chat_completion_request_with_cost(
     model_id: Optional[int] = None,
     api_key_id: Optional[int] = None,
     is_anonymous: bool = False,
+    metadata: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """
     Save a chat completion request with cost tracking
@@ -53,6 +54,8 @@ def save_chat_completion_request_with_cost(
         model_id: Optional model ID if already resolved (avoids lookup)
         api_key_id: Optional API key identifier to track which key was used
         is_anonymous: Whether this request was made anonymously (default: False)
+        metadata: Optional JSONB metadata (e.g., for Butter.dev cache tracking:
+                  {"butter_cache_hit": true, "actual_cost_usd": 0.001})
 
     Returns:
         Created record or None on error
@@ -93,6 +96,8 @@ def save_chat_completion_request_with_cost(
             request_data["user_id"] = user_id
         if api_key_id:
             request_data["api_key_id"] = api_key_id
+        if metadata:
+            request_data["metadata"] = metadata
 
         # Insert into database
         result = client.table("chat_completion_requests").insert(request_data).execute()

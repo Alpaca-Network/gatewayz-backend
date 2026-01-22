@@ -289,6 +289,109 @@ async def update_user_profile_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/user/cache-settings", tags=["authentication"])
+async def get_cache_settings_endpoint(api_key: str = Depends(get_api_key)):
+    """
+    Get the user's Butter.dev cache settings.
+
+    Returns the current cache preference and system status.
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Get user preferences
+        preferences = user.get("preferences") or {}
+        enable_butter_cache = preferences.get("enable_butter_cache", False)
+
+        # Import here to avoid circular imports
+        from src.config.config import Config
+
+        return {
+            "enable_butter_cache": enable_butter_cache,
+            "system_enabled": Config.BUTTER_DEV_ENABLED,
+            "privacy_notice": (
+                "When enabled, your prompts are sent through Butter.dev's caching proxy "
+                "to reduce costs and improve response times. Butter.dev uses prompts to "
+                "identify caching patterns but does not store them long-term."
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting cache settings: %s", sanitize_for_logging(str(e)))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.put("/user/cache-settings", tags=["authentication"])
+async def update_cache_settings_endpoint(
+    enable_butter_cache: bool,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Update the user's Butter.dev cache settings.
+
+    **Privacy Notice**: When enabled, your prompts are sent through Butter.dev's
+    caching proxy to reduce costs and improve response times. Butter.dev uses
+    prompts to identify caching patterns but does not store them long-term.
+
+    Args:
+        enable_butter_cache: Whether to enable LLM response caching via Butter.dev
+
+    Returns:
+        Updated cache settings and confirmation message
+    """
+    try:
+        user = get_user(api_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Get current preferences and update
+        current_preferences = user.get("preferences") or {}
+        current_preferences["enable_butter_cache"] = enable_butter_cache
+
+        # Update user profile with new preferences
+        updated_user = update_user_profile(api_key, {"preferences": current_preferences})
+
+        if not updated_user:
+            raise HTTPException(status_code=500, detail="Failed to update cache settings")
+
+        logger.info(
+            "User %s %s Butter.dev caching",
+            sanitize_for_logging(str(user.get("id"))),
+            "enabled" if enable_butter_cache else "disabled",
+        )
+
+        # Import here to avoid circular imports
+        from src.config.config import Config
+
+        return {
+            "status": "success",
+            "enable_butter_cache": enable_butter_cache,
+            "system_enabled": Config.BUTTER_DEV_ENABLED,
+            "message": (
+                f"Cache {'enabled' if enable_butter_cache else 'disabled'}. "
+                + (
+                    "Your requests will now be routed through Butter.dev for caching."
+                    if enable_butter_cache
+                    else "Your requests will go directly to providers."
+                )
+            ),
+            "privacy_notice": (
+                "When enabled, your prompts are sent through Butter.dev's caching proxy. "
+                "Butter.dev uses prompts to identify caching patterns but does not store them long-term."
+            ) if enable_butter_cache else None,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error updating cache settings: %s", sanitize_for_logging(str(e)))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.delete("/user/account", response_model=DeleteAccountResponse, tags=["authentication"])
 async def delete_user_account_endpoint(
     confirmation: DeleteAccountRequest, api_key: str = Depends(get_api_key)

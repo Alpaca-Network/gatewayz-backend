@@ -386,6 +386,7 @@ def create_app() -> FastAPI:
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
+        ("butter_analytics", "Butter.dev Cache Analytics"),  # LLM response cache analytics
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
