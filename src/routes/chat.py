@@ -1518,7 +1518,13 @@ async def chat_completions(
                 # Get client IP for rate limiting
                 client_ip = "unknown"
                 if request:
-                    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                    # Parse X-Forwarded-For header with defensive bounds checking
+                    forwarded_for = request.headers.get("X-Forwarded-For", "")
+                    if forwarded_for:
+                        parts = forwarded_for.split(",")
+                        if parts:  # Defensive check (split always returns at least [''])
+                            client_ip = parts[0].strip()
+
                     if not client_ip:
                         client_ip = request.headers.get("X-Real-IP", "")
                     if not client_ip and hasattr(request, "client") and request.client:
