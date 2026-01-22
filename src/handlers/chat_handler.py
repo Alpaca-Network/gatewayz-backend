@@ -23,6 +23,7 @@ from src.schemas.internal.chat import (
 from src.services.pricing import calculate_cost
 from src.services.provider_selector import get_selector
 from src.services.trial_validation import track_trial_usage, validate_trial_access
+from src.services.credit_precheck import estimate_and_check_credits
 
 # Provider client imports
 from src.services.openrouter_client import (
@@ -154,6 +155,77 @@ class ChatInferenceHandler:
         logger.debug(
             f"[ChatHandler] User context loaded: user_id={self.user.get('id')}, "
             f"is_trial={self.trial.get('is_trial')}"
+        )
+
+    async def _check_credit_sufficiency(
+        self,
+        model_id: str,
+        messages: list[dict],
+        max_tokens: Optional[int],
+    ) -> None:
+        """
+        Pre-flight credit check: verify user has sufficient credits for maximum possible cost.
+
+        This follows OpenAI's model:
+        1. Estimate input tokens from messages
+        2. Use max_tokens for maximum output
+        3. Calculate maximum possible cost
+        4. Verify user has sufficient credits
+
+        Args:
+            model_id: Model to be used
+            messages: Chat messages
+            max_tokens: Maximum output tokens (from request)
+
+        Raises:
+            HTTPException: 402 Payment Required if insufficient credits
+        """
+        from fastapi import HTTPException
+
+        # Trial users don't need credit checks
+        if self.trial.get("is_trial", False):
+            logger.debug("[ChatHandler] Skipping credit check for trial user")
+            return
+
+        # Get user's current credits
+        user_credits = self.user.get("credits", 0.0)
+
+        # Perform pre-flight check
+        check_result = estimate_and_check_credits(
+            model_id=model_id,
+            messages=messages,
+            user_credits=user_credits,
+            max_tokens=max_tokens,
+            is_trial=False,
+        )
+
+        if not check_result["allowed"]:
+            # Insufficient credits - reject before provider call
+            from src.utils.exceptions import APIExceptions
+
+            max_cost = check_result["max_cost"]
+            max_output_tokens = check_result["max_output_tokens"]
+            input_tokens = check_result.get("input_tokens", 0)
+
+            logger.warning(
+                f"[ChatHandler] Insufficient credits for user {self.user.get('id')}: "
+                f"need ${max_cost:.4f}, have ${user_credits:.4f}"
+            )
+
+            # Use detailed error with actionable suggestions
+            raise APIExceptions.insufficient_credits_for_reservation(
+                current_credits=user_credits,
+                max_cost=max_cost,
+                model_id=model_id,
+                max_tokens=max_output_tokens,
+                input_tokens=input_tokens,
+                request_id=self.request_id,
+            )
+
+        # Log successful check
+        logger.info(
+            f"[ChatHandler] Credit pre-check passed: max_cost=${check_result['max_cost']:.4f}, "
+            f"available=${user_credits:.4f}"
         )
 
     def _call_provider(
@@ -458,8 +530,7 @@ class ChatInferenceHandler:
                 f"messages={len(request.messages)}, user_id={self.user.get('id')}"
             )
 
-            # Step 2: Select provider and call with failover (provider selector handles model transformation)
-            # Convert internal messages to OpenAI format for provider clients
+            # Step 1.5: Convert internal messages to OpenAI format for provider clients
             messages = [
                 {
                     "role": msg.role,
@@ -471,7 +542,14 @@ class ChatInferenceHandler:
                 for msg in request.messages
             ]
 
-            # Build provider kwargs
+            # Step 1.6: Pre-flight credit check (verify user has enough credits for max possible cost)
+            await self._check_credit_sufficiency(
+                model_id=request.model,
+                messages=messages,
+                max_tokens=request.max_tokens,
+            )
+
+            # Step 2: Build provider kwargs
             kwargs = {
                 "temperature": request.temperature,
                 "max_tokens": request.max_tokens,
@@ -678,6 +756,13 @@ class ChatInferenceHandler:
                 }
                 for msg in request.messages
             ]
+
+            # Step 2.5: Pre-flight credit check (streaming)
+            await self._check_credit_sufficiency(
+                model_id=request.model,
+                messages=messages,
+                max_tokens=request.max_tokens,
+            )
 
             kwargs = {
                 "temperature": request.temperature,

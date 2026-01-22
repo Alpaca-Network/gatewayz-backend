@@ -339,6 +339,65 @@ class APIExceptions:
         )
 
     @staticmethod
+    def insufficient_credits_for_reservation(
+        current_credits: float,
+        max_cost: float,
+        model_id: str,
+        max_tokens: int,
+        input_tokens: Optional[int] = None,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        402 Insufficient Credits - Pre-flight check version with max cost details.
+
+        This error is raised BEFORE making a provider request when the user doesn't
+        have enough credits to cover the maximum possible cost (based on max_tokens).
+
+        Args:
+            current_credits: User's current credit balance
+            max_cost: Maximum possible cost for the request
+            model_id: Model being requested
+            max_tokens: Maximum output tokens parameter
+            input_tokens: Optional estimated input tokens
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response including:
+            - Maximum possible cost
+            - Current balance
+            - Shortfall amount
+            - Actionable suggestions (reduce max_tokens, add credits)
+            - Calculated recommended max_tokens
+
+        Example:
+            >>> raise APIExceptions.insufficient_credits_for_reservation(
+            ...     current_credits=0.05,
+            ...     max_cost=0.20,
+            ...     model_id="gpt-4o",
+            ...     max_tokens=4096,
+            ...     input_tokens=100
+            ... )
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.insufficient_credits_for_reservation(
+            current_credits=current_credits,
+            max_cost=max_cost,
+            model_id=model_id,
+            max_tokens=max_tokens,
+            input_tokens=input_tokens,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
     def invalid_api_key_detailed(
         reason: Optional[str] = None,
         key_prefix: Optional[str] = None,

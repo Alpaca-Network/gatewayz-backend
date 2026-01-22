@@ -491,6 +491,98 @@ class DetailedErrorFactory:
 
         return ErrorResponse(error=error)
 
+    @staticmethod
+    def insufficient_credits_for_reservation(
+        current_credits: float,
+        max_cost: float,
+        model_id: str,
+        max_tokens: int,
+        input_tokens: Optional[int] = None,
+        request_id: Optional[str] = None,
+    ) -> ErrorResponse:
+        """
+        Create an insufficient credits error for credit reservation (pre-flight check).
+
+        This error is raised BEFORE making a provider request when the user doesn't
+        have enough credits to cover the maximum possible cost.
+
+        Args:
+            current_credits: User's current credit balance
+            max_cost: Maximum possible cost for the request
+            model_id: Model being requested
+            max_tokens: Maximum output tokens parameter
+            input_tokens: Optional estimated input tokens
+            request_id: Optional request ID
+
+        Returns:
+            ErrorResponse with detailed insufficient credits error for reservation
+        """
+        code = ErrorCode.INSUFFICIENT_CREDITS
+        shortfall = max_cost - current_credits
+
+        # Create user-friendly message
+        message = (
+            f"Insufficient credits for this request. "
+            f"Maximum possible cost: ${max_cost:.4f}. "
+            f"Available balance: ${current_credits:.4f}. "
+            f"Shortfall: ${shortfall:.4f}."
+        )
+
+        # Create detailed explanation
+        detail = (
+            f"Your request to {model_id} requires up to ${max_cost:.4f} in credits "
+            f"(based on max_tokens={max_tokens}), but you only have ${current_credits:.4f} available. "
+            f"You need ${shortfall:.4f} more credits to proceed."
+        )
+
+        # Build actionable suggestions
+        suggestions = [
+            f"Add ${shortfall:.4f} or more in credits to your account",
+            f"Reduce max_tokens from {max_tokens} to lower the maximum possible cost",
+            "Use a less expensive model",
+            "Visit https://gatewayz.ai/pricing to add credits",
+        ]
+
+        # Add suggestion to reduce max_tokens with calculation
+        if max_tokens > 100:
+            suggested_max_tokens = int(max_tokens * (current_credits / max_cost)) if max_cost > 0 else 100
+            if suggested_max_tokens > 0:
+                suggestions.insert(
+                    1,
+                    f"Try setting max_tokens to {suggested_max_tokens} or less to fit your available balance"
+                )
+
+        context = ErrorContext(
+            current_credits=current_credits,
+            required_credits=max_cost,
+            credit_deficit=shortfall,
+            requested_model=model_id,
+            requested_max_tokens=max_tokens,
+            input_tokens=input_tokens,
+            additional_info={
+                "reason": "pre_flight_check",
+                "check_type": "credit_reservation",
+                "max_possible_cost": max_cost,
+                "note": "This is a conservative estimate. Actual cost may be lower based on actual token usage.",
+            },
+        )
+
+        error = ErrorDetail(
+            type=get_error_type(code),
+            message=message,
+            detail=detail,
+            code=code,
+            status=get_status_code(code),
+            request_id=request_id or f"req_{uuid.uuid4().hex[:12]}",
+            timestamp=datetime.utcnow().isoformat() + "Z",
+            suggestions=suggestions,
+            context=context,
+            docs_url="https://docs.gatewayz.ai/pricing-and-billing/credits",
+            support_url="https://gatewayz.ai/support",
+        )
+
+        return ErrorResponse(error=error)
+
     # ==================== Rate Limiting Errors ====================
 
     @staticmethod
