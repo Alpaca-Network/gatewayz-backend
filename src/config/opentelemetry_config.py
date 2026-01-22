@@ -145,8 +145,8 @@ class OpenTelemetryConfig:
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
             if Config.TEMPO_SKIP_REACHABILITY_CHECK:
                 logger.info(
-                    f"   Skipping reachability check (TEMPO_SKIP_REACHABILITY_CHECK=true) - "
-                    f"traces will be buffered and sent asynchronously"
+                    "   Skipping reachability check (TEMPO_SKIP_REACHABILITY_CHECK=true) - "
+                    "traces will be buffered and sent asynchronously"
                 )
             elif not _check_endpoint_reachable(tempo_endpoint):
                 logger.warning(
