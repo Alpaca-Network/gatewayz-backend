@@ -151,7 +151,7 @@ async def get_cache_analytics(
     except Exception as e:
         logger.error(
             "Error getting cache analytics for user %s: %s",
-            sanitize_for_logging(str(user_id) if 'user_id' in dir() else "unknown"),
+            sanitize_for_logging(str(locals().get("user_id", "unknown"))),
             sanitize_for_logging(str(e)),
             exc_info=True,
         )

@@ -607,9 +607,10 @@ def get_nosana_pooled_client() -> OpenAI:
 
 
 # Butter.dev timeout (slightly shorter since caching should be fast)
+# Only configure timeout when Butter.dev is enabled
 BUTTER_DEV_TIMEOUT = httpx.Timeout(
     connect=5.0,
-    read=float(Config.BUTTER_DEV_TIMEOUT),  # Configurable, default 30s
+    read=float(Config.BUTTER_DEV_TIMEOUT) if Config.BUTTER_DEV_ENABLED else 30.0,
     write=10.0,
     pool=5.0,
 )

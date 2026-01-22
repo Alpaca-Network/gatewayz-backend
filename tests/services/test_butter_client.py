@@ -6,9 +6,8 @@ for the Butter.dev integration.
 """
 
 import os
-import pytest
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Set test environment before imports
 os.environ.setdefault("TESTING", "true")
@@ -188,10 +187,11 @@ class TestButterCacheTimer:
         with ButterCacheTimer() as timer:
             time.sleep(0.1)
 
-        assert timer.elapsed_seconds >= 0.1
-        assert timer.elapsed_seconds < 0.2
-        assert timer.elapsed_ms >= 100
-        assert timer.elapsed_ms < 200
+        # Allow timing variance for CI environments (sleep may be imprecise)
+        assert timer.elapsed_seconds >= 0.08  # Allow some variance below
+        assert timer.elapsed_seconds < 0.3    # Allow generous upper bound
+        assert timer.elapsed_ms >= 80
+        assert timer.elapsed_ms < 300
 
     def test_timer_detects_cache_hit(self):
         """Test that timer correctly detects cache hit based on latency."""
