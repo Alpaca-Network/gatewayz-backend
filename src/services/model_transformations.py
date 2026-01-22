@@ -126,6 +126,21 @@ MODEL_ID_ALIASES = {
     # Claude 4 series - Sonnet variants
     "claude-sonnet-4": "anthropic/claude-sonnet-4",
     "sonnet-4": "anthropic/claude-sonnet-4",
+    # Claude 4.5 series - Sonnet variants (Anthropic native dated format used by Claude Code)
+    "claude-sonnet-4-20250514": "anthropic/claude-sonnet-4.5",
+    "claude-sonnet-4.5-20250514": "anthropic/claude-sonnet-4.5",
+    "claude-4-5-sonnet-20250514": "anthropic/claude-sonnet-4.5",
+    "claude-4.5-sonnet-20250514": "anthropic/claude-sonnet-4.5",
+    "sonnet-4.5": "anthropic/claude-sonnet-4.5",
+    "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
+    # Claude 4.5 series - Opus variants (Anthropic native dated format used by Claude Code)
+    "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+    "claude-opus-4.5-20250514": "anthropic/claude-opus-4.5",
+    "claude-4-5-opus-20250514": "anthropic/claude-opus-4.5",
+    "claude-4.5-opus-20250514": "anthropic/claude-opus-4.5",
+    # Claude 3.5 series (Anthropic native dated formats)
+    "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
+    "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
     # Claude 4 series - Haiku variants
     "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
     "haiku-4.5": "anthropic/claude-haiku-4.5",
@@ -502,6 +517,18 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_5,
             "claude-opus-4.5": "anthropic/claude-opus-4.5",
             "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+            # Claude Code native format (Anthropic API dated model IDs)
+            "claude-sonnet-4-20250514": CLAUDE_SONNET_4_5,
+            "claude-sonnet-4.5-20250514": CLAUDE_SONNET_4_5,
+            "claude-4-5-sonnet-20250514": CLAUDE_SONNET_4_5,
+            "claude-4.5-sonnet-20250514": CLAUDE_SONNET_4_5,
+            "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+            "claude-opus-4.5-20250514": "anthropic/claude-opus-4.5",
+            "claude-4-5-opus-20250514": "anthropic/claude-opus-4.5",
+            "claude-4.5-opus-20250514": "anthropic/claude-opus-4.5",
+            # Claude 3.5 series (Anthropic native dated formats)
+            "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
+            "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
             # Google Gemini models on OpenRouter
             "google/gemini-3-flash-preview": "google/gemini-3-flash-preview",
             "google/gemini-3-pro-preview": "google/gemini-3-pro-preview",
