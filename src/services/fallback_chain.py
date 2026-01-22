@@ -10,7 +10,6 @@ Target latency: < 0.2ms
 """
 
 import logging
-from typing import Any
 
 from src.schemas.router import ModelCapabilities, RequiredCapabilities
 
@@ -169,7 +168,7 @@ def _is_compatible_fallback(
     if primary_caps:
         # If primary has high tool adherence, fallback should too
         if primary_caps.tool_schema_adherence == "high":
-            if candidate_caps.tool_schema_adherence not in ("high",):
+            if candidate_caps.tool_schema_adherence != "high":
                 logger.debug(
                     f"Excluding {candidate} from fallback: tool adherence mismatch"
                 )

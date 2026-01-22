@@ -11,7 +11,7 @@ Tests cover:
 """
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -20,7 +20,6 @@ from src.schemas.router import (
     ModelCapabilities,
     PromptCategory,
     RequiredCapabilities,
-    RouterDecision,
     RouterOptimization,
     UserRouterPreferences,
 )
@@ -29,10 +28,7 @@ from src.services.capability_gating import (
     filter_by_capabilities,
 )
 from src.services.fallback_chain import build_fallback_chain
-from src.services.model_selector import (
-    QUALITY_PRIORS,
-    select_model,
-)
+from src.services.model_selector import select_model
 from src.services.prompt_classifier_rules import classify_prompt
 from src.services.prompt_router import (
     DEFAULT_CHEAP_MODEL,
@@ -451,9 +447,7 @@ class TestPromptRouter:
         router = PromptRouter()
         messages = [{"role": "user", "content": "Hello"}]
 
-        # Force no candidates by requiring impossible capability
-        caps = RequiredCapabilities(min_context_tokens=999999999)
-
+        # Force no candidates by patching empty capabilities registry
         with patch.object(router, '_capabilities_registry', {}):
             decision = router.route(messages=messages)
 

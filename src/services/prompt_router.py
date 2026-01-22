@@ -18,9 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from src.schemas.router import (
-    ClassificationResult,
     ModelCapabilities,
-    PromptCategory,
     RequiredCapabilities,
     RouterDecision,
     RouterOptimization,
@@ -41,6 +39,16 @@ ROUTER_TIMEOUT_MS = 2.0
 # Default cheap model for fail-open
 DEFAULT_CHEAP_MODEL = "openai/gpt-4o-mini"
 DEFAULT_PROVIDER = "openai"
+
+# Curated list of known-stable models for fallback when health data unavailable
+# These are high-reliability models that should always work
+STABLE_FALLBACK_MODELS = [
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3-haiku",
+    "google/gemini-1.5-flash",
+]
 
 # Path to model capabilities data
 CAPABILITIES_DATA_PATH = Path(__file__).parent.parent / "data" / "model_capabilities.json"
@@ -200,7 +208,11 @@ class PromptRouter:
                 healthy = get_healthy_models_sync(tier)
             except Exception as e:
                 logger.warning(f"Health snapshot read failed: {e}")
-                healthy = list(self._capabilities_registry.keys())
+                # Use curated stable models instead of entire registry to avoid unhealthy models
+                healthy = [m for m in STABLE_FALLBACK_MODELS if m in self._capabilities_registry]
+                if not healthy:
+                    # Last resort: use all models from registry
+                    healthy = list(self._capabilities_registry.keys())
 
             # Check timeout
             if self._check_timeout(start):

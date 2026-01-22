@@ -531,6 +531,10 @@ PROVIDER_TIMEOUTS = {
     "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
 
+# Auto-routing constants
+AUTO_ROUTE_MODEL_PREFIX = "auto"
+AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
+
 
 def mask_key(k: str) -> str:
     return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
@@ -1820,13 +1824,14 @@ async def chat_completions(
                     detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
                 )
 
-        # Store original model for response
+        # Store original model for response and routing logic
         original_model = req.model
+        is_auto_route = original_model and original_model.lower().startswith(AUTO_ROUTE_MODEL_PREFIX)
 
         # === 2.3) Prompt-Level Routing (if model="auto") ===
         # This is a fail-open router - if it fails or times out, it returns a default cheap model
         router_decision = None
-        if original_model and original_model.lower().startswith("auto"):
+        if is_auto_route:
             with tracker.stage("prompt_routing"):
                 try:
                     from src.services.prompt_router import (
@@ -1860,7 +1865,6 @@ async def chat_completions(
 
                         # Update model with routed selection
                         req.model = router_decision.selected_model
-                        original_model = router_decision.selected_model
 
                         logger.info(
                             "Prompt router selected model: %s (category=%s, confidence=%.2f, time=%.2fms, reason=%s)",
@@ -1872,15 +1876,13 @@ async def chat_completions(
                         )
 
                 except Exception as e:
-                    # Fail open - log warning and continue with original model (or default)
+                    # Fail open - log warning and use default model
                     logger.warning(
                         "Prompt router failed, falling back to default: %s",
                         str(e),
                     )
-                    # If model is still "auto*", default to gpt-4o-mini
-                    if req.model.lower().startswith("auto"):
-                        req.model = "openai/gpt-4o-mini"
-                        original_model = "openai/gpt-4o-mini"
+                    # Use default model since original was an auto-route request
+                    req.model = AUTO_ROUTE_DEFAULT_MODEL
 
         with tracker.stage("request_preparation"):
             optional = {}

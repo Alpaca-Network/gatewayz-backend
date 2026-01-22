@@ -6,11 +6,16 @@ optimal models based on price/performance trade-offs.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+# Constants for routing thresholds
+CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.6  # Minimum confidence to trust classification
+HEALTH_DATA_STALE_SECONDS = 300  # 5 minutes - health data older than this is stale
+MODEL_COOLDOWN_SECONDS = 60  # 1 minute cooldown after failures
 
 
 class PromptCategory(str, Enum):
@@ -69,7 +74,7 @@ class ClassificationResult:
     @property
     def is_low_confidence(self) -> bool:
         """Check if confidence is below threshold for escalation."""
-        return self.confidence < 0.6
+        return self.confidence < CLASSIFICATION_CONFIDENCE_THRESHOLD
 
 
 @dataclass
@@ -187,21 +192,16 @@ class ModelHealthSnapshot:
     @property
     def is_stale(self) -> bool:
         """Check if health data is too old to trust."""
-        from datetime import timezone
-
         age_seconds = (datetime.now(timezone.utc) - self.last_updated).total_seconds()
-        return age_seconds > 300  # 5 minutes
+        return age_seconds > HEALTH_DATA_STALE_SECONDS
 
     @property
     def in_cooldown(self) -> bool:
         """Check if model is in cooldown after failure."""
         if not self.last_failure_at:
             return False
-        from datetime import timezone
-
-        cooldown_seconds = 60  # 1 minute cooldown
         since_failure = (datetime.now(timezone.utc) - self.last_failure_at).total_seconds()
-        return since_failure < cooldown_seconds
+        return since_failure < MODEL_COOLDOWN_SECONDS
 
 
 @dataclass

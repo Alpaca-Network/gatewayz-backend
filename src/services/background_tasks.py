@@ -266,13 +266,13 @@ def start_router_health_snapshot_task() -> None:
     global _health_snapshot_task, _health_snapshot_stop_event
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            _health_snapshot_stop_event = asyncio.Event()
-            _health_snapshot_task = loop.create_task(update_router_health_snapshots())
-            logger.info("Router health snapshot background task started")
-        else:
-            logger.warning("Event loop not running, cannot start health snapshot task")
+        loop = asyncio.get_running_loop()
+        _health_snapshot_stop_event = asyncio.Event()
+        _health_snapshot_task = loop.create_task(update_router_health_snapshots())
+        logger.info("Router health snapshot background task started")
+    except RuntimeError:
+        # No running event loop
+        logger.warning("Event loop not running, cannot start health snapshot task")
     except Exception as e:
         logger.error(f"Failed to start router health snapshot task: {e}")
 

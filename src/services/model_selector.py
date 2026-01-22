@@ -11,12 +11,10 @@ Target latency: < 0.3ms
 
 import hashlib
 import logging
-from typing import Any
 
 from src.schemas.router import (
     ClassificationResult,
     ModelCapabilities,
-    PromptCategory,
     RouterOptimization,
 )
 
@@ -28,6 +26,12 @@ HYSTERESIS_THRESHOLD = 5.0
 
 # Default cheap model (fail-open fallback)
 DEFAULT_CHEAP_MODEL = "openai/gpt-4o-mini"
+
+# Realtime metrics penalty/bonus multipliers
+RETRY_RATE_PENALTY_MULTIPLIER = 20  # Penalty per 1.0 retry rate
+FORMAT_FAILURE_PENALTY_MULTIPLIER = 30  # Penalty per 1.0 format failure rate
+SUCCESS_RATE_BONUS_MULTIPLIER = 20  # Bonus per 0.1 above baseline
+SUCCESS_RATE_BASELINE = 0.9  # Expected baseline success rate
 
 # Quality priors from benchmarks (treated as priors, not truth)
 # Values are 0-100, will be blended with realtime metrics
@@ -264,15 +268,15 @@ def _compute_model_score(
     realtime = _realtime_metrics_cache.get(model_id)
     if realtime:
         # Penalize high retry rates (users retrying = bad experience)
-        retry_penalty = realtime.get("retry_rate", 0) * 20
+        retry_penalty = realtime.get("retry_rate", 0) * RETRY_RATE_PENALTY_MULTIPLIER
         quality -= retry_penalty
 
         # Penalize format failures (JSON invalid, etc.)
-        format_penalty = realtime.get("format_failure_rate", 0) * 30
+        format_penalty = realtime.get("format_failure_rate", 0) * FORMAT_FAILURE_PENALTY_MULTIPLIER
         quality -= format_penalty
 
         # Boost high success rates
-        success_bonus = (realtime.get("success_rate", 0.9) - 0.9) * 20
+        success_bonus = (realtime.get("success_rate", SUCCESS_RATE_BASELINE) - SUCCESS_RATE_BASELINE) * SUCCESS_RATE_BONUS_MULTIPLIER
         quality += success_bonus
 
     # Clamp quality to valid range
