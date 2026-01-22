@@ -1823,6 +1823,65 @@ async def chat_completions(
         # Store original model for response
         original_model = req.model
 
+        # === 2.3) Prompt-Level Routing (if model="auto") ===
+        # This is a fail-open router - if it fails or times out, it returns a default cheap model
+        router_decision = None
+        if original_model and original_model.lower().startswith("auto"):
+            with tracker.stage("prompt_routing"):
+                try:
+                    from src.services.prompt_router import (
+                        is_auto_route_request,
+                        parse_auto_route_options,
+                        route_request,
+                    )
+                    from src.schemas.router import UserRouterPreferences
+
+                    if is_auto_route_request(original_model):
+                        tier, optimization = parse_auto_route_options(original_model)
+
+                        # Build user preferences (could be loaded from DB in future)
+                        user_preferences = UserRouterPreferences(
+                            default_optimization=optimization,
+                            enabled=True,
+                        )
+
+                        # Get conversation ID for sticky routing (use session_id if available)
+                        conversation_id = str(session_id) if session_id else None
+
+                        # Route the request (fail-open, < 2ms target)
+                        router_decision = route_request(
+                            messages=messages,
+                            tools=getattr(req, "tools", None),
+                            response_format=getattr(req, "response_format", None),
+                            user_preferences=user_preferences,
+                            conversation_id=conversation_id,
+                            tier=tier,
+                        )
+
+                        # Update model with routed selection
+                        req.model = router_decision.selected_model
+                        original_model = router_decision.selected_model
+
+                        logger.info(
+                            "Prompt router selected model: %s (category=%s, confidence=%.2f, time=%.2fms, reason=%s)",
+                            router_decision.selected_model,
+                            router_decision.classification.category.value if router_decision.classification else "unknown",
+                            router_decision.classification.confidence if router_decision.classification else 0,
+                            router_decision.decision_time_ms,
+                            router_decision.reason,
+                        )
+
+                except Exception as e:
+                    # Fail open - log warning and continue with original model (or default)
+                    logger.warning(
+                        "Prompt router failed, falling back to default: %s",
+                        str(e),
+                    )
+                    # If model is still "auto*", default to gpt-4o-mini
+                    if req.model.lower().startswith("auto"):
+                        req.model = "openai/gpt-4o-mini"
+                        original_model = "openai/gpt-4o-mini"
+
         with tracker.stage("request_preparation"):
             optional = {}
             for name in (

@@ -147,3 +147,146 @@ def get_pending_tasks_count() -> int:
         return len(tasks)
     except Exception:
         return 0
+
+
+# === Router Health Snapshot Background Task ===
+
+_health_snapshot_task: asyncio.Task | None = None
+_health_snapshot_stop_event: asyncio.Event | None = None
+
+
+async def update_router_health_snapshots() -> None:
+    """
+    Background task to update router health snapshots every 30 seconds.
+
+    This task:
+    1. Collects health data from the intelligent health monitor
+    2. Writes pre-computed healthy model lists to Redis
+    3. Router then reads ONE key per request instead of N awaits
+
+    This is critical for meeting the < 2ms router latency budget.
+    """
+    from src.services.health_snapshots import get_health_snapshot_service
+
+    logger.info("Starting router health snapshot background task")
+    service = get_health_snapshot_service()
+
+    while True:
+        try:
+            # Check if we should stop
+            if _health_snapshot_stop_event and _health_snapshot_stop_event.is_set():
+                logger.info("Router health snapshot task stopping")
+                break
+
+            # Collect health data from existing health monitoring
+            health_data = await _collect_model_health_data()
+
+            # Update snapshots
+            await service.update_health_snapshot(health_data)
+
+            logger.debug(f"Updated router health snapshots with {len(health_data)} models")
+
+        except Exception as e:
+            logger.error(f"Error updating router health snapshots: {e}", exc_info=True)
+
+        # Wait 30 seconds before next update
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            logger.info("Router health snapshot task cancelled")
+            break
+
+
+async def _collect_model_health_data() -> dict[str, dict[str, Any]]:
+    """
+    Collect health data for all models from existing health monitoring.
+
+    Returns dict mapping model_id -> health info
+    """
+    from datetime import datetime, timezone
+
+    health_data = {}
+
+    try:
+        # Try to get health data from the intelligent health monitor
+        from src.services.intelligent_health_monitor import get_all_provider_health
+
+        provider_health = await get_all_provider_health()
+
+        if provider_health:
+            now = datetime.now(timezone.utc)
+            for provider, health in provider_health.items():
+                # Create synthetic model IDs based on provider
+                # In production, this should be enhanced to track per-model health
+                model_id = f"{provider}/default"
+                health_data[model_id] = {
+                    "health_score": health.get("score", 100),
+                    "consecutive_failures": health.get("consecutive_failures", 0),
+                    "last_failure_at": health.get("last_failure_at"),
+                    "last_updated": now.isoformat(),
+                }
+
+    except ImportError:
+        logger.debug("Intelligent health monitor not available, using defaults")
+    except Exception as e:
+        logger.warning(f"Could not collect health data from monitor: {e}")
+
+    # If no health data, assume all models are healthy
+    if not health_data:
+        from datetime import datetime, timezone
+        from src.services.health_snapshots import SMALL_TIER_POOL, MEDIUM_TIER_POOL
+
+        now = datetime.now(timezone.utc)
+        all_models = set(SMALL_TIER_POOL) | set(MEDIUM_TIER_POOL)
+
+        for model_id in all_models:
+            health_data[model_id] = {
+                "health_score": 100,
+                "consecutive_failures": 0,
+                "last_failure_at": None,
+                "last_updated": now.isoformat(),
+            }
+
+    return health_data
+
+
+async def get_all_provider_health() -> dict[str, dict[str, Any]]:
+    """
+    Fallback function if intelligent_health_monitor is not available.
+    Returns empty dict (all models treated as healthy).
+    """
+    return {}
+
+
+def start_router_health_snapshot_task() -> None:
+    """
+    Start the router health snapshot background task.
+    Call this during application startup.
+    """
+    global _health_snapshot_task, _health_snapshot_stop_event
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            _health_snapshot_stop_event = asyncio.Event()
+            _health_snapshot_task = loop.create_task(update_router_health_snapshots())
+            logger.info("Router health snapshot background task started")
+        else:
+            logger.warning("Event loop not running, cannot start health snapshot task")
+    except Exception as e:
+        logger.error(f"Failed to start router health snapshot task: {e}")
+
+
+def stop_router_health_snapshot_task() -> None:
+    """
+    Stop the router health snapshot background task.
+    Call this during application shutdown.
+    """
+    global _health_snapshot_task, _health_snapshot_stop_event
+
+    if _health_snapshot_stop_event:
+        _health_snapshot_stop_event.set()
+
+    if _health_snapshot_task:
+        _health_snapshot_task.cancel()
+        logger.info("Router health snapshot background task stopped")

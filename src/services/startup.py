@@ -307,6 +307,24 @@ async def lifespan(app):
 
         _create_background_task(init_error_monitoring_background(), name="init_error_monitoring")
 
+        # Initialize router health snapshot background task
+        # This updates pre-computed healthy model lists for the prompt router
+        # Critical for meeting < 2ms router latency (single Redis read vs N awaits)
+        async def init_router_health_snapshots_background():
+            try:
+                router_enabled = os.environ.get("ROUTER_ENABLED", "true").lower() == "true"
+                if router_enabled:
+                    from src.services.background_tasks import start_router_health_snapshot_task
+
+                    start_router_health_snapshot_task()
+                    logger.info("✓ Router health snapshot background task started")
+                else:
+                    logger.info("⏭️  Router disabled via ROUTER_ENABLED env var")
+            except Exception as e:
+                logger.warning(f"Router health snapshot initialization warning: {e}")
+
+        _create_background_task(init_router_health_snapshots_background(), name="init_router_health_snapshots")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
@@ -343,6 +361,15 @@ async def lifespan(app):
             logger.info("Autonomous error monitoring stopped")
         except Exception as e:
             logger.warning(f"Error monitoring shutdown warning: {e}")
+
+        # Stop router health snapshot background task
+        try:
+            from src.services.background_tasks import stop_router_health_snapshot_task
+
+            stop_router_health_snapshot_task()
+            logger.info("Router health snapshot task stopped")
+        except Exception as e:
+            logger.warning(f"Router health snapshot shutdown warning: {e}")
 
         # Health monitoring is handled by the dedicated health-service container
         # No health monitor shutdown needed in main API
