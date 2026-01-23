@@ -236,6 +236,7 @@ class Config:
 
     # Canopy Wave AI Configuration
     CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
+    CANOPYWAVE_BASE_URL = os.environ.get("CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1")
 
     # Nosana GPU Computing Network Configuration
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")

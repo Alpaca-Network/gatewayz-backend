@@ -585,10 +585,6 @@ def get_sybil_pooled_client() -> OpenAI:
     )
 
 
-# Canopy Wave base URL constant
-CANOPYWAVE_BASE_URL = "https://inference.canopywave.io/v1"
-
-
 def get_canopywave_pooled_client() -> OpenAI:
     """Get pooled client for Canopy Wave AI.
 
@@ -601,7 +597,7 @@ def get_canopywave_pooled_client() -> OpenAI:
 
     return get_pooled_client(
         provider="canopywave",
-        base_url=CANOPYWAVE_BASE_URL,
+        base_url=Config.CANOPYWAVE_BASE_URL,
         api_key=Config.CANOPYWAVE_API_KEY,
     )
 

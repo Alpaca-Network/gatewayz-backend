@@ -24,22 +24,20 @@ Features:
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Iterator
 
 import httpx
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
+from src.cache import _canopywave_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_canopywave_pooled_client
 
 # Initialize logging
 logger = logging.getLogger(__name__)
-
-# Canopy Wave base URL
-CANOPYWAVE_BASE_URL = "https://inference.canopywave.io/v1"
-CANOPYWAVE_MODELS_ENDPOINT = f"{CANOPYWAVE_BASE_URL}/models"
 
 
 def get_canopywave_client() -> OpenAI:
@@ -161,6 +159,39 @@ def process_canopywave_response(response: ChatCompletion) -> dict[str, Any]:
         raise
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Safely convert a value to float, returning default on failure.
+
+    Args:
+        value: The value to convert to float.
+        default: The default value to return if conversion fails.
+
+    Returns:
+        The float value or default if conversion fails.
+    """
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        logger.warning(f"Failed to convert pricing value to float: {value!r}, using default {default}")
+        return default
+
+
+def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Update cache with models and timestamp, then return models.
+
+    Args:
+        models: List of model dictionaries to cache.
+
+    Returns:
+        The same list of models.
+    """
+    _canopywave_models_cache["data"] = models
+    _canopywave_models_cache["timestamp"] = datetime.now(timezone.utc)
+    return models
+
+
 def fetch_models_from_canopywave() -> list[dict[str, Any]]:
     """Fetch available models from Canopy Wave API.
 
@@ -179,10 +210,13 @@ def fetch_models_from_canopywave() -> list[dict[str, Any]]:
             logger.warning("Canopy Wave API key not configured, skipping model fetch")
             return []
 
+        # Build models endpoint URL from config
+        models_endpoint = f"{Config.CANOPYWAVE_BASE_URL}/models"
+
         # Fetch models from API endpoint
         with httpx.Client(timeout=30.0) as client:
             headers = {"Authorization": f"Bearer {Config.CANOPYWAVE_API_KEY}"}
-            response = client.get(CANOPYWAVE_MODELS_ENDPOINT, headers=headers)
+            response = client.get(models_endpoint, headers=headers)
             response.raise_for_status()
             data = response.json()
 
@@ -194,10 +228,10 @@ def fetch_models_from_canopywave() -> list[dict[str, Any]]:
             if not model_id:
                 continue
 
-            # Extract pricing information (Canopy Wave uses OpenAI format)
+            # Extract pricing information with safe float conversion
             pricing_info = model.get("pricing", {})
-            prompt_price = float(pricing_info.get("prompt", 0))
-            completion_price = float(pricing_info.get("completion", 0))
+            prompt_price = _safe_float(pricing_info.get("prompt", 0))
+            completion_price = _safe_float(pricing_info.get("completion", 0))
 
             # Extract context length from model info
             context_length = model.get("context_length", 0)
@@ -253,7 +287,7 @@ def fetch_models_from_canopywave() -> list[dict[str, Any]]:
             models.append(model_data)
 
         logger.info(f"Fetched {len(models)} models from Canopy Wave")
-        return models
+        return _cache_and_return(models)
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching models from Canopy Wave: {e.response.status_code} - {e.response.text}")
         return []
