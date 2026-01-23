@@ -234,6 +234,9 @@ class Config:
     # Sybil AI Configuration
     SYBIL_API_KEY = os.environ.get("SYBIL_API_KEY")
 
+    # Canopy Wave AI Configuration
+    CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
+
     # Nosana GPU Computing Network Configuration
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
     NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
