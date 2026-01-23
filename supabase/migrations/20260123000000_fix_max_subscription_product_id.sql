@@ -43,9 +43,11 @@ BEGIN
     END IF;
 
     -- Check that MAX tier gives 150 credits
+    -- Use ORDER BY created_at DESC to get the most recently created active record
     SELECT credits_per_month INTO max_tier_credits
     FROM subscription_products
     WHERE tier = 'max' AND is_active = TRUE
+    ORDER BY created_at DESC
     LIMIT 1;
 
     IF max_tier_credits != 150.00 THEN
