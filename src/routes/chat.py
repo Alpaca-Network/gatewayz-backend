@@ -532,7 +532,8 @@ PROVIDER_TIMEOUTS = {
 }
 
 # Auto-routing constants
-AUTO_ROUTE_MODEL_PREFIX = "auto"
+# Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
+AUTO_ROUTE_MODEL_PREFIX = "router"
 AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
 
 
