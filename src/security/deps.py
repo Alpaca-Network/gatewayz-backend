@@ -361,7 +361,17 @@ async def check_credits(
     # Check if trial has expired using centralized utility
     validate_trial_expiration(user)
 
-    current_credits = user.get("credits", 0.0)
+    # Use tiered credits: sum of subscription_allowance and purchased_credits
+    # Falls back to legacy 'credits' field for backwards compatibility
+    subscription_allowance = float(user.get("subscription_allowance") or 0.0)
+    purchased_credits = float(user.get("purchased_credits") or 0.0)
+    tiered_credits = subscription_allowance + purchased_credits
+
+    # Use tiered credits if available, otherwise fall back to legacy credits field
+    if tiered_credits > 0 or user.get("subscription_allowance") is not None:
+        current_credits = tiered_credits
+    else:
+        current_credits = float(user.get("credits") or 0.0)
 
     if current_credits < min_credits:
         raise HTTPException(

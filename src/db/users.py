@@ -936,10 +936,12 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
             logger.error(f"Failed to reset allowance for user {user_id}")
             return False
 
-        # Log the transaction
+        # Log the transaction with delta amount (net change in balance)
+        # Delta = new_allowance - old_allowance (can be positive, negative, or zero)
+        delta_amount = allowance_amount - old_allowance
         log_credit_transaction(
             user_id=user_id,
-            amount=allowance_amount,  # Positive amount for reset
+            amount=delta_amount,  # Net change: new allowance minus forfeited old allowance
             transaction_type=TransactionType.SUBSCRIPTION_RENEWAL,
             description=f"Monthly allowance reset - {tier.upper()} tier (${allowance_amount})",
             balance_before=old_allowance + purchased,
@@ -948,6 +950,7 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
                 "tier": tier,
                 "forfeited_allowance": old_allowance,
                 "new_allowance": allowance_amount,
+                "delta_amount": delta_amount,
                 "purchased_credits_unchanged": purchased,
             },
         )
@@ -1138,7 +1141,7 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
         if not key_result.data:
             # Fallback to legacy users table
             user_result = (
-                client.table("users").select("id, credits").eq("api_key", api_key).execute()
+                client.table("users").select("id, credits, subscription_allowance, purchased_credits").eq("api_key", api_key).execute()
             )
             if not user_result.data:
                 return None
@@ -1146,12 +1149,24 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
         else:
             user_id = key_result.data[0]["user_id"]
 
-        # Get user credits
-        user_result = client.table("users").select("credits").eq("id", user_id).execute()
+        # Get user credits (use tiered credits if available)
+        user_result = client.table("users").select(
+            "credits, subscription_allowance, purchased_credits"
+        ).eq("id", user_id).execute()
         if not user_result.data:
             return None
 
-        current_credits = user_result.data[0]["credits"]
+        user_data = user_result.data[0]
+        # Use tiered credits: sum of subscription_allowance and purchased_credits
+        subscription_allowance = float(user_data.get("subscription_allowance") or 0)
+        purchased_credits = float(user_data.get("purchased_credits") or 0)
+        tiered_credits = subscription_allowance + purchased_credits
+
+        # Use tiered credits if available, otherwise fall back to legacy credits field
+        if tiered_credits > 0 or user_data.get("subscription_allowance") is not None:
+            current_credits = tiered_credits
+        else:
+            current_credits = float(user_data.get("credits") or 0)
 
         # Use the database function to get usage metrics
         result = client.rpc("get_user_usage_metrics", {"user_api_key": api_key}).execute()
