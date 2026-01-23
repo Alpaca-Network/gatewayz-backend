@@ -161,6 +161,8 @@ BEGIN
 
     RAISE NOTICE 'Current Distribution:';
     RAISE NOTICE '  Total models with pricing: %', v_total;
+
+    -- Guard against division by zero when no models have pricing
     IF v_total > 0 THEN
         RAISE NOTICE '  Per-1M format (> $0.001):  % models (%.1f%%)', v_per_1m, (v_per_1m::FLOAT / v_total::FLOAT * 100);
         RAISE NOTICE '  Per-1K format ($0.000001-$0.001): % models (%.1f%%)', v_per_1k, (v_per_1k::FLOAT / v_total::FLOAT * 100);
@@ -408,7 +410,10 @@ COMMENT ON VIEW "public"."pricing_migration_verification" IS
     'Use this to verify the migration was successful. '
     'Query: SELECT * FROM pricing_migration_verification WHERE validation_status = ''suspicious_high'';';
 
-RAISE NOTICE '✓ Created verification view: pricing_migration_verification';
+DO $$
+BEGIN
+    RAISE NOTICE '✓ Created verification view: pricing_migration_verification';
+END$$;
 
 -- ============================================================================
 -- STEP 8: Sample Verification Data
