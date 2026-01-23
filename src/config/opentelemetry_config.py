@@ -143,6 +143,19 @@ class OpenTelemetryConfig:
 
             # Configure OTLP exporter to Tempo
             tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
+
+            # Railway fix: Remove port numbers from Railway URLs (Railway only exposes 443)
+            # Railway routes https://tempo-xxx.up.railway.app (443) -> internal port 4318
+            if ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+                # Remove :4318 or :4317 port suffixes for Railway deployments
+                tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
+                # Ensure it uses https:// for Railway
+                if tempo_endpoint.startswith("http://"):
+                    tempo_endpoint = tempo_endpoint.replace("http://", "https://")
+                elif not tempo_endpoint.startswith("https://"):
+                    tempo_endpoint = f"https://{tempo_endpoint}"
+                logger.info(f"   Railway deployment detected - using HTTPS proxy")
+
             logger.info(f"   Tempo endpoint: {tempo_endpoint}")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
