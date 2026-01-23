@@ -144,25 +144,17 @@ class OpenTelemetryConfig:
             # Configure OTLP exporter to Tempo
             tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
 
-            # Railway internal DNS detection (same project)
-            if ".railway.internal" in tempo_endpoint:
-                # Using Railway internal DNS - keep as-is, port should be included
-                logger.info(f"   Railway internal DNS detected - using private network")
-                # Ensure http:// for internal (no SSL needed)
-                if not tempo_endpoint.startswith("http://") and not tempo_endpoint.startswith(
-                    "https://"
-                ):
-                    tempo_endpoint = f"http://{tempo_endpoint}"
-            # Railway public URL detection (cross-project or external)
-            elif ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
-                # Remove :4318 or :4317 port suffixes for Railway public deployments
+            # Railway fix: Remove port numbers from Railway URLs (Railway only exposes 443)
+            # Railway routes https://tempo-xxx.up.railway.app (443) -> internal port 4318
+            if ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+                # Remove :4318 or :4317 port suffixes for Railway deployments
                 tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
-                # Ensure it uses https:// for Railway public
+                # Ensure it uses https:// for Railway
                 if tempo_endpoint.startswith("http://"):
                     tempo_endpoint = tempo_endpoint.replace("http://", "https://")
                 elif not tempo_endpoint.startswith("https://"):
                     tempo_endpoint = f"https://{tempo_endpoint}"
-                logger.info(f"   Railway public deployment detected - using HTTPS proxy")
+                logger.info(f"   Railway deployment detected - using HTTPS proxy")
 
             logger.info(f"   Tempo endpoint: {tempo_endpoint}")
 
