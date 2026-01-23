@@ -33,6 +33,7 @@ WHERE
 
 -- Step 3: Log the migration in credit_transactions for audit trail
 -- This creates a record showing each user's migration to the tiered system
+-- Only insert if user doesn't already have a tiered_credits_v1 migration record (idempotent)
 INSERT INTO credit_transactions (
     user_id,
     amount,
@@ -60,10 +61,17 @@ SELECT
         'subscription_status', subscription_status
     ) as metadata,
     NOW() as created_at
-FROM users
+FROM users u
 WHERE
-    COALESCE(credits, 0) > 0
-    OR (subscription_status = 'active' AND tier IN ('pro', 'max'));
+    (COALESCE(credits, 0) > 0
+    OR (subscription_status = 'active' AND tier IN ('pro', 'max')))
+    -- Idempotency: only insert if no tiered_credits_v1 migration record exists
+    AND NOT EXISTS (
+        SELECT 1 FROM credit_transactions ct
+        WHERE ct.user_id = u.id
+        AND ct.transaction_type = 'system_migration'
+        AND ct.metadata->>'migration_name' = 'tiered_credits_v1'
+    );
 
 -- Output migration summary
 DO $$
