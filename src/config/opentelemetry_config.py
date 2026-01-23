@@ -192,6 +192,7 @@ class OpenTelemetryConfig:
                 otlp_exporter = OTLPSpanExporter(
                     endpoint=f"{tempo_endpoint}/v1/traces",
                     headers={},  # Add authentication headers if needed
+                    timeout=10,  # 10 second timeout to prevent hanging (Railway cross-project)
                 )
             except Exception as e:
                 logger.error(
