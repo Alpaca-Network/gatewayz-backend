@@ -1627,18 +1627,24 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
         tier_display_name = tier_display_map.get(tier) if tier else None
 
         # Calculate credit breakdown
-        subscription_allowance = float(user.get("subscription_allowance") or 0)
-        purchased_credits = float(user.get("purchased_credits") or 0)
-        total_credits = subscription_allowance + purchased_credits
+        # Database stores values in dollars, but frontend expects cents for consistency with TIER_CONFIG
+        subscription_allowance_dollars = float(user.get("subscription_allowance") or 0)
+        purchased_credits_dollars = float(user.get("purchased_credits") or 0)
+        total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
+
+        # Convert to cents for frontend (multiply by 100)
+        subscription_allowance_cents = int(subscription_allowance_dollars * 100)
+        purchased_credits_cents = int(purchased_credits_dollars * 100)
+        total_credits_cents = int(total_credits_dollars * 100)
 
         # Return profile data
         profile = {
             "user_id": user["id"],
             "api_key": f"{api_key[:10]}...",
-            "credits": total_credits,  # Total credits (sum for backward compatibility)
-            "subscription_allowance": subscription_allowance,  # Monthly subscription allowance
-            "purchased_credits": purchased_credits,  # One-time purchased credits
-            "total_credits": total_credits,  # Explicit sum of both
+            "credits": total_credits_cents,  # Total credits in cents (sum for backward compatibility)
+            "subscription_allowance": subscription_allowance_cents,  # Monthly subscription allowance in cents
+            "purchased_credits": purchased_credits_cents,  # One-time purchased credits in cents
+            "total_credits": total_credits_cents,  # Explicit sum of both in cents
             "allowance_reset_date": user.get("allowance_reset_date"),  # When allowance was last reset
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at"),
