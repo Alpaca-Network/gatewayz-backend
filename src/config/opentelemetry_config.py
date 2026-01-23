@@ -67,16 +67,20 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
 
         # Default port if not specified
         if not port:
-            port = 4318 if parsed.scheme == "http" else 4317
+            # For HTTPS URLs (Railway public endpoints), use 443 (standard HTTPS port)
+            # Railway proxies HTTPS (443) to internal service ports
+            if parsed.scheme == "https":
+                port = 443
+            elif parsed.scheme == "http":
+                port = 4318
+            else:
+                port = 4317  # gRPC default
 
         # Try to resolve the hostname (DNS check)
         try:
             socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror as e:
-            logger.warning(
-                f"Cannot resolve hostname '{host}': {e}. "
-                f"Tracing will be disabled."
-            )
+            logger.warning(f"Cannot resolve hostname '{host}': {e}. Tracing will be disabled.")
             return False
 
         # Try to establish a TCP connection
@@ -180,7 +184,7 @@ class OpenTelemetryConfig:
                 logger.error(
                     f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
                     f"Tracing will be disabled.",
-                    exc_info=True
+                    exc_info=True,
                 )
                 return False
 
@@ -235,7 +239,9 @@ class OpenTelemetryConfig:
             if instrumented:
                 logger.info("✅ FastAPI application instrumented with OpenTelemetry")
             else:
-                logger.debug("FastAPI instrumentation skipped (already instrumented or unavailable)")
+                logger.debug(
+                    "FastAPI instrumentation skipped (already instrumented or unavailable)"
+                )
         except Exception as e:
             logger.error(f"❌ Failed to instrument FastAPI: {e}", exc_info=True)
 
