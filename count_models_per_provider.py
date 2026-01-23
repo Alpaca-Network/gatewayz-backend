@@ -9,7 +9,7 @@ from collections import defaultdict
 # Add src to path
 sys.path.insert(0, '/root/repo')
 
-from src.services.models import get_all_models_parallel, get_model_count_by_provider
+from src.services.models import get_all_models_parallel
 
 
 async def main():

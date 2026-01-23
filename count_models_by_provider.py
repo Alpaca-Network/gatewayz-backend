@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from postgrest import APIError
 from src.config.supabase_config import get_supabase_client
 
 
@@ -19,11 +20,12 @@ def count_models_by_provider():
     try:
         # Check if 'models' table exists (new schema)
         try:
-            count_response = supabase.table("models").select("*", count="exact").limit(0).execute()
+            # Only check table existence without assigning to count_response
+            supabase.table("models").select("id").limit(1).execute()
             table_name = "models"
             print(f"\n✅ Using table: '{table_name}'")
-        except Exception:
-            # Fall back to 'latest_models' (old schema)
+        except APIError:
+            # Fall back to 'latest_models' (old schema) when 'models' table doesn't exist
             table_name = "latest_models"
             print(f"\n✅ Using table: '{table_name}' (legacy)")
 
