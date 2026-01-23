@@ -251,6 +251,12 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://mor.org",
     },
+    "canopywave": {
+        "name": "Canopy Wave",
+        "color": "bg-teal-500",
+        "priority": "slow",
+        "site_url": "https://canopywave.io",
+    },
 }
 
 
