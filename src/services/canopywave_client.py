@@ -24,8 +24,11 @@ Features:
 """
 
 import logging
+from typing import Any, Iterator
 
 import httpx
+from openai import OpenAI
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
@@ -39,10 +42,16 @@ CANOPYWAVE_BASE_URL = "https://inference.canopywave.io/v1"
 CANOPYWAVE_MODELS_ENDPOINT = f"{CANOPYWAVE_BASE_URL}/models"
 
 
-def get_canopywave_client():
+def get_canopywave_client() -> OpenAI:
     """Get Canopy Wave client with connection pooling for better performance.
 
     Canopy Wave provides OpenAI-compatible API endpoints for various models.
+
+    Returns:
+        OpenAI client configured for Canopy Wave API.
+
+    Raises:
+        ValueError: If CANOPYWAVE_API_KEY is not configured.
     """
     try:
         if not Config.CANOPYWAVE_API_KEY:
@@ -55,13 +64,21 @@ def get_canopywave_client():
         raise
 
 
-def make_canopywave_request_openai(messages, model, **kwargs):
+def make_canopywave_request_openai(
+    messages: list[dict[str, Any]], model: str, **kwargs: Any
+) -> ChatCompletion:
     """Make request to Canopy Wave using OpenAI client.
 
     Args:
-        messages: List of message objects
-        model: Model name to use
+        messages: List of message objects with role and content.
+        model: Model name to use (e.g., 'zai/glm-4.6').
         **kwargs: Additional parameters like max_tokens, temperature, etc.
+
+    Returns:
+        ChatCompletion response from Canopy Wave.
+
+    Raises:
+        Exception: If the request fails.
     """
     try:
         client = get_canopywave_client()
@@ -72,13 +89,21 @@ def make_canopywave_request_openai(messages, model, **kwargs):
         raise
 
 
-def make_canopywave_request_openai_stream(messages, model, **kwargs):
+def make_canopywave_request_openai_stream(
+    messages: list[dict[str, Any]], model: str, **kwargs: Any
+) -> Iterator[ChatCompletionChunk]:
     """Make streaming request to Canopy Wave using OpenAI client.
 
     Args:
-        messages: List of message objects
-        model: Model name to use
+        messages: List of message objects with role and content.
+        model: Model name to use (e.g., 'zai/glm-4.6').
         **kwargs: Additional parameters like max_tokens, temperature, etc.
+
+    Returns:
+        Iterator of ChatCompletionChunk for streaming responses.
+
+    Raises:
+        Exception: If the streaming request fails.
     """
     try:
         client = get_canopywave_client()
@@ -89,14 +114,18 @@ def make_canopywave_request_openai_stream(messages, model, **kwargs):
         raise
 
 
-def process_canopywave_response(response):
+def process_canopywave_response(response: ChatCompletion) -> dict[str, Any]:
     """Process Canopy Wave response to extract relevant data.
 
     Args:
-        response: OpenAI-format response object
+        response: OpenAI-format ChatCompletion response object.
 
     Returns:
-        Normalized response dictionary
+        Normalized response dictionary with id, object, created, model,
+        choices, and usage fields.
+
+    Raises:
+        Exception: If response processing fails.
     """
     try:
         choices = []
@@ -132,15 +161,24 @@ def process_canopywave_response(response):
         raise
 
 
-def fetch_models_from_canopywave():
+def fetch_models_from_canopywave() -> list[dict[str, Any]]:
     """Fetch available models from Canopy Wave API.
 
     Returns a list of model info dictionaries in catalog format.
     Fetches models dynamically from the Canopy Wave /v1/models endpoint.
 
     The API returns models with pricing information and capabilities.
+
+    Returns:
+        List of model dictionaries with id, name, provider, pricing, etc.
+        Returns empty list if API key is not configured or on error.
     """
     try:
+        # Check for API key before making request to avoid 401 errors
+        if not Config.CANOPYWAVE_API_KEY:
+            logger.warning("Canopy Wave API key not configured, skipping model fetch")
+            return []
+
         # Fetch models from API endpoint
         with httpx.Client(timeout=30.0) as client:
             headers = {"Authorization": f"Bearer {Config.CANOPYWAVE_API_KEY}"}

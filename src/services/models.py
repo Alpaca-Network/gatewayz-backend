@@ -691,6 +691,7 @@ def get_all_models_sequential():
     simplismart_models = get_cached_models("simplismart") or []
     morpheus_models = get_cached_models("morpheus") or []
     sybil_models = get_cached_models("sybil") or []
+    canopywave_models = get_cached_models("canopywave") or []
     vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
     return (
         openrouter_models
@@ -721,6 +722,7 @@ def get_all_models_sequential():
         + simplismart_models
         + morpheus_models
         + sybil_models
+        + canopywave_models
         + vercel_ai_gateway_models
     )
 

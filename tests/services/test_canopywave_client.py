@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 
+@pytest.mark.unit
 class TestCanopywaveClient:
     """Test Canopy Wave Client service functionality"""
 
