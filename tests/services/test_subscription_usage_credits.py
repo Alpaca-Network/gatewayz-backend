@@ -40,7 +40,7 @@ def mock_max_subscription():
     return Mock(
         id='sub_max_456',
         customer='cus_456',
-        metadata={'user_id': '2', 'tier': 'max', 'product_id': 'prod_TKOqRE2L6qXu7s'},
+        metadata={'user_id': '2', 'tier': 'max', 'product_id': 'prod_TKOraBpWMxMAIu'},
         current_period_end=1735689600,  # Future timestamp
         status='active'
     )
