@@ -408,7 +408,10 @@ COMMENT ON VIEW "public"."pricing_migration_verification" IS
     'Use this to verify the migration was successful. '
     'Query: SELECT * FROM pricing_migration_verification WHERE validation_status = ''suspicious_high'';';
 
-RAISE NOTICE '✓ Created verification view: pricing_migration_verification';
+DO $$
+BEGIN
+    RAISE NOTICE '✓ Created verification view: pricing_migration_verification';
+END$$;
 
 -- ============================================================================
 -- STEP 8: Sample Verification Data
