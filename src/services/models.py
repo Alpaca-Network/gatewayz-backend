@@ -17,6 +17,7 @@ from src.cache import (
     _aimo_models_cache,
     _alibaba_models_cache,
     _anannas_models_cache,
+    _canopywave_models_cache,
     _cerebras_models_cache,
     _chutes_models_cache,
     _clarifai_models_cache,
@@ -66,6 +67,7 @@ from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.pricing_lookup import enrich_model_with_pricing
+from src.services.canopywave_client import fetch_models_from_canopywave
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.sybil_client import fetch_models_from_sybil
 from src.services.xai_client import fetch_models_from_xai
@@ -600,6 +602,7 @@ def get_all_models_parallel():
             "anthropic",
             "simplismart",
             "sybil",
+            "canopywave",
             "morpheus",
             "vercel-ai-gateway",
         ]
@@ -688,6 +691,7 @@ def get_all_models_sequential():
     simplismart_models = get_cached_models("simplismart") or []
     morpheus_models = get_cached_models("morpheus") or []
     sybil_models = get_cached_models("sybil") or []
+    canopywave_models = get_cached_models("canopywave") or []
     vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
     return (
         openrouter_models
@@ -718,6 +722,7 @@ def get_all_models_sequential():
         + simplismart_models
         + morpheus_models
         + sybil_models
+        + canopywave_models
         + vercel_ai_gateway_models
     )
 
@@ -1034,6 +1039,14 @@ def get_cached_models(gateway: str = "openrouter"):
                 return cached
             result = fetch_models_from_sybil()
             _register_canonical_records("sybil", result)
+            return result if result is not None else []
+
+        if gateway == "canopywave":
+            cached = _get_fresh_or_stale_cached_models(_canopywave_models_cache, "canopywave")
+            if cached is not None:
+                return cached
+            result = fetch_models_from_canopywave()
+            _register_canonical_records("canopywave", result)
             return result if result is not None else []
 
         if gateway == "morpheus":

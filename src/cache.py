@@ -228,6 +228,13 @@ _sybil_models_cache = {
     "stale_ttl": 7200,
 }
 
+_canopywave_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Canopy Wave catalog
+    "stale_ttl": 7200,
+}
+
 _morpheus_models_cache = {
     "data": None,
     "timestamp": None,
@@ -277,6 +284,7 @@ def get_models_cache(gateway: str):
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
         "sybil": _sybil_models_cache,
+        "canopywave": _canopywave_models_cache,
         "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }
@@ -320,6 +328,7 @@ def clear_models_cache(gateway: str):
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
         "sybil": _sybil_models_cache,
+        "canopywave": _canopywave_models_cache,
         "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }

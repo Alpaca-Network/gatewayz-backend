@@ -585,6 +585,23 @@ def get_sybil_pooled_client() -> OpenAI:
     )
 
 
+def get_canopywave_pooled_client() -> OpenAI:
+    """Get pooled client for Canopy Wave AI.
+
+    Canopy Wave provides an OpenAI-compatible API endpoint for open-source models
+    with serverless GPU infrastructure for efficient inference.
+    See: https://canopywave.com/docs/get-started/openai-compatible
+    """
+    if not Config.CANOPYWAVE_API_KEY:
+        raise ValueError("Canopy Wave API key not configured")
+
+    return get_pooled_client(
+        provider="canopywave",
+        base_url=Config.CANOPYWAVE_BASE_URL,
+        api_key=Config.CANOPYWAVE_API_KEY,
+    )
+
+
 # Nosana base URL constant
 NOSANA_BASE_URL = "https://dashboard.k8s.prd.nos.ci/api/v1"
 
