@@ -1003,10 +1003,18 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
 
         if forfeited_amount > 0:
             # Set allowance to 0
-            client.table("users").update({
+            update_result = client.table("users").update({
                 "subscription_allowance": 0,
                 "updated_at": now,
             }).eq("id", user_id).execute()
+
+            # Check if update succeeded
+            if not update_result.data:
+                error_msg = f"Failed to update subscription_allowance to 0 for user {user_id}"
+                logger.error(error_msg)
+                if raise_on_error:
+                    raise RuntimeError(error_msg)
+                return 0.0
 
             # Log forfeiture
             log_credit_transaction(
