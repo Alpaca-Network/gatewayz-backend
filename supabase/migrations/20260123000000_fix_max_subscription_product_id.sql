@@ -3,34 +3,57 @@
 -- but the frontend/Stripe uses prod_TKOraBpWMxMAIu
 -- This migration adds the correct product ID mapping
 
--- Add the correct MAX product ID that's actually used in production
--- The $75/month subscription gives $150 worth of credits (50% discount)
-INSERT INTO subscription_products (product_id, tier, display_name, credits_per_month, description, is_active)
-VALUES
-    ('prod_TKOraBpWMxMAIu', 'max', 'MAX', 150.00, 'Maximum tier with $150 monthly credits (50% discount on $75/month subscription)', TRUE)
-ON CONFLICT (product_id) DO UPDATE SET
-    tier = EXCLUDED.tier,
-    display_name = EXCLUDED.display_name,
-    credits_per_month = EXCLUDED.credits_per_month,
-    description = EXCLUDED.description,
-    is_active = EXCLUDED.is_active,
-    updated_at = NOW();
+-- Check if table exists and perform migration only if it does
+-- (table may not exist in CI environments due to remote_schema.sql drop)
+DO $$
+BEGIN
+    -- Skip if table doesn't exist (CI/test environment)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'subscription_products'
+    ) THEN
+        RAISE NOTICE 'subscription_products table does not exist - skipping migration (CI/test environment)';
+        RETURN;
+    END IF;
 
--- Keep the old product ID mapping for backward compatibility, but mark it as inactive
--- in case any legacy users have it
-UPDATE subscription_products
-SET is_active = FALSE,
-    description = 'DEPRECATED: Old MAX product ID - use prod_TKOraBpWMxMAIu instead',
-    updated_at = NOW()
-WHERE product_id = 'prod_TKOqRE2L6qXu7s'
-  AND tier = 'max';
+    -- Add the correct MAX product ID that's actually used in production
+    -- The $75/month subscription gives $150 worth of credits (50% discount)
+    INSERT INTO subscription_products (product_id, tier, display_name, credits_per_month, description, is_active)
+    VALUES
+        ('prod_TKOraBpWMxMAIu', 'max', 'MAX', 150.00, 'Maximum tier with $150 monthly credits (50% discount on $75/month subscription)', TRUE)
+    ON CONFLICT (product_id) DO UPDATE SET
+        tier = EXCLUDED.tier,
+        display_name = EXCLUDED.display_name,
+        credits_per_month = EXCLUDED.credits_per_month,
+        description = EXCLUDED.description,
+        is_active = EXCLUDED.is_active,
+        updated_at = NOW();
 
--- Verify the changes
+    -- Keep the old product ID mapping for backward compatibility, but mark it as inactive
+    UPDATE subscription_products
+    SET is_active = FALSE,
+        description = 'DEPRECATED: Old MAX product ID - use prod_TKOraBpWMxMAIu instead',
+        updated_at = NOW()
+    WHERE product_id = 'prod_TKOqRE2L6qXu7s'
+      AND tier = 'max';
+
+    RAISE NOTICE 'Migration successful: MAX product ID prod_TKOraBpWMxMAIu now configured with 150 credits/month';
+END $$;
+
+-- Verify the changes (only if table exists)
 DO $$
 DECLARE
     correct_product_count INTEGER;
     max_tier_credits DECIMAL(10,2);
 BEGIN
+    -- Skip verification if table doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'subscription_products'
+    ) THEN
+        RETURN;
+    END IF;
+
     -- Check that the correct product ID exists
     SELECT COUNT(*) INTO correct_product_count
     FROM subscription_products
@@ -53,9 +76,15 @@ BEGIN
     IF max_tier_credits != 150.00 THEN
         RAISE EXCEPTION 'Migration failed: MAX tier should give 150 credits, got %', max_tier_credits;
     END IF;
-
-    RAISE NOTICE 'Migration successful: MAX product ID prod_TKOraBpWMxMAIu now configured with 150 credits/month';
 END $$;
 
--- Add comment explaining the product IDs
-COMMENT ON TABLE subscription_products IS 'Configuration for Stripe subscription products and tier mapping. Product IDs must match Stripe Dashboard: Pro=prod_TKOqQPhVRxNp4Q, Max=prod_TKOraBpWMxMAIu';
+-- Add comment explaining the product IDs (only if table exists)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'subscription_products'
+    ) THEN
+        COMMENT ON TABLE subscription_products IS 'Configuration for Stripe subscription products and tier mapping. Product IDs must match Stripe Dashboard: Pro=prod_TKOqQPhVRxNp4Q, Max=prod_TKOraBpWMxMAIu';
+    END IF;
+END $$;
