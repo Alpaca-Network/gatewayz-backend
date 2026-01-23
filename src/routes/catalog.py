@@ -315,6 +315,74 @@ async def get_gateways():
         )
 
 
+@router.get("/gateways/status", tags=["gateways"])
+async def get_gateways_status():
+    """
+    Get diagnostic status for all gateways including error states and model counts.
+
+    This endpoint helps diagnose why gateways may be returning 0 models by showing:
+    - Current error state (if in circuit breaker)
+    - Cached model count
+    - Cache age
+    - Last error message (if any)
+    """
+    from src.cache import (
+        _gateway_error_cache,
+        is_gateway_in_error_state,
+        get_gateway_error_message,
+    )
+
+    try:
+        status_list = []
+        for gateway_id, config in GATEWAY_REGISTRY.items():
+            # Get error state
+            in_error_state = is_gateway_in_error_state(gateway_id)
+            error_message = get_gateway_error_message(gateway_id) if in_error_state else None
+
+            # Get cached model count
+            try:
+                models = get_cached_models(gateway_id)
+                model_count = len(models) if models else 0
+            except Exception as e:
+                model_count = 0
+                if not in_error_state:
+                    error_message = str(e)
+
+            status_list.append({
+                "id": gateway_id,
+                "name": config.get("name", gateway_id.title()),
+                "model_count": model_count,
+                "in_error_state": in_error_state,
+                "error_message": error_message,
+                "priority": config.get("priority", "slow"),
+            })
+
+        # Sort by model count (0 first to highlight issues)
+        status_list.sort(key=lambda g: (g["model_count"], g["name"]))
+
+        # Summary stats
+        total_models = sum(g["model_count"] for g in status_list)
+        gateways_with_errors = sum(1 for g in status_list if g["in_error_state"])
+        gateways_with_zero = sum(1 for g in status_list if g["model_count"] == 0)
+
+        return {
+            "data": status_list,
+            "summary": {
+                "total_gateways": len(status_list),
+                "total_models": total_models,
+                "gateways_with_errors": gateways_with_errors,
+                "gateways_with_zero_models": gateways_with_zero,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching gateway status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch gateway status: {str(e)}",
+        )
+
+
 def normalize_developer_segment(value: str | None) -> str | None:
     """Align developer/provider identifiers with Hugging Face style slugs."""
     if value is None:
@@ -617,6 +685,8 @@ async def get_models(
         openai_models: list[dict] = []
         anthropic_models: list[dict] = []
         clarifai_models: list[dict] = []
+        sybil_models: list[dict] = []
+        morpheus_models: list[dict] = []
 
         if gateway_value in ("openrouter", "all"):
             openrouter_models = get_cached_models("openrouter") or []
@@ -761,6 +831,16 @@ async def get_models(
             if not clarifai_models and gateway_value == "clarifai":
                 logger.warning("Clarifai models unavailable - continuing without them")
 
+        if gateway_value in ("sybil", "all"):
+            sybil_models = get_cached_models("sybil") or []
+            if not sybil_models and gateway_value == "sybil":
+                logger.warning("Sybil models unavailable - continuing without them")
+
+        if gateway_value in ("morpheus", "all"):
+            morpheus_models = get_cached_models("morpheus") or []
+            if not morpheus_models and gateway_value == "morpheus":
+                logger.warning("Morpheus models unavailable - continuing without them")
+
         if gateway_value == "openrouter":
             models = openrouter_models
         elif gateway_value == "onerouter":
@@ -813,6 +893,10 @@ async def get_models(
             models = anthropic_models
         elif gateway_value == "clarifai":
             models = clarifai_models
+        elif gateway_value == "sybil":
+            models = sybil_models
+        elif gateway_value == "morpheus":
+            models = morpheus_models
         else:
             # For "all" gateway, merge all models avoiding duplicates
             models = merge_models_by_slug(
@@ -842,6 +926,8 @@ async def get_models(
                 openai_models,
                 anthropic_models,
                 clarifai_models,
+                sybil_models,
+                morpheus_models,
             )
 
         if not models:
@@ -995,6 +1081,18 @@ async def get_models(
             simplismart_providers = derive_providers_from_models(models_for_providers, "simplismart")
             annotated_simplismart = annotate_provider_sources(simplismart_providers, "simplismart")
             provider_groups.append(annotated_simplismart)
+
+        if gateway_value in ("sybil", "all"):
+            models_for_providers = sybil_models if gateway_value == "all" else models
+            sybil_providers = derive_providers_from_models(models_for_providers, "sybil")
+            annotated_sybil = annotate_provider_sources(sybil_providers, "sybil")
+            provider_groups.append(annotated_sybil)
+
+        if gateway_value in ("morpheus", "all"):
+            models_for_providers = morpheus_models if gateway_value == "all" else models
+            morpheus_providers = derive_providers_from_models(models_for_providers, "morpheus")
+            annotated_morpheus = annotate_provider_sources(morpheus_providers, "morpheus")
+            provider_groups.append(annotated_morpheus)
 
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")

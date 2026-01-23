@@ -50,14 +50,29 @@ from src.utils.ai_tracing import AITracer, AIRequestType
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
-# Make braintrust optional for test environments
+# Braintrust tracing - use centralized service for proper project association
+# The key fix is using logger.start_span() instead of standalone start_span()
 try:
-    from braintrust import flush as braintrust_flush
-    from braintrust import start_span, traced
+    from src.services.braintrust_service import (
+        create_span,
+        flush as braintrust_flush,
+        is_available as check_braintrust_available,
+        NoopSpan,
+    )
+    # Import traced decorator from braintrust SDK for route decoration
+    from braintrust import traced
+
+    # Wrapper to maintain backward compatibility with existing code
+    def start_span(name=None, span_type=None, **kwargs):
+        """Create a span using the centralized service."""
+        return create_span(name=name, span_type=span_type or "llm", **kwargs)
 
     BRAINTRUST_AVAILABLE = True
 except ImportError:
     BRAINTRUST_AVAILABLE = False
+
+    def check_braintrust_available():
+        return False
 
     # Create no-op decorators and functions when braintrust is not available
     def traced(name=None, type=None):
@@ -66,18 +81,21 @@ except ImportError:
 
         return decorator
 
-    class MockSpan:
+    class NoopSpan:
         def log(self, *args, **kwargs):
             pass
 
         def end(self):
             pass
 
-    def start_span(name=None, type=None):
-        return MockSpan()
+    # Alias for backward compatibility
+    MockSpan = NoopSpan
+
+    def start_span(name=None, span_type=None, **kwargs):
+        return NoopSpan()
 
     def current_span():
-        return MockSpan()
+        return NoopSpan()
 
     def braintrust_flush():
         pass
@@ -1468,7 +1486,11 @@ async def chat_completions(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     # Determine if this is an authenticated or anonymous request
     is_anonymous = api_key is None
@@ -1482,8 +1504,8 @@ async def chat_completions(
         extra={"request_id": request_id},
     )
 
-    # Start Braintrust span for this request
-    span = start_span(name=f"chat_{req.model}", type="llm")
+    # Start Braintrust span for this request (uses logger.start_span() for project association)
+    span = start_span(name=f"chat_{req.model}", span_type="llm")
 
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
@@ -1496,7 +1518,13 @@ async def chat_completions(
                 # Get client IP for rate limiting
                 client_ip = "unknown"
                 if request:
-                    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                    # Parse X-Forwarded-For header with defensive bounds checking
+                    forwarded_for = request.headers.get("X-Forwarded-For", "")
+                    if forwarded_for:
+                        parts = forwarded_for.split(",")
+                        if parts:  # Defensive check (split always returns at least [''])
+                            client_ip = parts[0].strip()
+
                     if not client_ip:
                         client_ip = request.headers.get("X-Real-IP", "")
                     if not client_ip and hasattr(request, "client") and request.client:
@@ -2519,7 +2547,8 @@ async def chat_completions(
         # === 7) Log to Braintrust ===
         try:
             logger.info(
-                f"[Braintrust] Starting log for request_id={request_id}, model={model}, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}"
+                f"[Braintrust] Starting log for request_id={request_id}, model={model}, "
+                f"available={check_braintrust_available()}, span_type={type(span).__name__}"
             )
             # Safely convert messages to dicts, filtering out None values and sanitizing content
             messages_for_log = []
@@ -2773,7 +2802,11 @@ async def unified_responses(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     logger.info(
         "unified_responses start (request_id=%s, api_key=%s, model=%s)",
@@ -2783,8 +2816,8 @@ async def unified_responses(
         extra={"request_id": request_id},
     )
 
-    # Start Braintrust span for this request
-    span = start_span(name=f"responses_{req.model}", type="llm")
+    # Start Braintrust span for this request (uses logger.start_span() for project association)
+    span = start_span(name=f"responses_{req.model}", span_type="llm")
 
     rate_limit_mgr = None
     should_release_concurrency = False
@@ -3761,7 +3794,8 @@ async def unified_responses(
         # === 7) Log to Braintrust ===
         try:
             logger.info(
-                f"[Braintrust] Starting log for request_id={request_id}, model={model}, endpoint=/v1/responses, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}"
+                f"[Braintrust] Starting log for request_id={request_id}, model={model}, "
+                f"endpoint=/v1/responses, available={check_braintrust_available()}, span_type={type(span).__name__}"
             )
             # Convert input messages to loggable format, safely handling None values
             input_messages = []

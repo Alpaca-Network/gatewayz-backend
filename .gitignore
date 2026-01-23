@@ -112,3 +112,4 @@ performance_summary*.txt
 comprehensive_performance_test*.py
 rate_limit_monitor.py
 gatewayz/
+archived_pricing_scripts/

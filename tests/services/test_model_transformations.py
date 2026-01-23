@@ -13,7 +13,100 @@ def test_openrouter_gpt51_hyphen_alias_transforms():
 
 
 def test_detect_provider_gpt51_alias_without_org():
-    assert detect_provider_from_model_id("gpt-5-1") == "openrouter"
+    """Test that gpt-5-1 alias routes to native OpenAI provider.
+
+    gpt-5-1 gets aliased to openai/gpt-5.1, which should route to native OpenAI first.
+    Failover to OpenRouter is handled by provider_failover.py.
+    """
+    assert detect_provider_from_model_id("gpt-5-1") == "openai"
+
+
+def test_bare_openai_model_names_alias_to_canonical():
+    """Test that bare OpenAI model names (without openai/ prefix) are aliased correctly.
+
+    This is critical to prevent OpenAI models from being incorrectly routed to
+    other providers like HuggingFace during failover.
+    """
+    from src.services.model_transformations import apply_model_alias
+
+    test_cases = [
+        ("gpt-4", "openai/gpt-4"),
+        ("gpt-4o", "openai/gpt-4o"),
+        ("gpt-4o-mini", "openai/gpt-4o-mini"),
+        ("gpt-4-turbo", "openai/gpt-4-turbo"),
+        ("gpt-3.5-turbo", "openai/gpt-3.5-turbo"),
+        ("gpt-3.5-turbo-16k", "openai/gpt-3.5-turbo-16k"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = apply_model_alias(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_bare_openai_model_names_detect_as_native_openai():
+    """Test that bare OpenAI model names are detected as native OpenAI provider.
+
+    After aliasing, these should all be detected as the native 'openai' provider
+    (via the openai/ prefix). The failover to OpenRouter is handled separately.
+    """
+    test_cases = [
+        "gpt-4",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo",
+    ]
+
+    for model_id in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == "openai", f"Expected 'openai' for {model_id}, got {result}"
+
+
+def test_bare_anthropic_model_names_alias_to_canonical():
+    """Test that bare Anthropic/Claude model names (without anthropic/ prefix) are aliased correctly.
+
+    This is critical to prevent Claude models from being incorrectly routed to
+    other providers like HuggingFace during failover.
+    """
+    from src.services.model_transformations import apply_model_alias
+
+    test_cases = [
+        ("claude-3-opus", "anthropic/claude-3-opus"),
+        ("claude-3-sonnet", "anthropic/claude-3-sonnet"),
+        ("claude-3-haiku", "anthropic/claude-3-haiku"),
+        ("claude-3.5-sonnet", "anthropic/claude-3.5-sonnet"),
+        ("claude-3.5-haiku", "anthropic/claude-3.5-haiku"),
+        ("claude-3.7-sonnet", "anthropic/claude-3.7-sonnet"),
+        ("claude-sonnet-4", "anthropic/claude-sonnet-4"),
+        ("claude-opus-4", "anthropic/claude-opus-4"),
+        ("claude-opus-4.5", "anthropic/claude-opus-4.5"),
+    ]
+
+    for model_id, expected in test_cases:
+        result = apply_model_alias(model_id)
+        assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+
+def test_bare_anthropic_model_names_detect_as_native_anthropic():
+    """Test that bare Anthropic/Claude model names are detected as native Anthropic provider.
+
+    After aliasing, these should all be detected as the native 'anthropic' provider
+    (via the anthropic/ prefix). The failover to OpenRouter is handled separately.
+    """
+    test_cases = [
+        "claude-3-opus",
+        "claude-3-sonnet",
+        "claude-3-haiku",
+        "claude-3.5-sonnet",
+        "claude-3.5-haiku",
+        "claude-3.7-sonnet",
+        "claude-sonnet-4",
+        "claude-opus-4",
+    ]
+
+    for model_id in test_cases:
+        result = detect_provider_from_model_id(model_id)
+        assert result == "anthropic", f"Expected 'anthropic' for {model_id}, got {result}"
 
 
 def test_openrouter_auto_preserves_prefix():
@@ -54,10 +147,14 @@ def test_detect_provider_from_model_id_fal_orgs():
 
 
 def test_detect_provider_from_model_id_existing_providers():
-    """Test that existing provider detection still works"""
+    """Test that existing provider detection still works.
+
+    Note: OpenAI and Anthropic models now route to their native providers first,
+    with failover to OpenRouter handled by provider_failover.py.
+    """
     test_cases = [
-        ("anthropic/claude-3-sonnet", "openrouter"),
-        ("openai/gpt-4", "openrouter"),
+        ("anthropic/claude-3-sonnet", "anthropic"),  # Native Anthropic first, OpenRouter as fallback
+        ("openai/gpt-4", "openai"),  # Native OpenAI first, OpenRouter as fallback
         ("meta-llama/llama-2-7b", None),  # This model doesn't match any specific provider
     ]
 
@@ -68,11 +165,15 @@ def test_detect_provider_from_model_id_existing_providers():
 
 @patch.dict('os.environ', {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
 def test_detect_provider_google_vertex_models():
-    """Test that Google Vertex AI models are correctly detected when credentials are available"""
+    """Test that Google Vertex AI models are correctly detected when credentials are available
+
+    Note: gemini-1.5-pro is excluded because gemini-1.5 models are retired on Vertex AI.
+    See the detect_provider_from_model_id function which explicitly excludes gemini-1.5.
+    """
     test_cases = [
         ("gemini-2.5-flash", "google-vertex"),
         ("gemini-2.0-flash", "google-vertex"),
-        ("gemini-1.5-pro", "google-vertex"),
+        # gemini-1.5-pro excluded - retired on Vertex AI, routed to openrouter instead
         ("google/gemini-2.5-flash", "google-vertex"),
         ("google/gemini-2.0-flash", "google-vertex"),
         ("@google/models/gemini-2.5-flash", "google-vertex"),  # Key test case - should NOT be portkey

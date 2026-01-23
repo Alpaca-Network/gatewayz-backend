@@ -199,8 +199,8 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 
                     parsed = urlparse(provider["privacy_policy_url"])
                     site_url = f"{parsed.scheme}://{parsed.netloc}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse privacy_policy_url for provider: {e}")
 
             # Try terms of service URL if privacy policy didn't work
             if not site_url and provider.get("terms_of_service_url"):
@@ -209,8 +209,8 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 
                     parsed = urlparse(provider["terms_of_service_url"])
                     site_url = f"{parsed.scheme}://{parsed.netloc}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse terms_of_service_url for provider: {e}")
 
             # Try status page URL if others didn't work
             if not site_url and provider.get("status_page_url"):
@@ -219,8 +219,8 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 
                     parsed = urlparse(provider["status_page_url"])
                     site_url = f"{parsed.scheme}://{parsed.netloc}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse status_page_url for provider: {e}")
 
             # Manual mapping for known providers
             if not site_url:

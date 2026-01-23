@@ -197,18 +197,21 @@ class PricingSyncService:
         model_id = model.get("id")
 
         # Get source_gateway from metadata, top_provider, or provider relationship
-        metadata = model.get("metadata", {})
+        metadata = model.get("metadata", {}) or {}
         source_gateway = (
             metadata.get("source_gateway") or
             model.get("top_provider") or
             ""
         ).lower()
 
-        # Get pricing fields
-        pricing_prompt = model.get("pricing_prompt")
-        pricing_completion = model.get("pricing_completion")
-        pricing_image = model.get("pricing_image")
-        pricing_request = model.get("pricing_request")
+        # Get pricing from metadata.pricing_raw (new location after migration)
+        # Pricing columns were removed from the models table and moved to metadata
+        pricing_raw = metadata.get("pricing_raw", {}) or {}
+
+        pricing_prompt = pricing_raw.get("prompt")
+        pricing_completion = pricing_raw.get("completion")
+        pricing_image = pricing_raw.get("image")
+        pricing_request = pricing_raw.get("request")
 
         # Skip if no pricing
         if not pricing_prompt and not pricing_completion:
