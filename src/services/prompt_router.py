@@ -373,11 +373,14 @@ def route_request(
 
 
 def is_auto_route_request(model: str) -> bool:
-    """Check if a model string indicates auto-routing."""
+    """Check if a model string indicates auto-routing.
+
+    Uses 'router' prefix to avoid confusion with OpenRouter's 'openrouter/auto' model.
+    """
     if not model:
         return False
     model_lower = model.lower()
-    return model_lower.startswith("auto")
+    return model_lower.startswith("router")
 
 
 def parse_auto_route_options(model: str) -> tuple[str, RouterOptimization]:
@@ -385,13 +388,13 @@ def parse_auto_route_options(model: str) -> tuple[str, RouterOptimization]:
     Parse auto-route model string into tier and optimization.
 
     Examples:
-        "auto" -> ("small", BALANCED)
-        "auto:small" -> ("small", BALANCED)
-        "auto:medium" -> ("medium", BALANCED)
-        "auto:price" -> ("small", PRICE)
-        "auto:quality" -> ("medium", QUALITY)
+        "router" -> ("small", BALANCED)
+        "router:small" -> ("small", BALANCED)
+        "router:medium" -> ("medium", BALANCED)
+        "router:price" -> ("small", PRICE)
+        "router:quality" -> ("medium", QUALITY)
     """
-    if not model or not model.lower().startswith("auto"):
+    if not model or not model.lower().startswith("router"):
         return ("small", RouterOptimization.BALANCED)
 
     parts = model.lower().split(":")

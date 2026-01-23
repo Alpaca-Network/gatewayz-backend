@@ -502,37 +502,40 @@ class TestAutoRouteHelpers:
 
     def test_is_auto_route_request(self):
         """Test detection of auto-route requests."""
-        assert is_auto_route_request("auto") is True
-        assert is_auto_route_request("AUTO") is True
-        assert is_auto_route_request("auto:small") is True
-        assert is_auto_route_request("auto:price") is True
+        # Router prefix should trigger auto-routing
+        assert is_auto_route_request("router") is True
+        assert is_auto_route_request("ROUTER") is True
+        assert is_auto_route_request("router:small") is True
+        assert is_auto_route_request("router:price") is True
+        # Other models should not trigger auto-routing
         assert is_auto_route_request("gpt-4o") is False
+        assert is_auto_route_request("openrouter/auto") is False  # OpenRouter's auto model
         assert is_auto_route_request("") is False
         assert is_auto_route_request(None) is False
 
     def test_parse_auto_route_options(self):
         """Test parsing of auto-route options."""
-        tier, opt = parse_auto_route_options("auto")
+        tier, opt = parse_auto_route_options("router")
         assert tier == "small"
         assert opt == RouterOptimization.BALANCED
 
-        tier, opt = parse_auto_route_options("auto:small")
+        tier, opt = parse_auto_route_options("router:small")
         assert tier == "small"
         assert opt == RouterOptimization.BALANCED
 
-        tier, opt = parse_auto_route_options("auto:medium")
+        tier, opt = parse_auto_route_options("router:medium")
         assert tier == "medium"
         assert opt == RouterOptimization.BALANCED
 
-        tier, opt = parse_auto_route_options("auto:price")
+        tier, opt = parse_auto_route_options("router:price")
         assert tier == "small"
         assert opt == RouterOptimization.PRICE
 
-        tier, opt = parse_auto_route_options("auto:quality")
+        tier, opt = parse_auto_route_options("router:quality")
         assert tier == "medium"
         assert opt == RouterOptimization.QUALITY
 
-        tier, opt = parse_auto_route_options("auto:fast")
+        tier, opt = parse_auto_route_options("router:fast")
         assert tier == "small"
         assert opt == RouterOptimization.FAST
 
