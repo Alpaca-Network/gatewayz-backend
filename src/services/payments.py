@@ -1341,7 +1341,13 @@ class StripeService:
 
             allowance = get_allowance_from_tier(tier)
             if allowance > 0:
-                reset_subscription_allowance(user_id, allowance, tier)
+                if not reset_subscription_allowance(user_id, allowance, tier):
+                    # If allowance reset fails, raise an exception to trigger webhook retry
+                    # This prevents a user from having active subscription but zero credits
+                    raise RuntimeError(
+                        f"Failed to set initial allowance for user {user_id} ({tier} tier). "
+                        f"Webhook will be retried by Stripe."
+                    )
                 logger.info(f"Set initial allowance of ${allowance} for user {user_id} ({tier} tier)")
 
             # CRITICAL: Invalidate user cache so profile API returns fresh data
@@ -1488,9 +1494,11 @@ class StripeService:
             logger.info(f"Subscription deleted for user {user_id}: {subscription.id}")
 
             # Forfeit subscription allowance before downgrading
+            # Use raise_on_error=True to ensure data consistency - if forfeiture fails,
+            # Stripe will retry the webhook
             from src.db.users import forfeit_subscription_allowance
 
-            forfeited = forfeit_subscription_allowance(user_id)
+            forfeited = forfeit_subscription_allowance(user_id, raise_on_error=True)
             if forfeited > 0:
                 logger.info(f"Forfeited ${forfeited} allowance for user {user_id} on subscription cancellation")
 
@@ -1557,7 +1565,13 @@ class StripeService:
             allowance = get_allowance_from_tier(tier)
             if allowance > 0:
                 # Reset allowance to full amount (old allowance is forfeited, no carry-over)
-                reset_subscription_allowance(user_id, allowance, tier)
+                if not reset_subscription_allowance(user_id, allowance, tier):
+                    # If allowance reset fails, raise an exception to trigger webhook retry
+                    # This prevents a user from paying but not receiving their credits
+                    raise RuntimeError(
+                        f"Failed to reset allowance for user {user_id} ({tier} tier) "
+                        f"on invoice payment. Webhook will be retried by Stripe."
+                    )
                 logger.info(
                     f"Reset allowance to ${allowance} for user {user_id} ({tier} tier) on invoice payment"
                 )

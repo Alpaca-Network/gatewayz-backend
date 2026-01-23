@@ -965,16 +965,20 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         return False
 
 
-def forfeit_subscription_allowance(user_id: int) -> float:
+def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -> float:
     """
     Forfeit remaining subscription allowance on cancellation.
     Purchased credits are preserved.
 
     Args:
         user_id: User ID
+        raise_on_error: If True, raises exception on database errors instead of returning 0.0
 
     Returns:
-        Amount of allowance that was forfeited
+        Amount of allowance that was forfeited (0.0 if user had no allowance)
+
+    Raises:
+        RuntimeError: If raise_on_error is True and database operation fails
     """
     try:
         from src.db.credit_transactions import TransactionType, log_credit_transaction
@@ -988,7 +992,10 @@ def forfeit_subscription_allowance(user_id: int) -> float:
         ).eq("id", user_id).execute()
 
         if not user_result.data:
-            logger.error(f"User {user_id} not found for allowance forfeiture")
+            error_msg = f"User {user_id} not found for allowance forfeiture"
+            logger.error(error_msg)
+            if raise_on_error:
+                raise RuntimeError(error_msg)
             return 0.0
 
         forfeited_amount = float(user_result.data[0].get("subscription_allowance") or 0)
@@ -1023,7 +1030,14 @@ def forfeit_subscription_allowance(user_id: int) -> float:
         return forfeited_amount
 
     except Exception as e:
-        logger.error(f"Failed to forfeit subscription allowance for user {user_id}: {e}", exc_info=True)
+        logger.error(
+            f"Failed to forfeit subscription allowance for user {user_id}: {e}",
+            exc_info=True,
+        )
+        if raise_on_error:
+            raise RuntimeError(
+                f"Failed to forfeit subscription allowance for user {user_id}: {e}"
+            ) from e
         return 0.0
 
 
