@@ -1335,6 +1335,21 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
+            # Set initial subscription allowance
+            from src.db.subscription_products import get_allowance_from_tier
+            from src.db.users import reset_subscription_allowance
+
+            allowance = get_allowance_from_tier(tier)
+            if allowance > 0:
+                if not reset_subscription_allowance(user_id, allowance, tier):
+                    # If allowance reset fails, raise an exception to trigger webhook retry
+                    # This prevents a user from having active subscription but zero credits
+                    raise RuntimeError(
+                        f"Failed to set initial allowance for user {user_id} ({tier} tier). "
+                        f"Webhook will be retried by Stripe."
+                    )
+                logger.info(f"Set initial allowance of ${allowance} for user {user_id} ({tier} tier)")
+
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
             from src.db.users import invalidate_user_cache_by_id
@@ -1478,6 +1493,15 @@ class StripeService:
 
             logger.info(f"Subscription deleted for user {user_id}: {subscription.id}")
 
+            # Forfeit subscription allowance before downgrading
+            # Use raise_on_error=True to ensure data consistency - if forfeiture fails,
+            # Stripe will retry the webhook
+            from src.db.users import forfeit_subscription_allowance
+
+            forfeited = forfeit_subscription_allowance(user_id, raise_on_error=True)
+            if forfeited > 0:
+                logger.info(f"Forfeited ${forfeited} allowance for user {user_id} on subscription cancellation")
+
             # Downgrade user to basic tier
             from src.config.supabase_config import get_supabase_client
 
@@ -1534,28 +1558,25 @@ class StripeService:
             # Resolve tier from metadata or subscription items
             tier, _ = self._resolve_tier_from_subscription(subscription, metadata_tier)
 
-            # Get credits from database configuration
-            credits = get_credits_from_tier(tier)
+            # Reset subscription allowance (old allowance is forfeited, no carry-over)
+            from src.db.subscription_products import get_allowance_from_tier
+            from src.db.users import reset_subscription_allowance
 
-            if credits > 0:
-                # Add credits to user account
-                add_credits_to_user(
-                    user_id=user_id,
-                    credits=credits,
-                    transaction_type="subscription_renewal",
-                    description=f"Monthly subscription credits - {tier.upper()} tier",
-                    metadata={
-                        "stripe_invoice_id": invoice.id,
-                        "stripe_subscription_id": subscription.id,
-                        "tier": tier,
-                    },
-                )
-
+            allowance = get_allowance_from_tier(tier)
+            if allowance > 0:
+                # Reset allowance to full amount (old allowance is forfeited, no carry-over)
+                if not reset_subscription_allowance(user_id, allowance, tier):
+                    # If allowance reset fails, raise an exception to trigger webhook retry
+                    # This prevents a user from paying but not receiving their credits
+                    raise RuntimeError(
+                        f"Failed to reset allowance for user {user_id} ({tier} tier) "
+                        f"on invoice payment. Webhook will be retried by Stripe."
+                    )
                 logger.info(
-                    f"Added {credits} credits to user {user_id} for {tier} subscription renewal (invoice: {invoice.id})"
+                    f"Reset allowance to ${allowance} for user {user_id} ({tier} tier) on invoice payment"
                 )
             else:
-                logger.warning(f"No credits configured for tier: {tier}")
+                logger.warning(f"No allowance configured for tier: {tier}")
 
         except Exception as e:
             logger.error(f"Error handling invoice paid: {e}", exc_info=True)
