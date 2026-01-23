@@ -2,12 +2,14 @@
 """
 Script to count models per provider across all gateways.
 """
+
 import asyncio
 import sys
 from collections import defaultdict
+from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, '/root/repo')
+# Add repo root to path (works from any location)
+sys.path.insert(0, str(Path(__file__).parent))
 
 from src.services.models import get_all_models_parallel
 
@@ -52,11 +54,7 @@ async def main():
                 provider_counts[provider_slug] += 1
 
         # Sort by count (descending)
-        sorted_providers = sorted(
-            provider_counts.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
+        sorted_providers = sorted(provider_counts.items(), key=lambda x: x[1], reverse=True)
 
         # Print results
         print("=" * 60)
@@ -76,12 +74,13 @@ async def main():
         print("=" * 60)
 
         # Also show canonical models if available
-        if hasattr(catalog, 'canonical_models') and catalog.canonical_models:
+        if hasattr(catalog, "canonical_models") and catalog.canonical_models:
             print(f"\n📊 Canonical (deduplicated) models: {len(catalog.canonical_models):,}")
 
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
 

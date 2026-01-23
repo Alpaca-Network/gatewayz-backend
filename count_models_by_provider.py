@@ -3,9 +3,11 @@
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from postgrest import APIError
+
 from src.config.supabase_config import get_supabase_client
 
 
@@ -31,7 +33,7 @@ def count_models_by_provider():
 
         # Get total count
         count_response = supabase.table(table_name).select("*", count="exact").limit(0).execute()
-        total_count = count_response.count if hasattr(count_response, 'count') else 'Unknown'
+        total_count = count_response.count if hasattr(count_response, "count") else "Unknown"
         print(f"📊 Total models in database: {total_count:,}\n")
 
         # Fetch all models (with pagination if needed)
@@ -42,7 +44,12 @@ def count_models_by_provider():
         print("Fetching models from database...")
 
         while True:
-            response = supabase.table(table_name).select("*").range(offset, offset + page_size - 1).execute()
+            response = (
+                supabase.table(table_name)
+                .select("*")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
 
             if not response.data:
                 break
@@ -62,36 +69,36 @@ def count_models_by_provider():
             provider = None
 
             # Try multiple fields to extract provider
-            if 'provider_slug' in model and model['provider_slug']:
-                provider = model['provider_slug']
-            elif 'provider' in model:
-                if isinstance(model['provider'], dict):
-                    provider = model['provider'].get('slug') or model['provider'].get('name', 'unknown')
-                elif isinstance(model['provider'], str):
-                    provider = model['provider']
-            elif 'top_provider' in model:
-                if isinstance(model['top_provider'], dict):
-                    provider = model['top_provider'].get('slug') or model['top_provider'].get('name', 'unknown')
-                elif isinstance(model['top_provider'], str):
-                    provider = model['top_provider']
-            elif 'id' in model and '/' in str(model['id']):
+            if "provider_slug" in model and model["provider_slug"]:
+                provider = model["provider_slug"]
+            elif "provider" in model:
+                if isinstance(model["provider"], dict):
+                    provider = model["provider"].get("slug") or model["provider"].get(
+                        "name", "unknown"
+                    )
+                elif isinstance(model["provider"], str):
+                    provider = model["provider"]
+            elif "top_provider" in model:
+                if isinstance(model["top_provider"], dict):
+                    provider = model["top_provider"].get("slug") or model["top_provider"].get(
+                        "name", "unknown"
+                    )
+                elif isinstance(model["top_provider"], str):
+                    provider = model["top_provider"]
+            elif "id" in model and "/" in str(model["id"]):
                 # Extract from ID format: provider/model-name
-                provider = str(model['id']).split('/')[0]
-            elif 'source_gateway' in model and model['source_gateway']:
-                provider = model['source_gateway']
+                provider = str(model["id"]).split("/")[0]
+            elif "source_gateway" in model and model["source_gateway"]:
+                provider = model["source_gateway"]
 
             if provider:
                 provider = str(provider).lower()
                 provider_counts[provider] = provider_counts.get(provider, 0) + 1
             else:
-                provider_counts['unknown'] = provider_counts.get('unknown', 0) + 1
+                provider_counts["unknown"] = provider_counts.get("unknown", 0) + 1
 
         # Sort by count (descending)
-        sorted_providers = sorted(
-            provider_counts.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
+        sorted_providers = sorted(provider_counts.items(), key=lambda x: x[1], reverse=True)
 
         # Print results
         print("=" * 80)
@@ -120,8 +127,9 @@ def count_models_by_provider():
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     count_models_by_provider()
