@@ -67,16 +67,20 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
 
         # Default port if not specified
         if not port:
-            port = 4318 if parsed.scheme == "http" else 4317
+            # For HTTPS URLs (Railway public endpoints), use 443 (standard HTTPS port)
+            # Railway proxies HTTPS (443) to internal service ports
+            if parsed.scheme == "https":
+                port = 443
+            elif parsed.scheme == "http":
+                port = 4318
+            else:
+                port = 4317  # gRPC default
 
         # Try to resolve the hostname (DNS check)
         try:
             socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror as e:
-            logger.warning(
-                f"Cannot resolve hostname '{host}': {e}. "
-                f"Tracing will be disabled."
-            )
+            logger.warning(f"Cannot resolve hostname '{host}': {e}. Tracing will be disabled.")
             return False
 
         # Try to establish a TCP connection
@@ -139,6 +143,19 @@ class OpenTelemetryConfig:
 
             # Configure OTLP exporter to Tempo
             tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
+
+            # Railway fix: Remove port numbers from Railway URLs (Railway only exposes 443)
+            # Railway routes https://tempo-xxx.up.railway.app (443) -> internal port 4318
+            if ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+                # Remove :4318 or :4317 port suffixes for Railway deployments
+                tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
+                # Ensure it uses https:// for Railway
+                if tempo_endpoint.startswith("http://"):
+                    tempo_endpoint = tempo_endpoint.replace("http://", "https://")
+                elif not tempo_endpoint.startswith("https://"):
+                    tempo_endpoint = f"https://{tempo_endpoint}"
+                logger.info(f"   Railway deployment detected - using HTTPS proxy")
+
             logger.info(f"   Tempo endpoint: {tempo_endpoint}")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
@@ -175,12 +192,13 @@ class OpenTelemetryConfig:
                 otlp_exporter = OTLPSpanExporter(
                     endpoint=f"{tempo_endpoint}/v1/traces",
                     headers={},  # Add authentication headers if needed
+                    timeout=10,  # 10 second timeout to prevent hanging (Railway cross-project)
                 )
             except Exception as e:
                 logger.error(
                     f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
                     f"Tracing will be disabled.",
-                    exc_info=True
+                    exc_info=True,
                 )
                 return False
 
@@ -235,7 +253,9 @@ class OpenTelemetryConfig:
             if instrumented:
                 logger.info("✅ FastAPI application instrumented with OpenTelemetry")
             else:
-                logger.debug("FastAPI instrumentation skipped (already instrumented or unavailable)")
+                logger.debug(
+                    "FastAPI instrumentation skipped (already instrumented or unavailable)"
+                )
         except Exception as e:
             logger.error(f"❌ Failed to instrument FastAPI: {e}", exc_info=True)
 

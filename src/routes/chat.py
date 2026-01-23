@@ -531,6 +531,10 @@ PROVIDER_TIMEOUTS = {
     "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
 
+# Auto-routing constants
+AUTO_ROUTE_MODEL_PREFIX = "auto"
+AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
+
 
 def mask_key(k: str) -> str:
     return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
@@ -1826,8 +1830,65 @@ async def chat_completions(
                     detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
                 )
 
-        # Store original model for response
+        # Store original model for response and routing logic
         original_model = req.model
+        is_auto_route = original_model and original_model.lower().startswith(AUTO_ROUTE_MODEL_PREFIX)
+
+        # === 2.3) Prompt-Level Routing (if model="auto") ===
+        # This is a fail-open router - if it fails or times out, it returns a default cheap model
+        router_decision = None
+        if is_auto_route:
+            with tracker.stage("prompt_routing"):
+                try:
+                    from src.services.prompt_router import (
+                        is_auto_route_request,
+                        parse_auto_route_options,
+                        route_request,
+                    )
+                    from src.schemas.router import UserRouterPreferences
+
+                    if is_auto_route_request(original_model):
+                        tier, optimization = parse_auto_route_options(original_model)
+
+                        # Build user preferences (could be loaded from DB in future)
+                        user_preferences = UserRouterPreferences(
+                            default_optimization=optimization,
+                            enabled=True,
+                        )
+
+                        # Get conversation ID for sticky routing (use session_id if available)
+                        conversation_id = str(session_id) if session_id else None
+
+                        # Route the request (fail-open, < 2ms target)
+                        router_decision = route_request(
+                            messages=messages,
+                            tools=getattr(req, "tools", None),
+                            response_format=getattr(req, "response_format", None),
+                            user_preferences=user_preferences,
+                            conversation_id=conversation_id,
+                            tier=tier,
+                        )
+
+                        # Update model with routed selection
+                        req.model = router_decision.selected_model
+
+                        logger.info(
+                            "Prompt router selected model: %s (category=%s, confidence=%.2f, time=%.2fms, reason=%s)",
+                            router_decision.selected_model,
+                            router_decision.classification.category.value if router_decision.classification else "unknown",
+                            router_decision.classification.confidence if router_decision.classification else 0,
+                            router_decision.decision_time_ms,
+                            router_decision.reason,
+                        )
+
+                except Exception as e:
+                    # Fail open - log warning and use default model
+                    logger.warning(
+                        "Prompt router failed, falling back to default: %s",
+                        str(e),
+                    )
+                    # Use default model since original was an auto-route request
+                    req.model = AUTO_ROUTE_DEFAULT_MODEL
 
         with tracker.stage("request_preparation"):
             optional = {}

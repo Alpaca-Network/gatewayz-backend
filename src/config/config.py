@@ -241,6 +241,24 @@ class Config:
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
     NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
 
+    # Butter.dev LLM Response Caching Configuration
+    # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
+    # and serves cached responses to reduce costs and improve latency.
+    # See: https://butter.dev
+    BUTTER_DEV_ENABLED: bool = os.environ.get("BUTTER_DEV_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    BUTTER_DEV_BASE_URL: str = os.environ.get(
+        "BUTTER_DEV_BASE_URL", "https://proxy.butter.dev/v1"
+    )
+    BUTTER_DEV_TIMEOUT: int = int(os.environ.get("BUTTER_DEV_TIMEOUT", "30"))
+    # Enable automatic fallback to direct provider on Butter.dev errors
+    BUTTER_DEV_FALLBACK_ENABLED: bool = os.environ.get(
+        "BUTTER_DEV_FALLBACK_ENABLED", "true"
+    ).lower() in {"1", "true", "yes"}
+
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
     CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")

@@ -123,6 +123,44 @@ def get_credits_from_tier(tier: str) -> float:
         return 0.0
 
 
+def get_allowance_from_tier(tier: str) -> float:
+    """
+    Get monthly subscription allowance for a tier
+
+    Args:
+        tier: Subscription tier ('pro', 'max', etc.)
+
+    Returns:
+        Monthly allowance in USD - defaults to 0 if not found
+    """
+    try:
+        client = get_supabase_client()
+
+        def query():
+            return (
+                client.table("subscription_products")
+                .select("allowance_per_month")
+                .eq("tier", tier)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+
+        result = _execute_with_schema_cache_retry(query)
+
+        if result.data and result.data[0].get("allowance_per_month") is not None:
+            allowance = float(result.data[0]["allowance_per_month"])
+            logger.info(f"Tier {tier} has ${allowance} monthly allowance")
+            return allowance
+        else:
+            logger.warning(f"Tier {tier} not found or no allowance set, defaulting to 0")
+            return 0.0
+
+    except Exception as e:
+        logger.error(f"Error getting allowance from tier: {e}", exc_info=True)
+        return 0.0
+
+
 def get_subscription_product(product_id: str) -> dict[str, Any] | None:
     """
     Get full subscription product configuration

@@ -5,18 +5,37 @@
 -- IMPORTANT: This rollback restores pricing to pre-migration state
 -- Only use this if the migration caused issues
 
--- Step 1: Verify backup data exists
+-- Step 1: Verify backup data exists (skip gracefully if empty database)
 DO $$
 DECLARE
     v_backup_count INTEGER;
+    v_total_models INTEGER;
 BEGIN
+    -- Check total models first
+    SELECT COUNT(*) INTO v_total_models FROM "public"."models";
+
+    -- If no models exist, skip rollback gracefully
+    IF v_total_models = 0 THEN
+        RAISE NOTICE 'No models in database - skipping rollback (nothing to restore)';
+        RETURN;
+    END IF;
+
     SELECT COUNT(*) INTO v_backup_count
     FROM "public"."models"
     WHERE pricing_original_prompt IS NOT NULL
        OR pricing_original_completion IS NOT NULL;
 
     IF v_backup_count = 0 THEN
-        RAISE EXCEPTION 'No backup data found! Cannot rollback safely.';
+        -- Check if migration was ever run
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'models' AND column_name = 'pricing_format_migrated'
+        ) THEN
+            RAISE WARNING 'No backup data found but models exist. Migration may not have been applied.';
+        ELSE
+            RAISE NOTICE 'Migration columns do not exist - nothing to rollback';
+        END IF;
+        RETURN;
     END IF;
 
     RAISE NOTICE 'Found backup data for % models', v_backup_count;

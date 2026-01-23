@@ -96,6 +96,15 @@ def init_tempo_otlp():
 
     # Check if Tempo endpoint is reachable before initializing
     tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
+
+    # Railway fix: Remove port numbers from Railway URLs
+    if ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+        tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
+        if tempo_endpoint.startswith("http://"):
+            tempo_endpoint = tempo_endpoint.replace("http://", "https://")
+        elif not tempo_endpoint.startswith("https://"):
+            tempo_endpoint = f"https://{tempo_endpoint}"
+
     logger.info(f"Checking Tempo endpoint availability: {tempo_endpoint}")
 
     if not check_tempo_endpoint_reachable(tempo_endpoint):
@@ -183,7 +192,9 @@ def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
             if fastapi_instrumented:
                 logger.info("FastAPI instrumentation enabled for app instance")
             else:
-                logger.debug("FastAPI instrumentation skipped (app missing or already instrumented)")
+                logger.debug(
+                    "FastAPI instrumentation skipped (app missing or already instrumented)"
+                )
 
         # Instrument HTTP clients
         HTTPXClientInstrumentor().instrument()

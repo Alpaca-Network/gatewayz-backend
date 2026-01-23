@@ -211,6 +211,86 @@ cache_misses = get_or_create_metric(Counter,
     ["cache_name"],
 )
 
+# ==================== Butter.dev Cache Metrics ====================
+# Metrics for tracking LLM response caching via Butter.dev
+butter_cache_requests = get_or_create_metric(Counter,
+    "butter_cache_requests_total",
+    "Total requests routed through Butter.dev cache",
+    ["provider", "model", "cache_result"],  # cache_result: hit, miss, error, skipped
+)
+
+butter_cache_savings_usd = get_or_create_metric(Counter,
+    "butter_cache_savings_usd_total",
+    "Total USD savings from Butter.dev cache hits",
+    ["provider", "model"],
+)
+
+butter_cache_latency = get_or_create_metric(Histogram,
+    "butter_cache_latency_seconds",
+    "Butter.dev request latency in seconds",
+    ["provider", "cache_result"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+butter_cache_errors = get_or_create_metric(Counter,
+    "butter_cache_errors_total",
+    "Total Butter.dev errors (triggers fallback to direct provider)",
+    ["provider", "error_type"],
+)
+
+
+def track_butter_cache_request(
+    provider: str,
+    model: str,
+    cache_result: str,
+    latency_seconds: float | None = None,
+    savings_usd: float | None = None,
+):
+    """
+    Track a Butter.dev cache request in Prometheus metrics.
+
+    Args:
+        provider: Provider slug (e.g., 'openrouter', 'fireworks')
+        model: Model name
+        cache_result: One of 'hit', 'miss', 'error', 'skipped'
+        latency_seconds: Request latency (optional)
+        savings_usd: Cost saved from cache hit (optional)
+    """
+    # Increment request counter
+    butter_cache_requests.labels(
+        provider=provider,
+        model=model,
+        cache_result=cache_result,
+    ).inc()
+
+    # Record latency if provided
+    if latency_seconds is not None:
+        butter_cache_latency.labels(
+            provider=provider,
+            cache_result=cache_result,
+        ).observe(latency_seconds)
+
+    # Track savings for cache hits
+    if cache_result == "hit" and savings_usd is not None and savings_usd > 0:
+        butter_cache_savings_usd.labels(
+            provider=provider,
+            model=model,
+        ).inc(savings_usd)
+
+
+def track_butter_cache_error(provider: str, error_type: str):
+    """
+    Track a Butter.dev error (e.g., timeout, connection error).
+
+    Args:
+        provider: Provider slug
+        error_type: Type of error (e.g., 'timeout', 'connection_error', 'api_error')
+    """
+    butter_cache_errors.labels(
+        provider=provider,
+        error_type=error_type,
+    ).inc()
+
 cache_size = get_or_create_metric(Gauge,
     "cache_size_bytes",
     "Cache size in bytes",
