@@ -358,8 +358,10 @@ def redeem_coupon(
         coupon_id = validation["coupon_id"]
         coupon_value = validation["coupon_value"]
 
-        # Step 2: Get current user balance
-        user_result = client.table("users").select("credits").eq("id", user_id).execute()
+        # Step 2: Get current user balance (use tiered credits if available)
+        user_result = client.table("users").select(
+            "credits, subscription_allowance, purchased_credits"
+        ).eq("id", user_id).execute()
 
         if not user_result.data:
             return {
@@ -372,13 +374,29 @@ def redeem_coupon(
                 "coupon_code": code,
             }
 
-        current_balance = float(user_result.data[0]["credits"])
-        new_balance = current_balance + coupon_value
+        user_data = user_result.data[0]
+        # Use tiered credits: sum of subscription_allowance and purchased_credits
+        subscription_allowance = float(user_data.get("subscription_allowance") or 0)
+        purchased_credits = float(user_data.get("purchased_credits") or 0)
+        tiered_credits = subscription_allowance + purchased_credits
 
-        # Step 3: Update user balance
-        update_result = (
-            client.table("users").update({"credits": new_balance}).eq("id", user_id).execute()
-        )
+        # Use tiered credits if available, otherwise fall back to legacy credits field
+        if tiered_credits > 0 or user_data.get("subscription_allowance") is not None:
+            current_balance = tiered_credits
+            # Add coupon credits to purchased_credits (not allowance)
+            new_purchased = purchased_credits + coupon_value
+            new_balance = subscription_allowance + new_purchased
+            # Step 3: Update purchased_credits (coupon credits go to purchased pool)
+            update_result = (
+                client.table("users").update({"purchased_credits": new_purchased}).eq("id", user_id).execute()
+            )
+        else:
+            current_balance = float(user_data.get("credits") or 0)
+            new_balance = current_balance + coupon_value
+            # Step 3: Update legacy credits balance
+            update_result = (
+                client.table("users").update({"credits": new_balance}).eq("id", user_id).execute()
+            )
 
         if not update_result.data:
             raise Exception("Failed to update user balance")
