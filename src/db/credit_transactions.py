@@ -29,6 +29,8 @@ class TransactionType:
     REFUND = "refund"  # Refund from payment
     BONUS = "bonus"  # Promotional/bonus credits
     TRANSFER = "transfer"  # Credits transferred between accounts
+    SUBSCRIPTION_RENEWAL = "subscription_renewal"  # Monthly allowance reset on renewal
+    SUBSCRIPTION_CANCELLATION = "subscription_cancellation"  # Allowance forfeited on cancel
 
 
 def log_credit_transaction(

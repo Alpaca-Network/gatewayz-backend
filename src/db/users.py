@@ -940,7 +940,7 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         log_credit_transaction(
             user_id=user_id,
             amount=allowance_amount,  # Positive amount for reset
-            transaction_type="subscription_renewal",
+            transaction_type=TransactionType.SUBSCRIPTION_RENEWAL,
             description=f"Monthly allowance reset - {tier.upper()} tier (${allowance_amount})",
             balance_before=old_allowance + purchased,
             balance_after=allowance_amount + purchased,
@@ -977,7 +977,7 @@ def forfeit_subscription_allowance(user_id: int) -> float:
         Amount of allowance that was forfeited
     """
     try:
-        from src.db.credit_transactions import log_credit_transaction
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         client = get_supabase_client()
         now = datetime.now(timezone.utc).isoformat()
@@ -1005,7 +1005,7 @@ def forfeit_subscription_allowance(user_id: int) -> float:
             log_credit_transaction(
                 user_id=user_id,
                 amount=-forfeited_amount,
-                transaction_type="subscription_cancellation",
+                transaction_type=TransactionType.SUBSCRIPTION_CANCELLATION,
                 description="Subscription allowance forfeited on cancellation",
                 balance_before=forfeited_amount + purchased,
                 balance_after=purchased,
