@@ -4,7 +4,7 @@ Handles saving and retrieval of chat completion request metrics
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.utils.db_safety import DatabaseResultError, safe_get_first
@@ -12,7 +12,7 @@ from src.utils.db_safety import DatabaseResultError, safe_get_first
 logger = logging.getLogger(__name__)
 
 
-def get_model_id_by_name(model_name: str, provider_name: Optional[str] = None) -> Optional[int]:
+def get_model_id_by_name(model_name: str, provider_name: str | None = None) -> int | None:
     """
     Get the model ID from the models table by model name and provider.
 
@@ -139,13 +139,13 @@ def save_chat_completion_request(
     output_tokens: int,
     processing_time_ms: int,
     status: str = "completed",
-    error_message: Optional[str] = None,
-    user_id: Optional[int] = None,
-    provider_name: Optional[str] = None,
-    model_id: Optional[int] = None,
-    api_key_id: Optional[int] = None,
+    error_message: str | None = None,
+    user_id: int | None = None,
+    provider_name: str | None = None,
+    model_id: int | None = None,
+    api_key_id: int | None = None,
     is_anonymous: bool = False,
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Save a chat completion request to the database.
 
@@ -233,8 +233,8 @@ def save_chat_completion_request(
 
 
 def get_chat_completion_stats(
-    model_id: Optional[int] = None,
-    user_id: Optional[str] = None,
+    model_id: int | None = None,
+    user_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -588,11 +588,11 @@ def get_chat_completion_summary_by_api_key(api_key_id: int) -> dict[str, Any]:
 
 
 def get_chat_completion_summary_by_filters(
-    model_id: Optional[int] = None,
-    provider_id: Optional[int] = None,
-    model_name: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    model_id: int | None = None,
+    provider_id: int | None = None,
+    model_name: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> dict[str, Any]:
     """
     Get aggregated summary statistics for chat completion requests with flexible filtering.
@@ -758,7 +758,7 @@ def get_chat_completion_summary_by_filters(
 
 def search_models_with_chat_summary(
     query: str,
-    provider_name: Optional[str] = None,
+    provider_name: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """
@@ -1026,24 +1026,17 @@ def get_top_models_by_requests(limit: int = 3) -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
 
-        # Query to get models with their request and token counts
-        query_str = """
-        SELECT
-            m.id,
-            m.model_name,
-            p.slug as provider,
-            COUNT(ccr.id) as request_count,
-            COALESCE(SUM(ccr.input_tokens + ccr.output_tokens), 0) as total_tokens
-        FROM chat_completion_requests ccr
-        JOIN models m ON ccr.model_id = m.id
-        JOIN providers p ON m.provider_id = p.id
-        WHERE ccr.status = 'completed'
-        GROUP BY m.id, m.model_name, p.slug
-        ORDER BY request_count DESC
-        LIMIT %s
-        """
-
-        # Use raw SQL via RPC or direct query
+        # Note: Ideally we'd use raw SQL like:
+        # SELECT m.id, m.model_name, p.slug as provider,
+        #        COUNT(ccr.id) as request_count,
+        #        COALESCE(SUM(ccr.input_tokens + ccr.output_tokens), 0) as total_tokens
+        # FROM chat_completion_requests ccr
+        # JOIN models m ON ccr.model_id = m.id
+        # JOIN providers p ON m.provider_id = p.id
+        # WHERE ccr.status = 'completed'
+        # GROUP BY m.id, m.model_name, p.slug
+        # ORDER BY request_count DESC LIMIT N
+        # But using Supabase client API instead:
         result = client.table("models").select("*").execute()
         models = result.data or []
 
@@ -1146,14 +1139,14 @@ def calculate_tokens_per_second(
         }
     """
     try:
-        from datetime import datetime, timedelta, timezone
+        from datetime import UTC, datetime, timedelta
 
         client = get_supabase_client()
 
         # Get time range filter
         start_time = None
         if time_range:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if time_range == "hour":
                 start_time = now - timedelta(hours=1)
             elif time_range == "week":

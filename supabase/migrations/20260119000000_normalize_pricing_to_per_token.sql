@@ -168,7 +168,9 @@ BEGIN
         RAISE NOTICE '  Per-1K format ($0.000001-$0.001): % models (%.1f%%)', v_per_1k, (v_per_1k::FLOAT / v_total::FLOAT * 100);
         RAISE NOTICE '  Per-token format (< $0.000001): % models (%.1f%%) [already correct]', v_per_token, (v_per_token::FLOAT / v_total::FLOAT * 100);
     ELSE
-        RAISE NOTICE '  No models with pricing found - skipping distribution breakdown';
+        RAISE NOTICE '  Per-1M format (> $0.001):  % models (0.0%%)', v_per_1m;
+        RAISE NOTICE '  Per-1K format ($0.000001-$0.001): % models (0.0%%)', v_per_1k;
+        RAISE NOTICE '  Per-token format (< $0.000001): % models (0.0%%) [already correct]', v_per_token;
     END IF;
     RAISE NOTICE '  Zero/null pricing: % models', v_zero_pricing;
 END$$;

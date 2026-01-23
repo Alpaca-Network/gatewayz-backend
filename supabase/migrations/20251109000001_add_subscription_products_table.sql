@@ -26,10 +26,12 @@ COMMENT ON COLUMN subscription_products.credits_per_month IS 'Monthly credit all
 COMMENT ON COLUMN subscription_products.is_active IS 'Whether this product is currently active/available';
 
 -- Insert existing product configurations
+-- Note: MAX tier uses prod_TKOraBpWMxMAIu (matching Stripe/frontend configuration)
+-- The $75/month subscription gives $150 worth of credits (50% discount)
 INSERT INTO subscription_products (product_id, tier, display_name, credits_per_month, description, is_active)
 VALUES
     ('prod_TKOqQPhVRxNp4Q', 'pro', 'Pro', 20.00, 'Professional tier with $20 monthly credits', TRUE),
-    ('prod_TKOqRE2L6qXu7s', 'max', 'MAX', 150.00, 'Maximum tier with $150 monthly credits', TRUE)
+    ('prod_TKOraBpWMxMAIu', 'max', 'MAX', 150.00, 'Maximum tier with $150 monthly credits (50% discount on $75/month subscription)', TRUE)
 ON CONFLICT (product_id) DO NOTHING;
 
 -- Create function to get tier from product_id

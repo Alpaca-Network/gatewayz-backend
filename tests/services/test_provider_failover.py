@@ -250,44 +250,61 @@ class TestEnforceModelFailoverRules:
 
         assert filtered == chain
 
-    def test_payment_failover_bypasses_anthropic_restriction(self):
-        """Test that allow_payment_failover=True bypasses provider restriction for 402 scenarios"""
+    def test_payment_failover_does_not_bypass_anthropic_restriction(self):
+        """Test that allow_payment_failover=True does NOT bypass anthropic/ restriction.
+
+        Anthropic models can ONLY be served by Anthropic or OpenRouter. Routing them
+        to other providers like Cerebras or HuggingFace will always fail, so we must
+        maintain the restriction even with payment failover enabled.
+        """
         chain = ["anthropic", "openrouter", "cerebras", "huggingface"]
         # Without payment failover, anthropic/ models are restricted to anthropic + openrouter
         filtered = enforce_model_failover_rules("anthropic/claude-3.5-sonnet", chain)
         assert filtered == ["anthropic", "openrouter"]
 
-        # With payment failover enabled, the full chain is returned
+        # With payment failover enabled, restriction is STILL enforced
+        # because these models don't exist on other providers
         filtered = enforce_model_failover_rules(
             "anthropic/claude-3.5-sonnet", chain, allow_payment_failover=True
         )
-        assert filtered == chain
+        assert filtered == ["anthropic", "openrouter"]
 
-    def test_payment_failover_bypasses_openai_restriction(self):
-        """Test that allow_payment_failover=True bypasses openai/ provider restriction"""
+    def test_payment_failover_does_not_bypass_openai_restriction(self):
+        """Test that allow_payment_failover=True does NOT bypass openai/ restriction.
+
+        OpenAI models can ONLY be served by OpenAI or OpenRouter. Routing them
+        to other providers like Cerebras or HuggingFace will always fail, so we must
+        maintain the restriction even with payment failover enabled.
+        """
         chain = ["openai", "openrouter", "cerebras", "huggingface"]
         # Without payment failover, openai/ models are restricted to openai + openrouter
         filtered = enforce_model_failover_rules("openai/gpt-5.1", chain)
         assert filtered == ["openai", "openrouter"]
 
-        # With payment failover enabled, the full chain is returned
+        # With payment failover enabled, restriction is STILL enforced
+        # because these models don't exist on other providers
         filtered = enforce_model_failover_rules(
             "openai/gpt-5.1", chain, allow_payment_failover=True
         )
-        assert filtered == chain
+        assert filtered == ["openai", "openrouter"]
 
-    def test_payment_failover_bypasses_suffix_lock(self):
-        """Test that allow_payment_failover=True bypasses suffix-based provider lock"""
+    def test_payment_failover_does_not_bypass_suffix_lock(self):
+        """Test that allow_payment_failover=True does NOT bypass suffix-based provider lock.
+
+        Models with :free, :exacto, :extended suffixes only exist on OpenRouter,
+        so they must always be routed to OpenRouter regardless of payment failover.
+        """
         chain = ["openrouter", "cerebras", "huggingface"]
         # Without payment failover
         filtered = enforce_model_failover_rules("z-ai/glm-4.6:exacto", chain)
         assert filtered == ["openrouter"]
 
-        # With payment failover enabled
+        # With payment failover enabled, restriction is STILL enforced
+        # because these model variants only exist on OpenRouter
         filtered = enforce_model_failover_rules(
             "z-ai/glm-4.6:exacto", chain, allow_payment_failover=True
         )
-        assert filtered == chain
+        assert filtered == ["openrouter"]
 
     def test_payment_failover_no_effect_on_unlocked_models(self):
         """Test that allow_payment_failover has no effect on models without provider lock"""
@@ -332,15 +349,20 @@ class TestEnforceModelFailoverRules:
         filtered = enforce_model_failover_rules("gpt-4", chain.copy())
         assert filtered == ["openrouter"]
 
-    def test_bare_openai_model_names_allow_payment_failover(self):
-        """Test that bare OpenAI model names allow failover when payment_failover=True."""
+    def test_bare_openai_model_names_keep_restriction_with_payment_failover(self):
+        """Test that bare OpenAI model names keep their restriction even with payment_failover=True.
+
+        Bare model names like 'gpt-4' are aliased to 'openai/gpt-4', which can only be
+        served by OpenAI or OpenRouter. Even with payment failover enabled, we cannot
+        route these models to other providers.
+        """
         chain = ["openai", "openrouter", "cerebras", "huggingface"]
 
-        # With payment failover enabled, should return full chain
+        # With payment failover enabled, restriction is STILL enforced
         filtered = enforce_model_failover_rules(
             "gpt-4", chain.copy(), allow_payment_failover=True
         )
-        assert filtered == chain
+        assert filtered == ["openai", "openrouter"]
 
     def test_bare_anthropic_model_names_route_to_native_first(self):
         """Test that bare Anthropic/Claude model names route to native Anthropic first, then OpenRouter.
@@ -377,15 +399,20 @@ class TestEnforceModelFailoverRules:
         filtered = enforce_model_failover_rules("claude-3-opus", chain.copy())
         assert filtered == ["openrouter"]
 
-    def test_bare_anthropic_model_names_allow_payment_failover(self):
-        """Test that bare Anthropic model names allow failover when payment_failover=True."""
+    def test_bare_anthropic_model_names_keep_restriction_with_payment_failover(self):
+        """Test that bare Anthropic model names keep restriction with payment_failover=True.
+
+        Bare model names like 'claude-3-opus' are aliased to 'anthropic/claude-3-opus',
+        which can only be served by Anthropic or OpenRouter. Even with payment failover
+        enabled, we cannot route these models to other providers.
+        """
         chain = ["anthropic", "openrouter", "cerebras", "huggingface"]
 
-        # With payment failover enabled, should return full chain
+        # With payment failover enabled, restriction is STILL enforced
         filtered = enforce_model_failover_rules(
             "claude-3-opus", chain.copy(), allow_payment_failover=True
         )
-        assert filtered == chain
+        assert filtered == ["anthropic", "openrouter"]
 
 
 # ============================================================
