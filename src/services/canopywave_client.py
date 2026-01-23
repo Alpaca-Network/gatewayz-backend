@@ -24,7 +24,7 @@ Features:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, Iterator
 
 import httpx
@@ -35,6 +35,7 @@ from src.cache import _canopywave_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_canopywave_pooled_client
+from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def get_canopywave_client() -> OpenAI:
         return get_canopywave_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize Canopy Wave client: {e}")
+        capture_provider_error(e, provider="canopywave", endpoint="client_init")
         raise
 
 
@@ -84,6 +86,12 @@ def make_canopywave_request_openai(
         return response
     except Exception as e:
         logger.error(f"Canopy Wave request failed: {e}")
+        capture_provider_error(
+            e,
+            provider="canopywave",
+            endpoint="chat_completions",
+            model=model,
+        )
         raise
 
 
@@ -109,6 +117,12 @@ def make_canopywave_request_openai_stream(
         return stream
     except Exception as e:
         logger.error(f"Canopy Wave streaming request failed: {e}")
+        capture_provider_error(
+            e,
+            provider="canopywave",
+            endpoint="chat_completions_stream",
+            model=model,
+        )
         raise
 
 
@@ -156,6 +170,7 @@ def process_canopywave_response(response: ChatCompletion) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to process Canopy Wave response: {e}")
+        capture_provider_error(e, provider="canopywave", endpoint="response_processing")
         raise
 
 
@@ -188,7 +203,7 @@ def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         The same list of models.
     """
     _canopywave_models_cache["data"] = models
-    _canopywave_models_cache["timestamp"] = datetime.now(timezone.utc)
+    _canopywave_models_cache["timestamp"] = datetime.now(UTC)
     return models
 
 
@@ -290,9 +305,16 @@ def fetch_models_from_canopywave() -> list[dict[str, Any]]:
         return _cache_and_return(models)
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching models from Canopy Wave: {e.response.status_code} - {e.response.text}")
+        capture_provider_error(
+            e,
+            provider="canopywave",
+            endpoint="fetch_models",
+            extra_context={"status_code": e.response.status_code},
+        )
         return []
     except Exception as e:
         logger.error(f"Failed to fetch models from Canopy Wave: {e}")
+        capture_provider_error(e, provider="canopywave", endpoint="fetch_models")
         return []
 
 
