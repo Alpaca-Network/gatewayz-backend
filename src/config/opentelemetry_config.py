@@ -144,6 +144,9 @@ class OpenTelemetryConfig:
             # Configure OTLP exporter to Tempo
             tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
 
+            # DEBUG: Log the original value
+            logger.info(f"   [DEBUG] Raw TEMPO_OTLP_HTTP_ENDPOINT: {tempo_endpoint}")
+
             # Railway internal DNS detection (same project) - check FIRST
             if ".railway.internal" in tempo_endpoint:
                 # Using Railway internal DNS - keep as-is with port
@@ -153,6 +156,7 @@ class OpenTelemetryConfig:
                     "https://"
                 ):
                     tempo_endpoint = f"http://{tempo_endpoint}"
+                logger.info(f"   [DEBUG] After internal DNS processing: {tempo_endpoint}")
             # Railway public URL detection (cross-project)
             elif ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
                 # Remove :4318 or :4317 port suffixes for Railway public deployments
@@ -163,8 +167,10 @@ class OpenTelemetryConfig:
                 elif not tempo_endpoint.startswith("https://"):
                     tempo_endpoint = f"https://{tempo_endpoint}"
                 logger.info(f"   Railway public deployment detected - using HTTPS proxy")
+                logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
             logger.info(f"   Tempo endpoint: {tempo_endpoint}")
+            logger.info(f"   [DEBUG] Final endpoint with path: {tempo_endpoint}/v1/traces")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
