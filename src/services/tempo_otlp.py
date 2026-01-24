@@ -94,58 +94,43 @@ def init_tempo_otlp():
         logger.info("Tempo/OTLP tracing is disabled")
         return
 
-    # Use gRPC endpoint (more reliable than HTTP, no 404 path issues)
-    tempo_endpoint = Config.TEMPO_OTLP_GRPC_ENDPOINT
+    # Check if Tempo endpoint is reachable before initializing
+    tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
 
-    # Validate endpoint is configured
-    if not tempo_endpoint:
-        logger.warning("⏭️  TEMPO_OTLP_GRPC_ENDPOINT not configured, skipping tracing")
+    # Railway fix: Remove port numbers from Railway URLs
+    if ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+        tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
+        if tempo_endpoint.startswith("http://"):
+            tempo_endpoint = tempo_endpoint.replace("http://", "https://")
+        elif not tempo_endpoint.startswith("https://"):
+            tempo_endpoint = f"https://{tempo_endpoint}"
+
+    logger.info(f"Checking Tempo endpoint availability: {tempo_endpoint}")
+
+    if not check_tempo_endpoint_reachable(tempo_endpoint):
+        logger.warning(
+            f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
+            f"Ensure the Tempo service is deployed and accessible from this service. "
+            f"The application will continue without distributed tracing."
+        )
         return None
-
-    logger.info(f"🔭 Initializing OpenTelemetry with Tempo (gRPC)")
-    logger.info(f"   Raw TEMPO_OTLP_GRPC_ENDPOINT: {tempo_endpoint}")
-
-    # Clean up endpoint format for gRPC
-    # gRPC format: "host:port" (no http:// prefix, no /v1/traces path)
-    if "://" in tempo_endpoint:
-        parsed = urlparse(tempo_endpoint)
-        tempo_endpoint = f"{parsed.hostname}:{parsed.port or 4317}"
-        logger.warning(f"   ⚠️  Removed protocol prefix, using: {tempo_endpoint}")
-
-    # Ensure port is specified
-    if ":" not in tempo_endpoint:
-        tempo_endpoint = f"{tempo_endpoint}:4317"
-        logger.warning(f"   ⚠️  Port missing, added default gRPC port: {tempo_endpoint}")
-
-    logger.info(f"   Tempo gRPC endpoint: {tempo_endpoint}")
-
-    # Determine if connection should use TLS
-    use_insecure = ".railway.internal" in tempo_endpoint or "localhost" in tempo_endpoint
-    if use_insecure:
-        logger.info(f"   Using insecure connection (no TLS) for internal network")
-    else:
-        logger.info(f"   Using secure connection (TLS) for external network")
 
     try:
         from opentelemetry import trace
-
-        # Using gRPC exporter - more reliable, no HTTP 404 path issues
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        # Create OTLP gRPC exporter
+        # Create OTLP exporter pointing to Tempo
+        # Wrap in try-except to catch any connection errors during initialization
         try:
             otlp_exporter = OTLPSpanExporter(
-                endpoint=tempo_endpoint,  # Format: "host:port" (no http://, no /v1/traces)
-                insecure=use_insecure,  # True for Railway internal DNS
-                timeout=10,
+                endpoint=tempo_endpoint,
             )
-            logger.info("   ✅ OTLP gRPC exporter created successfully")
         except Exception as e:
             logger.error(
-                f"❌ Failed to create OTLP gRPC exporter for {tempo_endpoint}: {e}. "
+                f"Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
                 f"Tracing will be disabled."
             )
             return None
@@ -154,8 +139,6 @@ def init_tempo_otlp():
         resource = Resource.create(
             {
                 "service.name": Config.OTEL_SERVICE_NAME,
-                "service.version": "2.0.3",
-                "deployment.environment": Config.APP_ENV,
             }
         )
 
@@ -168,9 +151,8 @@ def init_tempo_otlp():
 
         logger.info("✅ OpenTelemetry/Tempo initialization completed")
         logger.info(f"   Service name: {Config.OTEL_SERVICE_NAME}")
-        logger.info(f"   Protocol: gRPC (more reliable than HTTP)")
-        logger.info(f"   Endpoint: {tempo_endpoint}")
-        logger.info("   Traces will be exported to Tempo via gRPC")
+        logger.info(f"   Tempo endpoint: {tempo_endpoint}")
+        logger.info("   Traces will be exported to Tempo")
 
         return trace_provider
 

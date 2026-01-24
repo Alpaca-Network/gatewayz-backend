@@ -20,9 +20,7 @@ from urllib.parse import urlparse
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
 try:
     from opentelemetry import trace
-
-    # Using gRPC exporter - more reliable, no HTTP 404 path issues
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     from opentelemetry.instrumentation.requests import RequestsInstrumentor
@@ -141,46 +139,70 @@ class OpenTelemetryConfig:
             return False
 
         try:
-            logger.info("🔭 Initializing OpenTelemetry tracing with gRPC...")
+            logger.info("🔭 Initializing OpenTelemetry tracing...")
 
-            # Use gRPC endpoint (more reliable than HTTP, no 404 path issues)
-            tempo_endpoint = Config.TEMPO_OTLP_GRPC_ENDPOINT
-
-            # Validate endpoint is configured
-            if not tempo_endpoint:
-                logger.warning("⏭️  TEMPO_OTLP_GRPC_ENDPOINT not configured, skipping tracing")
-                return False
+            # Configure OTLP exporter to Tempo
+            tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
 
             # DEBUG: Log the original value
-            logger.info(f"   [DEBUG] Raw TEMPO_OTLP_GRPC_ENDPOINT: {tempo_endpoint}")
+            logger.info(f"   [DEBUG] Raw TEMPO_OTLP_HTTP_ENDPOINT: {tempo_endpoint}")
 
-            # Clean up endpoint format for gRPC
-            # gRPC format: "host:port" (no http:// prefix, no /v1/traces path)
-            if "://" in tempo_endpoint:
-                # Remove protocol prefix if present
+            # Railway internal DNS detection (same project) - check FIRST
+            if ".railway.internal" in tempo_endpoint:
+                # Using Railway internal DNS - keep as-is with port
+                logger.info(f"   Railway internal DNS detected - using private network")
+                # Ensure http:// for internal (no SSL)
+                if not tempo_endpoint.startswith("http://") and not tempo_endpoint.startswith(
+                    "https://"
+                ):
+                    tempo_endpoint = f"http://{tempo_endpoint}"
+
+                # CRITICAL FIX: Ensure port 4318 is explicitly set for Railway internal DNS
+                # Without this, OTLPSpanExporter defaults to port 80, causing connection refused errors
                 parsed = urlparse(tempo_endpoint)
-                tempo_endpoint = f"{parsed.hostname}:{parsed.port or 4317}"
-                logger.warning(f"   ⚠️  Removed protocol prefix, using: {tempo_endpoint}")
+                if not parsed.port:
+                    # Port missing - add :4318 for OTLP HTTP
+                    if parsed.hostname:
+                        tempo_endpoint = f"{parsed.scheme}://{parsed.hostname}:4318{parsed.path}"
+                        logger.warning(
+                            f"   ⚠️  Port missing in Railway internal endpoint - "
+                            f"auto-corrected to: {tempo_endpoint}"
+                        )
+                        logger.warning(
+                            f"   💡 TIP: Set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318 "
+                            f"in Railway environment variables to avoid this warning"
+                        )
 
-            # Ensure port is specified
-            if ":" not in tempo_endpoint:
-                tempo_endpoint = f"{tempo_endpoint}:4317"
-                logger.warning(f"   ⚠️  Port missing, added default gRPC port: {tempo_endpoint}")
+                logger.info(f"   [DEBUG] After internal DNS processing: {tempo_endpoint}")
+            # Railway public URL detection (cross-project)
+            elif ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+                # Remove :4318 or :4317 port suffixes for Railway public deployments
+                tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
+                # Ensure it uses https:// for Railway public
+                if tempo_endpoint.startswith("http://"):
+                    tempo_endpoint = tempo_endpoint.replace("http://", "https://")
+                elif not tempo_endpoint.startswith("https://"):
+                    tempo_endpoint = f"https://{tempo_endpoint}"
+                logger.info(f"   Railway public deployment detected - using HTTPS proxy")
+                logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
-            logger.info(f"   Tempo gRPC endpoint: {tempo_endpoint}")
+            logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
+            logger.info(f"   [DEBUG] Full OTLP path will be: {tempo_endpoint}/v1/traces")
 
-            # Determine if connection should use TLS
-            # Railway internal DNS (.railway.internal) should use insecure connection (no TLS)
-            use_insecure = ".railway.internal" in tempo_endpoint or "localhost" in tempo_endpoint
-            if use_insecure:
-                logger.info(f"   Using insecure connection (no TLS) for internal network")
-            else:
-                logger.info(f"   Using secure connection (TLS) for external network")
-
-            # Skip reachability check for gRPC (connection established lazily on first export)
-            logger.info(
-                "   Skipping reachability check for gRPC (connection established on first export)"
-            )
+            # Check if Tempo endpoint is reachable before attempting to create exporter
+            # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
+            if Config.TEMPO_SKIP_REACHABILITY_CHECK:
+                logger.info(
+                    "   Skipping reachability check (TEMPO_SKIP_REACHABILITY_CHECK=true) - "
+                    "traces will be buffered and sent asynchronously"
+                )
+            elif not _check_endpoint_reachable(tempo_endpoint):
+                logger.warning(
+                    f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
+                    f"Ensure the Tempo service is deployed and accessible. "
+                    f"The application will continue without distributed tracing."
+                )
+                return False
 
             # Create resource with service metadata
             resource = Resource.create(
@@ -196,25 +218,30 @@ class OpenTelemetryConfig:
             # Create tracer provider
             cls._tracer_provider = TracerProvider(resource=resource)
 
-            # Create OTLP gRPC exporter
+            # Create OTLP exporter with error handling for connection issues
             try:
-                timeout_seconds = 10
+                # Increased timeout for Railway cross-project connections
+                # Railway internal DNS is fast, but cross-project public URLs need more time
+                timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
+                # CRITICAL: For HTTP protocol, the endpoint MUST include the full path including /v1/traces
+                # The HTTP exporter does NOT auto-append /v1/traces like some other exporters do
+                # Reference: https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
+                full_endpoint = f"{tempo_endpoint}/v1/traces"
                 logger.info(
-                    f"   [DEBUG] Creating OTLP gRPC exporter with endpoint: {tempo_endpoint}"
+                    f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {full_endpoint}"
                 )
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
-                logger.info(f"   [DEBUG] Insecure: {use_insecure}")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=tempo_endpoint,  # Format: "host:port" (no http://, no /v1/traces)
-                    insecure=use_insecure,  # True for Railway internal DNS, False for external
+                    endpoint=full_endpoint,  # HTTP exporter needs full path with /v1/traces
+                    headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
-                logger.info(f"   [DEBUG] OTLP gRPC exporter created successfully")
-                logger.info(f"   [DEBUG] Will send traces via gRPC to: {tempo_endpoint}")
+                logger.info(f"   [DEBUG] OTLP exporter created successfully")
+                logger.info(f"   [DEBUG] Will POST traces to: {full_endpoint}")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
