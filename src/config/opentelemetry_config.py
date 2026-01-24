@@ -156,6 +156,23 @@ class OpenTelemetryConfig:
                     "https://"
                 ):
                     tempo_endpoint = f"http://{tempo_endpoint}"
+
+                # CRITICAL FIX: Ensure port 4318 is explicitly set for Railway internal DNS
+                # Without this, OTLPSpanExporter defaults to port 80, causing connection refused errors
+                parsed = urlparse(tempo_endpoint)
+                if not parsed.port:
+                    # Port missing - add :4318 for OTLP HTTP
+                    if parsed.hostname:
+                        tempo_endpoint = f"{parsed.scheme}://{parsed.hostname}:4318{parsed.path}"
+                        logger.warning(
+                            f"   ⚠️  Port missing in Railway internal endpoint - "
+                            f"auto-corrected to: {tempo_endpoint}"
+                        )
+                        logger.warning(
+                            f"   💡 TIP: Set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318 "
+                            f"in Railway environment variables to avoid this warning"
+                        )
+
                 logger.info(f"   [DEBUG] After internal DNS processing: {tempo_endpoint}")
             # Railway public URL detection (cross-project)
             elif ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
@@ -169,8 +186,8 @@ class OpenTelemetryConfig:
                 logger.info(f"   Railway public deployment detected - using HTTPS proxy")
                 logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
-            logger.info(f"   Tempo endpoint: {tempo_endpoint}")
-            logger.info(f"   [DEBUG] Final endpoint with path: {tempo_endpoint}/v1/traces")
+            logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
+            logger.info(f"   [DEBUG] Full OTLP path will be: {tempo_endpoint}/v1/traces")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
@@ -207,21 +224,22 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
-                full_endpoint = f"{tempo_endpoint}/v1/traces"
-                logger.info(f"   [DEBUG] Creating OTLP exporter with endpoint: {full_endpoint}")
+                # IMPORTANT: OTLPSpanExporter automatically appends /v1/traces to the endpoint
+                # We should NOT include it in the endpoint URL, just pass the base URL
+                # Example: http://tempo.railway.internal:4318 (NOT http://tempo.railway.internal:4318/v1/traces)
+                logger.info(f"   [DEBUG] Creating OTLP exporter with endpoint: {tempo_endpoint}")
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
+                logger.info(f"   [DEBUG] Note: OTLPSpanExporter will auto-append /v1/traces")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=full_endpoint,
+                    endpoint=tempo_endpoint,  # Pass base URL without /v1/traces
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
                 logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(
-                    f"   [DEBUG] Exporter endpoint property: {getattr(otlp_exporter, '_endpoint', 'N/A')}"
-                )
+                logger.info(f"   [DEBUG] Exporter will send to: {tempo_endpoint}/v1/traces")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
