@@ -207,10 +207,20 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
+                full_endpoint = f"{tempo_endpoint}/v1/traces"
+                logger.info(f"   [DEBUG] Creating OTLP exporter with endpoint: {full_endpoint}")
+                logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
+
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=f"{tempo_endpoint}/v1/traces",
+                    endpoint=full_endpoint,
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
+                )
+
+                # Log the actual endpoint the exporter is using
+                logger.info(f"   [DEBUG] OTLP exporter created successfully")
+                logger.info(
+                    f"   [DEBUG] Exporter endpoint property: {getattr(otlp_exporter, '_endpoint', 'N/A')}"
                 )
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
