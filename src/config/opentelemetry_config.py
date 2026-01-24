@@ -188,9 +188,11 @@ class OpenTelemetryConfig:
             cls._tracer_provider = TracerProvider(resource=resource)
 
             # Create OTLP exporter with error handling for connection issues
+            # Note: OTLPSpanExporter automatically appends /v1/traces to the endpoint
+            # so we only provide the base URL (e.g., http://tempo:4318)
             try:
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=f"{tempo_endpoint}/v1/traces",
+                    endpoint=tempo_endpoint,
                     headers={},  # Add authentication headers if needed
                     timeout=10,  # 10 second timeout to prevent hanging (Railway cross-project)
                 )
