@@ -25,7 +25,6 @@ Environment Variables:
     EMAILABLE_TIMEOUT - Request timeout in seconds (default: 5)
 """
 
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -35,21 +34,6 @@ from typing import Optional
 import httpx
 
 logger = logging.getLogger(__name__)
-
-# Cache TTL in seconds (1 hour)
-EMAIL_VERIFICATION_CACHE_TTL = 3600
-EMAIL_VERIFICATION_CACHE_PREFIX = "email_verification:"
-
-
-def _get_redis_client():
-    """Get Redis client instance with error handling."""
-    try:
-        from src.config.redis_config import get_redis_client
-
-        return get_redis_client()
-    except Exception as e:
-        logger.warning(f"Failed to get Redis client for email verification cache: {e}")
-        return None
 
 
 class EmailState(str, Enum):
@@ -145,35 +129,6 @@ class EmailVerificationResult:
             return "bot"
         return "trial"
 
-    def to_cache_dict(self) -> dict:
-        """Convert result to dict for caching."""
-        return {
-            "email": self.email,
-            "state": self.state.value,
-            "reason": self.reason.value,
-            "score": self.score,
-            "is_disposable": self.is_disposable,
-            "is_free": self.is_free,
-            "is_role": self.is_role,
-            "domain": self.domain,
-            "did_you_mean": self.did_you_mean,
-        }
-
-    @classmethod
-    def from_cache_dict(cls, data: dict) -> "EmailVerificationResult":
-        """Create result from cached dict."""
-        return cls(
-            email=data["email"],
-            state=EmailState(data["state"]),
-            reason=EmailReason(data["reason"]),
-            score=data["score"],
-            is_disposable=data["is_disposable"],
-            is_free=data["is_free"],
-            is_role=data["is_role"],
-            domain=data["domain"],
-            did_you_mean=data.get("did_you_mean"),
-        )
-
 
 class EmailVerificationService:
     """Service for verifying email addresses using Emailable API."""
@@ -217,7 +172,7 @@ class EmailVerificationService:
 
         # If verification is disabled, return a default result
         if not self.enabled:
-            logger.debug(f"Email verification disabled, skipping verification for domain={domain}")
+            logger.debug(f"Email verification disabled, skipping verification for {email}")
             return EmailVerificationResult(
                 email=email,
                 state=EmailState.UNKNOWN,
@@ -229,25 +184,8 @@ class EmailVerificationService:
                 domain=domain,
             )
 
-        # Check cache first
-        cached_result = self._get_cached_result(email)
-        if cached_result:
-            logger.debug(f"Email verification cache hit for domain={domain}")
-            return cached_result
-
-        # Make API call
-        result = await self._verify_email_uncached(email, domain)
-
-        # Cache the result (only for successful API calls, not errors)
-        if result.reason not in (EmailReason.API_ERROR, EmailReason.THROTTLED, EmailReason.TIMEOUT):
-            self._cache_result(email, result)
-
-        return result
-
-    async def _verify_email_uncached(self, email: str, domain: str) -> EmailVerificationResult:
-        """Make the actual API call to verify an email (no caching)."""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout + 5) as client:
                 response = await client.get(
                     f"{self.API_BASE_URL}/verify",
                     params={
@@ -259,7 +197,7 @@ class EmailVerificationService:
 
                 # Handle rate limiting
                 if response.status_code == 429:
-                    logger.warning(f"Emailable rate limit exceeded for domain={domain}")
+                    logger.warning(f"Emailable rate limit exceeded for {email}")
                     return self._create_unknown_result(email, domain, EmailReason.THROTTLED)
 
                 # Handle insufficient credits
@@ -269,52 +207,19 @@ class EmailVerificationService:
 
                 # Handle other errors
                 if response.status_code != 200:
-                    logger.error(f"Emailable API error: {response.status_code} for domain={domain}")
+                    logger.error(f"Emailable API error: {response.status_code} - {response.text}")
                     return self._create_unknown_result(email, domain, EmailReason.API_ERROR)
 
                 data = response.json()
                 return self._parse_response(email, data)
 
         except httpx.TimeoutException:
-            logger.warning(f"Emailable API timeout for domain={domain}")
+            logger.warning(f"Emailable API timeout for {email}")
             return self._create_unknown_result(email, domain, EmailReason.TIMEOUT)
 
         except Exception as e:
-            logger.error(f"Emailable API unexpected error for domain={domain}: {type(e).__name__}")
+            logger.error(f"Emailable API unexpected error for {email}: {e}")
             return self._create_unknown_result(email, domain, EmailReason.UNEXPECTED_ERROR)
-
-    def _get_cached_result(self, email: str) -> EmailVerificationResult | None:
-        """Get cached verification result for an email."""
-        try:
-            redis_client = _get_redis_client()
-            if not redis_client:
-                return None
-
-            cache_key = f"{EMAIL_VERIFICATION_CACHE_PREFIX}{email.lower()}"
-            cached_data = redis_client.get(cache_key)
-
-            if cached_data:
-                data = json.loads(cached_data)
-                return EmailVerificationResult.from_cache_dict(data)
-        except Exception as e:
-            logger.warning(f"Failed to get cached email verification result: {e}")
-        return None
-
-    def _cache_result(self, email: str, result: EmailVerificationResult) -> bool:
-        """Cache verification result for an email."""
-        try:
-            redis_client = _get_redis_client()
-            if not redis_client:
-                return False
-
-            cache_key = f"{EMAIL_VERIFICATION_CACHE_PREFIX}{email.lower()}"
-            cache_data = json.dumps(result.to_cache_dict())
-            redis_client.setex(cache_key, EMAIL_VERIFICATION_CACHE_TTL, cache_data)
-            logger.debug(f"Cached email verification result for domain={result.domain}")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to cache email verification result: {e}")
-        return False
 
     def _parse_response(self, email: str, data: dict) -> EmailVerificationResult:
         """Parse the Emailable API response into a result object."""
