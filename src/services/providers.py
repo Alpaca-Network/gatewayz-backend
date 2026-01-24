@@ -90,7 +90,7 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             "aihubmix": "https://aihubmix.com/favicon.ico",
             "anannas": "https://api.anannas.ai/favicon.ico",
             "alpaca-network": "https://console.anyscale.com/favicon.ico",
-            "onerouter": "https://onerouter.pro/favicon.ico",
+            "onerouter": "https://infron.ai/favicon.ico",
             "simplismart": "https://simplismart.ai/favicon.ico",
         }
 
@@ -303,7 +303,7 @@ def fetch_models_from_novita():
 
 
 def fetch_models_from_onerouter():
-    """Fetch models from OneRouter client"""
+    """Fetch models from Infron AI client"""
     from src.services.onerouter_client import fetch_models_from_onerouter as _fetch
 
     return _fetch()

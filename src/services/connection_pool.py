@@ -438,13 +438,13 @@ def get_clarifai_pooled_client() -> OpenAI:
 
 
 def get_onerouter_pooled_client() -> OpenAI:
-    """Get pooled client for OneRouter."""
+    """Get pooled client for Infron AI (formerly OneRouter)."""
     if not Config.ONEROUTER_API_KEY:
-        raise ValueError("OneRouter API key not configured")
+        raise ValueError("Infron AI API key not configured")
 
     return get_pooled_client(
         provider="onerouter",
-        base_url="https://llm.onerouter.pro/v1",
+        base_url="https://llm.infron.ai/v1",
         api_key=Config.ONEROUTER_API_KEY,
     )
 

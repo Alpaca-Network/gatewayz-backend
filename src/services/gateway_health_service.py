@@ -206,8 +206,8 @@ GATEWAY_CONFIG = {
         "header_type": "bearer",
     },
     "onerouter": {
-        "name": "OneRouter",
-        "url": "https://api.onerouter.pro/v1/models",
+        "name": "Infron AI",
+        "url": "https://api.infron.ai/v1/models",
         "api_key_env": "ONEROUTER_API_KEY",
         "api_key": Config.ONEROUTER_API_KEY,
         "cache": _onerouter_models_cache,

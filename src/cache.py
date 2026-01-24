@@ -182,7 +182,7 @@ _alibaba_models_cache = {
 _onerouter_models_cache = {
     "data": None,
     "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for OneRouter catalog
+    "ttl": 3600,  # 1 hour TTL for Infron AI (formerly OneRouter) catalog
     "stale_ttl": 7200,
 }
 

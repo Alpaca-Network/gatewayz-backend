@@ -40,7 +40,7 @@ INSERT INTO "public"."providers" (
     ('Alpaca Network', 'alpaca', 'Alpaca Network - slow priority gateway', 'ALPACA_NETWORK_API_KEY', true, true, 'https://alpaca.network', '{"color": "bg-green-700", "priority": "slow"}'::jsonb),
     ('Alibaba', 'alibaba', 'Alibaba - slow priority gateway', 'ALIBABA_CLOUD_API_KEY', true, true, 'https://dashscope.aliyun.com', '{"color": "bg-orange-700", "priority": "slow"}'::jsonb),
     ('Clarifai', 'clarifai', 'Clarifai - slow priority gateway', 'CLARIFAI_API_KEY', true, true, 'https://clarifai.com', '{"color": "bg-purple-600", "priority": "slow"}'::jsonb),
-    ('OneRouter', 'onerouter', 'OneRouter - slow priority gateway', 'ONEROUTER_API_KEY', true, true, 'https://onerouter.pro', '{"color": "bg-emerald-500", "priority": "slow"}'::jsonb),
+    ('Infron AI', 'onerouter', 'Infron AI (formerly OneRouter) - slow priority gateway', 'ONEROUTER_API_KEY', true, true, 'https://infron.ai', '{"color": "bg-emerald-500", "priority": "slow"}'::jsonb),
     ('SimpliSmart', 'simplismart', 'SimpliSmart - slow priority gateway', 'SIMPLISMART_API_KEY', true, true, 'https://simplismart.ai', '{"color": "bg-sky-500", "priority": "slow"}'::jsonb),
     ('AiHubMix', 'aihubmix', 'AiHubMix - slow priority gateway', 'AIHUBMIX_API_KEY', true, true, 'https://aihubmix.com', '{"color": "bg-rose-500", "priority": "slow"}'::jsonb),
     ('Anannas', 'anannas', 'Anannas - slow priority gateway', 'ANANNAS_API_KEY', true, true, 'https://anannas.ai', '{"color": "bg-lime-600", "priority": "slow"}'::jsonb),

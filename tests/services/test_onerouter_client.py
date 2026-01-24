@@ -530,13 +530,13 @@ class TestFetchModelsFromOneRouter:
 
             # Check the /v1/models call (first call)
             v1_call = mock_get.call_args_list[0]
-            assert v1_call[0][0] == "https://api.onerouter.pro/v1/models"
+            assert v1_call[0][0] == "https://api.infron.ai/v1/models"
             assert "Authorization" in v1_call[1]["headers"]
             assert v1_call[1]["headers"]["Authorization"] == "Bearer test_onerouter_key_123"
 
             # Check the display_models call (second call - from pricing enrichment)
             display_call = mock_get.call_args_list[1]
-            assert display_call[0][0] == "https://app.onerouter.pro/api/display_models/"
+            assert display_call[0][0] == "https://app.infron.ai/api/display_models/"
 
     def test_fetch_models_missing_api_key(self):
         """Test that fetch returns empty list when API key is not configured"""
