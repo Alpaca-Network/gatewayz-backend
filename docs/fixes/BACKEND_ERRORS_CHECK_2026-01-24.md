@@ -6,7 +6,7 @@ Comprehensive check of backend errors for the last 24 hours using git history an
 
 **Result**: ✅ **MULTIPLE TRACING ISSUES IDENTIFIED AND RESOLVED** - OpenTelemetry/Tempo configuration stabilized
 
-**Status**: Backend experienced multiple deployment cycles (9 commits) to fix OpenTelemetry tracing configuration issues. System now stable with HTTP exporter.
+**Status**: Backend experienced multiple deployment cycles (12 commits) to fix OpenTelemetry tracing configuration issues. System now stable with HTTP exporter.
 
 ---
 
@@ -40,7 +40,7 @@ Comprehensive check of backend errors for the last 24 hours using git history an
 **Discovery Method**: Git commit history analysis
 
 **Problem**:
-- **9 fix commits** in 24 hours related to OpenTelemetry Tempo OTLP exporter configuration
+- **12 commits** in 24 hours related to OpenTelemetry Tempo OTLP exporter configuration (8 fixes, 2 reverts, 2 debug)
 - Backend experienced deployment instability due to gRPC vs HTTP exporter issues
 - Multiple failed attempts to migrate from HTTP to gRPC exporter
 - Health check failures when gRPC endpoint not configured
@@ -98,14 +98,13 @@ Comprehensive check of backend errors for the last 24 hours using git history an
 5. **Incomplete Migration**: Partial gRPC migration left system in inconsistent state
 
 **Final Resolution** (Commit 24f6b7d):
-```python
-# Stable HTTP exporter configuration
-- Uses TEMPO_OTLP_HTTP_ENDPOINT (http://tempo.railway.internal:4318)
-- HTTP exporter with /v1/traces path
+
+Stable HTTP exporter configuration:
+- Uses `TEMPO_OTLP_HTTP_ENDPOINT` (`http://tempo.railway.internal:4318`)
+- HTTP exporter with `/v1/traces` path
 - Validated endpoint reachability checks
 - Graceful degradation if Tempo unavailable
 - Cost tracking metrics preserved (from 8285975)
-```
 
 **Impact**:
 - 🟠 **HIGH** - Multiple deployment cycles caused temporary instability
@@ -255,7 +254,7 @@ Comprehensive check of backend errors for the last 24 hours using git history an
 - **Recent Activity**: High velocity (43 commits since Jan 20)
 
 ### Recent Commits (Last 24 Hours - Chronological Order)
-```
+```text
 671253d - feat(subscriptions): tiered subscription tracking (23 hours ago)
 57aa910 - feat(backend): integrate Canopy Wave AI provider (21 hours ago)
 6c3b00e - fix(backend): return credits in cents (18 hours ago)
@@ -317,7 +316,7 @@ de827e8 - debug: OTLP exporter endpoint logging (12 hours ago)
 ### January 24, 2026 Check (This Report)
 **Status**: ⚠️ Multiple deployment cycles for tracing configuration
 **New Findings**:
-- 🟠 OpenTelemetry configuration instability (9 fix commits)
+- 🟠 OpenTelemetry configuration instability (12 commits: 8 fixes, 2 reverts, 2 debug)
 - ✅ All issues resolved, system now stable
 - ✅ 7 feature/fix PRs successfully merged
 - ✅ Cost tracking metrics added
@@ -454,7 +453,7 @@ de827e8 - debug: OTLP exporter endpoint logging (12 hours ago)
 ⚠️ **GOOD PROGRESS WITH SOME TURBULENCE** - OpenTelemetry configuration issues resolved after multiple deployment cycles
 
 **Key Findings**:
-- 🟠 **9 commits** to stabilize OpenTelemetry/Tempo configuration
+- 🟠 **12 commits** to stabilize OpenTelemetry/Tempo configuration (8 fixes, 2 reverts, 2 debug)
 - ✅ **Final resolution**: Revert to stable HTTP exporter
 - ✅ **7 successful PRs**: Features and fixes merged successfully
 - ✅ **Cost tracking**: New metrics system operational
