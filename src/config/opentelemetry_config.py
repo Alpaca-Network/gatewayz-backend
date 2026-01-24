@@ -146,6 +146,11 @@ class OpenTelemetryConfig:
             # Use gRPC endpoint (more reliable than HTTP, no 404 path issues)
             tempo_endpoint = Config.TEMPO_OTLP_GRPC_ENDPOINT
 
+            # Validate endpoint is configured
+            if not tempo_endpoint:
+                logger.warning("⏭️  TEMPO_OTLP_GRPC_ENDPOINT not configured, skipping tracing")
+                return False
+
             # DEBUG: Log the original value
             logger.info(f"   [DEBUG] Raw TEMPO_OTLP_GRPC_ENDPOINT: {tempo_endpoint}")
 

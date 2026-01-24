@@ -236,7 +236,9 @@ class Config:
 
     # Canopy Wave AI Configuration
     CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
-    CANOPYWAVE_BASE_URL = os.environ.get("CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1")
+    CANOPYWAVE_BASE_URL = os.environ.get(
+        "CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1"
+    )
 
     # Nosana GPU Computing Network Configuration
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
@@ -251,9 +253,7 @@ class Config:
         "true",
         "yes",
     }
-    BUTTER_DEV_BASE_URL: str = os.environ.get(
-        "BUTTER_DEV_BASE_URL", "https://proxy.butter.dev/v1"
-    )
+    BUTTER_DEV_BASE_URL: str = os.environ.get("BUTTER_DEV_BASE_URL", "https://proxy.butter.dev/v1")
     BUTTER_DEV_TIMEOUT: int = int(os.environ.get("BUTTER_DEV_TIMEOUT", "30"))
     # Enable automatic fallback to direct provider on Butter.dev errors
     BUTTER_DEV_FALLBACK_ENABLED: bool = os.environ.get(
@@ -335,10 +335,20 @@ class Config:
         "TEMPO_OTLP_HTTP_ENDPOINT",
         "http://localhost:4318",
     )
-    TEMPO_OTLP_GRPC_ENDPOINT = os.environ.get(
-        "TEMPO_OTLP_GRPC_ENDPOINT",
-        "localhost:4317",
-    )
+    # Get gRPC endpoint, fall back to converting HTTP endpoint if not set
+    _grpc_endpoint = os.environ.get("TEMPO_OTLP_GRPC_ENDPOINT")
+    if not _grpc_endpoint:
+        # Convert HTTP endpoint to gRPC format if gRPC not explicitly set
+        _http_endpoint = os.environ.get("TEMPO_OTLP_HTTP_ENDPOINT", "http://localhost:4318")
+        # Extract host from HTTP endpoint and change port to 4317
+        if "://" in _http_endpoint:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(_http_endpoint)
+            _grpc_endpoint = f"{parsed.hostname}:4317"
+        else:
+            _grpc_endpoint = _http_endpoint.replace(":4318", ":4317")
+    TEMPO_OTLP_GRPC_ENDPOINT = _grpc_endpoint
     # Skip endpoint reachability check during startup (allows async connection)
     TEMPO_SKIP_REACHABILITY_CHECK = os.environ.get(
         "TEMPO_SKIP_REACHABILITY_CHECK", "true"
