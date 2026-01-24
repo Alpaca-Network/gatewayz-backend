@@ -1174,7 +1174,7 @@ def test_onerouter_upstream_error_handling(
 
     # Make upstream raise HTTPStatusError(429)
     def boom(*a, **k):
-        req = Request("POST", "https://llm.onerouter.pro/v1/chat/completions")
+        req = Request("POST", "https://llm.infron.ai/v1/chat/completions")
         resp = Response(429, request=req, headers={"retry-after": "5"}, text="Rate limited")
         raise HTTPStatusError("rate limit", request=req, response=resp)
     mock_make_request.side_effect = boom
@@ -1259,7 +1259,7 @@ def test_onerouter_network_error_handling(
 
     # Simulate network error
     def boom(*a, **k):
-        raise RequestError("Network unreachable", request=Request("POST", "https://llm.onerouter.pro/v1/chat/completions"))
+        raise RequestError("Network unreachable", request=Request("POST", "https://llm.infron.ai/v1/chat/completions"))
     mock_make_request.side_effect = boom
 
     payload = {

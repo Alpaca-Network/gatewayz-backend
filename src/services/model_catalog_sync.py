@@ -418,11 +418,11 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "supports_streaming": True,
             },
             "onerouter": {
-                "name": "OneRouter",
-                "description": "OneRouter multi-provider gateway",
-                "base_url": "https://api.onerouter.pro/v1",
+                "name": "Infron AI",
+                "description": "Infron AI (formerly OneRouter) multi-provider gateway",
+                "base_url": "https://api.infron.ai/v1",
                 "api_key_env_var": "ONEROUTER_API_KEY",
-                "site_url": "https://onerouter.pro",
+                "site_url": "https://infron.ai",
                 "supports_streaming": True,
             },
             "cloudflare-workers-ai": {

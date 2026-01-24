@@ -330,7 +330,7 @@ class CanonicalModelRegistry:
 
         # Determine priority based on provider reliability/routing
         priority_map = {
-            "onerouter": 1,  # Highest priority - main router
+            "onerouter": 1,  # Highest priority - Infron AI (main router)
             "openrouter": 2,  # Fallback router
             "google-vertex": 3,  # Fast, reliable
             "together": 4,  # Good coverage

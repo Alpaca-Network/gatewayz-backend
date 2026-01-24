@@ -132,7 +132,7 @@ class Config:
     OPENROUTER_SITE_URL = _get_env_var("OPENROUTER_SITE_URL", "https://your-site.com")
     OPENROUTER_SITE_NAME = _get_env_var("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
 
-    # OneRouter Configuration
+    # Infron AI Configuration (formerly OneRouter)
     ONEROUTER_API_KEY = os.environ.get("ONEROUTER_API_KEY")
 
     # DeepInfra Configuration (for direct API access)

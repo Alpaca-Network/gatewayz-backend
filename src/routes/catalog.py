@@ -210,10 +210,10 @@ GATEWAY_REGISTRY = {
         "site_url": "https://clarifai.com",
     },
     "onerouter": {
-        "name": "OneRouter",
+        "name": "Infron AI",
         "color": "bg-emerald-500",
         "priority": "slow",
-        "site_url": "https://onerouter.pro",
+        "site_url": "https://infron.ai",
     },
     "simplismart": {
         "name": "SimpliSmart",
@@ -709,7 +709,7 @@ async def get_models(
         if gateway_value in ("onerouter", "all"):
             onerouter_models = get_cached_models("onerouter") or []
             if not onerouter_models and gateway_value == "onerouter":
-                logger.warning("OneRouter models unavailable - continuing without them")
+                logger.warning("Infron AI models unavailable - continuing without them")
 
         if gateway_value in ("featherless", "all"):
             featherless_models = get_cached_models("featherless") or []
@@ -1180,7 +1180,7 @@ async def get_models(
 
         note = {
             "openrouter": "OpenRouter catalog",
-            "onerouter": "OneRouter catalog",
+            "onerouter": "Infron AI catalog",
             "featherless": "Featherless catalog",
             "deepinfra": "DeepInfra catalog",
             "chutes": "Chutes.ai catalog",
@@ -1200,7 +1200,7 @@ async def get_models(
             "aihubmix": "AiHubMix catalog",
             "vercel-ai-gateway": "Vercel AI Gateway catalog",
             "simplismart": "Simplismart catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, OneRouter, Vercel AI Gateway, and Simplismart catalogs",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, Infron AI, Vercel AI Gateway, and Simplismart catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         result = {

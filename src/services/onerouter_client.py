@@ -15,25 +15,25 @@ logger = logging.getLogger(__name__)
 
 
 def get_onerouter_client():
-    """Get OneRouter client with connection pooling for better performance
+    """Get Infron AI client with connection pooling for better performance
 
-    OneRouter provides OpenAI-compatible API endpoints with automatic fallbacks,
+    Infron AI (formerly OneRouter) provides OpenAI-compatible API endpoints with automatic fallbacks,
     prompt caching (enabled by default), and multimodal support.
     """
     try:
         if not Config.ONEROUTER_API_KEY:
-            raise ValueError("OneRouter API key not configured")
+            raise ValueError("Infron AI API key not configured")
 
         # Use pooled client for ~10-20ms performance improvement per request
         return get_onerouter_pooled_client()
     except Exception as e:
-        logger.error(f"Failed to initialize OneRouter client: {e}")
+        logger.error(f"Failed to initialize Infron AI client: {e}")
         capture_provider_error(e, provider='onerouter', endpoint='client_init')
         raise
 
 
 def make_onerouter_request_openai(messages, model, **kwargs):
-    """Make request to OneRouter using OpenAI client
+    """Make request to Infron AI using OpenAI client
 
     Args:
         messages: List of message objects
@@ -45,7 +45,7 @@ def make_onerouter_request_openai(messages, model, **kwargs):
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
         return response
     except Exception as e:
-        logger.error(f"OneRouter request failed: {e}")
+        logger.error(f"Infron AI request failed: {e}")
         capture_provider_error(
             e,
             provider='onerouter',
@@ -56,7 +56,7 @@ def make_onerouter_request_openai(messages, model, **kwargs):
 
 
 def make_onerouter_request_openai_stream(messages, model, **kwargs):
-    """Make streaming request to OneRouter using OpenAI client
+    """Make streaming request to Infron AI using OpenAI client
 
     Args:
         messages: List of message objects
@@ -70,7 +70,7 @@ def make_onerouter_request_openai_stream(messages, model, **kwargs):
         )
         return stream
     except Exception as e:
-        logger.error(f"OneRouter streaming request failed: {e}")
+        logger.error(f"Infron AI streaming request failed: {e}")
         capture_provider_error(
             e,
             provider='onerouter',
@@ -81,7 +81,7 @@ def make_onerouter_request_openai_stream(messages, model, **kwargs):
 
 
 def process_onerouter_response(response):
-    """Process OneRouter response to extract relevant data"""
+    """Process Infron AI response to extract relevant data"""
     try:
         choices = []
         for choice in response.choices:
@@ -112,7 +112,7 @@ def process_onerouter_response(response):
             ),
         }
     except Exception as e:
-        logger.error(f"Failed to process OneRouter response: {e}")
+        logger.error(f"Failed to process Infron AI response: {e}")
         capture_provider_error(
             e,
             provider='onerouter',
@@ -150,7 +150,7 @@ def _fetch_display_models_pricing() -> dict:
     """Fetch pricing info from display_models endpoint and return as a lookup dict."""
     try:
         response = httpx.get(
-            "https://app.onerouter.pro/api/display_models/",
+            "https://app.infron.ai/api/display_models/",
             headers={"Content-Type": "application/json"},
             timeout=10.0,
             follow_redirects=True
@@ -214,9 +214,9 @@ def _fetch_display_models_pricing() -> dict:
 
 
 def fetch_models_from_onerouter():
-    """Fetch models from OneRouter API
+    """Fetch models from Infron AI API
 
-    OneRouter provides access to multiple AI models through their API.
+    Infron AI (formerly OneRouter) provides access to multiple AI models through their API.
     This function fetches the complete model list from the authenticated /v1/models
     endpoint and enriches it with pricing data from the display_models endpoint.
 
@@ -230,10 +230,10 @@ def fetch_models_from_onerouter():
         return models
 
     try:
-        logger.info("Fetching models from OneRouter API...")
+        logger.info("Fetching models from Infron AI API...")
 
         if not Config.ONEROUTER_API_KEY:
-            logger.warning("OneRouter API key not configured, skipping model fetch")
+            logger.warning("Infron AI API key not configured, skipping model fetch")
             return _cache_and_return([])
 
         headers = {
@@ -243,7 +243,7 @@ def fetch_models_from_onerouter():
 
         # Use the authenticated /v1/models endpoint for complete model list
         response = httpx.get(
-            "https://api.onerouter.pro/v1/models",
+            "https://api.infron.ai/v1/models",
             headers=headers,
             timeout=15.0,
             follow_redirects=True
@@ -290,14 +290,14 @@ def fetch_models_from_onerouter():
                     manual_pricing_count += 1
                 else:
                     # Filter out models without valid pricing to prevent them appearing as free
-                    logger.debug(f"Filtering out OneRouter model {model_id} - no pricing available")
+                    logger.debug(f"Filtering out Infron AI model {model_id} - no pricing available")
                     filtered_count += 1
                     continue
 
             # Validate we have non-zero pricing (don't show free models)
             try:
                 if float(prompt_price) == 0 and float(completion_price) == 0:
-                    logger.debug(f"Filtering out OneRouter model {model_id} - zero pricing")
+                    logger.debug(f"Filtering out Infron AI model {model_id} - zero pricing")
                     filtered_count += 1
                     continue
             except (ValueError, TypeError):
@@ -322,7 +322,7 @@ def fetch_models_from_onerouter():
                 "slug": model_id,
                 "canonical_slug": model_id,
                 "name": model_name,
-                "description": f"OneRouter model: {model_name}",
+                "description": f"Infron AI model: {model_name}",
                 "context_length": context_length,
                 "max_completion_tokens": max_completion_tokens,
                 "architecture": {
@@ -343,7 +343,7 @@ def fetch_models_from_onerouter():
             transformed_models.append(transformed_model)
 
         logger.info(
-            f"Successfully fetched {len(transformed_models)} models from OneRouter "
+            f"Successfully fetched {len(transformed_models)} models from Infron AI "
             f"({enriched_count} from API, {manual_pricing_count} from manual pricing, "
             f"{filtered_count} filtered for zero/missing pricing)"
         )
@@ -351,7 +351,7 @@ def fetch_models_from_onerouter():
 
     except httpx.HTTPStatusError as e:
         logger.error(
-            f"HTTP error fetching OneRouter models: {e.response.status_code} - "
+            f"HTTP error fetching Infron AI models: {e.response.status_code} - "
             f"{e.response.text[:200] if e.response.text else 'No response body'}"
         )
         capture_provider_error(
@@ -361,7 +361,7 @@ def fetch_models_from_onerouter():
         )
         return _cache_and_return([])
     except Exception as e:
-        logger.error(f"Failed to fetch models from OneRouter: {type(e).__name__}: {e}")
+        logger.error(f"Failed to fetch models from Infron AI: {type(e).__name__}: {e}")
         capture_provider_error(
             e,
             provider='onerouter',
