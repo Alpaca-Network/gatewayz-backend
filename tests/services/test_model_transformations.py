@@ -247,7 +247,7 @@ def test_openrouter_colon_suffix_variants():
     """Test that OpenRouter models with colon suffixes are correctly detected"""
     test_cases = [
         ("z-ai/glm-4.6:exacto", "openrouter"),
-        ("google/gemini-2.0-flash-exp:free", "openrouter"),
+        ("google/gemini-2.0-flash-exp:free", "google-vertex"),  # Gemini models route to Google Vertex
         ("anthropic/claude-3-opus:extended", "openrouter"),
     ]
 

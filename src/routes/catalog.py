@@ -132,7 +132,7 @@ GATEWAY_REGISTRY = {
     "google-vertex": {
         "name": "Google",
         "color": "bg-blue-600",
-        "priority": "slow",
+        "priority": "fast",
         "site_url": "https://cloud.google.com/vertex-ai",
         "aliases": ["google"],
     },
