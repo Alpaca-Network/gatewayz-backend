@@ -224,22 +224,24 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
-                # IMPORTANT: OTLPSpanExporter automatically appends /v1/traces to the endpoint
-                # We should NOT include it in the endpoint URL, just pass the base URL
-                # Example: http://tempo.railway.internal:4318 (NOT http://tempo.railway.internal:4318/v1/traces)
-                logger.info(f"   [DEBUG] Creating OTLP exporter with endpoint: {tempo_endpoint}")
+                # CRITICAL: For HTTP protocol, the endpoint MUST include the full path including /v1/traces
+                # The HTTP exporter does NOT auto-append /v1/traces like some other exporters do
+                # Reference: https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
+                full_endpoint = f"{tempo_endpoint}/v1/traces"
+                logger.info(
+                    f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {full_endpoint}"
+                )
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
-                logger.info(f"   [DEBUG] Note: OTLPSpanExporter will auto-append /v1/traces")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=tempo_endpoint,  # Pass base URL without /v1/traces
+                    endpoint=full_endpoint,  # HTTP exporter needs full path with /v1/traces
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
                 logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(f"   [DEBUG] Exporter will send to: {tempo_endpoint}/v1/traces")
+                logger.info(f"   [DEBUG] Will POST traces to: {full_endpoint}")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
