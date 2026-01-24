@@ -435,11 +435,11 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
         model_id = stripped
 
-    # Special handling for OneRouter: strip 'onerouter/' prefix if present
-    # OneRouter API expects just the model name without the provider prefix
+    # Special handling for Infron AI: strip 'onerouter/' prefix if present
+    # Infron AI API expects just the model name without the provider prefix
     if provider_lower == "onerouter" and model_id.startswith("onerouter/"):
         stripped = model_id[len("onerouter/") :]
-        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for OneRouter")
+        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for Infron AI")
         model_id = stripped
 
     # Get the mapping for this provider
@@ -1220,9 +1220,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-r1": "deepseek-r1",
         },
         "onerouter": {
-            # OneRouter uses OpenAI-compatible model identifiers with @ versioning
+            # Infron AI uses OpenAI-compatible model identifiers with @ versioning
             # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
-            # Models are dynamically fetched from OneRouter's /v1/models endpoint
+            # Models are dynamically fetched from Infron AI's /v1/models endpoint
             # Strip onerouter/ prefix for actual API calls
             "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
             "onerouter/gpt-4": "gpt-4@latest",
@@ -1570,7 +1570,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org == "morpheus":
             return "morpheus"
 
-        # OneRouter models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
+        # Infron AI models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
         if org == "onerouter":
             return "onerouter"
 
