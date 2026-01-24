@@ -205,8 +205,6 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any
     Raises:
         HTTPException: 404 if user not found, 402 if trial expired
     """
-    from datetime import datetime, timezone
-
     user = get_user(api_key)
 
     if not user:
