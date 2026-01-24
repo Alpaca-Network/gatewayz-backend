@@ -1233,7 +1233,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gpt-4@latest": "gpt-4@latest",
             "gpt-4o@latest": "gpt-4o@latest",
             "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
-            # Models can also use simpler names - OneRouter handles routing
+            # Models can also use simpler names - Infron AI handles routing
             "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
             "gpt-4": "gpt-4@latest",
             "gpt-4o": "gpt-4o@latest",

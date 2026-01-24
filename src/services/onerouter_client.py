@@ -314,7 +314,7 @@ def fetch_models_from_onerouter():
             model_name = model_id.replace("-", " ").replace("_", " ").title()
 
             # Build the full model ID with onerouter prefix for consistent display
-            # This ensures models are grouped under "OneRouter" in the UI
+            # This ensures models are grouped under "Infron AI" in the UI
             full_model_id = f"onerouter/{model_id}"
 
             transformed_model = {
