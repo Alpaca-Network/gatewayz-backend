@@ -94,6 +94,7 @@ src/routes/model_health.py
 src/routes/model_sync.py
 src/routes/models_catalog_management.py
 src/routes/monitoring.py
+src/routes/nosana.py
 src/routes/notifications.py
 src/routes/optimization_monitor.py
 src/routes/optimized_health.py
@@ -103,6 +104,7 @@ src/routes/ping.py
 src/routes/plans.py
 src/routes/pricing_audit.py
 src/routes/pricing_sync.py
+src/routes/pricing_sync_routes.py
 src/routes/prometheus_data.py
 src/routes/prometheus_endpoints.py
 src/routes/prometheus_grafana.py
@@ -150,6 +152,7 @@ src/services/alibaba_cloud_client.py
 src/services/alpaca_network_client.py
 src/services/analytics.py
 src/services/anannas_client.py
+src/services/anonymous_rate_limiter.py
 src/services/anthropic_client.py
 src/services/anthropic_transformer.py
 src/services/auth_cache.py
@@ -169,6 +172,7 @@ src/services/connection_pool_monitor.py
 src/services/daily_usage_limiter.py
 src/services/db_cache.py
 src/services/deepinfra_client.py
+src/services/email_verification.py
 src/services/error_monitor.py
 src/services/failover_service.py
 src/services/fal_image_client.py
@@ -194,6 +198,7 @@ src/services/model_availability.py
 src/services/model_catalog_cache.py
 src/services/model_catalog_sync.py
 src/services/model_health_monitor.py
+src/services/model_pricing_service.py
 src/services/model_transformations.py
 src/services/models.py
 src/services/modelz_client.py
@@ -201,6 +206,7 @@ src/services/morpheus_client.py
 src/services/multi_provider_registry.py
 src/services/near_client.py
 src/services/nebius_client.py
+src/services/nosana_client.py
 src/services/notification.py
 src/services/notification_service.py
 src/services/notification_triggers.py
@@ -216,7 +222,9 @@ src/services/pricing.py
 src/services/pricing_analytics.py
 src/services/pricing_audit_service.py
 src/services/pricing_lookup.py
+src/services/pricing_normalization.py
 src/services/pricing_provider_auditor.py
+src/services/pricing_sync_background.py
 src/services/pricing_sync_service.py
 src/services/professional_email_templates.py
 src/services/prometheus_exporter.py
@@ -241,6 +249,7 @@ src/services/simplismart_client.py
 src/services/startup.py
 src/services/statsig_service.py
 src/services/stream_normalizer.py
+src/services/sybil_client.py
 src/services/tempo_otlp.py
 src/services/together_client.py
 src/services/trial_service.py
@@ -252,6 +261,7 @@ src/services/tools/__init__.py
 src/services/tools/base.py
 src/services/tools/text_to_speech.py
 src/services/tools/web_search.py
+src/utils/ai_tracing.py
 src/utils/api_key_lookup.py
 src/utils/auto_sentry.py
 src/utils/braintrust_tracing.py
