@@ -189,11 +189,16 @@ class OpenTelemetryConfig:
 
             # Create OTLP exporter with error handling for connection issues
             try:
+                # Increased timeout for Railway cross-project connections
+                # Railway internal DNS is fast, but cross-project public URLs need more time
+                timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
+
                 otlp_exporter = OTLPSpanExporter(
                     endpoint=f"{tempo_endpoint}/v1/traces",
                     headers={},  # Add authentication headers if needed
-                    timeout=10,  # 10 second timeout to prevent hanging (Railway cross-project)
+                    timeout=timeout_seconds,
                 )
+                logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
                     f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
@@ -202,8 +207,24 @@ class OpenTelemetryConfig:
                 )
                 return False
 
-            # Add span processor for exporting traces
-            cls._tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+            # Add span processor for exporting traces with error handling
+            try:
+                # Use BatchSpanProcessor to batch spans before sending
+                # This reduces network overhead and improves performance
+                batch_processor = BatchSpanProcessor(
+                    otlp_exporter,
+                    max_queue_size=2048,  # Increase queue size for high-traffic
+                    schedule_delay_millis=5000,  # Send every 5 seconds
+                    max_export_batch_size=512,  # Send up to 512 spans per batch
+                )
+                cls._tracer_provider.add_span_processor(batch_processor)
+                logger.info("   Batch span processor configured (queue: 2048, batch: 512)")
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to add span processor: {e}. Tracing will be disabled.",
+                    exc_info=True,
+                )
+                return False
 
             # In development, also log traces to console
             if Config.IS_DEVELOPMENT:
