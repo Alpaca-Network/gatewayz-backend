@@ -56,6 +56,11 @@ class UserProfileResponse(BaseModel):
     user_id: int
     api_key: str
     credits: int
+    # Tiered credit fields (in cents for frontend consistency)
+    subscription_allowance: int | None = None  # Monthly subscription allowance remaining
+    purchased_credits: int | None = None  # One-time purchased credits
+    total_credits: int | None = None  # Computed sum of both
+    allowance_reset_date: str | None = None  # When allowance was last reset
     username: str | None
     email: str | None
     auth_method: str | None

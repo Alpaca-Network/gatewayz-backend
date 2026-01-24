@@ -108,7 +108,11 @@ def mock_user_profile():
     return {
         'user_id': 1,
         'api_key': 'sk-test-key-12345',
-        'credits': 100,
+        'credits': 1500,  # Total credits in cents ($15.00)
+        'subscription_allowance': 1500,  # Monthly allowance in cents ($15.00 for Pro)
+        'purchased_credits': 0,  # No purchased credits
+        'total_credits': 1500,  # Total in cents
+        'allowance_reset_date': '2024-02-01T00:00:00Z',  # Next reset date
         'username': 'testuser',
         'email': 'test@example.com',
         'auth_method': 'email',
@@ -497,8 +501,62 @@ class TestUserProfile:
         assert data['user_id'] == 1
         assert data['username'] == 'testuser'
         assert data['email'] == 'test@example.com'
-        assert data['credits'] == 100
+        assert data['credits'] == 1500  # Pro tier total credits in cents
         assert data['subscription_status'] == 'active'
+        # Verify tiered credit fields are included in response
+        assert data['subscription_allowance'] == 1500  # Pro tier allowance in cents
+        assert data['purchased_credits'] == 0
+        assert data['total_credits'] == 1500
+        assert data['allowance_reset_date'] == '2024-02-01T00:00:00Z'
+
+    @patch('src.routes.users.get_user')
+    @patch('src.routes.users.get_user_profile')
+    def test_get_profile_with_max_tier_tiered_credits(
+        self,
+        mock_get_profile,
+        mock_get_user,
+        client,
+        mock_api_key,
+        mock_user
+    ):
+        """Test profile response includes tiered credit fields for MAX tier user"""
+        mock_user_max = {**mock_user, 'tier': 'max'}
+        mock_profile_max = {
+            'user_id': 1,
+            'api_key': 'sk-test-key-12345',
+            'credits': 16000,  # $160.00 total
+            'subscription_allowance': 15000,  # $150.00 MAX tier allowance
+            'purchased_credits': 1000,  # $10.00 purchased
+            'total_credits': 16000,
+            'allowance_reset_date': '2024-02-01T00:00:00Z',
+            'username': 'maxuser',
+            'email': 'max@example.com',
+            'auth_method': 'email',
+            'subscription_status': 'active',
+            'tier': 'max',
+            'tier_display_name': 'MAX',
+            'trial_expires_at': None,
+            'subscription_end_date': None,
+            'is_active': True,
+            'registration_date': '2024-01-01T00:00:00Z',
+            'created_at': '2024-01-01T00:00:00Z',
+            'updated_at': '2024-01-15T12:00:00Z'
+        }
+        mock_get_user.return_value = mock_user_max
+        mock_get_profile.return_value = mock_profile_max
+
+        response = client.get(
+            '/user/profile',
+            headers={'Authorization': f'Bearer {mock_api_key}'}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['tier'] == 'max'
+        assert data['tier_display_name'] == 'MAX'
+        assert data['subscription_allowance'] == 15000  # MAX tier allowance
+        assert data['purchased_credits'] == 1000
+        assert data['total_credits'] == 16000
 
     @patch('src.routes.users.get_user')
     @patch('src.routes.users.get_user_profile')
