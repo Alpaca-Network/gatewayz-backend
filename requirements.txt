@@ -43,6 +43,7 @@ opentelemetry-instrumentation-fastapi>=0.49b0
 opentelemetry-instrumentation-httpx>=0.49b0
 opentelemetry-instrumentation-requests>=0.49b0
 opentelemetry-exporter-otlp>=1.28.0
+opentelemetry-exporter-otlp-proto-grpc>=1.28.0  # Explicit gRPC proto exporter for Tempo (more reliable than HTTP)
 
 # Loki Logging
 python-json-logger>=2.0.7
