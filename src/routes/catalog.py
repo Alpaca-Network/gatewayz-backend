@@ -215,6 +215,12 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://onerouter.pro",
     },
+    "zai": {
+        "name": "Z.AI",
+        "color": "bg-purple-700",
+        "priority": "slow",
+        "site_url": "https://z.ai",
+    },
     "simplismart": {
         "name": "SimpliSmart",
         "color": "bg-sky-500",
