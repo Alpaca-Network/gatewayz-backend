@@ -40,6 +40,7 @@ except ImportError:
     TracerProvider = None  # type: ignore
 
 from src.config.config import Config
+from src.utils.resilient_span_processor import ResilientSpanProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -261,8 +262,12 @@ class OpenTelemetryConfig:
                     schedule_delay_millis=5000,  # Send every 5 seconds
                     max_export_batch_size=512,  # Send up to 512 spans per batch
                 )
-                cls._tracer_provider.add_span_processor(batch_processor)
-                logger.info("   Batch span processor configured (queue: 2048, batch: 512)")
+
+                # Wrap with resilient processor to handle connection errors gracefully
+                resilient_processor = ResilientSpanProcessor(batch_processor)
+                cls._tracer_provider.add_span_processor(resilient_processor)
+                logger.info("   Resilient batch span processor configured (queue: 2048, batch: 512)")
+                logger.info("   Circuit breaker enabled to handle connection failures")
             except Exception as e:
                 logger.error(
                     f"❌ Failed to add span processor: {e}. Tracing will be disabled.",
