@@ -60,6 +60,7 @@ class ResilientSpanProcessor(SpanProcessor):
         self._last_failure_time: Optional[float] = None
         self._total_exports = 0
         self._total_failures = 0
+        self._total_drops = 0  # Spans dropped due to open circuit
         self._lock = threading.Lock()
 
         logger.info("🛡️  Resilient span processor initialized with circuit breaker")
@@ -114,6 +115,7 @@ class ResilientSpanProcessor(SpanProcessor):
                     self._failure_count = 0
                 else:
                     # Still in cooldown - silently drop spans
+                    self._total_drops += 1
                     logger.debug("Circuit breaker OPEN - dropping spans (in cooldown)")
                     return False
 
@@ -174,10 +176,18 @@ class ResilientSpanProcessor(SpanProcessor):
     def _log_statistics(self):
         """Log summary statistics about exports."""
         if self._total_exports > 0:
-            success_rate = ((self._total_exports - self._total_failures) / self._total_exports) * 100
+            # Calculate success rate excluding dropped spans
+            attempted_exports = self._total_exports - self._total_drops
+            if attempted_exports > 0:
+                success_rate = ((attempted_exports - self._total_failures) / attempted_exports) * 100
+            else:
+                success_rate = 0.0
+
             logger.info(
                 f"📊 OpenTelemetry export stats: "
-                f"{self._total_exports} attempts, "
+                f"{self._total_exports} total, "
+                f"{attempted_exports} attempted, "
                 f"{self._total_failures} failures, "
+                f"{self._total_drops} dropped, "
                 f"{success_rate:.1f}% success rate"
             )

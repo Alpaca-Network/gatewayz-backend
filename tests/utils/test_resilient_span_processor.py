@@ -38,6 +38,7 @@ class TestResilientSpanProcessor:
         assert resilient_processor._last_failure_time is None
         assert resilient_processor._total_exports == 0
         assert resilient_processor._total_failures == 0
+        assert resilient_processor._total_drops == 0
 
     def test_successful_flush(self, resilient_processor, mock_processor):
         """Test that successful flushes work normally."""
@@ -105,8 +106,9 @@ class TestResilientSpanProcessor:
         # Act - Try to flush while circuit is open
         result = resilient_processor.force_flush()
 
-        # Assert - Request should be blocked
+        # Assert - Request should be blocked and counted as dropped
         assert result is False
+        assert resilient_processor._total_drops == 1
         mock_processor.force_flush.assert_not_called()
 
     def test_circuit_attempts_recovery_after_cooldown(
