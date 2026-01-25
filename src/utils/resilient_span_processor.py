@@ -12,14 +12,12 @@ from typing import Optional
 
 try:
     from opentelemetry.sdk.trace import SpanProcessor
-    from opentelemetry.sdk.trace.export import SpanExporter
     from requests.exceptions import ConnectionError, Timeout
 
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
     SpanProcessor = object  # type: ignore
-    SpanExporter = object  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +29,8 @@ class ResilientSpanProcessor(SpanProcessor):
 
     Circuit Breaker States:
     - CLOSED: Normal operation, traces are exported
-    - OPEN: Too many failures, tracing temporarily disabled
-    - HALF_OPEN: Testing if service has recovered
+    - OPEN: Too many failures, tracing temporarily disabled (in cooldown)
+    - HALF_OPEN: Testing if service has recovered (after cooldown expires)
 
     Features:
     - Suppresses "Connection reset by peer" errors to avoid log pollution
@@ -43,8 +41,13 @@ class ResilientSpanProcessor(SpanProcessor):
 
     # Circuit breaker thresholds
     FAILURE_THRESHOLD = 5  # Open circuit after N consecutive failures
-    SUCCESS_THRESHOLD = 2  # Close circuit after N consecutive successes
+    SUCCESS_THRESHOLD = 2  # Close circuit after N consecutive successes in HALF_OPEN state
     COOLDOWN_SECONDS = 60  # Wait time before attempting recovery
+
+    # Circuit breaker states
+    STATE_CLOSED = "CLOSED"
+    STATE_OPEN = "OPEN"
+    STATE_HALF_OPEN = "HALF_OPEN"
 
     def __init__(self, span_processor: SpanProcessor):
         """
@@ -56,7 +59,7 @@ class ResilientSpanProcessor(SpanProcessor):
         self._processor = span_processor
         self._failure_count = 0
         self._success_count = 0
-        self._circuit_open = False
+        self._circuit_state = self.STATE_CLOSED
         self._last_failure_time: Optional[float] = None
         self._total_exports = 0
         self._total_failures = 0
@@ -65,10 +68,16 @@ class ResilientSpanProcessor(SpanProcessor):
 
         logger.info("🛡️  Resilient span processor initialized with circuit breaker")
 
+    @property
+    def _circuit_open(self) -> bool:
+        """Backward-compatible property for circuit open state."""
+        return self._circuit_state != self.STATE_CLOSED
+
     def on_start(self, span, parent_context=None):
         """Called when a span is started."""
         try:
-            if not self._circuit_open:
+            # Skip if circuit is not closed (OPEN or HALF_OPEN states)
+            if self._circuit_state == self.STATE_CLOSED:
                 self._processor.on_start(span, parent_context)
         except Exception as e:
             # Silently ignore errors in span start - don't break request flow
@@ -77,9 +86,10 @@ class ResilientSpanProcessor(SpanProcessor):
     def on_end(self, span):
         """Called when a span ends - add to export queue."""
         try:
-            # Always accept spans even if circuit is open
-            # They'll be dropped during export if connection is down
-            self._processor.on_end(span)
+            # Skip if circuit is not closed (OPEN or HALF_OPEN states)
+            # This ensures consistency with on_start behavior
+            if self._circuit_state == self.STATE_CLOSED:
+                self._processor.on_end(span)
         except Exception as e:
             # Silently ignore errors in span end - don't break request flow
             logger.debug(f"Error in span on_end: {e}")
@@ -97,6 +107,9 @@ class ResilientSpanProcessor(SpanProcessor):
         """
         Force flush all queued spans with error handling.
 
+        The entire operation is protected by a lock to prevent race conditions
+        where multiple threads could pass circuit checks simultaneously.
+
         Args:
             timeout_millis: Maximum time to wait for flush in milliseconds
 
@@ -107,71 +120,82 @@ class ResilientSpanProcessor(SpanProcessor):
             self._total_exports += 1
 
             # Check circuit breaker state
-            if self._circuit_open:
+            if self._circuit_state == self.STATE_OPEN:
                 # Check if cooldown period has passed
                 if self._last_failure_time and (time.time() - self._last_failure_time) > self.COOLDOWN_SECONDS:
-                    logger.info("🔄 Circuit breaker cooldown complete - attempting recovery...")
-                    self._circuit_open = False
+                    logger.info("🔄 Circuit breaker cooldown complete - entering HALF_OPEN state...")
+                    # Transition to HALF_OPEN for testing recovery
+                    self._circuit_state = self.STATE_HALF_OPEN
                     self._failure_count = 0
+                    self._success_count = 0
                 else:
                     # Still in cooldown - silently drop spans
                     self._total_drops += 1
                     logger.debug("Circuit breaker OPEN - dropping spans (in cooldown)")
                     return False
 
-        try:
-            # Attempt to flush spans
-            result = self._processor.force_flush(timeout_millis)
+            try:
+                # Attempt to flush spans
+                result = self._processor.force_flush(timeout_millis)
 
-            # Track success
-            with self._lock:
+                # Track success
                 self._success_count += 1
                 self._failure_count = 0  # Reset failure count on success
 
-                # Close circuit after enough successes
-                if self._success_count >= self.SUCCESS_THRESHOLD and self._circuit_open:
-                    logger.info("✅ Circuit breaker CLOSED - tracing fully restored")
-                    self._circuit_open = False
+                # Handle state transitions based on current state
+                if self._circuit_state == self.STATE_HALF_OPEN:
+                    # In HALF_OPEN state, close circuit after enough successes
+                    if self._success_count >= self.SUCCESS_THRESHOLD:
+                        logger.info("✅ Circuit breaker CLOSED - tracing fully restored")
+                        self._circuit_state = self.STATE_CLOSED
 
-            return result
+                return result
 
-        except (ConnectionError, Timeout, OSError) as e:
-            # Connection-related errors - handle gracefully
-            with self._lock:
+            except (ConnectionError, Timeout, OSError) as e:
+                # Connection-related errors - handle gracefully
                 self._total_failures += 1
                 self._failure_count += 1
                 self._success_count = 0  # Reset success count
                 self._last_failure_time = time.time()
 
-                # Open circuit if threshold exceeded
-                if self._failure_count >= self.FAILURE_THRESHOLD and not self._circuit_open:
-                    self._circuit_open = True
+                # Handle state transitions based on current state
+                if self._circuit_state == self.STATE_HALF_OPEN:
+                    # Failed during recovery - go back to OPEN state
+                    self._circuit_state = self.STATE_OPEN
                     logger.warning(
-                        f"⚠️  Circuit breaker OPEN - temporarily disabling OpenTelemetry tracing "
-                        f"(failed {self._failure_count} times in a row). "
+                        f"⚠️  Circuit breaker returning to OPEN - recovery failed. "
                         f"Will retry in {self.COOLDOWN_SECONDS}s. "
                         f"Cause: {type(e).__name__}: {str(e)}"
                     )
-                elif not self._circuit_open:
-                    # Log at debug level for occasional failures
-                    logger.debug(
-                        f"OpenTelemetry export failed ({self._failure_count}/{self.FAILURE_THRESHOLD}): "
-                        f"{type(e).__name__}: {str(e)}"
-                    )
+                elif self._circuit_state == self.STATE_CLOSED:
+                    # Open circuit if threshold exceeded
+                    if self._failure_count >= self.FAILURE_THRESHOLD:
+                        self._circuit_state = self.STATE_OPEN
+                        logger.warning(
+                            f"⚠️  Circuit breaker OPEN - temporarily disabling OpenTelemetry tracing "
+                            f"(failed {self._failure_count} times in a row). "
+                            f"Will retry in {self.COOLDOWN_SECONDS}s. "
+                            f"Cause: {type(e).__name__}: {str(e)}"
+                        )
+                    else:
+                        # Log at debug level for occasional failures
+                        logger.debug(
+                            f"OpenTelemetry export failed ({self._failure_count}/{self.FAILURE_THRESHOLD}): "
+                            f"{type(e).__name__}: {str(e)}"
+                        )
 
-            return False
+                return False
 
-        except Exception as e:
-            # Unexpected errors - log at warning level
-            with self._lock:
+            except Exception as e:
+                # Unexpected errors - log at warning level
                 self._total_failures += 1
                 self._failure_count += 1
 
-            logger.warning(
-                f"Unexpected error during span export: {type(e).__name__}: {str(e)}",
-                exc_info=False  # Don't log full stack trace for common errors
-            )
-            return False
+                logger.warning(
+                    f"Unexpected error during span export: {type(e).__name__}: {str(e)}",
+                    exc_info=False  # Don't log full stack trace for common errors
+                )
+                return False
 
     def _log_statistics(self):
         """Log summary statistics about exports."""
