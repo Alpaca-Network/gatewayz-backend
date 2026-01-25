@@ -205,6 +205,29 @@ def _handle_existing_user(
     trial_expires_at = existing_user.get("trial_expires_at")
     subscription_end_date = existing_user.get("subscription_end_date")
 
+    # Calculate tiered credit fields (same logic as get_user_profile)
+    # Database stores values in dollars, frontend expects cents
+    subscription_allowance_dollars = float(existing_user.get("subscription_allowance") or 0)
+    purchased_credits_dollars = float(existing_user.get("purchased_credits") or 0)
+    legacy_credits_dollars = float(existing_user.get("credits") or 0)
+
+    # If tiered fields are empty but legacy credits exist, use legacy credits
+    if subscription_allowance_dollars == 0 and purchased_credits_dollars == 0 and legacy_credits_dollars > 0:
+        if tier in ("pro", "max") and subscription_status_value == "active":
+            # Active Pro/Max subscriber - legacy credits are subscription allowance
+            subscription_allowance_dollars = legacy_credits_dollars
+        else:
+            # Basic user or no active subscription - legacy credits are purchased credits
+            purchased_credits_dollars = legacy_credits_dollars
+
+    total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
+
+    # Convert to cents for frontend (multiply by 100)
+    subscription_allowance_cents = int(subscription_allowance_dollars * 100)
+    purchased_credits_cents = int(purchased_credits_dollars * 100)
+    total_credits_cents = int(total_credits_dollars * 100)
+    allowance_reset_date = existing_user.get("allowance_reset_date")
+
     user_email = existing_user.get("email") or email
     logger.info(
         "Welcome email check - User ID: %s, Welcome sent: %s",
@@ -315,6 +338,11 @@ def _handle_existing_user(
         tier_display_name=tier_display_name,
         trial_expires_at=trial_expires_at,
         subscription_end_date=subscription_end_date,
+        # Tiered credit fields (in cents for frontend)
+        subscription_allowance=subscription_allowance_cents,
+        purchased_credits=purchased_credits_cents,
+        total_credits=total_credits_cents,
+        allowance_reset_date=allowance_reset_date,
     )
 
 
@@ -1115,6 +1143,13 @@ async def privy_auth(
 
             tier_value = user_data.get("tier")
 
+            # Calculate tiered credit fields for new users
+            # New users start with trial credits, which go to purchased_credits (not subscription)
+            new_user_credits_cents = int(new_user_credits * 100)
+            new_subscription_allowance = 0  # No subscription yet
+            new_purchased_credits = new_user_credits_cents  # Trial credits are purchased credits
+            new_total_credits = new_user_credits_cents
+
             # CRITICAL: Verify API key exists before returning success
             # This prevents silent failures where user is created but has no working key
             if not user_data.get("primary_api_key"):
@@ -1149,6 +1184,11 @@ async def privy_auth(
                 tier_display_name=_get_tier_display_name(tier_value),
                 trial_expires_at=user_data.get("trial_expires_at"),
                 subscription_end_date=user_data.get("subscription_end_date"),
+                # Tiered credit fields (in cents for frontend)
+                subscription_allowance=new_subscription_allowance,
+                purchased_credits=new_purchased_credits,
+                total_credits=new_total_credits,
+                allowance_reset_date=None,  # No subscription = no reset date
             )
 
     except Exception as e:
