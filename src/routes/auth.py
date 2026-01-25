@@ -43,6 +43,11 @@ from src.utils.security_validators import (
     is_valid_email,
     sanitize_for_logging,
 )
+from src.services.email_verification import (
+    verify_email as emailable_verify_email,
+    EmailVerificationResult,
+)
+from src.utils.sentry_context import capture_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -87,6 +92,72 @@ def _get_tier_display_name(tier: str | None) -> str | None:
     """Return a user-friendly display name for a subscription tier."""
     tier_display_map = {"basic": "Basic", "pro": "Pro", "max": "MAX"}
     return tier_display_map.get(tier) if tier else None
+
+
+async def _get_subscription_status_for_email(email: str) -> tuple[str, bool]:
+    """
+    Determine subscription status for an email using Emailable API + local checks.
+
+    Returns:
+        Tuple of (subscription_status, should_block)
+        - subscription_status: "trial" or "bot"
+        - should_block: True if registration should be blocked entirely
+    """
+    if not email:
+        return "trial", False
+
+    # Skip verification for Privy placeholder emails
+    if email.endswith("@privy.user") or email.endswith("@privy.placeholder"):
+        return "trial", False
+
+    # Step 1: Check local blocklist (blocked domains are rejected outright)
+    if is_blocked_email_domain(email):
+        logger.warning(f"Email blocked by local blocklist: {sanitize_for_logging(email)}")
+        return "bot", True
+
+    # Step 2: Check local temp email list (fast check)
+    if is_temporary_email_domain(email):
+        logger.info(f"Temporary email detected by local check: {sanitize_for_logging(email)}")
+        return "bot", False
+
+    # Step 3: Use Emailable API for comprehensive verification
+    try:
+        result: EmailVerificationResult = await emailable_verify_email(email)
+
+        logger.info(
+            f"Emailable verification for {sanitize_for_logging(email)}: "
+            f"state={result.state.value}, reason={result.reason.value}, "
+            f"score={result.score}, disposable={result.is_disposable}"
+        )
+
+        # Block undeliverable emails
+        if result.should_block:
+            logger.warning(
+                f"Email blocked by Emailable: {sanitize_for_logging(email)} "
+                f"({result.reason.value})"
+            )
+            return "bot", True
+
+        # Mark disposable/suspicious as bot
+        if result.is_bot:
+            logger.info(f"Email marked as bot by Emailable: {sanitize_for_logging(email)}")
+            return "bot", False
+
+        return "trial", False
+
+    except Exception as e:
+        # Don't block registration if API fails - fall back to local checks only
+        logger.error(f"Emailable API error for {sanitize_for_logging(email)}: {e}")
+        # Capture to Sentry for monitoring
+        capture_error(
+            e,
+            context_type="provider",
+            context_data={
+                "provider": "emailable",
+                "operation": "email_verification",
+            },
+        )
+        return "trial", False
 
 
 def _handle_existing_user(
@@ -802,24 +873,27 @@ async def privy_auth(
             # New user - create account
             logger.info(f"Creating new Privy user: {request.user.id}")
 
-            # Block new registrations from domains identified as sources of abuse
-            if email and is_blocked_email_domain(email):
-                logger.warning(
-                    f"Registration blocked for abuse domain: {sanitize_for_logging(email)} "
-                    f"(privy_user_id={request.user.id})"
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail="Registration from this email domain is not allowed.",
-                )
+            # Verify email using Emailable API + local checks
+            subscription_status = "trial"
+            if email:
+                subscription_status, should_block = await _get_subscription_status_for_email(email)
+                if should_block:
+                    logger.warning(
+                        f"Registration blocked for email: {sanitize_for_logging(email)} "
+                        f"(privy_user_id={request.user.id})"
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This email address is not allowed. Please use a valid email.",
+                    )
+                if subscription_status == "bot":
+                    logger.warning(
+                        f"Email marked as bot: {sanitize_for_logging(email)} "
+                        f"(privy_user_id={request.user.id})"
+                    )
 
-            # Detect temporary/disposable email addresses and mark as bot
-            is_temp_email = email and is_temporary_email_domain(email)
-            if is_temp_email:
-                logger.warning(
-                    f"Temporary email detected, marking as bot: {sanitize_for_logging(email)} "
-                    f"(privy_user_id={request.user.id})"
-                )
+            # Legacy variable for backwards compatibility in fallback code
+            is_temp_email = subscription_status == "bot"
 
             # Ensure username is unique before attempting to create user
             # This prevents duplicate username errors, especially for phone auth
@@ -844,7 +918,7 @@ async def privy_auth(
                     auth_method=auth_method_str,
                     privy_user_id=request.user.id,
                     credits=5,  # Users start with $5 trial credits for 3 days
-                    subscription_status="bot" if is_temp_email else "trial",
+                    subscription_status=subscription_status,
                 )
             except Exception as creation_error:
                 logger.warning(
@@ -1236,22 +1310,23 @@ async def register_user(
     try:
         logger.info(f"Registration request for user: {request.username}")
 
-        # Block domains identified as sources of abuse
-        if is_blocked_email_domain(request.email):
+        # Verify email using Emailable API + local checks
+        subscription_status, should_block = await _get_subscription_status_for_email(request.email)
+        if should_block:
             logger.warning(
-                f"Registration blocked for abuse domain: {sanitize_for_logging(request.email)}"
+                f"Registration blocked for email: {sanitize_for_logging(request.email)}"
             )
             raise HTTPException(
                 status_code=400,
-                detail="Registration from this email domain is not allowed.",
+                detail="This email address is not allowed. Please use a valid email.",
+            )
+        if subscription_status == "bot":
+            logger.warning(
+                f"Email marked as bot: {sanitize_for_logging(request.email)}"
             )
 
-        # Detect temporary/disposable email addresses and mark as bot
-        is_temp_email = is_temporary_email_domain(request.email)
-        if is_temp_email:
-            logger.warning(
-                f"Temporary email detected, marking as bot: {sanitize_for_logging(request.email)}"
-            )
+        # Legacy variable for backwards compatibility
+        is_temp_email = subscription_status == "bot"
 
         client = supabase_config.get_supabase_client()
 
@@ -1303,7 +1378,7 @@ async def register_user(
                 auth_method=auth_method_str,
                 privy_user_id=None,  # No Privy for direct registration
                 credits=5,
-                subscription_status="bot" if is_temp_email else "trial",
+                subscription_status=subscription_status,
             )
         except Exception as creation_error:
             logger.warning(
