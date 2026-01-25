@@ -461,6 +461,22 @@ def get_groq_pooled_client() -> OpenAI:
     )
 
 
+def get_zai_pooled_client() -> OpenAI:
+    """Get pooled client for Z.AI (Zhipu AI).
+
+    Z.AI provides OpenAI-compatible API endpoints for the GLM model family.
+    See: https://docs.z.ai
+    """
+    if not Config.ZAI_API_KEY:
+        raise ValueError("Z.AI API key not configured")
+
+    return get_pooled_client(
+        provider="zai",
+        base_url="https://api.z.ai/api/paas/v4/",
+        api_key=Config.ZAI_API_KEY,
+    )
+
+
 def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
     """Get pooled client for Cloudflare Workers AI.
 

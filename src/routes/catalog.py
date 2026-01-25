@@ -215,6 +215,12 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://infron.ai",
     },
+    "zai": {
+        "name": "Z.AI",
+        "color": "bg-purple-700",
+        "priority": "slow",
+        "site_url": "https://z.ai",
+    },
     "simplismart": {
         "name": "SimpliSmart",
         "color": "bg-sky-500",
@@ -286,24 +292,29 @@ async def get_gateways():
             if site_url:
                 try:
                     from urllib.parse import urlparse
+
                     parsed = urlparse(site_url)
                     domain = parsed.netloc or parsed.path
                     if domain.startswith("www."):
                         domain = domain[4:]
                     logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
                 except Exception as e:
-                    logger.warning(f"Failed to generate logo URL for {gateway_id} from {site_url}: {e}")
+                    logger.warning(
+                        f"Failed to generate logo URL for {gateway_id} from {site_url}: {e}"
+                    )
 
-            gateways.append({
-                "id": gateway_id,
-                "name": config.get("name", gateway_id.title()),
-                "color": config.get("color", "bg-gray-500"),
-                "priority": config.get("priority", "slow"),
-                "site_url": site_url,
-                "logo_url": logo_url,
-                "icon": config.get("icon"),
-                "aliases": config.get("aliases", []),
-            })
+            gateways.append(
+                {
+                    "id": gateway_id,
+                    "name": config.get("name", gateway_id.title()),
+                    "color": config.get("color", "bg-gray-500"),
+                    "priority": config.get("priority", "slow"),
+                    "site_url": site_url,
+                    "logo_url": logo_url,
+                    "icon": config.get("icon"),
+                    "aliases": config.get("aliases", []),
+                }
+            )
 
         # Sort by priority (fast first), then by name
         gateways.sort(key=lambda g: (0 if g["priority"] == "fast" else 1, g["name"]))
@@ -334,8 +345,8 @@ async def get_gateways_status():
     """
     from src.cache import (
         _gateway_error_cache,
-        is_gateway_in_error_state,
         get_gateway_error_message,
+        is_gateway_in_error_state,
     )
 
     try:
@@ -354,14 +365,16 @@ async def get_gateways_status():
                 if not in_error_state:
                     error_message = str(e)
 
-            status_list.append({
-                "id": gateway_id,
-                "name": config.get("name", gateway_id.title()),
-                "model_count": model_count,
-                "in_error_state": in_error_state,
-                "error_message": error_message,
-                "priority": config.get("priority", "slow"),
-            })
+            status_list.append(
+                {
+                    "id": gateway_id,
+                    "name": config.get("name", gateway_id.title()),
+                    "model_count": model_count,
+                    "in_error_state": in_error_state,
+                    "error_message": error_message,
+                    "priority": config.get("priority", "slow"),
+                }
+            )
 
         # Sort by model count (0 first to highlight issues)
         status_list.sort(key=lambda g: (g["model_count"], g["name"]))
@@ -571,11 +584,15 @@ async def get_providers(
                     provider_groups.append(derived_providers)
                 elif gateway_value == gw:
                     # Don't raise 503 - graceful degradation, return empty response
-                    logger.warning(f"{gw.capitalize()} models data unavailable - returning empty response")
+                    logger.warning(
+                        f"{gw.capitalize()} models data unavailable - returning empty response"
+                    )
 
         if not provider_groups:
             # Graceful degradation - return empty response instead of 503
-            logger.warning(f"No provider data available for gateway={gateway_value} - returning empty response")
+            logger.warning(
+                f"No provider data available for gateway={gateway_value} - returning empty response"
+            )
             return {
                 "data": [],
                 "total": 0,
@@ -701,7 +718,7 @@ async def get_models(
                     "OpenRouter models unavailable (gateway=%s) - possible causes: "
                     "API key not configured, API is down, network issues, or cache warming incomplete. "
                     "Continuing with other providers if available.",
-                    gateway_value
+                    gateway_value,
                 )
                 # Don't fail with 503 - this prevents a single provider failure from breaking the entire API
                 # Users will get models from other providers if gateway="all", or empty list if gateway="openrouter"
@@ -949,7 +966,7 @@ async def get_models(
                 logger.warning(
                     "No models available for gateway=%s. Returning empty response. "
                     "This may indicate provider API keys not configured or all providers are down.",
-                    gateway_value
+                    gateway_value,
                 )
                 # Instead of raising 503, return an empty but valid response
                 # This prevents the entire API from failing when a single provider is unavailable
@@ -959,7 +976,9 @@ async def get_models(
         if gateway_value in ("openrouter", "all"):
             providers = get_cached_providers()
             if not providers and gateway_value == "openrouter":
-                logger.warning("OpenRouter provider data unavailable - returning empty providers list")
+                logger.warning(
+                    "OpenRouter provider data unavailable - returning empty providers list"
+                )
             enhanced_providers = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(providers or []),
                 "openrouter",
@@ -974,7 +993,9 @@ async def get_models(
 
         if gateway_value in ("featherless", "all"):
             models_for_providers = featherless_models if gateway_value == "all" else models
-            featherless_providers = derive_providers_from_models(models_for_providers, "featherless")
+            featherless_providers = derive_providers_from_models(
+                models_for_providers, "featherless"
+            )
             annotated_featherless = annotate_provider_sources(featherless_providers, "featherless")
             provider_groups.append(annotated_featherless)
 
@@ -1084,7 +1105,9 @@ async def get_models(
 
         if gateway_value in ("simplismart", "all"):
             models_for_providers = simplismart_models if gateway_value == "all" else models
-            simplismart_providers = derive_providers_from_models(models_for_providers, "simplismart")
+            simplismart_providers = derive_providers_from_models(
+                models_for_providers, "simplismart"
+            )
             annotated_simplismart = annotate_provider_sources(simplismart_providers, "simplismart")
             provider_groups.append(annotated_simplismart)
 

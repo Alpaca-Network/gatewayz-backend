@@ -242,6 +242,9 @@ class Config:
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
     NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
 
+    # Z.AI Configuration (Zhipu AI - GLM models)
+    ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
+
     # Butter.dev LLM Response Caching Configuration
     # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
     # and serves cached responses to reduce costs and improve latency.
