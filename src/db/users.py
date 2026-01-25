@@ -1630,6 +1630,19 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
         # Database stores values in dollars, but frontend expects cents for consistency with TIER_CONFIG
         subscription_allowance_dollars = float(user.get("subscription_allowance") or 0)
         purchased_credits_dollars = float(user.get("purchased_credits") or 0)
+        legacy_credits_dollars = float(user.get("credits") or 0)
+
+        # If tiered fields are empty but legacy credits exist, use legacy credits
+        # For Pro/Max users with active subscription, legacy credits should go to subscription_allowance
+        # For basic users or purchased credits, they should go to purchased_credits
+        if subscription_allowance_dollars == 0 and purchased_credits_dollars == 0 and legacy_credits_dollars > 0:
+            if tier in ("pro", "max") and user.get("subscription_status") == "active":
+                # Active Pro/Max subscriber - legacy credits are subscription allowance
+                subscription_allowance_dollars = legacy_credits_dollars
+            else:
+                # Basic user or no active subscription - legacy credits are purchased credits
+                purchased_credits_dollars = legacy_credits_dollars
+
         total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
 
         # Convert to cents for frontend (multiply by 100)
