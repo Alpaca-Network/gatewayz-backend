@@ -336,3 +336,221 @@ class TestEmailVerificationEdgeCases:
             did_you_mean="test@gmail.com",
         )
         assert result.did_you_mean == "test@gmail.com"
+
+
+class TestEmailVerificationCaching:
+    """Tests for email verification caching functionality."""
+
+    def test_result_to_cache_dict(self):
+        """Result should correctly convert to cache dict."""
+        result = EmailVerificationResult(
+            email="test@gmail.com",
+            state=EmailState.DELIVERABLE,
+            reason=EmailReason.ACCEPTED_EMAIL,
+            score=95,
+            is_disposable=False,
+            is_free=True,
+            is_role=False,
+            domain="gmail.com",
+            did_you_mean=None,
+        )
+
+        cache_dict = result.to_cache_dict()
+
+        assert cache_dict["email"] == "test@gmail.com"
+        assert cache_dict["state"] == "deliverable"
+        assert cache_dict["reason"] == "accepted_email"
+        assert cache_dict["score"] == 95
+        assert cache_dict["is_disposable"] is False
+        assert cache_dict["is_free"] is True
+        assert cache_dict["is_role"] is False
+        assert cache_dict["domain"] == "gmail.com"
+        assert cache_dict["did_you_mean"] is None
+
+    def test_result_from_cache_dict(self):
+        """Result should correctly restore from cache dict."""
+        cache_dict = {
+            "email": "test@gmail.com",
+            "state": "deliverable",
+            "reason": "accepted_email",
+            "score": 95,
+            "is_disposable": False,
+            "is_free": True,
+            "is_role": False,
+            "domain": "gmail.com",
+            "did_you_mean": "test@google.com",
+        }
+
+        result = EmailVerificationResult.from_cache_dict(cache_dict)
+
+        assert result.email == "test@gmail.com"
+        assert result.state == EmailState.DELIVERABLE
+        assert result.reason == EmailReason.ACCEPTED_EMAIL
+        assert result.score == 95
+        assert result.is_disposable is False
+        assert result.is_free is True
+        assert result.is_role is False
+        assert result.domain == "gmail.com"
+        assert result.did_you_mean == "test@google.com"
+
+    def test_cache_roundtrip(self):
+        """Result should survive roundtrip through cache dict."""
+        original = EmailVerificationResult(
+            email="test@tempmail.com",
+            state=EmailState.DELIVERABLE,
+            reason=EmailReason.ACCEPTED_EMAIL,
+            score=80,
+            is_disposable=True,
+            is_free=False,
+            is_role=True,
+            domain="tempmail.com",
+            did_you_mean=None,
+        )
+
+        cache_dict = original.to_cache_dict()
+        restored = EmailVerificationResult.from_cache_dict(cache_dict)
+
+        assert restored.email == original.email
+        assert restored.state == original.state
+        assert restored.reason == original.reason
+        assert restored.score == original.score
+        assert restored.is_disposable == original.is_disposable
+        assert restored.is_free == original.is_free
+        assert restored.is_role == original.is_role
+        assert restored.domain == original.domain
+        assert restored.did_you_mean == original.did_you_mean
+        # Verify computed properties still work
+        assert restored.is_bot == original.is_bot
+        assert restored.should_block == original.should_block
+
+    @pytest.mark.asyncio
+    async def test_verify_caches_successful_result(self):
+        """Successful verification should be cached."""
+        service = EmailVerificationService(api_key="test_key", enabled=True)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "state": "deliverable",
+            "reason": "accepted_email",
+            "score": 95,
+            "disposable": False,
+            "free": True,
+            "role": False,
+            "domain": "gmail.com",
+        }
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None  # No cached result
+
+        with patch("httpx.AsyncClient") as mock_client, \
+             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                return_value=mock_response
+            )
+
+            result = await service.verify_email("test@gmail.com")
+
+            # Verify result is correct
+            assert result.state == EmailState.DELIVERABLE
+            # Verify cache was called
+            mock_redis.setex.assert_called_once()
+            call_args = mock_redis.setex.call_args
+            assert "email_verification:test@gmail.com" in call_args[0]
+
+    @pytest.mark.asyncio
+    async def test_verify_returns_cached_result(self):
+        """Verification should return cached result if available."""
+        service = EmailVerificationService(api_key="test_key", enabled=True)
+
+        cached_data = '{"email": "test@gmail.com", "state": "deliverable", "reason": "accepted_email", "score": 95, "is_disposable": false, "is_free": true, "is_role": false, "domain": "gmail.com", "did_you_mean": null}'
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = cached_data
+
+        with patch("httpx.AsyncClient") as mock_client, \
+             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+            result = await service.verify_email("test@gmail.com")
+
+            # Verify result matches cached data
+            assert result.email == "test@gmail.com"
+            assert result.state == EmailState.DELIVERABLE
+            assert result.score == 95
+            # Verify API was NOT called
+            mock_client.return_value.__aenter__.return_value.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_verify_does_not_cache_api_errors(self):
+        """API errors should not be cached."""
+        service = EmailVerificationService(api_key="test_key", enabled=True)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500  # Server error
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None  # No cached result
+
+        with patch("httpx.AsyncClient") as mock_client, \
+             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                return_value=mock_response
+            )
+
+            result = await service.verify_email("test@example.com")
+
+            # Verify error result
+            assert result.state == EmailState.UNKNOWN
+            assert result.reason == EmailReason.API_ERROR
+            # Verify cache was NOT written
+            mock_redis.setex.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_verify_does_not_cache_timeouts(self):
+        """Timeouts should not be cached."""
+        import httpx
+
+        service = EmailVerificationService(api_key="test_key", enabled=True)
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        with patch("httpx.AsyncClient") as mock_client, \
+             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                side_effect=httpx.TimeoutException("timeout")
+            )
+
+            result = await service.verify_email("test@example.com")
+
+            assert result.reason == EmailReason.TIMEOUT
+            # Verify cache was NOT written
+            mock_redis.setex.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_verify_works_when_redis_unavailable(self):
+        """Verification should work when Redis is unavailable."""
+        service = EmailVerificationService(api_key="test_key", enabled=True)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "state": "deliverable",
+            "reason": "accepted_email",
+            "score": 95,
+            "disposable": False,
+            "free": True,
+            "role": False,
+            "domain": "gmail.com",
+        }
+
+        with patch("httpx.AsyncClient") as mock_client, \
+             patch("src.services.email_verification._get_redis_client", return_value=None):
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                return_value=mock_response
+            )
+
+            result = await service.verify_email("test@gmail.com")
+
+            # Verification should still work
+            assert result.state == EmailState.DELIVERABLE
+            assert result.score == 95
