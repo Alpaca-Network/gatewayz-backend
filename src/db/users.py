@@ -1671,6 +1671,7 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
             "subscription_end_date": user.get("subscription_end_date"),  # Unix timestamp
             "is_active": user.get("is_active"),
             "registration_date": user.get("registration_date"),
+            "settings": user.get("settings"),  # User settings including auto top-up configuration
         }
 
         logger.info(f"Profile built successfully for user {user.get('id')}")

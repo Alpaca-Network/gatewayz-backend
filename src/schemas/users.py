@@ -73,6 +73,7 @@ class UserProfileResponse(BaseModel):
     registration_date: str | None
     created_at: str | None
     updated_at: str | None
+    settings: dict[str, Any] | None = None  # User settings including auto top-up configuration
 
 
 class DeleteAccountRequest(BaseModel):
