@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # Z.AI GLM models - route to Z.AI gateway
+    "zai/glm-4.7": "zai",
+    "zai/glm-4.6v": "zai",
+    "zai/glm-4.5-air": "zai",
+    "zai/glm-4.5": "zai",
+    "glm-4.7": "zai",
+    "glm-4.6v": "zai",
+    "glm-4.5-air": "zai",
+    "glm-4.5": "zai",
     # Featherless-only models - not available on OpenRouter
     "c10x/longwriter-qwen2.5-7b-instruct": "featherless",
     # Meta Llama model ID aliases (support both meta/ and meta-llama/)

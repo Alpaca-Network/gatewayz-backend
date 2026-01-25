@@ -99,6 +99,8 @@ _nebius_models_cache = {
 
 _xai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
+_zai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL for Z.AI
+
 _novita_models_cache = {
     "data": None,
     "timestamp": None,

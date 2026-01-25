@@ -277,6 +277,11 @@ PROVIDER_FUNCTIONS = {
         "process_nosana_response",
         "make_nosana_request_openai_stream",
     ],
+    "zai": [
+        "make_zai_request_openai",
+        "process_zai_response",
+        "make_zai_request_openai_stream",
+    ],
 }
 
 # Load all providers and expose functions to global namespace
@@ -408,6 +413,11 @@ PROVIDER_ROUTING = {
         "request": make_nosana_request_openai,
         "process": process_nosana_response,
         "stream": make_nosana_request_openai_stream,
+    },
+    "zai": {
+        "request": make_zai_request_openai,
+        "process": process_zai_response,
+        "stream": make_zai_request_openai_stream,
     },
 }
 
