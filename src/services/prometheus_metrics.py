@@ -250,6 +250,47 @@ provider_response_time = get_or_create_metric(Histogram,
     buckets=(0.1, 0.5, 1, 2.5, 5, 10),
 )
 
+# ==================== Zero-Model Event Metrics ====================
+# These metrics track when gateways/providers return zero models
+# Critical for monitoring provider health and fallback activation
+
+gateway_zero_model_events = get_or_create_metric(Counter,
+    "gateway_zero_model_events_total",
+    "Total zero-model events by gateway (when API returns 0 models)",
+    ["gateway", "reason"],  # reason: api_empty, cache_empty, below_threshold, timeout
+)
+
+gateway_model_count = get_or_create_metric(Gauge,
+    "gateway_model_count",
+    "Current number of models available per gateway",
+    ["gateway"],
+)
+
+gateway_fallback_activations = get_or_create_metric(Counter,
+    "gateway_fallback_activations_total",
+    "Total fallback activations when primary gateway returns zero models",
+    ["primary_gateway", "fallback_source"],  # fallback_source: database, cache, static
+)
+
+gateway_recovery_events = get_or_create_metric(Counter,
+    "gateway_recovery_events_total",
+    "Total recovery events when gateway returns models after zero-model state",
+    ["gateway"],
+)
+
+gateway_health_check_duration = get_or_create_metric(Histogram,
+    "gateway_health_check_duration_seconds",
+    "Duration of gateway health checks",
+    ["gateway", "status"],  # status: healthy, unhealthy, timeout
+    buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30),
+)
+
+gateway_auto_fix_attempts = get_or_create_metric(Counter,
+    "gateway_auto_fix_attempts_total",
+    "Total auto-fix attempts for failing gateways",
+    ["gateway", "result"],  # result: success, failure
+)
+
 # ==================== API Key Tracking Metrics ====================
 api_key_lookup_attempts = get_or_create_metric(Counter,
     "api_key_lookup_attempts_total",
@@ -614,6 +655,86 @@ def set_provider_error_rate(provider: str, error_rate: float):
 def track_provider_response_time(provider: str, duration: float):
     """Track provider response time."""
     provider_response_time.labels(provider=provider).observe(duration)
+
+
+# ==================== Zero-Model Event Helper Functions ====================
+
+def record_zero_model_event(gateway: str, reason: str = "api_empty"):
+    """
+    Record a zero-model event for a gateway.
+
+    Args:
+        gateway: Gateway/provider name (e.g., "openrouter", "featherless")
+        reason: Reason for zero models:
+            - "api_empty": API returned empty response
+            - "cache_empty": Cache was empty/expired
+            - "below_threshold": Model count below minimum threshold
+            - "timeout": Request timed out
+            - "error": Other error occurred
+    """
+    gateway_zero_model_events.labels(gateway=gateway, reason=reason).inc()
+
+
+def set_gateway_model_count(gateway: str, count: int):
+    """
+    Set the current model count for a gateway.
+
+    Args:
+        gateway: Gateway/provider name
+        count: Number of models currently available
+    """
+    gateway_model_count.labels(gateway=gateway).set(count)
+
+
+def record_fallback_activation(primary_gateway: str, fallback_source: str = "database"):
+    """
+    Record a fallback activation event.
+
+    Args:
+        primary_gateway: Gateway that triggered the fallback
+        fallback_source: Source of fallback models:
+            - "database": Models from database
+            - "cache": Models from stale cache
+            - "static": Static fallback model list
+    """
+    gateway_fallback_activations.labels(
+        primary_gateway=primary_gateway,
+        fallback_source=fallback_source
+    ).inc()
+
+
+def record_gateway_recovery(gateway: str):
+    """
+    Record a recovery event when a gateway returns models after being in zero-model state.
+
+    Args:
+        gateway: Gateway/provider name that recovered
+    """
+    gateway_recovery_events.labels(gateway=gateway).inc()
+
+
+def track_gateway_health_check(gateway: str, status: str, duration: float):
+    """
+    Track gateway health check duration and status.
+
+    Args:
+        gateway: Gateway/provider name
+        status: Health check result ("healthy", "unhealthy", "timeout")
+        duration: Duration of the health check in seconds
+    """
+    gateway_health_check_duration.labels(gateway=gateway, status=status).observe(duration)
+
+
+def record_auto_fix_attempt(gateway: str, success: bool):
+    """
+    Record an auto-fix attempt for a failing gateway.
+
+    Args:
+        gateway: Gateway/provider name
+        success: Whether the auto-fix was successful
+    """
+    result = "success" if success else "failure"
+    gateway_auto_fix_attempts.labels(gateway=gateway, result=result).inc()
 
 
 def record_api_key_usage(api_key_id: str, status: str = "success"):
