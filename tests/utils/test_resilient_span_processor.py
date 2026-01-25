@@ -34,7 +34,8 @@ class TestResilientSpanProcessor:
         """Test that processor initializes with correct state."""
         assert resilient_processor._failure_count == 0
         assert resilient_processor._success_count == 0
-        assert resilient_processor._circuit_open is False
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_CLOSED
+        assert resilient_processor._circuit_open is False  # Backward-compatible property
         assert resilient_processor._last_failure_time is None
         assert resilient_processor._total_exports == 0
         assert resilient_processor._total_failures == 0
@@ -83,7 +84,8 @@ class TestResilientSpanProcessor:
             assert result is False
 
         # Assert
-        assert resilient_processor._circuit_open is True
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
+        assert resilient_processor._circuit_open is True  # Backward-compatible property
         assert resilient_processor._failure_count == ResilientSpanProcessor.FAILURE_THRESHOLD
         assert resilient_processor._total_failures == ResilientSpanProcessor.FAILURE_THRESHOLD
 
@@ -96,7 +98,7 @@ class TestResilientSpanProcessor:
         for _ in range(ResilientSpanProcessor.FAILURE_THRESHOLD):
             resilient_processor.force_flush()
 
-        assert resilient_processor._circuit_open is True
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
 
         # Reset mock to verify it's not called
         mock_processor.force_flush.reset_mock()
@@ -114,16 +116,16 @@ class TestResilientSpanProcessor:
     def test_circuit_attempts_recovery_after_cooldown(
         self, resilient_processor, mock_processor
     ):
-        """Test that circuit attempts recovery after cooldown period."""
+        """Test that circuit attempts recovery after cooldown period (enters HALF_OPEN state)."""
         # Arrange - Open the circuit
         mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
         for _ in range(ResilientSpanProcessor.FAILURE_THRESHOLD):
             resilient_processor.force_flush()
 
-        assert resilient_processor._circuit_open is True
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
 
         # Fast-forward time past cooldown
-        with patch("time.time") as mock_time:
+        with patch("src.utils.resilient_span_processor.time.time") as mock_time:
             # Set current time to cooldown + 1 second in the future
             mock_time.return_value = (
                 resilient_processor._last_failure_time
@@ -139,20 +141,22 @@ class TestResilientSpanProcessor:
             # Act - Attempt flush after cooldown
             result = resilient_processor.force_flush()
 
-            # Assert - Circuit should attempt recovery
+            # Assert - Circuit should enter HALF_OPEN and attempt recovery
             assert result is True
             mock_processor.force_flush.assert_called_once()
+            # After first success, circuit should be in HALF_OPEN (needs SUCCESS_THRESHOLD successes)
+            assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_HALF_OPEN
 
     def test_circuit_closes_after_successful_recoveries(
         self, resilient_processor, mock_processor
     ):
-        """Test that circuit closes after SUCCESS_THRESHOLD successful flushes."""
+        """Test that circuit closes after SUCCESS_THRESHOLD successful flushes in HALF_OPEN state."""
         # Arrange - Open the circuit
         mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
         for _ in range(ResilientSpanProcessor.FAILURE_THRESHOLD):
             resilient_processor.force_flush()
 
-        assert resilient_processor._circuit_open is True
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
 
         # Reset for successful flushes
         mock_processor.force_flush.reset_mock()
@@ -160,7 +164,7 @@ class TestResilientSpanProcessor:
         mock_processor.force_flush.return_value = True
 
         # Fast-forward time past cooldown
-        with patch("time.time") as mock_time:
+        with patch("src.utils.resilient_span_processor.time.time") as mock_time:
             mock_time.return_value = (
                 resilient_processor._last_failure_time
                 + ResilientSpanProcessor.COOLDOWN_SECONDS
@@ -172,8 +176,9 @@ class TestResilientSpanProcessor:
                 result = resilient_processor.force_flush()
                 assert result is True
 
-            # Assert - Circuit should be closed
-            assert resilient_processor._circuit_open is False
+            # Assert - Circuit should be closed after SUCCESS_THRESHOLD successes
+            assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_CLOSED
+            assert resilient_processor._circuit_open is False  # Backward-compatible property
             assert resilient_processor._success_count == ResilientSpanProcessor.SUCCESS_THRESHOLD
             assert resilient_processor._failure_count == 0
 
@@ -239,6 +244,79 @@ class TestResilientSpanProcessor:
 
         # Assert
         mock_processor.on_end.assert_called_once()
+
+    def test_on_end_respects_circuit_state(self, resilient_processor, mock_processor):
+        """Test that on_end respects circuit state (skips when not CLOSED)."""
+        # Arrange - Open the circuit
+        mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
+        for _ in range(ResilientSpanProcessor.FAILURE_THRESHOLD):
+            resilient_processor.force_flush()
+
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
+
+        # Reset mock to track on_end calls
+        mock_processor.on_end.reset_mock()
+        mock_span = Mock()
+
+        # Act - Call on_end while circuit is open
+        resilient_processor.on_end(mock_span)
+
+        # Assert - on_end should NOT be called on underlying processor
+        mock_processor.on_end.assert_not_called()
+
+    def test_on_start_respects_circuit_state(self, resilient_processor, mock_processor):
+        """Test that on_start respects circuit state (skips when not CLOSED)."""
+        # Arrange - Open the circuit
+        mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
+        for _ in range(ResilientSpanProcessor.FAILURE_THRESHOLD):
+            resilient_processor.force_flush()
+
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
+
+        # Reset mock to track on_start calls
+        mock_processor.on_start.reset_mock()
+        mock_span = Mock()
+
+        # Act - Call on_start while circuit is open
+        resilient_processor.on_start(mock_span)
+
+        # Assert - on_start should NOT be called on underlying processor
+        mock_processor.on_start.assert_not_called()
+
+    def test_half_open_failure_returns_to_open(self, resilient_processor, mock_processor):
+        """Test that failure in HALF_OPEN state returns circuit to OPEN."""
+        # Arrange - Open the circuit
+        mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
+        for _ in range(ResilientSpanProcessor.FAILURE_THRESHOLD):
+            resilient_processor.force_flush()
+
+        assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
+
+        # Fast-forward time past cooldown to enter HALF_OPEN
+        with patch("src.utils.resilient_span_processor.time.time") as mock_time:
+            mock_time.return_value = (
+                resilient_processor._last_failure_time
+                + ResilientSpanProcessor.COOLDOWN_SECONDS
+                + 1
+            )
+
+            # Reset mock processor to succeed first, then fail
+            mock_processor.force_flush.reset_mock()
+            mock_processor.force_flush.side_effect = None
+            mock_processor.force_flush.return_value = True
+
+            # First call succeeds - enters HALF_OPEN
+            result = resilient_processor.force_flush()
+            assert result is True
+            assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_HALF_OPEN
+
+            # Now make it fail
+            mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
+            result = resilient_processor.force_flush()
+
+            # Assert - Should return to OPEN state
+            assert result is False
+            assert resilient_processor._circuit_state == ResilientSpanProcessor.STATE_OPEN
 
     def test_shutdown_logs_statistics(self, resilient_processor, mock_processor, caplog):
         """Test that shutdown logs export statistics."""
