@@ -47,6 +47,7 @@ from src.services.email_verification import (
     verify_email as emailable_verify_email,
     EmailVerificationResult,
 )
+from src.utils.sentry_context import capture_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -147,6 +148,15 @@ async def _get_subscription_status_for_email(email: str) -> tuple[str, bool]:
     except Exception as e:
         # Don't block registration if API fails - fall back to local checks only
         logger.error(f"Emailable API error for {sanitize_for_logging(email)}: {e}")
+        # Capture to Sentry for monitoring
+        capture_error(
+            e,
+            context_type="provider",
+            context_data={
+                "provider": "emailable",
+                "operation": "email_verification",
+            },
+        )
         return "trial", False
 
 

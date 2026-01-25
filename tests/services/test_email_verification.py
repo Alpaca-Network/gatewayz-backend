@@ -12,7 +12,6 @@ from src.services.email_verification import (
     EmailState,
     EmailVerificationResult,
     EmailVerificationService,
-    verify_email,
 )
 
 

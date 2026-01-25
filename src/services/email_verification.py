@@ -172,7 +172,7 @@ class EmailVerificationService:
 
         # If verification is disabled, return a default result
         if not self.enabled:
-            logger.debug(f"Email verification disabled, skipping verification for {email}")
+            logger.debug(f"Email verification disabled, skipping verification for domain={domain}")
             return EmailVerificationResult(
                 email=email,
                 state=EmailState.UNKNOWN,
@@ -185,7 +185,7 @@ class EmailVerificationService:
             )
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout + 5) as client:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
                     f"{self.API_BASE_URL}/verify",
                     params={
@@ -197,7 +197,7 @@ class EmailVerificationService:
 
                 # Handle rate limiting
                 if response.status_code == 429:
-                    logger.warning(f"Emailable rate limit exceeded for {email}")
+                    logger.warning(f"Emailable rate limit exceeded for domain={domain}")
                     return self._create_unknown_result(email, domain, EmailReason.THROTTLED)
 
                 # Handle insufficient credits
@@ -207,18 +207,18 @@ class EmailVerificationService:
 
                 # Handle other errors
                 if response.status_code != 200:
-                    logger.error(f"Emailable API error: {response.status_code} - {response.text}")
+                    logger.error(f"Emailable API error: {response.status_code} for domain={domain}")
                     return self._create_unknown_result(email, domain, EmailReason.API_ERROR)
 
                 data = response.json()
                 return self._parse_response(email, data)
 
         except httpx.TimeoutException:
-            logger.warning(f"Emailable API timeout for {email}")
+            logger.warning(f"Emailable API timeout for domain={domain}")
             return self._create_unknown_result(email, domain, EmailReason.TIMEOUT)
 
         except Exception as e:
-            logger.error(f"Emailable API unexpected error for {email}: {e}")
+            logger.error(f"Emailable API unexpected error for domain={domain}: {type(e).__name__}")
             return self._create_unknown_result(email, domain, EmailReason.UNEXPECTED_ERROR)
 
     def _parse_response(self, email: str, data: dict) -> EmailVerificationResult:
