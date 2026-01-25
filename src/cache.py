@@ -99,7 +99,12 @@ _nebius_models_cache = {
 
 _xai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
-_zai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL for Z.AI
+_zai_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,
+    "stale_ttl": 7200,
+}  # 1 hour TTL for Z.AI
 
 _novita_models_cache = {
     "data": None,
@@ -268,6 +273,7 @@ def get_models_cache(gateway: str):
         "cerebras": _cerebras_models_cache,
         "nebius": _nebius_models_cache,
         "xai": _xai_models_cache,
+        "zai": _zai_models_cache,
         "novita": _novita_models_cache,
         "huggingface": _huggingface_models_cache,
         "hug": _huggingface_models_cache,  # Alias for backward compatibility
@@ -312,6 +318,7 @@ def clear_models_cache(gateway: str):
         "cerebras": _cerebras_models_cache,
         "nebius": _nebius_models_cache,
         "xai": _xai_models_cache,
+        "zai": _zai_models_cache,
         "novita": _novita_models_cache,
         "huggingface": _huggingface_models_cache,
         "hug": _huggingface_models_cache,  # Alias for backward compatibility
