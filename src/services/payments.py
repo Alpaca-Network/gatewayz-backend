@@ -13,10 +13,11 @@ from typing import Any
 import stripe
 
 from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
-from src.db.subscription_products import get_credits_from_tier, get_tier_from_product_id
+from src.db.subscription_products import get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.db.webhook_events import is_event_processed, record_processed_event
 from src.schemas.payments import (
+    CancelSubscriptionRequest,
     CheckoutSessionResponse,
     CreateCheckoutSessionRequest,
     CreatePaymentIntentRequest,
@@ -24,11 +25,15 @@ from src.schemas.payments import (
     CreateSubscriptionCheckoutRequest,
     CreditPackage,
     CreditPackagesResponse,
+    CurrentSubscriptionResponse,
+    DowngradeSubscriptionRequest,
     PaymentIntentResponse,
     PaymentStatus,
     RefundResponse,
     StripeCurrency,
     SubscriptionCheckoutResponse,
+    SubscriptionManagementResponse,
+    UpgradeSubscriptionRequest,
     WebhookProcessingResult,
 )
 from src.utils.sentry_context import capture_payment_error
@@ -1461,6 +1466,24 @@ class StripeService:
                 ).eq("user_id", user_id).execute()
                 logger.info(f"User {user_id} trial status cleared on subscription update to active")
 
+                # Update subscription allowance when tier changes (for upgrades/downgrades)
+                # Check if tier has changed by comparing with previous product_id
+                from src.db.subscription_products import get_allowance_from_tier
+                from src.db.users import reset_subscription_allowance
+
+                new_allowance = get_allowance_from_tier(tier)
+                if new_allowance > 0:
+                    # Reset allowance to new tier's amount on tier change
+                    reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
+                    if not reset_result:
+                        logger.error(
+                            f"Failed to reset allowance for user {user_id} during subscription update webhook. "
+                            f"Tier: {tier}, allowance: ${new_allowance}. "
+                            f"Raising exception to trigger Stripe retry."
+                        )
+                        raise Exception(f"Failed to update subscription allowance for user {user_id}")
+                    logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) on subscription update")
+
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
             from src.db.users import invalidate_user_cache_by_id
@@ -1641,4 +1664,611 @@ class StripeService:
 
         except Exception as e:
             logger.error(f"Error handling invoice payment failed: {e}", exc_info=True)
+            raise
+
+    # ==================== Subscription Management ====================
+
+    def get_current_subscription(self, user_id: int) -> CurrentSubscriptionResponse:
+        """
+        Get the current subscription status for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            CurrentSubscriptionResponse with subscription details
+        """
+        try:
+            user = get_user_by_id(user_id)
+            if not user:
+                raise ValueError(f"User {user_id} not found")
+
+            stripe_subscription_id = user.get("stripe_subscription_id")
+            tier = user.get("tier", "basic")
+
+            if not stripe_subscription_id:
+                return CurrentSubscriptionResponse(
+                    has_subscription=False,
+                    tier=tier,
+                )
+
+            # Fetch subscription from Stripe
+            try:
+                subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+            except stripe.StripeError as e:
+                logger.warning(f"Could not retrieve subscription {stripe_subscription_id}: {e}")
+                return CurrentSubscriptionResponse(
+                    has_subscription=False,
+                    subscription_id=stripe_subscription_id,
+                    tier=tier,
+                )
+
+            # Extract price and product from subscription items
+            price_id = None
+            product_id = None
+            items = self._get_stripe_object_value(subscription, "items")
+            if items:
+                items_data = self._get_stripe_object_value(items, "data")
+                if items_data and len(items_data) > 0:
+                    first_item = items_data[0]
+                    price = self._get_stripe_object_value(first_item, "price")
+                    if price:
+                        price_id = self._get_stripe_object_value(price, "id")
+                        product_id = self._get_stripe_object_value(price, "product")
+
+            return CurrentSubscriptionResponse(
+                has_subscription=True,
+                subscription_id=subscription.id,
+                status=subscription.status,
+                tier=tier,
+                current_period_start=datetime.fromtimestamp(
+                    subscription.current_period_start, tz=timezone.utc
+                ) if subscription.current_period_start else None,
+                current_period_end=datetime.fromtimestamp(
+                    subscription.current_period_end, tz=timezone.utc
+                ) if subscription.current_period_end else None,
+                cancel_at_period_end=subscription.cancel_at_period_end,
+                canceled_at=datetime.fromtimestamp(
+                    subscription.canceled_at, tz=timezone.utc
+                ) if subscription.canceled_at else None,
+                product_id=product_id,
+                price_id=price_id,
+            )
+
+        except stripe.StripeError as e:
+            logger.error(f"Stripe error getting subscription for user {user_id}: {e}")
+            raise Exception(f"Failed to get subscription: {str(e)}") from e
+
+        except Exception as e:
+            logger.error(f"Error getting subscription for user {user_id}: {e}")
+            raise
+
+    def upgrade_subscription(
+        self, user_id: int, request: UpgradeSubscriptionRequest
+    ) -> SubscriptionManagementResponse:
+        """
+        Upgrade a user's subscription to a higher tier (e.g., Pro -> Max).
+        Uses Stripe's subscription update with proration to charge the difference immediately.
+
+        Args:
+            user_id: User ID
+            request: Upgrade request with new price/product IDs
+
+        Returns:
+            SubscriptionManagementResponse with upgrade details
+        """
+        try:
+            user = get_user_by_id(user_id)
+            if not user:
+                raise ValueError(f"User {user_id} not found")
+
+            stripe_subscription_id = user.get("stripe_subscription_id")
+            if not stripe_subscription_id:
+                raise ValueError("User does not have an active subscription to upgrade")
+
+            # Get current subscription
+            subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+
+            if subscription.status != "active":
+                raise ValueError(f"Cannot upgrade subscription with status: {subscription.status}")
+
+            # Get the subscription item to update
+            items = self._get_stripe_object_value(subscription, "items")
+            if not items:
+                raise ValueError("Subscription has no items")
+
+            items_data = self._get_stripe_object_value(items, "data")
+            if not items_data or len(items_data) == 0:
+                raise ValueError("Subscription has no item data")
+
+            subscription_item_id = items_data[0].id
+
+            # Determine the new tier from product ID
+            new_tier = get_tier_from_product_id(request.new_product_id)
+            if not new_tier or new_tier == "basic":
+                raise ValueError(
+                    f"Invalid product ID for upgrade: {request.new_product_id}. "
+                    "Cannot resolve to a valid paid tier."
+                )
+
+            # Get current tier for audit logging
+            current_tier = user.get("tier", "basic")
+
+            logger.info(
+                f"Upgrading subscription {stripe_subscription_id} for user {user_id} "
+                f"from {current_tier} to tier {new_tier} (price_id: {request.new_price_id})"
+            )
+
+            # Update the subscription with the new price
+            # proration_behavior='create_prorations' will charge the difference immediately
+            updated_subscription = stripe.Subscription.modify(
+                stripe_subscription_id,
+                items=[
+                    {
+                        "id": subscription_item_id,
+                        "price": request.new_price_id,
+                    }
+                ],
+                proration_behavior=request.proration_behavior,
+                metadata={
+                    "user_id": str(user_id),
+                    "product_id": request.new_product_id,
+                    "tier": new_tier,
+                },
+            )
+
+            # Calculate proration amount (if any)
+            # Note: The actual proration will be handled by Stripe and reflected in the next invoice
+            proration_amount = None
+
+            # Update user's tier in database
+            from src.config.supabase_config import get_supabase_client
+            from src.db.plans import get_plan_id_by_tier
+
+            client = get_supabase_client()
+
+            client.table("users").update(
+                {
+                    "tier": new_tier,
+                    "stripe_product_id": request.new_product_id,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ).eq("id", user_id).execute()
+
+            # Update user_plans entry
+            plan_id = get_plan_id_by_tier(new_tier)
+            if plan_id:
+                # Deactivate existing plans
+                client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
+
+                # Create new plan assignment
+                start_date = datetime.now(timezone.utc)
+                if updated_subscription.current_period_end:
+                    end_date = datetime.fromtimestamp(updated_subscription.current_period_end, tz=timezone.utc)
+                else:
+                    end_date = start_date + timedelta(days=30)
+
+                client.table("user_plans").insert(
+                    {
+                        "user_id": user_id,
+                        "plan_id": plan_id,
+                        "started_at": start_date.isoformat(),
+                        "expires_at": end_date.isoformat(),
+                        "is_active": True,
+                    }
+                ).execute()
+
+            # Update API keys
+            client.table("api_keys_new").update(
+                {
+                    "subscription_plan": new_tier,
+                }
+            ).eq("user_id", user_id).execute()
+
+            # Update subscription allowance to new tier's allowance
+            # Business decision: On upgrade, user gets full new tier allowance immediately.
+            # This is intentionally generous to reward upgrading mid-cycle. The user pays
+            # prorated amount for the higher tier and receives the full higher allowance.
+            # Alternative approaches considered:
+            # - Preserve remaining allowance + add difference (more complex tracking)
+            # - Wait for next billing cycle (less immediate value for user)
+            from src.db.subscription_products import get_allowance_from_tier
+            from src.db.users import reset_subscription_allowance, get_user_by_id as get_user_fresh
+            from src.db.credit_transactions import TransactionType, log_credit_transaction
+
+            new_allowance = get_allowance_from_tier(new_tier)
+            if new_allowance > 0:
+                # Get current balance for audit logging
+                user_fresh = get_user_fresh(user_id)
+                old_allowance = user_fresh.get("subscription_allowance", 0) if user_fresh else 0
+
+                # Reset allowance to new tier's full amount (immediate benefit for upgrade)
+                reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
+                if not reset_result:
+                    logger.error(f"Failed to reset allowance for user {user_id} during upgrade")
+                    raise Exception("Failed to update subscription allowance")
+
+                logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)")
+
+                # Log audit trail for subscription upgrade
+                log_credit_transaction(
+                    user_id=user_id,
+                    amount=new_allowance - old_allowance,
+                    transaction_type=TransactionType.SUBSCRIPTION_UPGRADE,
+                    description=f"Subscription upgraded from {current_tier} to {new_tier}",
+                    balance_before=old_allowance,
+                    balance_after=new_allowance,
+                    metadata={
+                        "from_tier": current_tier,
+                        "to_tier": new_tier,
+                        "subscription_id": updated_subscription.id,
+                        "product_id": request.new_product_id,
+                        "price_id": request.new_price_id,
+                    },
+                    created_by="system:subscription_upgrade",
+                )
+
+            # Invalidate user cache
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+
+            logger.info(
+                f"Successfully upgraded subscription {stripe_subscription_id} to {new_tier} for user {user_id}"
+            )
+
+            return SubscriptionManagementResponse(
+                success=True,
+                subscription_id=updated_subscription.id,
+                status=updated_subscription.status,
+                current_tier=new_tier,
+                message=f"Successfully upgraded to {new_tier} tier",
+                proration_amount=proration_amount,
+            )
+
+        except stripe.StripeError as e:
+            logger.error(f"Stripe error upgrading subscription for user {user_id}: {e}")
+            capture_payment_error(
+                e,
+                operation='upgrade_subscription',
+                user_id=str(user_id),
+                details={'new_price_id': request.new_price_id}
+            )
+            raise Exception(f"Failed to upgrade subscription: {str(e)}") from e
+
+        except Exception as e:
+            logger.error(f"Error upgrading subscription for user {user_id}: {e}", exc_info=True)
+            raise
+
+    def downgrade_subscription(
+        self, user_id: int, request: DowngradeSubscriptionRequest
+    ) -> SubscriptionManagementResponse:
+        """
+        Downgrade a user's subscription to a lower tier (e.g., Max -> Pro).
+        Uses Stripe's subscription update with proration to credit the unused time.
+
+        Args:
+            user_id: User ID
+            request: Downgrade request with new price/product IDs
+
+        Returns:
+            SubscriptionManagementResponse with downgrade details
+        """
+        try:
+            user = get_user_by_id(user_id)
+            if not user:
+                raise ValueError(f"User {user_id} not found")
+
+            stripe_subscription_id = user.get("stripe_subscription_id")
+            if not stripe_subscription_id:
+                raise ValueError("User does not have an active subscription to downgrade")
+
+            # Get current subscription
+            subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+
+            if subscription.status != "active":
+                raise ValueError(f"Cannot downgrade subscription with status: {subscription.status}")
+
+            # Get the subscription item to update
+            items = self._get_stripe_object_value(subscription, "items")
+            if not items:
+                raise ValueError("Subscription has no items")
+
+            items_data = self._get_stripe_object_value(items, "data")
+            if not items_data or len(items_data) == 0:
+                raise ValueError("Subscription has no item data")
+
+            subscription_item_id = items_data[0].id
+
+            # Determine the new tier from product ID
+            new_tier = get_tier_from_product_id(request.new_product_id)
+            if not new_tier or new_tier == "basic":
+                raise ValueError(
+                    f"Invalid product ID for downgrade: {request.new_product_id}. "
+                    "Cannot resolve to a valid paid tier."
+                )
+
+            # Get current tier for audit logging
+            current_tier = user.get("tier", "basic")
+
+            logger.info(
+                f"Downgrading subscription {stripe_subscription_id} for user {user_id} "
+                f"from {current_tier} to tier {new_tier} (price_id: {request.new_price_id})"
+            )
+
+            # Update the subscription with the new price
+            # proration_behavior='create_prorations' will credit the unused time
+            updated_subscription = stripe.Subscription.modify(
+                stripe_subscription_id,
+                items=[
+                    {
+                        "id": subscription_item_id,
+                        "price": request.new_price_id,
+                    }
+                ],
+                proration_behavior=request.proration_behavior,
+                metadata={
+                    "user_id": str(user_id),
+                    "product_id": request.new_product_id,
+                    "tier": new_tier,
+                },
+            )
+
+            # Update user's tier in database
+            from src.config.supabase_config import get_supabase_client
+            from src.db.plans import get_plan_id_by_tier
+
+            client = get_supabase_client()
+
+            client.table("users").update(
+                {
+                    "tier": new_tier,
+                    "stripe_product_id": request.new_product_id,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ).eq("id", user_id).execute()
+
+            # Update user_plans entry
+            plan_id = get_plan_id_by_tier(new_tier)
+            if plan_id:
+                # Deactivate existing plans
+                client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
+
+                # Create new plan assignment
+                start_date = datetime.now(timezone.utc)
+                if updated_subscription.current_period_end:
+                    end_date = datetime.fromtimestamp(updated_subscription.current_period_end, tz=timezone.utc)
+                else:
+                    end_date = start_date + timedelta(days=30)
+
+                client.table("user_plans").insert(
+                    {
+                        "user_id": user_id,
+                        "plan_id": plan_id,
+                        "started_at": start_date.isoformat(),
+                        "expires_at": end_date.isoformat(),
+                        "is_active": True,
+                    }
+                ).execute()
+
+            # Update API keys
+            client.table("api_keys_new").update(
+                {
+                    "subscription_plan": new_tier,
+                }
+            ).eq("user_id", user_id).execute()
+
+            # Update subscription allowance to new tier's allowance
+            # Business decision: On downgrade, user's allowance is reset to the lower tier amount.
+            # The user receives prorated credit via Stripe for unused subscription time.
+            # This ensures allowance matches the tier being paid for going forward.
+            from src.db.subscription_products import get_allowance_from_tier
+            from src.db.users import reset_subscription_allowance, get_user_by_id as get_user_fresh
+            from src.db.credit_transactions import TransactionType, log_credit_transaction
+
+            new_allowance = get_allowance_from_tier(new_tier)
+            if new_allowance > 0:
+                # Get current balance for audit logging
+                user_fresh = get_user_fresh(user_id)
+                old_allowance = user_fresh.get("subscription_allowance", 0) if user_fresh else 0
+
+                # Reset allowance to new tier's amount (matches what user is now paying for)
+                reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
+                if not reset_result:
+                    logger.error(f"Failed to reset allowance for user {user_id} during downgrade")
+                    raise Exception("Failed to update subscription allowance")
+
+                logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)")
+
+                # Log audit trail for subscription downgrade
+                log_credit_transaction(
+                    user_id=user_id,
+                    amount=new_allowance - old_allowance,
+                    transaction_type=TransactionType.SUBSCRIPTION_DOWNGRADE,
+                    description=f"Subscription downgraded from {current_tier} to {new_tier}",
+                    balance_before=old_allowance,
+                    balance_after=new_allowance,
+                    metadata={
+                        "from_tier": current_tier,
+                        "to_tier": new_tier,
+                        "subscription_id": updated_subscription.id,
+                        "product_id": request.new_product_id,
+                        "price_id": request.new_price_id,
+                    },
+                    created_by="system:subscription_downgrade",
+                )
+
+            # Invalidate user cache
+            from src.db.users import invalidate_user_cache_by_id
+            invalidate_user_cache_by_id(user_id)
+
+            logger.info(
+                f"Successfully downgraded subscription {stripe_subscription_id} to {new_tier} for user {user_id}"
+            )
+
+            return SubscriptionManagementResponse(
+                success=True,
+                subscription_id=updated_subscription.id,
+                status=updated_subscription.status,
+                current_tier=new_tier,
+                message=f"Successfully downgraded to {new_tier} tier. Credit applied for unused time.",
+            )
+
+        except stripe.StripeError as e:
+            logger.error(f"Stripe error downgrading subscription for user {user_id}: {e}")
+            capture_payment_error(
+                e,
+                operation='downgrade_subscription',
+                user_id=str(user_id),
+                details={'new_price_id': request.new_price_id}
+            )
+            raise Exception(f"Failed to downgrade subscription: {str(e)}") from e
+
+        except Exception as e:
+            logger.error(f"Error downgrading subscription for user {user_id}: {e}", exc_info=True)
+            raise
+
+    def cancel_subscription(
+        self, user_id: int, request: CancelSubscriptionRequest
+    ) -> SubscriptionManagementResponse:
+        """
+        Cancel a user's subscription.
+        By default, cancels at the end of the billing period (user keeps access until then).
+
+        Args:
+            user_id: User ID
+            request: Cancel request with options
+
+        Returns:
+            SubscriptionManagementResponse with cancellation details
+        """
+        try:
+            user = get_user_by_id(user_id)
+            if not user:
+                raise ValueError(f"User {user_id} not found")
+
+            stripe_subscription_id = user.get("stripe_subscription_id")
+            if not stripe_subscription_id:
+                raise ValueError("User does not have an active subscription to cancel")
+
+            # Get current subscription
+            subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+
+            if subscription.status not in ["active", "trialing", "past_due"]:
+                raise ValueError(f"Cannot cancel subscription with status: {subscription.status}")
+
+            current_tier = user.get("tier", "basic")
+
+            logger.info(
+                f"Canceling subscription {stripe_subscription_id} for user {user_id} "
+                f"(cancel_at_period_end: {request.cancel_at_period_end})"
+            )
+
+            if request.cancel_at_period_end:
+                # Cancel at end of billing period - user keeps access until then
+                updated_subscription = stripe.Subscription.modify(
+                    stripe_subscription_id,
+                    cancel_at_period_end=True,
+                    metadata={
+                        "cancellation_reason": request.reason or "User requested cancellation",
+                    },
+                )
+
+                effective_date = datetime.fromtimestamp(
+                    updated_subscription.current_period_end, tz=timezone.utc
+                ) if updated_subscription.current_period_end else None
+
+                # Update user's subscription status to indicate pending cancellation
+                from src.config.supabase_config import get_supabase_client
+
+                client = get_supabase_client()
+
+                # Keep the tier and status as-is, but mark cancellation in metadata
+                # The actual downgrade will happen when subscription.deleted webhook fires
+                client.table("users").update(
+                    {
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).eq("id", user_id).execute()
+
+                # Invalidate user cache
+                from src.db.users import invalidate_user_cache_by_id
+                invalidate_user_cache_by_id(user_id)
+
+                logger.info(
+                    f"Subscription {stripe_subscription_id} marked for cancellation at period end "
+                    f"(effective: {effective_date}) for user {user_id}"
+                )
+
+                return SubscriptionManagementResponse(
+                    success=True,
+                    subscription_id=updated_subscription.id,
+                    status="cancel_scheduled",
+                    current_tier=current_tier,
+                    message=f"Subscription will be canceled at the end of the billing period. You'll keep access until {effective_date.strftime('%B %d, %Y') if effective_date else 'end of period'}.",
+                    effective_date=effective_date,
+                )
+
+            else:
+                # Cancel immediately
+                canceled_subscription = stripe.Subscription.cancel(stripe_subscription_id)
+
+                # Forfeit remaining allowance and downgrade tier
+                from src.db.users import forfeit_subscription_allowance
+
+                forfeited = forfeit_subscription_allowance(user_id, raise_on_error=False)
+                if forfeited > 0:
+                    logger.info(f"Forfeited ${forfeited} allowance for user {user_id} on immediate cancellation")
+
+                # Update user to basic tier
+                from src.config.supabase_config import get_supabase_client
+
+                client = get_supabase_client()
+
+                client.table("users").update(
+                    {
+                        "subscription_status": "canceled",
+                        "tier": "basic",
+                        "stripe_subscription_id": None,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).eq("id", user_id).execute()
+
+                # Update API keys
+                client.table("api_keys_new").update(
+                    {
+                        "subscription_status": "canceled",
+                        "subscription_plan": "basic",
+                    }
+                ).eq("user_id", user_id).execute()
+
+                # Invalidate user cache
+                from src.db.users import invalidate_user_cache_by_id
+                invalidate_user_cache_by_id(user_id)
+
+                logger.info(
+                    f"Subscription {stripe_subscription_id} canceled immediately for user {user_id}, "
+                    f"downgraded to basic tier"
+                )
+
+                return SubscriptionManagementResponse(
+                    success=True,
+                    subscription_id=canceled_subscription.id,
+                    status="canceled",
+                    current_tier="basic",
+                    message="Subscription canceled immediately. You have been downgraded to the free tier.",
+                    effective_date=datetime.now(timezone.utc),
+                )
+
+        except stripe.StripeError as e:
+            logger.error(f"Stripe error canceling subscription for user {user_id}: {e}")
+            capture_payment_error(
+                e,
+                operation='cancel_subscription',
+                user_id=str(user_id),
+                details={'cancel_at_period_end': request.cancel_at_period_end}
+            )
+            raise Exception(f"Failed to cancel subscription: {str(e)}") from e
+
+        except Exception as e:
+            logger.error(f"Error canceling subscription for user {user_id}: {e}", exc_info=True)
             raise

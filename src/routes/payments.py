@@ -17,10 +17,13 @@ from src.db.payments import (
     get_user_payments,
 )
 from src.schemas.payments import (
+    CancelSubscriptionRequest,
     CreateCheckoutSessionRequest,
     CreatePaymentIntentRequest,
     CreateRefundRequest,
     CreateSubscriptionCheckoutRequest,
+    DowngradeSubscriptionRequest,
+    UpgradeSubscriptionRequest,
     WebhookProcessingResult,
 )
 from src.security import deps as security_deps
@@ -607,3 +610,246 @@ async def create_subscription_checkout(
         raise HTTPException(
             status_code=500, detail=f"Failed to create subscription checkout: {str(e)}"
         )
+
+
+# ==================== Subscription Management ====================
+
+
+@router.get("/subscription", response_model=dict[str, Any])
+async def get_current_subscription(
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get the current user's subscription status
+
+    Returns:
+        Current subscription details including tier, status, and billing period
+
+    Example response:
+    {
+        "has_subscription": true,
+        "subscription_id": "sub_xxxxx",
+        "status": "active",
+        "tier": "pro",
+        "current_period_start": "2024-01-01T00:00:00Z",
+        "current_period_end": "2024-02-01T00:00:00Z",
+        "cancel_at_period_end": false,
+        "product_id": "prod_TKOqQPhVRxNp4Q",
+        "price_id": "price_xxxxx"
+    }
+    """
+    try:
+        user_id = current_user["id"]
+        subscription = stripe_service.get_current_subscription(user_id)
+
+        return {
+            "has_subscription": subscription.has_subscription,
+            "subscription_id": subscription.subscription_id,
+            "status": subscription.status,
+            "tier": subscription.tier,
+            "current_period_start": subscription.current_period_start.isoformat()
+            if subscription.current_period_start
+            else None,
+            "current_period_end": subscription.current_period_end.isoformat()
+            if subscription.current_period_end
+            else None,
+            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "canceled_at": subscription.canceled_at.isoformat()
+            if subscription.canceled_at
+            else None,
+            "product_id": subscription.product_id,
+            "price_id": subscription.price_id,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get subscription: {str(e)}")
+
+
+@router.post("/subscription/upgrade", response_model=dict[str, Any])
+async def upgrade_subscription(
+    request: UpgradeSubscriptionRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Upgrade subscription to a higher tier (e.g., Pro -> Max)
+
+    This uses Stripe's subscription update with proration to charge the difference immediately.
+
+    Args:
+        request: Upgrade request with new price/product IDs
+        current_user: Authenticated user from token
+
+    Returns:
+        Upgrade result with new subscription status
+
+    Example request body:
+    {
+        "new_price_id": "price_xxxxx",
+        "new_product_id": "prod_TKOraBpWMxMAIu",
+        "proration_behavior": "create_prorations"
+    }
+
+    Example response:
+    {
+        "success": true,
+        "subscription_id": "sub_xxxxx",
+        "status": "active",
+        "current_tier": "max",
+        "message": "Successfully upgraded to max tier"
+    }
+    """
+    try:
+        user_id = current_user["id"]
+        logger.info(
+            f"Upgrading subscription for user {user_id} to product {request.new_product_id}"
+        )
+
+        result = stripe_service.upgrade_subscription(user_id=user_id, request=request)
+
+        return {
+            "success": result.success,
+            "subscription_id": result.subscription_id,
+            "status": result.status,
+            "current_tier": result.current_tier,
+            "message": result.message,
+            "effective_date": result.effective_date.isoformat()
+            if result.effective_date
+            else None,
+            "proration_amount": result.proration_amount,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error upgrading subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        logger.error(f"Error upgrading subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upgrade subscription: {str(e)}")
+
+
+@router.post("/subscription/downgrade", response_model=dict[str, Any])
+async def downgrade_subscription(
+    request: DowngradeSubscriptionRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Downgrade subscription to a lower tier (e.g., Max -> Pro)
+
+    This uses Stripe's subscription update with proration to credit the unused time.
+
+    Args:
+        request: Downgrade request with new price/product IDs
+        current_user: Authenticated user from token
+
+    Returns:
+        Downgrade result with new subscription status
+
+    Example request body:
+    {
+        "new_price_id": "price_xxxxx",
+        "new_product_id": "prod_TKOqQPhVRxNp4Q",
+        "proration_behavior": "create_prorations"
+    }
+
+    Example response:
+    {
+        "success": true,
+        "subscription_id": "sub_xxxxx",
+        "status": "active",
+        "current_tier": "pro",
+        "message": "Successfully downgraded to pro tier. Credit applied for unused time."
+    }
+    """
+    try:
+        user_id = current_user["id"]
+        logger.info(
+            f"Downgrading subscription for user {user_id} to product {request.new_product_id}"
+        )
+
+        result = stripe_service.downgrade_subscription(user_id=user_id, request=request)
+
+        return {
+            "success": result.success,
+            "subscription_id": result.subscription_id,
+            "status": result.status,
+            "current_tier": result.current_tier,
+            "message": result.message,
+            "effective_date": result.effective_date.isoformat()
+            if result.effective_date
+            else None,
+            "proration_amount": result.proration_amount,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error downgrading subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        logger.error(f"Error downgrading subscription: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to downgrade subscription: {str(e)}"
+        )
+
+
+@router.post("/subscription/cancel", response_model=dict[str, Any])
+async def cancel_subscription(
+    request: CancelSubscriptionRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Cancel subscription
+
+    By default, cancels at the end of the billing period (user keeps access until then).
+    Set cancel_at_period_end=false for immediate cancellation.
+
+    Args:
+        request: Cancel request with options
+        current_user: Authenticated user from token
+
+    Returns:
+        Cancellation result
+
+    Example request body (cancel at period end):
+    {
+        "cancel_at_period_end": true,
+        "reason": "Switching to another service"
+    }
+
+    Example response:
+    {
+        "success": true,
+        "subscription_id": "sub_xxxxx",
+        "status": "cancel_scheduled",
+        "current_tier": "pro",
+        "message": "Subscription will be canceled at the end of the billing period...",
+        "effective_date": "2024-02-01T00:00:00Z"
+    }
+    """
+    try:
+        user_id = current_user["id"]
+        logger.info(
+            f"Canceling subscription for user {user_id} "
+            f"(cancel_at_period_end: {request.cancel_at_period_end})"
+        )
+
+        result = stripe_service.cancel_subscription(user_id=user_id, request=request)
+
+        return {
+            "success": result.success,
+            "subscription_id": result.subscription_id,
+            "status": result.status,
+            "current_tier": result.current_tier,
+            "message": result.message,
+            "effective_date": result.effective_date.isoformat()
+            if result.effective_date
+            else None,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error canceling subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        logger.error(f"Error canceling subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to cancel subscription: {str(e)}")
