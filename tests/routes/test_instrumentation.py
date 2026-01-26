@@ -9,7 +9,6 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
 

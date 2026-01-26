@@ -302,7 +302,7 @@ async def otel_initialize(admin_key: str = Depends(get_admin_key)):
     """
     from src.config.opentelemetry_config import OpenTelemetryConfig
 
-    # Force re-initialization by resetting the initialized flag
+    # Check if already initialized
     was_initialized = OpenTelemetryConfig._initialized
 
     if was_initialized:
@@ -371,16 +371,13 @@ async def otel_reinitialize(admin_key: str = Depends(get_admin_key)):
     """
     from src.config.opentelemetry_config import OpenTelemetryConfig
 
-    # Shutdown existing provider if any
+    # Use the thread-safe shutdown method which handles locking internally
+    # and resets the _initialized and _tracer_provider state
     if OpenTelemetryConfig._initialized:
         logger.info("Shutting down existing OpenTelemetry provider for re-initialization...")
         OpenTelemetryConfig.shutdown()
 
-    # Reset state
-    OpenTelemetryConfig._initialized = False
-    OpenTelemetryConfig._tracer_provider = None
-
-    # Re-initialize
+    # Re-initialize (thread-safe, handles locking internally)
     success = OpenTelemetryConfig.initialize()
 
     if success:

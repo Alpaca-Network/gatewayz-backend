@@ -15,6 +15,7 @@ Note: OpenTelemetry is optional. If not installed, tracing will be gracefully di
 
 import logging
 import socket
+import threading
 from urllib.parse import urlparse
 
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
@@ -118,6 +119,7 @@ class OpenTelemetryConfig:
 
     _initialized = False
     _tracer_provider: TracerProvider | None = None
+    _lock = threading.Lock()
 
     @classmethod
     def initialize(cls) -> bool:
@@ -127,179 +129,193 @@ class OpenTelemetryConfig:
         Returns:
             bool: True if initialization succeeded, False if disabled or failed
         """
-        if cls._initialized:
-            logger.debug("OpenTelemetry already initialized")
-            return True
+        with cls._lock:
+            if cls._initialized:
+                logger.debug("OpenTelemetry already initialized")
+                return True
 
-        if not OPENTELEMETRY_AVAILABLE:
-            logger.info("⏭️  OpenTelemetry not available (package not installed)")
-            return False
-
-        if not Config.TEMPO_ENABLED:
-            logger.info("⏭️  OpenTelemetry tracing disabled (TEMPO_ENABLED=false)")
-            return False
-
-        try:
-            logger.info("🔭 Initializing OpenTelemetry tracing...")
-
-            # Configure OTLP exporter to Tempo
-            tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
-
-            # DEBUG: Log the original value
-            logger.info(f"   [DEBUG] Raw TEMPO_OTLP_HTTP_ENDPOINT: {tempo_endpoint}")
-
-            # Railway internal DNS detection (same project) - check FIRST
-            if ".railway.internal" in tempo_endpoint:
-                # Using Railway internal DNS - keep as-is with port
-                logger.info(f"   Railway internal DNS detected - using private network")
-                # Ensure http:// for internal (no SSL)
-                if not tempo_endpoint.startswith("http://") and not tempo_endpoint.startswith(
-                    "https://"
-                ):
-                    tempo_endpoint = f"http://{tempo_endpoint}"
-
-                # CRITICAL FIX: Ensure port 4318 is explicitly set for Railway internal DNS
-                # Without this, OTLPSpanExporter defaults to port 80, causing connection refused errors
-                parsed = urlparse(tempo_endpoint)
-                if not parsed.port:
-                    # Port missing - add :4318 for OTLP HTTP
-                    if parsed.hostname:
-                        tempo_endpoint = f"{parsed.scheme}://{parsed.hostname}:4318{parsed.path}"
-                        logger.warning(
-                            f"   ⚠️  Port missing in Railway internal endpoint - "
-                            f"auto-corrected to: {tempo_endpoint}"
-                        )
-                        logger.warning(
-                            f"   💡 TIP: Set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318 "
-                            f"in Railway environment variables to avoid this warning"
-                        )
-
-                logger.info(f"   [DEBUG] After internal DNS processing: {tempo_endpoint}")
-            # Railway public URL detection (cross-project)
-            elif ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
-                # Remove :4318 or :4317 port suffixes for Railway public deployments
-                tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
-                # Ensure it uses https:// for Railway public
-                if tempo_endpoint.startswith("http://"):
-                    tempo_endpoint = tempo_endpoint.replace("http://", "https://")
-                elif not tempo_endpoint.startswith("https://"):
-                    tempo_endpoint = f"https://{tempo_endpoint}"
-                logger.info(f"   Railway public deployment detected - using HTTPS proxy")
-                logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
-
-            logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
-            logger.info(f"   [DEBUG] Full OTLP path will be: {tempo_endpoint}/v1/traces")
-
-            # Check if Tempo endpoint is reachable before attempting to create exporter
-            # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
-            if Config.TEMPO_SKIP_REACHABILITY_CHECK:
-                logger.info(
-                    "   Skipping reachability check (TEMPO_SKIP_REACHABILITY_CHECK=true) - "
-                    "traces will be buffered and sent asynchronously"
-                )
-            elif not _check_endpoint_reachable(tempo_endpoint):
-                logger.warning(
-                    f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
-                    f"Ensure the Tempo service is deployed and accessible. "
-                    f"The application will continue without distributed tracing."
-                )
+            if not OPENTELEMETRY_AVAILABLE:
+                logger.info("⏭️  OpenTelemetry not available (package not installed)")
                 return False
 
-            # Create resource with service metadata
-            resource = Resource.create(
-                {
-                    SERVICE_NAME: Config.OTEL_SERVICE_NAME,
-                    SERVICE_VERSION: "2.0.3",
-                    DEPLOYMENT_ENVIRONMENT: Config.APP_ENV,
-                    "service.namespace": "gatewayz",
-                    "telemetry.sdk.language": "python",
-                }
-            )
+            if not Config.TEMPO_ENABLED:
+                logger.info("⏭️  OpenTelemetry tracing disabled (TEMPO_ENABLED=false)")
+                return False
 
-            # Create tracer provider
-            cls._tracer_provider = TracerProvider(resource=resource)
-
-            # Create OTLP exporter with error handling for connection issues
             try:
-                # Increased timeout for Railway cross-project connections
-                # Railway internal DNS is fast, but cross-project public URLs need more time
-                timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
+                logger.info("🔭 Initializing OpenTelemetry tracing...")
 
-                # NOTE: The OTLPSpanExporter from opentelemetry-exporter-otlp-proto-http
-                # AUTOMATICALLY appends /v1/traces to the endpoint URL.
-                # See: https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/trace_exporter/__init__.py
-                # DO NOT manually append /v1/traces - it will result in /v1/traces/v1/traces (404 error)
+                # Configure OTLP exporter to Tempo
+                tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
 
-                # Ensure endpoint ends with / for proper path joining
-                base_endpoint = tempo_endpoint.rstrip("/") + "/"
+                # DEBUG: Log the original value
+                logger.info(f"   [DEBUG] Raw TEMPO_OTLP_HTTP_ENDPOINT: {tempo_endpoint}")
 
-                logger.info(
-                    f"   [DEBUG] Creating OTLP HTTP exporter with base endpoint: {base_endpoint}"
+                # Railway internal DNS detection (same project) - check FIRST
+                if ".railway.internal" in tempo_endpoint:
+                    # Using Railway internal DNS - keep as-is with port
+                    logger.info("   Railway internal DNS detected - using private network")
+                    # Ensure http:// for internal (no SSL)
+                    if not tempo_endpoint.startswith("http://") and not tempo_endpoint.startswith(
+                        "https://"
+                    ):
+                        tempo_endpoint = f"http://{tempo_endpoint}"
+
+                    # CRITICAL FIX: Ensure port 4318 is explicitly set for Railway internal DNS
+                    # Without this, OTLPSpanExporter defaults to port 80, causing connection refused errors
+                    parsed = urlparse(tempo_endpoint)
+                    if not parsed.port:
+                        # Port missing - add :4318 for OTLP HTTP
+                        if parsed.hostname:
+                            tempo_endpoint = (
+                                f"{parsed.scheme}://{parsed.hostname}:4318{parsed.path}"
+                            )
+                            logger.warning(
+                                f"   ⚠️  Port missing in Railway internal endpoint - "
+                                f"auto-corrected to: {tempo_endpoint}"
+                            )
+                            logger.warning(
+                                "   💡 TIP: Set TEMPO_OTLP_HTTP_ENDPOINT="
+                                "http://tempo.railway.internal:4318 "
+                                "in Railway environment variables to avoid this warning"
+                            )
+
+                    logger.info(f"   [DEBUG] After internal DNS processing: {tempo_endpoint}")
+                # Railway public URL detection (cross-project)
+                elif ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
+                    # Remove :4318 or :4317 port suffixes for Railway public deployments
+                    tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
+                    # Ensure it uses https:// for Railway public
+                    if tempo_endpoint.startswith("http://"):
+                        tempo_endpoint = tempo_endpoint.replace("http://", "https://")
+                    elif not tempo_endpoint.startswith("https://"):
+                        tempo_endpoint = f"https://{tempo_endpoint}"
+                    logger.info("   Railway public deployment detected - using HTTPS proxy")
+                    logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
+
+                logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
+                logger.info(f"   [DEBUG] Full OTLP path will be: {tempo_endpoint}/v1/traces")
+
+                # Check if Tempo endpoint is reachable before attempting to create exporter
+                # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true
+                # for async/lazy connections
+                if Config.TEMPO_SKIP_REACHABILITY_CHECK:
+                    logger.info(
+                        "   Skipping reachability check (TEMPO_SKIP_REACHABILITY_CHECK=true) - "
+                        "traces will be buffered and sent asynchronously"
+                    )
+                elif not _check_endpoint_reachable(tempo_endpoint):
+                    logger.warning(
+                        f"⏭️  Skipping OpenTelemetry initialization - "
+                        f"Tempo endpoint {tempo_endpoint} is not reachable. "
+                        f"Ensure the Tempo service is deployed and accessible. "
+                        f"The application will continue without distributed tracing."
+                    )
+                    return False
+
+                # Create resource with service metadata
+                resource = Resource.create(
+                    {
+                        SERVICE_NAME: Config.OTEL_SERVICE_NAME,
+                        SERVICE_VERSION: "2.0.3",
+                        DEPLOYMENT_ENVIRONMENT: Config.APP_ENV,
+                        "service.namespace": "gatewayz",
+                        "telemetry.sdk.language": "python",
+                    }
                 )
-                logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
-                logger.info(f"   [DEBUG] Note: OTLPSpanExporter will auto-append /v1/traces")
 
-                otlp_exporter = OTLPSpanExporter(
-                    endpoint=base_endpoint,  # Base URL only - exporter appends /v1/traces automatically
-                    headers={},  # Add authentication headers if needed
-                    timeout=timeout_seconds,
-                )
+                # Create tracer provider
+                cls._tracer_provider = TracerProvider(resource=resource)
 
-                # Log the actual endpoint the exporter is using
-                logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(f"   [DEBUG] Traces will be sent to: {base_endpoint}v1/traces")
-                logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
+                # Create OTLP exporter with error handling for connection issues
+                try:
+                    # Increased timeout for Railway cross-project connections
+                    # Railway internal DNS is fast, but cross-project public URLs need more time
+                    timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
+
+                    # NOTE: The OTLPSpanExporter from opentelemetry-exporter-otlp-proto-http
+                    # AUTOMATICALLY appends /v1/traces to the endpoint URL.
+                    # See: https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/trace_exporter/__init__.py
+                    # DO NOT manually append /v1/traces - it will result in
+                    # /v1/traces/v1/traces (404 error)
+
+                    # Ensure endpoint ends with / for proper path joining
+                    base_endpoint = tempo_endpoint.rstrip("/") + "/"
+
+                    logger.info(
+                        f"   [DEBUG] Creating OTLP HTTP exporter with base endpoint: "
+                        f"{base_endpoint}"
+                    )
+                    logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
+                    logger.info(
+                        "   [DEBUG] Note: OTLPSpanExporter will auto-append /v1/traces"
+                    )
+
+                    otlp_exporter = OTLPSpanExporter(
+                        endpoint=base_endpoint,  # Base URL only - exporter appends /v1/traces
+                        headers={},  # Add authentication headers if needed
+                        timeout=timeout_seconds,
+                    )
+
+                    # Log the actual endpoint the exporter is using
+                    logger.info("   [DEBUG] OTLP exporter created successfully")
+                    logger.info(f"   [DEBUG] Traces will be sent to: {base_endpoint}v1/traces")
+                    logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
+                except Exception as e:
+                    logger.error(
+                        f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
+                        f"Tracing will be disabled.",
+                        exc_info=True,
+                    )
+                    return False
+
+                # Add span processor for exporting traces with error handling
+                try:
+                    # Use BatchSpanProcessor to batch spans before sending
+                    # This reduces network overhead and improves performance
+                    batch_processor = BatchSpanProcessor(
+                        otlp_exporter,
+                        max_queue_size=2048,  # Increase queue size for high-traffic
+                        schedule_delay_millis=5000,  # Send every 5 seconds
+                        max_export_batch_size=512,  # Send up to 512 spans per batch
+                    )
+
+                    # Wrap with resilient processor to handle connection errors gracefully
+                    resilient_processor = ResilientSpanProcessor(batch_processor)
+                    cls._tracer_provider.add_span_processor(resilient_processor)
+                    logger.info(
+                        "   Resilient batch span processor configured (queue: 2048, batch: 512)"
+                    )
+                    logger.info("   Circuit breaker enabled to handle connection failures")
+                except Exception as e:
+                    logger.error(
+                        f"❌ Failed to add span processor: {e}. Tracing will be disabled.",
+                        exc_info=True,
+                    )
+                    return False
+
+                # In development, also log traces to console
+                if Config.IS_DEVELOPMENT:
+                    cls._tracer_provider.add_span_processor(
+                        BatchSpanProcessor(ConsoleSpanExporter())
+                    )
+                    logger.info("   Console trace export enabled (development mode)")
+
+                # Set global tracer provider
+                trace.set_tracer_provider(cls._tracer_provider)
+
+                # Instrument HTTP clients for automatic tracing
+                HTTPXClientInstrumentor().instrument()
+                RequestsInstrumentor().instrument()
+                logger.info("   HTTP client instrumentation enabled")
+
+                cls._initialized = True
+                logger.info("✅ OpenTelemetry tracing initialized successfully")
+                return True
+
             except Exception as e:
-                logger.error(
-                    f"❌ Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
-                    f"Tracing will be disabled.",
-                    exc_info=True,
-                )
+                logger.error(f"❌ Failed to initialize OpenTelemetry: {e}", exc_info=True)
                 return False
-
-            # Add span processor for exporting traces with error handling
-            try:
-                # Use BatchSpanProcessor to batch spans before sending
-                # This reduces network overhead and improves performance
-                batch_processor = BatchSpanProcessor(
-                    otlp_exporter,
-                    max_queue_size=2048,  # Increase queue size for high-traffic
-                    schedule_delay_millis=5000,  # Send every 5 seconds
-                    max_export_batch_size=512,  # Send up to 512 spans per batch
-                )
-
-                # Wrap with resilient processor to handle connection errors gracefully
-                resilient_processor = ResilientSpanProcessor(batch_processor)
-                cls._tracer_provider.add_span_processor(resilient_processor)
-                logger.info("   Resilient batch span processor configured (queue: 2048, batch: 512)")
-                logger.info("   Circuit breaker enabled to handle connection failures")
-            except Exception as e:
-                logger.error(
-                    f"❌ Failed to add span processor: {e}. Tracing will be disabled.",
-                    exc_info=True,
-                )
-                return False
-
-            # In development, also log traces to console
-            if Config.IS_DEVELOPMENT:
-                cls._tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-                logger.info("   Console trace export enabled (development mode)")
-
-            # Set global tracer provider
-            trace.set_tracer_provider(cls._tracer_provider)
-
-            # Instrument HTTP clients for automatic tracing
-            HTTPXClientInstrumentor().instrument()
-            RequestsInstrumentor().instrument()
-            logger.info("   HTTP client instrumentation enabled")
-
-            cls._initialized = True
-            logger.info("✅ OpenTelemetry tracing initialized successfully")
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize OpenTelemetry: {e}", exc_info=True)
-            return False
 
     @classmethod
     def instrument_fastapi(cls, app) -> None:
@@ -342,19 +358,20 @@ class OpenTelemetryConfig:
         Should be called during application shutdown to ensure all traces
         are exported before the application exits.
         """
-        if not cls._initialized:
-            return
+        with cls._lock:
+            if not cls._initialized:
+                return
 
-        try:
-            logger.info("🛑 Shutting down OpenTelemetry...")
-            if cls._tracer_provider:
-                cls._tracer_provider.shutdown()
-            logger.info("✅ OpenTelemetry shutdown complete")
-        except Exception as e:
-            logger.error(f"❌ Error during OpenTelemetry shutdown: {e}", exc_info=True)
-        finally:
-            cls._initialized = False
-            cls._tracer_provider = None
+            try:
+                logger.info("🛑 Shutting down OpenTelemetry...")
+                if cls._tracer_provider:
+                    cls._tracer_provider.shutdown()
+                logger.info("✅ OpenTelemetry shutdown complete")
+            except Exception as e:
+                logger.error(f"❌ Error during OpenTelemetry shutdown: {e}", exc_info=True)
+            finally:
+                cls._initialized = False
+                cls._tracer_provider = None
 
     @classmethod
     def get_tracer(cls, name: str):
