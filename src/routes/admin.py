@@ -2521,3 +2521,127 @@ async def get_model_usage_analytics(
         raise HTTPException(
             status_code=500, detail=f"Failed to get model usage analytics: {str(e)}"
         )
+
+
+# ============================================================================
+# ADMIN PRICING SCHEDULER - Automated Pricing Sync (Phase 2.5/Phase 3)
+# ============================================================================
+# Endpoints to monitor and control the automated pricing sync scheduler
+
+
+@router.get("/admin/pricing/scheduler/status", tags=["admin", "pricing"])
+async def get_pricing_scheduler_status(admin_user: dict = Depends(require_admin)):
+    """
+    Get automated pricing sync scheduler status.
+
+    Returns information about:
+    - Whether scheduler is enabled and running
+    - Sync interval configuration
+    - Configured providers
+    - Last sync timestamps per provider
+    - Time since last sync
+
+    **Authentication**: Requires admin role
+
+    **Example Response**:
+    ```json
+    {
+        "enabled": true,
+        "interval_hours": 6,
+        "running": true,
+        "providers": ["openrouter", "featherless", "nearai", "alibaba-cloud"],
+        "last_syncs": {
+            "openrouter": {
+                "timestamp": "2026-01-26T12:00:00Z",
+                "seconds_ago": 3600
+            }
+        }
+    }
+    ```
+    """
+    try:
+        from src.services.pricing_sync_scheduler import get_scheduler_status
+
+        status = get_scheduler_status()
+
+        return {
+            "success": True,
+            "scheduler": status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get scheduler status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get scheduler status: {str(e)}"
+        )
+
+
+@router.post("/admin/pricing/scheduler/trigger", tags=["admin", "pricing"])
+async def trigger_manual_pricing_sync(admin_user: dict = Depends(require_admin)):
+    """
+    Manually trigger a pricing sync outside the regular schedule.
+
+    This endpoint triggers an immediate pricing sync for all configured providers,
+    independent of the automated scheduler. Useful for:
+    - Emergency pricing updates
+    - Testing sync functionality
+    - Forcing a sync after configuration changes
+
+    **Authentication**: Requires admin role
+
+    **Note**: This runs synchronously and may take 10-60 seconds depending on
+    the number of providers and models. Consider using a background task for
+    production use.
+
+    **Example Response**:
+    ```json
+    {
+        "success": true,
+        "status": "success",
+        "duration_seconds": 12.5,
+        "total_models_updated": 150,
+        "total_models_skipped": 0,
+        "total_errors": 0,
+        "results": {
+            "openrouter": {
+                "status": "success",
+                "models_updated": 50,
+                "models_skipped": 0,
+                "errors": []
+            }
+        }
+    }
+    ```
+    """
+    try:
+        from src.services.pricing_sync_scheduler import trigger_manual_sync
+
+        logger.info(f"Manual pricing sync triggered by admin: {admin_user.get('email')}")
+
+        # Trigger sync (runs synchronously)
+        result = await trigger_manual_sync()
+
+        if result["status"] == "success":
+            logger.info(
+                f"Manual pricing sync completed: "
+                f"{result.get('total_models_updated', 0)} models updated "
+                f"in {result.get('duration_seconds', 0):.2f}s"
+            )
+        else:
+            logger.error(
+                f"Manual pricing sync failed: {result.get('error_message')}"
+            )
+
+        return {
+            "success": result["status"] == "success",
+            **result,
+            "triggered_by": admin_user.get("email"),
+            "triggered_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to trigger manual sync: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to trigger manual sync: {str(e)}"
+        )
