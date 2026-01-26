@@ -188,7 +188,7 @@ class OpenTelemetryConfig:
                 logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
             logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
-            logger.info(f"   [DEBUG] Full OTLP path will be: {tempo_endpoint}/v1/traces")
+            logger.info(f"   [DEBUG] SDK will POST traces to: {tempo_endpoint}/v1/traces (auto-appended)")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
@@ -225,24 +225,24 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
-                # CRITICAL: For HTTP protocol, the endpoint MUST include the full path including /v1/traces
-                # The HTTP exporter does NOT auto-append /v1/traces like some other exporters do
+                # NOTE: OTLPSpanExporter (HTTP) automatically appends /v1/traces to the endpoint
+                # Do NOT manually append /v1/traces - this causes double-path 404 errors
                 # Reference: https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
-                full_endpoint = f"{tempo_endpoint}/v1/traces"
                 logger.info(
-                    f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {full_endpoint}"
+                    f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {tempo_endpoint}"
                 )
+                logger.info(f"   [DEBUG] SDK will auto-append /v1/traces to this base URL")
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=full_endpoint,  # HTTP exporter needs full path with /v1/traces
+                    endpoint=tempo_endpoint,  # Base URL only - SDK auto-appends /v1/traces
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
                 logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(f"   [DEBUG] Will POST traces to: {full_endpoint}")
+                logger.info(f"   [DEBUG] Will POST traces to: {tempo_endpoint}/v1/traces")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
