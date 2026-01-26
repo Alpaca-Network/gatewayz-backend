@@ -88,84 +88,29 @@ def init_tempo_otlp():
     Initialize OpenTelemetry integration with Tempo.
 
     This sets up trace collection and export to Tempo using OTLP.
-    Includes health check to prevent initialization if Tempo is unreachable.
+    Includes optional health check (controlled by TEMPO_SKIP_REACHABILITY_CHECK)
+    to prevent initialization if Tempo is unreachable.
+
+    Note: This function is typically called from the background task in startup.py.
+    For the main initialization path with full features (resilient processor, FastAPI
+    instrumentation), use OpenTelemetryConfig.initialize() instead.
     """
     if not Config.TEMPO_ENABLED:
         logger.info("Tempo/OTLP tracing is disabled")
         return
 
-    # Check if Tempo endpoint is reachable before initializing
-    tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
+    # Delegate to OpenTelemetryConfig for consistent initialization
+    # This ensures we use the same code path with resilient span processor
+    from src.config.opentelemetry_config import OpenTelemetryConfig
 
-    # Railway fix: Remove port numbers from Railway URLs
-    if ".railway.app" in tempo_endpoint or ".up.railway.app" in tempo_endpoint:
-        tempo_endpoint = tempo_endpoint.replace(":4318", "").replace(":4317", "")
-        if tempo_endpoint.startswith("http://"):
-            tempo_endpoint = tempo_endpoint.replace("http://", "https://")
-        elif not tempo_endpoint.startswith("https://"):
-            tempo_endpoint = f"https://{tempo_endpoint}"
+    if OpenTelemetryConfig._initialized:
+        logger.debug("OpenTelemetry already initialized via OpenTelemetryConfig")
+        return OpenTelemetryConfig._tracer_provider
 
-    logger.info(f"Checking Tempo endpoint availability: {tempo_endpoint}")
-
-    if not check_tempo_endpoint_reachable(tempo_endpoint):
-        logger.warning(
-            f"⏭️  Skipping OpenTelemetry initialization - Tempo endpoint {tempo_endpoint} is not reachable. "
-            f"Ensure the Tempo service is deployed and accessible from this service. "
-            f"The application will continue without distributed tracing."
-        )
-        return None
-
-    try:
-        from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-        # Create OTLP exporter pointing to Tempo
-        # Wrap in try-except to catch any connection errors during initialization
-        try:
-            otlp_exporter = OTLPSpanExporter(
-                endpoint=tempo_endpoint,
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to create OTLP exporter for {tempo_endpoint}: {e}. "
-                f"Tracing will be disabled."
-            )
-            return None
-
-        # Create resource with service name for Tempo filtering
-        resource = Resource.create(
-            {
-                "service.name": Config.OTEL_SERVICE_NAME,
-            }
-        )
-
-        # Create tracer provider with resource
-        trace_provider = TracerProvider(resource=resource)
-        trace_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-
-        # Set as global tracer provider
-        trace.set_tracer_provider(trace_provider)
-
-        logger.info("✅ OpenTelemetry/Tempo initialization completed")
-        logger.info(f"   Service name: {Config.OTEL_SERVICE_NAME}")
-        logger.info(f"   Tempo endpoint: {tempo_endpoint}")
-        logger.info("   Traces will be exported to Tempo")
-
-        return trace_provider
-
-    except ImportError:
-        logger.warning(
-            "⏭️  OpenTelemetry packages not installed. "
-            "Install with: pip install opentelemetry-api opentelemetry-sdk "
-            "opentelemetry-exporter-otlp"
-        )
-        return None
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Tempo/OTLP: {e}", exc_info=True)
-        return None
+    success = OpenTelemetryConfig.initialize()
+    if success:
+        return OpenTelemetryConfig._tracer_provider
+    return None
 
 
 def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):

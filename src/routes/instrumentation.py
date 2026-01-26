@@ -285,3 +285,169 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.post("/otel/initialize", tags=["instrumentation"])
+async def otel_initialize(admin_key: str = Depends(get_admin_key)):
+    """
+    Manually initialize or re-initialize OpenTelemetry.
+
+    Useful for debugging when automatic initialization fails at startup
+    due to timing issues (e.g., Tempo not ready when backend starts).
+
+    Requires admin API key.
+
+    Returns:
+        dict: Initialization result with tracer provider status
+    """
+    from src.config.opentelemetry_config import OpenTelemetryConfig
+
+    # Force re-initialization by resetting the initialized flag
+    was_initialized = OpenTelemetryConfig._initialized
+
+    if was_initialized:
+        # Already initialized - return current status
+        tracer = OpenTelemetryConfig.get_tracer(__name__)
+        trace_id = None
+        if tracer:
+            with tracer.start_as_current_span("otel_initialize_check") as span:
+                trace_id = get_current_trace_id()
+
+        return {
+            "status": "already_initialized",
+            "initialized": True,
+            "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "test_trace_id": trace_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Try to initialize
+    success = OpenTelemetryConfig.initialize()
+
+    if success:
+        # Generate a test trace to verify
+        tracer = OpenTelemetryConfig.get_tracer(__name__)
+        trace_id = None
+        if tracer:
+            with tracer.start_as_current_span("otel_manual_initialization") as span:
+                span.set_attribute("manual_init", True)
+                span.set_attribute("timestamp", datetime.now(timezone.utc).isoformat())
+                trace_id = get_current_trace_id()
+
+        logger.info(f"OpenTelemetry manually initialized. Test trace ID: {trace_id}")
+
+        return {
+            "status": "success",
+            "initialized": True,
+            "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "test_trace_id": trace_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    else:
+        return {
+            "status": "failed",
+            "initialized": False,
+            "tracer_provider_exists": False,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "message": "Initialization failed - check logs for details. Tempo may not be reachable.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.post("/otel/reinitialize", tags=["instrumentation"])
+async def otel_reinitialize(admin_key: str = Depends(get_admin_key)):
+    """
+    Force re-initialize OpenTelemetry by shutting down existing provider first.
+
+    Use this when tracing was initialized but is not working correctly,
+    or when Tempo endpoint has changed.
+
+    Requires admin API key.
+
+    Returns:
+        dict: Re-initialization result
+    """
+    from src.config.opentelemetry_config import OpenTelemetryConfig
+
+    # Shutdown existing provider if any
+    if OpenTelemetryConfig._initialized:
+        logger.info("Shutting down existing OpenTelemetry provider for re-initialization...")
+        OpenTelemetryConfig.shutdown()
+
+    # Reset state
+    OpenTelemetryConfig._initialized = False
+    OpenTelemetryConfig._tracer_provider = None
+
+    # Re-initialize
+    success = OpenTelemetryConfig.initialize()
+
+    if success:
+        tracer = OpenTelemetryConfig.get_tracer(__name__)
+        trace_id = None
+        if tracer:
+            with tracer.start_as_current_span("otel_reinitialization") as span:
+                span.set_attribute("reinitialized", True)
+                span.set_attribute("timestamp", datetime.now(timezone.utc).isoformat())
+                trace_id = get_current_trace_id()
+
+        logger.info(f"OpenTelemetry re-initialized successfully. Test trace ID: {trace_id}")
+
+        return {
+            "status": "success",
+            "reinitialized": True,
+            "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "test_trace_id": trace_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    else:
+        return {
+            "status": "failed",
+            "reinitialized": False,
+            "tracer_provider_exists": False,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "message": "Re-initialization failed - check logs for details",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.get("/otel/status", tags=["instrumentation"])
+async def otel_status(admin_key: str = Depends(get_admin_key)):
+    """
+    Get detailed OpenTelemetry status.
+
+    Requires admin API key.
+
+    Returns:
+        dict: Current OTel initialization status and configuration
+    """
+    from src.config.opentelemetry_config import OpenTelemetryConfig
+
+    # Check if we can create spans
+    can_create_spans = False
+    test_trace_id = None
+    tracer = OpenTelemetryConfig.get_tracer(__name__)
+    if tracer:
+        try:
+            with tracer.start_as_current_span("otel_status_check") as span:
+                test_trace_id = get_current_trace_id()
+                can_create_spans = test_trace_id is not None
+        except Exception as e:
+            logger.warning(f"Failed to create test span: {e}")
+
+    return {
+        "initialized": OpenTelemetryConfig._initialized,
+        "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+        "can_create_spans": can_create_spans,
+        "test_trace_id": test_trace_id,
+        "config": {
+            "tempo_enabled": Config.TEMPO_ENABLED,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "service_name": Config.OTEL_SERVICE_NAME,
+            "environment": Config.APP_ENV,
+            "skip_reachability_check": Config.TEMPO_SKIP_REACHABILITY_CHECK,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
