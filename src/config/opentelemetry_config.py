@@ -187,10 +187,13 @@ class OpenTelemetryConfig:
                 logger.info(f"   Railway public deployment detected - using HTTPS proxy")
                 logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
-            logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
-            logger.info(
-                f"   [DEBUG] SDK will POST traces to: {tempo_endpoint}/v1/traces (auto-appended)"
-            )
+            # CRITICAL: OTLPSpanExporter does NOT auto-append /v1/traces when using
+            # the endpoint parameter. We must append it manually.
+            # Only append if not already present (to avoid double-path issues)
+            if not tempo_endpoint.rstrip("/").endswith("/v1/traces"):
+                tempo_endpoint = f"{tempo_endpoint.rstrip('/')}/v1/traces"
+
+            logger.info(f"   Tempo endpoint (full path): {tempo_endpoint}")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
@@ -227,24 +230,22 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
-                # NOTE: OTLPSpanExporter (HTTP) automatically appends /v1/traces to the endpoint
-                # Do NOT manually append /v1/traces - this causes double-path 404 errors
-                # Reference: https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
+                # NOTE: OTLPSpanExporter does NOT auto-append /v1/traces when using
+                # the endpoint parameter. We append it above before reaching here.
                 logger.info(
                     f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {tempo_endpoint}"
                 )
-                logger.info(f"   [DEBUG] SDK will auto-append /v1/traces to this base URL")
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=tempo_endpoint,  # Base URL only - SDK auto-appends /v1/traces
+                    endpoint=tempo_endpoint,  # Full path including /v1/traces
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
                 logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(f"   [DEBUG] Will POST traces to: {tempo_endpoint}/v1/traces")
+                logger.info(f"   [DEBUG] Will POST traces to: {tempo_endpoint}")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
@@ -447,3 +448,43 @@ def get_current_span_id() -> str | None:
     except Exception:
         pass
     return None
+
+
+def test_trace_export() -> dict:
+    """
+    Create a test span and attempt to flush it to Tempo.
+    Returns diagnostic information about the export attempt.
+    """
+    if not OPENTELEMETRY_AVAILABLE:
+        return {"status": "error", "message": "OpenTelemetry not available"}
+
+    if not OpenTelemetryConfig._initialized:
+        return {"status": "error", "message": "OpenTelemetry not initialized"}
+
+    try:
+        # Create a test tracer
+        tracer = trace.get_tracer("test-tracer")
+
+        # Create a test span
+        with tracer.start_as_current_span("test-trace-export") as span:
+            span.set_attribute("test.type", "diagnostic")
+            span.set_attribute("test.timestamp", str(int(__import__("time").time())))
+            trace_id = format(span.get_span_context().trace_id, "032x")
+            span_id = format(span.get_span_context().span_id, "016x")
+
+        # Force flush to send traces immediately
+        if OpenTelemetryConfig._tracer_provider:
+            flush_result = OpenTelemetryConfig._tracer_provider.force_flush(timeout_millis=10000)
+            return {
+                "status": "success" if flush_result else "flush_failed",
+                "trace_id": trace_id,
+                "span_id": span_id,
+                "flush_result": flush_result,
+                "message": "Test span created and flush attempted. Check Tempo for trace_id: "
+                + trace_id,
+            }
+        else:
+            return {"status": "error", "message": "Tracer provider not available"}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e), "error_type": type(e).__name__}

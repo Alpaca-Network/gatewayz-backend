@@ -105,6 +105,11 @@ def init_tempo_otlp():
         elif not tempo_endpoint.startswith("https://"):
             tempo_endpoint = f"https://{tempo_endpoint}"
 
+    # CRITICAL: OTLPSpanExporter does NOT auto-append /v1/traces when using
+    # the endpoint parameter. We must append it manually.
+    if not tempo_endpoint.rstrip("/").endswith("/v1/traces"):
+        tempo_endpoint = f"{tempo_endpoint.rstrip('/')}/v1/traces"
+
     logger.info(f"Checking Tempo endpoint availability: {tempo_endpoint}")
 
     if not check_tempo_endpoint_reachable(tempo_endpoint):
@@ -126,7 +131,7 @@ def init_tempo_otlp():
         # Wrap in try-except to catch any connection errors during initialization
         try:
             otlp_exporter = OTLPSpanExporter(
-                endpoint=tempo_endpoint,
+                endpoint=tempo_endpoint,  # Full path including /v1/traces
             )
         except Exception as e:
             logger.error(
