@@ -1474,7 +1474,14 @@ class StripeService:
                 new_allowance = get_allowance_from_tier(tier)
                 if new_allowance > 0:
                     # Reset allowance to new tier's amount on tier change
-                    reset_subscription_allowance(user_id, new_allowance, tier)
+                    reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
+                    if not reset_result:
+                        logger.error(
+                            f"Failed to reset allowance for user {user_id} during subscription update webhook. "
+                            f"Tier: {tier}, allowance: ${new_allowance}. "
+                            f"Raising exception to trigger Stripe retry."
+                        )
+                        raise Exception(f"Failed to update subscription allowance for user {user_id}")
                     logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) on subscription update")
 
             # CRITICAL: Invalidate user cache so profile API returns fresh data
@@ -1778,10 +1785,18 @@ class StripeService:
 
             # Determine the new tier from product ID
             new_tier = get_tier_from_product_id(request.new_product_id)
+            if not new_tier or new_tier == "basic":
+                raise ValueError(
+                    f"Invalid product ID for upgrade: {request.new_product_id}. "
+                    "Cannot resolve to a valid paid tier."
+                )
+
+            # Get current tier for audit logging
+            current_tier = user.get("tier", "basic")
 
             logger.info(
                 f"Upgrading subscription {stripe_subscription_id} for user {user_id} "
-                f"to tier {new_tier} (price_id: {request.new_price_id})"
+                f"from {current_tier} to tier {new_tier} (price_id: {request.new_price_id})"
             )
 
             # Update the subscription with the new price
@@ -1858,13 +1873,40 @@ class StripeService:
             # - Preserve remaining allowance + add difference (more complex tracking)
             # - Wait for next billing cycle (less immediate value for user)
             from src.db.subscription_products import get_allowance_from_tier
-            from src.db.users import reset_subscription_allowance
+            from src.db.users import reset_subscription_allowance, get_user_by_id as get_user_fresh
+            from src.db.credit_transactions import TransactionType, log_credit_transaction
 
             new_allowance = get_allowance_from_tier(new_tier)
             if new_allowance > 0:
+                # Get current balance for audit logging
+                user_fresh = get_user_fresh(user_id)
+                old_allowance = user_fresh.get("subscription_allowance", 0) if user_fresh else 0
+
                 # Reset allowance to new tier's full amount (immediate benefit for upgrade)
-                reset_subscription_allowance(user_id, new_allowance, new_tier)
+                reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
+                if not reset_result:
+                    logger.error(f"Failed to reset allowance for user {user_id} during upgrade")
+                    raise Exception("Failed to update subscription allowance")
+
                 logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)")
+
+                # Log audit trail for subscription upgrade
+                log_credit_transaction(
+                    user_id=user_id,
+                    amount=new_allowance - old_allowance,
+                    transaction_type=TransactionType.SUBSCRIPTION_UPGRADE,
+                    description=f"Subscription upgraded from {current_tier} to {new_tier}",
+                    balance_before=old_allowance,
+                    balance_after=new_allowance,
+                    metadata={
+                        "from_tier": current_tier,
+                        "to_tier": new_tier,
+                        "subscription_id": updated_subscription.id,
+                        "product_id": request.new_product_id,
+                        "price_id": request.new_price_id,
+                    },
+                    created_by="system:subscription_upgrade",
+                )
 
             # Invalidate user cache
             from src.db.users import invalidate_user_cache_by_id
@@ -1939,10 +1981,18 @@ class StripeService:
 
             # Determine the new tier from product ID
             new_tier = get_tier_from_product_id(request.new_product_id)
+            if not new_tier or new_tier == "basic":
+                raise ValueError(
+                    f"Invalid product ID for downgrade: {request.new_product_id}. "
+                    "Cannot resolve to a valid paid tier."
+                )
+
+            # Get current tier for audit logging
+            current_tier = user.get("tier", "basic")
 
             logger.info(
                 f"Downgrading subscription {stripe_subscription_id} for user {user_id} "
-                f"to tier {new_tier} (price_id: {request.new_price_id})"
+                f"from {current_tier} to tier {new_tier} (price_id: {request.new_price_id})"
             )
 
             # Update the subscription with the new price
@@ -2012,13 +2062,40 @@ class StripeService:
             # The user receives prorated credit via Stripe for unused subscription time.
             # This ensures allowance matches the tier being paid for going forward.
             from src.db.subscription_products import get_allowance_from_tier
-            from src.db.users import reset_subscription_allowance
+            from src.db.users import reset_subscription_allowance, get_user_by_id as get_user_fresh
+            from src.db.credit_transactions import TransactionType, log_credit_transaction
 
             new_allowance = get_allowance_from_tier(new_tier)
             if new_allowance > 0:
+                # Get current balance for audit logging
+                user_fresh = get_user_fresh(user_id)
+                old_allowance = user_fresh.get("subscription_allowance", 0) if user_fresh else 0
+
                 # Reset allowance to new tier's amount (matches what user is now paying for)
-                reset_subscription_allowance(user_id, new_allowance, new_tier)
+                reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
+                if not reset_result:
+                    logger.error(f"Failed to reset allowance for user {user_id} during downgrade")
+                    raise Exception("Failed to update subscription allowance")
+
                 logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)")
+
+                # Log audit trail for subscription downgrade
+                log_credit_transaction(
+                    user_id=user_id,
+                    amount=new_allowance - old_allowance,
+                    transaction_type=TransactionType.SUBSCRIPTION_DOWNGRADE,
+                    description=f"Subscription downgraded from {current_tier} to {new_tier}",
+                    balance_before=old_allowance,
+                    balance_after=new_allowance,
+                    metadata={
+                        "from_tier": current_tier,
+                        "to_tier": new_tier,
+                        "subscription_id": updated_subscription.id,
+                        "product_id": request.new_product_id,
+                        "price_id": request.new_price_id,
+                    },
+                    created_by="system:subscription_downgrade",
+                )
 
             # Invalidate user cache
             from src.db.users import invalidate_user_cache_by_id

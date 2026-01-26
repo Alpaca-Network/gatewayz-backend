@@ -31,6 +31,8 @@ class TransactionType:
     TRANSFER = "transfer"  # Credits transferred between accounts
     SUBSCRIPTION_RENEWAL = "subscription_renewal"  # Monthly allowance reset on renewal
     SUBSCRIPTION_CANCELLATION = "subscription_cancellation"  # Allowance forfeited on cancel
+    SUBSCRIPTION_UPGRADE = "subscription_upgrade"  # Allowance reset on tier upgrade
+    SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
 
 
 def log_credit_transaction(

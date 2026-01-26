@@ -4,11 +4,14 @@
 -- Note: The new Stripe Price ID for Pro at $8/month must be created in Stripe Dashboard
 -- and set via NEXT_PUBLIC_STRIPE_PRO_PRICE_ID environment variable on frontend
 
--- Update Pro tier description to reflect new pricing
+-- ==================== UP MIGRATION ====================
+
+-- Update Pro tier description to reflect new pricing (idempotent)
 UPDATE subscription_products
-SET description = 'Professional tier - $8/month with $15 monthly allowance (Save 20%)',
-    updated_at = NOW()
-WHERE tier = 'pro' AND is_active = TRUE;
+SET description = 'Professional tier - $8/month with $15 monthly allowance (Save 20%)'
+WHERE tier = 'pro'
+  AND is_active = TRUE
+  AND description != 'Professional tier - $8/month with $15 monthly allowance (Save 20%)';
 
 -- Log the update
 DO $$
@@ -19,3 +22,13 @@ END $$;
 
 -- Add comment explaining the pricing tiers
 COMMENT ON TABLE subscription_products IS 'Configuration for Stripe subscription products and tier mapping. Product IDs must match Stripe Dashboard: Pro=prod_TKOqQPhVRxNp4Q ($8/month), Max=prod_TKOraBpWMxMAIu ($75/month)';
+
+-- ==================== DOWN MIGRATION ====================
+-- To rollback, run the following SQL manually:
+--
+-- UPDATE subscription_products
+-- SET description = 'Professional tier - $10/month with $15 monthly allowance'
+-- WHERE tier = 'pro'
+--   AND is_active = TRUE;
+--
+-- COMMENT ON TABLE subscription_products IS 'Configuration for Stripe subscription products and tier mapping. Product IDs must match Stripe Dashboard: Pro=prod_TKOqQPhVRxNp4Q ($10/month), Max=prod_TKOraBpWMxMAIu ($75/month)';
