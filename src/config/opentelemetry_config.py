@@ -225,29 +225,30 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
-                # NOTE: The OTLPSpanExporter from opentelemetry-exporter-otlp-proto-http
-                # AUTOMATICALLY appends /v1/traces to the endpoint URL.
-                # See: https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/trace_exporter/__init__.py
-                # DO NOT manually append /v1/traces - it will result in /v1/traces/v1/traces (404 error)
+                # IMPORTANT: The OTLPSpanExporter does NOT auto-append /v1/traces when
+                # you pass the `endpoint` parameter directly. We must append it manually.
+                # Verified via testing: exporter._endpoint shows exactly what you pass in.
+                # Without /v1/traces, Tempo returns 404 (POST / instead of POST /v1/traces).
 
-                # Ensure endpoint ends with / for proper path joining
-                base_endpoint = tempo_endpoint.rstrip("/") + "/"
+                # Ensure endpoint has /v1/traces path
+                traces_endpoint = tempo_endpoint.rstrip("/")
+                if not traces_endpoint.endswith("/v1/traces"):
+                    traces_endpoint = f"{traces_endpoint}/v1/traces"
 
                 logger.info(
-                    f"   [DEBUG] Creating OTLP HTTP exporter with base endpoint: {base_endpoint}"
+                    f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {traces_endpoint}"
                 )
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
-                logger.info(f"   [DEBUG] Note: OTLPSpanExporter will auto-append /v1/traces")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=base_endpoint,  # Base URL only - exporter appends /v1/traces automatically
+                    endpoint=traces_endpoint,  # Full path including /v1/traces
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
                 logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(f"   [DEBUG] Traces will be sent to: {base_endpoint}v1/traces")
+                logger.info(f"   [DEBUG] Traces will be sent to: {traces_endpoint}")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
@@ -271,7 +272,9 @@ class OpenTelemetryConfig:
                 # Wrap with resilient processor to handle connection errors gracefully
                 resilient_processor = ResilientSpanProcessor(batch_processor)
                 cls._tracer_provider.add_span_processor(resilient_processor)
-                logger.info("   Resilient batch span processor configured (queue: 2048, batch: 512)")
+                logger.info(
+                    "   Resilient batch span processor configured (queue: 2048, batch: 512)"
+                )
                 logger.info("   Circuit breaker enabled to handle connection failures")
             except Exception as e:
                 logger.error(
