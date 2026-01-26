@@ -243,6 +243,22 @@ async def lifespan(app):
 
         _create_background_task(init_google_models_background(), name="init_google_models")
 
+        # Clean up any stuck pricing syncs from previous runs
+        async def cleanup_stuck_syncs_startup():
+            try:
+                logger.info("🧹 Running startup cleanup for stuck pricing syncs...")
+                from src.services.pricing_sync_cleanup import cleanup_stuck_syncs
+                result = await cleanup_stuck_syncs(timeout_minutes=5)
+                logger.info(
+                    f"✅ Startup cleanup complete: "
+                    f"found {result['stuck_syncs_found']}, "
+                    f"cleaned {result['syncs_cleaned']}"
+                )
+            except Exception as e:
+                logger.warning(f"Stuck sync cleanup warning: {e}")
+
+        _create_background_task(cleanup_stuck_syncs_startup(), name="cleanup_stuck_syncs")
+
         # Phase 2.5: Start automated pricing sync scheduler
         async def start_pricing_sync_scheduler():
             """Start automated pricing sync scheduler (runs every N hours)."""

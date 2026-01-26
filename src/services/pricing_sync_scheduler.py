@@ -55,8 +55,9 @@ async def start_pricing_sync_scheduler() -> None:
     """
     Start the automated pricing sync scheduler.
 
-    This function starts a background task that runs pricing sync
-    at regular intervals.
+    This function starts background tasks for:
+    1. Pricing sync at regular intervals
+    2. Cleanup of stuck syncs every 15 minutes
     """
     global _scheduler_task
 
@@ -64,12 +65,19 @@ async def start_pricing_sync_scheduler() -> None:
         logger.warning("Pricing sync scheduler already running")
         return
 
+    # Start pricing sync scheduler
     _scheduler_task = asyncio.create_task(
         _pricing_sync_scheduler_loop(),
         name="pricing_sync_scheduler_loop"
     )
 
-    logger.info("✅ Pricing sync scheduler task created")
+    # Start cleanup scheduler
+    asyncio.create_task(
+        _cleanup_scheduler_loop(),
+        name="pricing_sync_cleanup_loop"
+    )
+
+    logger.info("✅ Pricing sync scheduler and cleanup tasks created")
 
 
 async def stop_pricing_sync_scheduler() -> None:
@@ -333,3 +341,285 @@ def get_scheduler_status() -> Dict[str, Any]:
         logger.debug(f"Could not get last sync metrics: {e}")
 
     return status
+
+
+# ============================================================================
+# Background Async Queue Functions (Fix for Railway 55s timeout)
+# ============================================================================
+
+async def queue_background_sync(triggered_by: str = "manual") -> str:
+    """
+    Queue a pricing sync to run in the background.
+
+    This function returns immediately with a sync job ID,
+    allowing the HTTP request to complete without waiting
+    for the sync to finish. This solves the Railway 55-second timeout.
+
+    Args:
+        triggered_by: Who/what triggered the sync
+
+    Returns:
+        Sync job ID for status polling
+    """
+    from uuid import uuid4
+    from src.config.supabase_config import get_supabase_client
+
+    sync_id = str(uuid4())
+    supabase = get_supabase_client()
+
+    logger.info(f"Queueing background sync {sync_id} (triggered_by={triggered_by})")
+
+    try:
+        # Create sync job record immediately with status 'queued'
+        supabase.table('pricing_sync_jobs').insert({
+            'job_id': sync_id,
+            'status': 'queued',
+            'triggered_by': triggered_by,
+            'triggered_at': datetime.now(timezone.utc).isoformat(),
+            'providers_synced': 0,
+            'models_updated': 0,
+            'models_skipped': 0,
+            'total_errors': 0
+        }).execute()
+
+        # Queue the actual sync work in background
+        asyncio.create_task(
+            _run_background_sync_with_error_handling(sync_id, triggered_by),
+            name=f"pricing_sync_{sync_id}"
+        )
+
+        logger.info(f"✅ Background sync {sync_id} queued successfully")
+        return sync_id
+
+    except Exception as e:
+        logger.error(f"Failed to queue background sync: {e}", exc_info=True)
+        raise
+
+
+async def _run_background_sync_with_error_handling(sync_id: str, triggered_by: str) -> None:
+    """
+    Run the pricing sync in background with comprehensive error handling.
+
+    This ensures the sync status is ALWAYS updated, even if errors occur.
+    This prevents stuck syncs.
+    """
+    from src.config.supabase_config import get_supabase_client
+    from src.services.pricing_sync_service import run_scheduled_sync
+
+    supabase = get_supabase_client()
+    start_time = time.time()
+
+    try:
+        # Update status to running
+        supabase.table('pricing_sync_jobs').update({
+            'status': 'running',
+            'started_at': datetime.now(timezone.utc).isoformat()
+        }).eq('job_id', sync_id).execute()
+
+        logger.info(f"🔄 Background sync {sync_id} started")
+
+        # Run the actual sync
+        result = await run_scheduled_sync(triggered_by=triggered_by)
+
+        # Update status to completed
+        supabase.table('pricing_sync_jobs').update({
+            'status': 'completed',
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+            'providers_synced': result.get('providers_synced', 0),
+            'models_updated': result.get('total_models_updated', 0),
+            'models_skipped': result.get('total_models_skipped', 0),
+            'total_errors': result.get('total_errors', 0),
+            'error_message': None,
+            'result_data': result
+        }).eq('job_id', sync_id).execute()
+
+        scheduled_sync_runs.labels(status="success").inc()
+
+        logger.info(
+            f"✅ Background sync {sync_id} completed successfully "
+            f"(duration: {duration_ms}ms, updated: {result.get('total_models_updated', 0)} models)"
+        )
+
+    except Exception as e:
+        # Calculate duration
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        logger.error(f"❌ Background sync {sync_id} failed: {e}", exc_info=True)
+
+        scheduled_sync_runs.labels(status="failed").inc()
+
+        # CRITICAL: Always update status even on error (prevents stuck syncs)
+        try:
+            supabase.table('pricing_sync_jobs').update({
+                'status': 'failed',
+                'completed_at': datetime.now(timezone.utc).isoformat(),
+                'error_message': str(e)[:500]  # Limit error message length
+            }).eq('job_id', sync_id).execute()
+        except Exception as update_error:
+            logger.error(
+                f"CRITICAL: Failed to update sync status for {sync_id}: {update_error}",
+                exc_info=True
+            )
+
+
+async def get_sync_job_status(sync_id: str) -> Dict[str, Any] | None:
+    """
+    Get the status of a pricing sync job.
+
+    Args:
+        sync_id: The sync job ID
+
+    Returns:
+        Sync status dict or None if not found
+    """
+    from src.config.supabase_config import get_supabase_client
+
+    supabase = get_supabase_client()
+
+    try:
+        response = supabase.table('pricing_sync_jobs').select('*').eq('job_id', sync_id).execute()
+
+        if not response.data:
+            return None
+
+        job = response.data[0]
+
+        # Calculate progress percentage
+        progress = 0
+        if job['status'] == 'queued':
+            progress = 0
+        elif job['status'] == 'running':
+            progress = 50  # Rough estimate
+        elif job['status'] == 'completed':
+            progress = 100
+        elif job['status'] == 'failed':
+            progress = 0
+
+        return {
+            'sync_id': sync_id,
+            'job_id': job['job_id'],
+            'status': job['status'],
+            'triggered_at': job['triggered_at'],
+            'started_at': job.get('started_at'),
+            'completed_at': job.get('completed_at'),
+            'duration_seconds': job.get('duration_seconds'),
+            'triggered_by': job['triggered_by'],
+            'providers_synced': job.get('providers_synced', 0),
+            'models_updated': job.get('models_updated', 0),
+            'models_skipped': job.get('models_skipped', 0),
+            'total_errors': job.get('total_errors', 0),
+            'error_message': job.get('error_message'),
+            'result_data': job.get('result_data'),
+            'progress_percent': progress
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting sync status for {sync_id}: {e}")
+        return None
+
+
+async def get_active_syncs() -> list:
+    """
+    Get all active (queued or in_progress) pricing syncs.
+
+    Returns:
+        List of active sync status dicts
+    """
+    from src.config.supabase_config import get_supabase_client
+
+    supabase = get_supabase_client()
+
+    try:
+        response = (
+            supabase.table('pricing_sync_jobs')
+            .select('*')
+            .in_('status', ['queued', 'running'])
+            .order('triggered_at', desc=True)
+            .execute()
+        )
+
+        return [
+            {
+                'sync_id': job['job_id'],
+                'job_id': job['job_id'],
+                'status': job['status'],
+                'triggered_at': job['triggered_at'],
+                'started_at': job.get('started_at'),
+                'triggered_by': job['triggered_by'],
+                'progress_percent': 0 if job['status'] == 'queued' else 50
+            }
+            for job in response.data
+        ]
+
+    except Exception as e:
+        logger.error(f"Error getting active syncs: {e}")
+        return []
+
+
+async def _cleanup_scheduler_loop() -> None:
+    """
+    Run cleanup every 15 minutes to catch and clean stuck syncs.
+
+    This prevents stuck syncs from polluting the database and ensures
+    all sync records eventually get a final status.
+    """
+    cleanup_interval_seconds = 900  # 15 minutes
+
+    logger.info(
+        f"🧹 Pricing sync cleanup scheduler started "
+        f"(interval: {cleanup_interval_seconds}s = 15 minutes)"
+    )
+
+    # Run first cleanup after 5 minutes (allow some syncs to complete)
+    try:
+        await asyncio.wait_for(
+            _shutdown_event.wait(),
+            timeout=300.0  # 5 minutes
+        )
+        logger.info("Cleanup scheduler shutdown requested before first run")
+        return
+    except asyncio.TimeoutError:
+        pass
+
+    while not _shutdown_event.is_set():
+        try:
+            logger.info("🧹 Running scheduled cleanup for stuck pricing syncs...")
+
+            from src.services.pricing_sync_cleanup import cleanup_stuck_syncs
+
+            result = await cleanup_stuck_syncs(timeout_minutes=10)
+
+            logger.info(
+                f"✅ Scheduled cleanup complete: "
+                f"found {result['stuck_syncs_found']}, "
+                f"cleaned {result['syncs_cleaned']}"
+            )
+
+            # Wait for next interval or shutdown
+            try:
+                await asyncio.wait_for(
+                    _shutdown_event.wait(),
+                    timeout=cleanup_interval_seconds
+                )
+                logger.info("Cleanup scheduler shutdown requested")
+                break
+            except asyncio.TimeoutError:
+                continue
+
+        except asyncio.CancelledError:
+            logger.info("Cleanup scheduler loop cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error in cleanup scheduler: {e}", exc_info=True)
+
+            # Wait before retrying
+            try:
+                await asyncio.wait_for(
+                    _shutdown_event.wait(),
+                    timeout=60.0  # Wait 1 minute on error
+                )
+                break
+            except asyncio.TimeoutError:
+                continue
+
+    logger.info("🧹 Pricing sync cleanup scheduler stopped")
