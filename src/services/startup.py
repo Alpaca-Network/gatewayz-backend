@@ -133,14 +133,54 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"FastAPI instrumentation warning: {e}")
 
-        # Initialize Tempo/OpenTelemetry OTLP exporter in background
-        # The endpoint check has 1s timeout, so defer to not block healthcheck
+        # Initialize Tempo/OpenTelemetry OTLP exporter in background with retry
+        # Uses exponential backoff to handle Railway timing issues where Tempo
+        # may not be ready when the backend starts
         async def init_tempo_exporter_background():
-            try:
-                init_tempo_otlp()
-                logger.info("Tempo/OTLP tracing initialized")
-            except Exception as e:
-                logger.warning(f"Tempo/OTLP initialization warning: {e}")
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+
+            max_retries = 5
+            base_delay = 2.0  # Start with 2 seconds
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # Check if already initialized (e.g., via on_startup event)
+                    if OpenTelemetryConfig._initialized:
+                        logger.info("Tempo/OTLP tracing already initialized")
+                        return
+
+                    success = OpenTelemetryConfig.initialize()
+                    if success:
+                        logger.info(f"Tempo/OTLP tracing initialized (attempt {attempt}/{max_retries})")
+                        return
+                    else:
+                        # Initialization returned False (endpoint not reachable, etc.)
+                        if attempt < max_retries:
+                            delay = base_delay * (2 ** (attempt - 1))  # Exponential backoff
+                            logger.info(
+                                f"Tempo/OTLP initialization attempt {attempt}/{max_retries} failed, "
+                                f"retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                        else:
+                            logger.warning(
+                                f"Tempo/OTLP initialization failed after {max_retries} attempts. "
+                                f"Tracing will be disabled. Use POST /api/instrumentation/otel/initialize "
+                                f"to manually retry."
+                            )
+                except Exception as e:
+                    if attempt < max_retries:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        logger.warning(
+                            f"Tempo/OTLP initialization attempt {attempt}/{max_retries} error: {e}, "
+                            f"retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.warning(
+                            f"Tempo/OTLP initialization failed after {max_retries} attempts: {e}. "
+                            f"Use POST /api/instrumentation/otel/initialize to manually retry."
+                        )
 
         _create_background_task(init_tempo_exporter_background(), name="init_tempo_exporter")
 
@@ -382,6 +422,15 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
+
+        # Shutdown OpenTelemetry (Tempo tracing)
+        try:
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+
+            OpenTelemetryConfig.shutdown()
+            logger.info("OpenTelemetry (Tempo) shutdown complete")
+        except Exception as e:
+            logger.warning(f"OpenTelemetry shutdown warning: {e}")
 
         # Shutdown Arize OTEL
         try:
