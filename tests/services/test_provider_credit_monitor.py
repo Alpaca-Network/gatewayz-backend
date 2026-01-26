@@ -3,7 +3,7 @@ Tests for provider credit monitoring service.
 """
 
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.provider_credit_monitor import (
@@ -12,7 +12,6 @@ from src.services.provider_credit_monitor import (
     send_low_credit_alert,
     clear_credit_cache,
     _determine_credit_status,
-    CREDIT_THRESHOLDS,
 )
 
 
@@ -205,8 +204,9 @@ class TestLowCreditAlerts:
     @pytest.mark.asyncio
     async def test_send_critical_alert(self):
         """Test sending critical credit alert"""
+        mock_notification_service = MagicMock()
         with patch("src.services.provider_credit_monitor.capture_provider_error") as mock_capture, \
-             patch("src.services.provider_credit_monitor.send_email") as mock_email, \
+             patch("src.services.provider_credit_monitor.notification_service", mock_notification_service), \
              patch("src.services.provider_credit_monitor.Config") as mock_config:
 
             mock_config.ADMIN_EMAIL = "admin@test.com"

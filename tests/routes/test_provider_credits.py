@@ -5,7 +5,6 @@ Tests for provider credit balance API endpoints.
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture

@@ -112,11 +112,6 @@ class TestValidateModelAvailability:
             mock_inference_response = MagicMock()
             mock_inference_response.status_code = 400
 
-            async def mock_get_post(url, **kwargs):
-                if "huggingface.co/api" in url:
-                    return mock_hub_response
-                return mock_inference_response
-
             mock_client_instance = mock_client.return_value.__aenter__.return_value
             mock_client_instance.get = AsyncMock(return_value=mock_hub_response)
             mock_client_instance.post = AsyncMock(return_value=mock_inference_response)
