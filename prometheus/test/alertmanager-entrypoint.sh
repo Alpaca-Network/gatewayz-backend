@@ -15,7 +15,8 @@ envsubst < /etc/alertmanager/alertmanager.yml.template > /etc/alertmanager/alert
 
 echo "✅ Alertmanager configuration processed with environment variables"
 echo "   SMTP_USERNAME: ${SMTP_USERNAME:-not set}"
-echo "   SMTP_PASSWORD: ${SMTP_PASSWORD:+***set***}"
+# Show whether password is configured (not the actual value)
+if [ -n "$SMTP_PASSWORD" ]; then echo "   SMTP_PASSWORD: [configured]"; else echo "   SMTP_PASSWORD: not set"; fi
 
 # Start Alertmanager with provided arguments
 exec /bin/alertmanager "$@"

@@ -29,13 +29,15 @@ except ImportError:  # pragma: no cover - handled gracefully below
 # Cerebras SDK has its own exception hierarchy separate from OpenAI's.
 # Import these to properly handle Cerebras-specific errors.
 try:  # pragma: no cover - import guard
-    from cerebras.cloud.sdk import APIConnectionError as CerebrasAPIConnectionError
-    from cerebras.cloud.sdk import APIStatusError as CerebrasAPIStatusError
-    from cerebras.cloud.sdk import AuthenticationError as CerebrasAuthenticationError
-    from cerebras.cloud.sdk import BadRequestError as CerebrasBadRequestError
-    from cerebras.cloud.sdk import NotFoundError as CerebrasNotFoundError
-    from cerebras.cloud.sdk import PermissionDeniedError as CerebrasPermissionDeniedError
-    from cerebras.cloud.sdk import RateLimitError as CerebrasRateLimitError
+    from cerebras.cloud.sdk import (
+        APIConnectionError as CerebrasAPIConnectionError,
+        APIStatusError as CerebrasAPIStatusError,
+        AuthenticationError as CerebrasAuthenticationError,
+        BadRequestError as CerebrasBadRequestError,
+        NotFoundError as CerebrasNotFoundError,
+        PermissionDeniedError as CerebrasPermissionDeniedError,
+        RateLimitError as CerebrasRateLimitError,
+    )
 except ImportError:  # pragma: no cover - handled gracefully below
     CerebrasAPIConnectionError = CerebrasAPIStatusError = CerebrasAuthenticationError = None
     CerebrasBadRequestError = CerebrasNotFoundError = CerebrasPermissionDeniedError = None
