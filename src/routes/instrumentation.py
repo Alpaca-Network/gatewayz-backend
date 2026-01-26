@@ -180,12 +180,12 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
 @router.post("/test-trace", tags=["instrumentation"])
 async def test_trace(admin_key: str = Depends(get_admin_key)):
     """
-    Generate a test trace for verification.
+    Generate a test trace for verification with force flush.
 
     Requires admin API key.
 
     Returns:
-        dict: Test trace information
+        dict: Test trace information with export status
     """
     from src.config.opentelemetry_config import OpenTelemetryConfig
 
@@ -197,8 +197,13 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
             detail="OpenTelemetry tracing not available",
         )
 
-    with tracer.start_as_current_span("test_trace") as span:
+    trace_id = None
+    span_id = None
+
+    # Create test span
+    with tracer.start_as_current_span("test_trace_export") as span:
         span.set_attribute("test", True)
+        span.set_attribute("test.type", "diagnostic")
         span.set_attribute("timestamp", datetime.now(timezone.utc).isoformat())
 
         trace_id = get_current_trace_id()
@@ -213,13 +218,32 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
             },
         )
 
-        return {
-            "status": "success",
-            "trace_id": trace_id,
-            "span_id": span_id,
-            "message": "Test trace generated successfully. Check Tempo for trace details.",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    # Force flush to ensure trace is sent immediately
+    flush_result = False
+    flush_error = None
+
+    try:
+        if OpenTelemetryConfig._tracer_provider:
+            flush_result = OpenTelemetryConfig._tracer_provider.force_flush(timeout_millis=10000)
+            logger.info(f"Force flush result: {flush_result}")
+        else:
+            flush_error = "TracerProvider not initialized"
+    except Exception as e:
+        flush_error = str(e)
+        logger.error(f"Force flush failed: {e}")
+
+    return {
+        "status": "success" if flush_result else "flush_failed",
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "flush_result": flush_result,
+        "flush_error": flush_error,
+        "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+        "message": "Test trace generated. Check Tempo for trace details."
+        if flush_result
+        else "Trace created but flush failed - check Tempo connection.",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.post("/test-log", tags=["instrumentation"])
@@ -274,8 +298,12 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
         "tempo": {
             "TEMPO_ENABLED": os.environ.get("TEMPO_ENABLED", "false"),
             "TEMPO_URL": "***" if os.environ.get("TEMPO_URL") else None,
-            "TEMPO_OTLP_HTTP_ENDPOINT": "***" if os.environ.get("TEMPO_OTLP_HTTP_ENDPOINT") else None,
-            "TEMPO_OTLP_GRPC_ENDPOINT": "***" if os.environ.get("TEMPO_OTLP_GRPC_ENDPOINT") else None,
+            "TEMPO_OTLP_HTTP_ENDPOINT": "***"
+            if os.environ.get("TEMPO_OTLP_HTTP_ENDPOINT")
+            else None,
+            "TEMPO_OTLP_GRPC_ENDPOINT": "***"
+            if os.environ.get("TEMPO_OTLP_GRPC_ENDPOINT")
+            else None,
         },
         "service": {
             "SERVICE_NAME": os.environ.get("SERVICE_NAME", "gatewayz-api"),
