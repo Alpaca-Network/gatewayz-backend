@@ -69,9 +69,9 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 5.0) -> bool:
             logger.warning(f"Invalid endpoint URL: {endpoint}")
             return False
 
-        # For HTTPS endpoints, do an actual HTTP request
-        # This works better with Railway's proxy layer
-        if parsed.scheme == "https":
+        # For endpoints with /v1/traces path, do an actual HTTP POST request
+        # This properly validates that Tempo's OTLP receiver is working
+        if "/v1/traces" in endpoint:
             try:
                 # Send empty protobuf to the traces endpoint
                 # Tempo returns 200 for valid (even empty) requests
@@ -94,7 +94,7 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 5.0) -> bool:
                 logger.warning(f"Cannot reach Tempo endpoint {endpoint}: {e}")
                 return False
 
-        # For HTTP endpoints (internal DNS), use TCP socket check
+        # For other HTTP endpoints, use TCP socket check
         port = parsed.port
         if not port:
             port = 4318 if parsed.scheme == "http" else 4317
