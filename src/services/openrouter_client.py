@@ -127,6 +127,54 @@ def make_openrouter_request_openai(messages, model, **kwargs):
         merged_kwargs = _merge_extra_body(kwargs)
         response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
         return response
+    except APIStatusError as e:
+        # Handle 402 Payment Required errors specifically (credit exhaustion)
+        if e.status_code == 402:
+            error_details = _extract_error_details(e, model, kwargs)
+            logger.error(
+                f"OpenRouter credit exhaustion for model '{model}': {str(e)}. "
+                "Provider failover will be attempted automatically."
+            )
+
+            # Check credit balance and alert if necessary
+            try:
+                import asyncio
+                from src.services.provider_credit_monitor import check_openrouter_credits, send_low_credit_alert
+
+                # Run async credit check in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    credit_info = loop.run_until_complete(check_openrouter_credits())
+                    if credit_info.get("status") in ("critical", "warning"):
+                        loop.run_until_complete(
+                            send_low_credit_alert(
+                                "openrouter",
+                                credit_info.get("balance", 0),
+                                credit_info["status"]
+                            )
+                        )
+                finally:
+                    loop.close()
+            except Exception as credit_check_err:
+                logger.warning(f"Failed to check OpenRouter credits after 402 error: {credit_check_err}")
+
+            capture_provider_error(
+                e,
+                provider='openrouter',
+                model=model,
+                endpoint='/chat/completions',
+                extra_context={**error_details, "error_type": "insufficient_credits"}
+            )
+            raise
+        # Fall through to BadRequestError handling
+        if isinstance(e, BadRequestError):
+            pass  # Handle in next except block
+        else:
+            # Other APIStatusErrors
+            logger.error(f"OpenRouter request failed: {e}")
+            capture_provider_error(e, provider='openrouter', model=model, endpoint='/chat/completions')
+            raise
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors (helps diagnose openrouter/auto issues)
         error_details = _extract_error_details(e, model, kwargs)
@@ -235,6 +283,54 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
             model=model, messages=normalized_messages, stream=True, **merged_kwargs
         )
         return stream
+    except APIStatusError as e:
+        # Handle 402 Payment Required errors specifically (credit exhaustion)
+        if e.status_code == 402:
+            error_details = _extract_error_details(e, model, kwargs)
+            logger.error(
+                f"OpenRouter credit exhaustion (streaming) for model '{model}': {str(e)}. "
+                "Provider failover will be attempted automatically."
+            )
+
+            # Check credit balance and alert if necessary
+            try:
+                import asyncio
+                from src.services.provider_credit_monitor import check_openrouter_credits, send_low_credit_alert
+
+                # Run async credit check in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    credit_info = loop.run_until_complete(check_openrouter_credits())
+                    if credit_info.get("status") in ("critical", "warning"):
+                        loop.run_until_complete(
+                            send_low_credit_alert(
+                                "openrouter",
+                                credit_info.get("balance", 0),
+                                credit_info["status"]
+                            )
+                        )
+                finally:
+                    loop.close()
+            except Exception as credit_check_err:
+                logger.warning(f"Failed to check OpenRouter credits after 402 error: {credit_check_err}")
+
+            capture_provider_error(
+                e,
+                provider='openrouter',
+                model=model,
+                endpoint='/chat/completions (stream)',
+                extra_context={**error_details, "error_type": "insufficient_credits"}
+            )
+            raise
+        # Fall through to BadRequestError handling
+        if isinstance(e, BadRequestError):
+            pass  # Handle in next except block
+        else:
+            # Other APIStatusErrors
+            logger.error(f"OpenRouter streaming request failed: {e}")
+            capture_provider_error(e, provider='openrouter', model=model, endpoint='/chat/completions (stream)')
+            raise
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors
         error_details = _extract_error_details(e, model, kwargs)
@@ -336,6 +432,45 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
             model=model, messages=normalized_messages, stream=True, **merged_kwargs
         )
         return stream
+    except APIStatusError as e:
+        # Handle 402 Payment Required errors specifically (credit exhaustion)
+        if e.status_code == 402:
+            error_details = _extract_error_details(e, model, kwargs)
+            logger.error(
+                f"OpenRouter credit exhaustion (async streaming) for model '{model}': {str(e)}. "
+                "Provider failover will be attempted automatically."
+            )
+
+            # Check credit balance and alert if necessary
+            try:
+                from src.services.provider_credit_monitor import check_openrouter_credits, send_low_credit_alert
+
+                credit_info = await check_openrouter_credits()
+                if credit_info.get("status") in ("critical", "warning"):
+                    await send_low_credit_alert(
+                        "openrouter",
+                        credit_info.get("balance", 0),
+                        credit_info["status"]
+                    )
+            except Exception as credit_check_err:
+                logger.warning(f"Failed to check OpenRouter credits after 402 error: {credit_check_err}")
+
+            capture_provider_error(
+                e,
+                provider='openrouter',
+                model=model,
+                endpoint='/chat/completions (async stream)',
+                extra_context={**error_details, "error_type": "insufficient_credits"}
+            )
+            raise
+        # Fall through to BadRequestError handling
+        if isinstance(e, BadRequestError):
+            pass  # Handle in next except block
+        else:
+            # Other APIStatusErrors
+            logger.error(f"OpenRouter async streaming request failed: {e}")
+            capture_provider_error(e, provider='openrouter', model=model, endpoint='/chat/completions (async stream)')
+            raise
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors
         error_details = _extract_error_details(e, model, kwargs)

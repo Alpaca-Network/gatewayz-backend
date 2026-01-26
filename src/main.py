@@ -444,6 +444,7 @@ def create_app() -> FastAPI:
         ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
+        ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
     ]
 
     loaded_count = 0
