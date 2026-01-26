@@ -188,7 +188,9 @@ class OpenTelemetryConfig:
                 logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
             logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
-            logger.info(f"   [DEBUG] SDK will POST traces to: {tempo_endpoint}/v1/traces (auto-appended)")
+            logger.info(
+                f"   [DEBUG] SDK will POST traces to: {tempo_endpoint}/v1/traces (auto-appended)"
+            )
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
@@ -266,7 +268,9 @@ class OpenTelemetryConfig:
                 # Wrap with resilient processor to handle connection errors gracefully
                 resilient_processor = ResilientSpanProcessor(batch_processor)
                 cls._tracer_provider.add_span_processor(resilient_processor)
-                logger.info("   Resilient batch span processor configured (queue: 2048, batch: 512)")
+                logger.info(
+                    "   Resilient batch span processor configured (queue: 2048, batch: 512)"
+                )
                 logger.info("   Circuit breaker enabled to handle connection failures")
             except Exception as e:
                 logger.error(
