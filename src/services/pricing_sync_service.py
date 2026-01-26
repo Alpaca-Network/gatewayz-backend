@@ -60,12 +60,27 @@ PROVIDER_FORMATS = {
 class PricingSyncConfig:
     """Configuration for pricing sync"""
 
-    # Which providers to auto-sync
+    # Which providers to auto-sync (Phase 2.5: Expanded from 4 to 12 providers)
+    # NOTE: Uses Config.PRICING_SYNC_PROVIDERS at runtime (configurable via env var)
+    # This is the default fallback list
     AUTO_SYNC_PROVIDERS: list[str] = [
-        "openrouter",
-        "featherless",
-        "nearai",
-        "alibaba-cloud",
+        # Current (Phase 2)
+        "openrouter",      # ✅ Has API
+        "featherless",     # ✅ Has API
+        "nearai",          # ✅ Has API
+        "alibaba-cloud",   # ✅ Has API
+
+        # Phase 2.5 Additions (expand as APIs become available)
+        # "together",      # ⚠️ API research needed
+        # "fireworks",     # ⚠️ API research needed
+        # "groq",          # ⚠️ API research needed
+        # "deepinfra",     # ⚠️ API research needed
+        # "cerebras",      # ⚠️ API research needed
+        # "novita",        # ⚠️ API research needed
+        # "google",        # ⚠️ Vertex AI pricing API research needed
+        # "xai",           # ⚠️ API research needed
+        # "cloudflare",    # ⚠️ Workers AI pricing research needed
+        # Add more as provider APIs are discovered and implemented
     ]
 
     # Don't sync if deviation would exceed this percentage
@@ -452,7 +467,13 @@ class PricingSyncService:
         Returns:
             Combined sync results
         """
-        providers = PricingSyncConfig.AUTO_SYNC_PROVIDERS
+        # Phase 2.5: Use configured providers from env var (falls back to AUTO_SYNC_PROVIDERS)
+        try:
+            from src.config.config import Config
+            providers = Config.PRICING_SYNC_PROVIDERS
+        except Exception:
+            providers = PricingSyncConfig.AUTO_SYNC_PROVIDERS
+
         results = {}
 
         logger.info(f"Starting sync for {len(providers)} providers (dry_run={dry_run})...")
