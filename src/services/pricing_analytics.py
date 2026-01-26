@@ -1,10 +1,8 @@
 """
 Pricing Analytics Service
-Provides admin analytics for model usage and costs using the model_pricing table.
 
-Note: The original pricing_calculator.py module was removed as part of the
-pricing consolidation (commit d3f6c5b7). Pricing is now stored in the
-model_pricing database table.
+Provides admin analytics for model usage and costs. Pricing data is stored
+in the model_pricing database table and queried via the model_usage_analytics view.
 """
 
 import logging
@@ -14,79 +12,6 @@ from typing import Any, Dict, List, Optional
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
-
-
-def calculate_request_cost_with_standard(
-    provider: str,
-    model_data: Dict[str, Any],
-    prompt_tokens: int,
-    completion_tokens: int
-) -> Dict[str, Any]:
-    """
-    Calculate cost for a request using model pricing data.
-
-    Uses pricing from model_data if available, otherwise falls back to
-    a default rate.
-
-    Args:
-        provider: Provider name (e.g., 'openrouter', 'deepinfra')
-        model_data: Model data including pricing fields
-        prompt_tokens: Number of prompt tokens
-        completion_tokens: Number of completion tokens
-
-    Returns:
-        Dict with cost breakdown:
-        {
-            "total_cost": float,
-            "input_cost": float,
-            "output_cost": float,
-            "pricing_source": str,
-            "provider": str,
-            "modality": str
-        }
-    """
-    try:
-        # Try to get pricing from model_data (from model_pricing table)
-        input_price = model_data.get("input_price_per_token") or model_data.get("price_per_input_token")
-        output_price = model_data.get("output_price_per_token") or model_data.get("price_per_output_token")
-
-        if input_price is not None and output_price is not None:
-            input_cost = prompt_tokens * float(input_price)
-            output_cost = completion_tokens * float(output_price)
-            return {
-                "total_cost": input_cost + output_cost,
-                "input_cost": input_cost,
-                "output_cost": output_cost,
-                "pricing_source": "model_pricing",
-                "provider": provider,
-                "modality": model_data.get("modality", "text")
-            }
-
-        # Fallback to default rate if no pricing data available
-        default_rate = 0.00002  # $0.02 per 1K tokens
-        input_cost = prompt_tokens * default_rate
-        output_cost = completion_tokens * default_rate
-        return {
-            "total_cost": input_cost + output_cost,
-            "input_cost": input_cost,
-            "output_cost": output_cost,
-            "pricing_source": "default",
-            "provider": provider,
-            "modality": model_data.get("modality", "unknown")
-        }
-
-    except Exception as e:
-        logger.error(f"Error calculating cost: {e}")
-        # Fallback to simple calculation
-        default_rate = 0.00002
-        return {
-            "total_cost": (prompt_tokens + completion_tokens) * default_rate,
-            "input_cost": prompt_tokens * default_rate,
-            "output_cost": completion_tokens * default_rate,
-            "pricing_source": "fallback",
-            "provider": provider,
-            "modality": "unknown"
-        }
 
 
 def get_model_usage_analytics(
