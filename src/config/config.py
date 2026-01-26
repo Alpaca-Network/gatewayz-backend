@@ -249,13 +249,14 @@ class Config:
     # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
     # and serves cached responses to reduce costs and improve latency.
     # See: https://butter.dev
-    BUTTER_DEV_ENABLED: bool = os.environ.get("BUTTER_DEV_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    # Supports both BUTTER_DEV_ENABLED and BUTTER_ENABLED env vars for compatibility
+    BUTTER_DEV_ENABLED: bool = (
+        os.environ.get("BUTTER_DEV_ENABLED", os.environ.get("BUTTER_ENABLED", "false"))
+        .lower()
+        in {"1", "true", "yes"}
+    )
     BUTTER_DEV_BASE_URL: str = os.environ.get(
-        "BUTTER_DEV_BASE_URL", "https://proxy.butter.dev/v1"
+        "BUTTER_DEV_BASE_URL", os.environ.get("BUTTER_PROXY_URL", "https://proxy.butter.dev/v1")
     )
     BUTTER_DEV_TIMEOUT: int = int(os.environ.get("BUTTER_DEV_TIMEOUT", "30"))
     # Enable automatic fallback to direct provider on Butter.dev errors
