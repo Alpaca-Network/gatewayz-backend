@@ -47,6 +47,13 @@ from src.services.anonymous_rate_limiter import (
     ANONYMOUS_ALLOWED_MODELS,
 )
 from src.utils.ai_tracing import AITracer, AIRequestType
+from src.services.butter_client import (
+    should_use_butter_cache,
+    ButterCacheTimer,
+    get_butter_request_metadata,
+    log_butter_cache_result,
+)
+from src.services.connection_pool import get_butter_pooled_async_client
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -540,6 +547,132 @@ PROVIDER_TIMEOUTS = {
     "huggingface": 120,
     "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
+
+# Butter.dev provider configuration for caching proxy
+# Maps provider names to their API key config attribute and base URL
+BUTTER_PROVIDER_CONFIG = {
+    "openrouter": {
+        "api_key_attr": "OPENROUTER_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+    },
+    "featherless": {
+        "api_key_attr": "FEATHERLESS_API_KEY",
+        "base_url": "https://api.featherless.ai/v1",
+    },
+    "together": {
+        "api_key_attr": "TOGETHER_API_KEY",
+        "base_url": "https://api.together.xyz/v1",
+    },
+    "fireworks": {
+        "api_key_attr": "FIREWORKS_API_KEY",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+    },
+    "groq": {
+        "api_key_attr": "GROQ_API_KEY",
+        "base_url": "https://api.groq.com/openai/v1",
+    },
+    "cerebras": {
+        "api_key_attr": "CEREBRAS_API_KEY",
+        "base_url": "https://api.cerebras.ai/v1",
+    },
+    "deepinfra": {
+        "api_key_attr": "DEEPINFRA_API_KEY",
+        "base_url": "https://api.deepinfra.com/v1/openai",
+    },
+    "xai": {
+        "api_key_attr": "XAI_API_KEY",
+        "base_url": "https://api.x.ai/v1",
+    },
+    "openai": {
+        "api_key_attr": "OPENAI_API_KEY",
+        "base_url": "https://api.openai.com/v1",
+    },
+    "huggingface": {
+        "api_key_attr": "HF_API_KEY",
+        "base_url": "https://api-inference.huggingface.co/v1",
+    },
+    "chutes": {
+        "api_key_attr": "CHUTES_API_KEY",
+        "base_url": "https://llm.chutes.ai/v1",
+    },
+}
+
+
+async def make_butter_proxied_stream(
+    messages: list,
+    model: str,
+    provider: str,
+    **kwargs,
+):
+    """
+    Make a streaming request through Butter.dev caching proxy.
+
+    This routes the request through Butter.dev which can cache responses
+    for identical prompts, reducing costs and latency.
+
+    Args:
+        messages: Chat messages
+        model: Model name
+        provider: Target provider (e.g., 'openrouter', 'together')
+        **kwargs: Additional arguments (temperature, max_tokens, etc.)
+
+    Returns:
+        Async stream iterator
+
+    Raises:
+        ValueError: If provider is not configured for Butter
+    """
+    provider_config = BUTTER_PROVIDER_CONFIG.get(provider)
+    if not provider_config:
+        raise ValueError(f"Provider '{provider}' is not configured for Butter.dev caching")
+
+    api_key = getattr(Config, provider_config["api_key_attr"], None)
+    if not api_key:
+        raise ValueError(f"API key not configured for provider '{provider}'")
+
+    base_url = provider_config["base_url"]
+
+    # Get the Butter-proxied async client
+    client = get_butter_pooled_async_client(
+        target_provider=provider,
+        target_api_key=api_key,
+        target_base_url=base_url,
+    )
+
+    logger.info(
+        f"Butter.dev: Routing {provider}/{model} through cache proxy"
+    )
+
+    # Build request parameters
+    request_params = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+    }
+
+    # Add optional parameters
+    if kwargs.get("temperature") is not None:
+        request_params["temperature"] = kwargs["temperature"]
+    if kwargs.get("max_tokens") is not None:
+        request_params["max_tokens"] = kwargs["max_tokens"]
+    if kwargs.get("top_p") is not None:
+        request_params["top_p"] = kwargs["top_p"]
+    if kwargs.get("frequency_penalty") is not None:
+        request_params["frequency_penalty"] = kwargs["frequency_penalty"]
+    if kwargs.get("presence_penalty") is not None:
+        request_params["presence_penalty"] = kwargs["presence_penalty"]
+    if kwargs.get("stop") is not None:
+        request_params["stop"] = kwargs["stop"]
+    if kwargs.get("tools") is not None:
+        request_params["tools"] = kwargs["tools"]
+    if kwargs.get("tool_choice") is not None:
+        request_params["tool_choice"] = kwargs["tool_choice"]
+
+    # Make the streaming request
+    stream = await client.chat.completions.create(**request_params)
+
+    return stream
+
 
 # Auto-routing constants
 # Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
@@ -2104,6 +2237,23 @@ async def chat_completions(
 
                 request_model = attempt_model
                 is_async_stream = False  # Default to sync, only OpenRouter uses async currently
+                use_butter_cache = False  # Track if we're using Butter.dev
+                butter_reason = "not_checked"
+
+                # Check if we should use Butter.dev caching for this request
+                butter_check = should_use_butter_cache(user, attempt_provider, request_model)
+                use_butter_cache = butter_check[0]
+                butter_reason = butter_check[1]
+
+                if use_butter_cache:
+                    logger.info(
+                        f"Butter.dev: Cache enabled for {attempt_provider}/{request_model} (reason={butter_reason})"
+                    )
+                else:
+                    logger.debug(
+                        f"Butter.dev: Cache disabled for {attempt_provider}/{request_model} (reason={butter_reason})"
+                    )
+
                 try:
                     # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
                     # Note: Streaming tracing is handled in stream_generator to capture final token counts
@@ -2121,6 +2271,31 @@ async def chat_completions(
                                 }
                             },
                         )
+                    elif use_butter_cache and attempt_provider in BUTTER_PROVIDER_CONFIG:
+                        # Route through Butter.dev caching proxy for eligible requests
+                        try:
+                            stream = await make_butter_proxied_stream(
+                                messages, request_model, attempt_provider, **optional
+                            )
+                            is_async_stream = True
+                            logger.info(
+                                f"Using Butter.dev cached streaming for {attempt_provider}/{request_model}"
+                            )
+                        except Exception as butter_err:
+                            # Fallback to direct provider if Butter fails
+                            logger.warning(
+                                f"Butter.dev streaming failed, falling back to direct: {butter_err}"
+                            )
+                            use_butter_cache = False
+                            # Fall through to normal provider routing below
+                            if attempt_provider in PROVIDER_ROUTING:
+                                stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
+                                stream = await _to_thread(stream_func, messages, request_model, **optional)
+                            else:
+                                stream = await make_openrouter_request_openai_stream_async(
+                                    messages, request_model, **optional
+                                )
+                                is_async_stream = True
                     elif attempt_provider in PROVIDER_ROUTING:
                         # Use registry for all registered providers
                         stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
@@ -2162,6 +2337,12 @@ async def chat_completions(
                     stream_headers["X-Provider"] = provider
                     stream_headers["X-Model"] = model
                     stream_headers["X-Requested-Model"] = original_model
+
+                    # Add Butter.dev caching headers
+                    if use_butter_cache:
+                        stream_headers["X-Butter-Cache"] = "enabled"
+                    else:
+                        stream_headers["X-Butter-Cache"] = f"disabled:{butter_reason}"
 
                     # SSE streaming headers to prevent buffering by proxies/nginx
                     stream_headers["X-Accel-Buffering"] = "no"
