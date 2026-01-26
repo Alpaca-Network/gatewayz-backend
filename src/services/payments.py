@@ -1851,12 +1851,18 @@ class StripeService:
             ).eq("user_id", user_id).execute()
 
             # Update subscription allowance to new tier's allowance
+            # Business decision: On upgrade, user gets full new tier allowance immediately.
+            # This is intentionally generous to reward upgrading mid-cycle. The user pays
+            # prorated amount for the higher tier and receives the full higher allowance.
+            # Alternative approaches considered:
+            # - Preserve remaining allowance + add difference (more complex tracking)
+            # - Wait for next billing cycle (less immediate value for user)
             from src.db.subscription_products import get_allowance_from_tier
             from src.db.users import reset_subscription_allowance
 
             new_allowance = get_allowance_from_tier(new_tier)
             if new_allowance > 0:
-                # Reset allowance to new tier's full amount
+                # Reset allowance to new tier's full amount (immediate benefit for upgrade)
                 reset_subscription_allowance(user_id, new_allowance, new_tier)
                 logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)")
 
@@ -2002,13 +2008,15 @@ class StripeService:
             ).eq("user_id", user_id).execute()
 
             # Update subscription allowance to new tier's allowance
-            # Note: On downgrade, we set the new lower allowance
+            # Business decision: On downgrade, user's allowance is reset to the lower tier amount.
+            # The user receives prorated credit via Stripe for unused subscription time.
+            # This ensures allowance matches the tier being paid for going forward.
             from src.db.subscription_products import get_allowance_from_tier
             from src.db.users import reset_subscription_allowance
 
             new_allowance = get_allowance_from_tier(new_tier)
             if new_allowance > 0:
-                # Reset allowance to new tier's amount
+                # Reset allowance to new tier's amount (matches what user is now paying for)
                 reset_subscription_allowance(user_id, new_allowance, new_tier)
                 logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)")
 

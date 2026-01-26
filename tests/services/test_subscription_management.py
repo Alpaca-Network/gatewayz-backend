@@ -6,7 +6,7 @@ Tests upgrade, downgrade, cancel, and get subscription functionality
 
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from src.schemas.payments import (
     UpgradeSubscriptionRequest,
