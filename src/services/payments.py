@@ -1467,22 +1467,36 @@ class StripeService:
                 logger.info(f"User {user_id} trial status cleared on subscription update to active")
 
                 # Update subscription allowance when tier changes (for upgrades/downgrades)
-                # Check if tier has changed by comparing with previous product_id
+                # Skip reset if the allowance was already set by direct upgrade/downgrade call
+                # to avoid double-reset (service method already resets, then webhook fires)
                 from src.db.subscription_products import get_allowance_from_tier
-                from src.db.users import reset_subscription_allowance
+                from src.db.users import reset_subscription_allowance, get_user_by_id as get_user_fresh
 
                 new_allowance = get_allowance_from_tier(tier)
                 if new_allowance > 0:
-                    # Reset allowance to new tier's amount on tier change
-                    reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
-                    if not reset_result:
-                        logger.error(
-                            f"Failed to reset allowance for user {user_id} during subscription update webhook. "
-                            f"Tier: {tier}, allowance: ${new_allowance}. "
-                            f"Raising exception to trigger Stripe retry."
+                    # Check current user state to avoid double-reset
+                    current_user = get_user_fresh(user_id)
+                    current_allowance = current_user.get("subscription_allowance", 0) if current_user else 0
+                    current_tier = current_user.get("tier", "basic") if current_user else "basic"
+
+                    # Only reset if tier changed AND allowance doesn't already match new tier
+                    # This prevents double-reset when webhook fires after direct upgrade/downgrade
+                    if current_tier == tier and abs(current_allowance - new_allowance) < 0.01:
+                        logger.info(
+                            f"Skipping allowance reset for user {user_id} - already at {tier} tier "
+                            f"with ${current_allowance} allowance (webhook after direct update)"
                         )
-                        raise Exception(f"Failed to update subscription allowance for user {user_id}")
-                    logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) on subscription update")
+                    else:
+                        # Reset allowance to new tier's amount on tier change
+                        reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
+                        if not reset_result:
+                            logger.error(
+                                f"Failed to reset allowance for user {user_id} during subscription update webhook. "
+                                f"Tier: {tier}, allowance: ${new_allowance}. "
+                                f"Raising exception to trigger Stripe retry."
+                            )
+                            raise Exception(f"Failed to update subscription allowance for user {user_id}")
+                        logger.info(f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) on subscription update")
 
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately

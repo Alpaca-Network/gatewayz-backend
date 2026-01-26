@@ -269,6 +269,10 @@ class TestUpgradeSubscription:
                                                 with patch("src.db.credit_transactions.log_credit_transaction") as mock_log:
                                                     result = stripe_service.upgrade_subscription(123, upgrade_request)
 
+                                                    # Verify upgrade succeeded
+                                                    assert result.success is True
+                                                    assert result.current_tier == "max"
+
                                                     # Verify credit transaction was logged
                                                     assert mock_log.called
                                                     call_kwargs = mock_log.call_args[1]
@@ -454,6 +458,10 @@ class TestDowngradeSubscription:
                                             with patch("src.db.users.invalidate_user_cache_by_id"):
                                                 with patch("src.db.credit_transactions.log_credit_transaction") as mock_log:
                                                     result = stripe_service.downgrade_subscription(456, downgrade_request)
+
+                                                    # Verify downgrade succeeded
+                                                    assert result.success is True
+                                                    assert result.current_tier == "pro"
 
                                                     # Verify credit transaction was logged
                                                     assert mock_log.called
