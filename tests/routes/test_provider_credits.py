@@ -47,11 +47,8 @@ class TestGetProviderCreditBalances:
     @pytest.mark.asyncio
     async def test_get_balances_as_admin(self, client, mock_admin_user):
         """Test retrieving all provider credit balances as admin"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth, \
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user), \
              patch("src.routes.provider_credits.check_all_provider_credits") as mock_check:
-
-            # Mock authentication
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
 
             # Mock credit check response
             mock_check.return_value = {
@@ -79,10 +76,8 @@ class TestGetProviderCreditBalances:
     @pytest.mark.asyncio
     async def test_get_balances_with_warning_status(self, client, mock_admin_user):
         """Test retrieving balance with warning status"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth, \
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user), \
              patch("src.routes.provider_credits.check_all_provider_credits") as mock_check:
-
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
 
             # Mock low balance
             mock_check.return_value = {
@@ -108,12 +103,12 @@ class TestGetProviderCreditBalances:
     @pytest.mark.asyncio
     async def test_get_balances_unauthorized(self, client, mock_regular_user):
         """Test that non-admin users cannot access credit balances"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth:
-            # Mock authentication to raise 403 for non-admin
-            mock_auth.side_effect = lambda roles: AsyncMock(
-                side_effect=Exception("Forbidden")
-            )
+        from fastapi import HTTPException
 
+        async def mock_require_admin_raises():
+            raise HTTPException(status_code=403, detail="Administrator privileges required")
+
+        with patch("src.routes.provider_credits.require_admin", side_effect=mock_require_admin_raises):
             response = client.get(
                 "/api/provider-credits/balance",
                 headers={"Authorization": "Bearer user-key"}
@@ -129,10 +124,8 @@ class TestGetSpecificProviderBalance:
     @pytest.mark.asyncio
     async def test_get_openrouter_balance(self, client, mock_admin_user):
         """Test retrieving OpenRouter specific balance"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth, \
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user), \
              patch("src.routes.provider_credits.check_openrouter_credits") as mock_check:
-
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
 
             mock_check.return_value = {
                 "provider": "openrouter",
@@ -157,8 +150,7 @@ class TestGetSpecificProviderBalance:
     @pytest.mark.asyncio
     async def test_get_unsupported_provider(self, client, mock_admin_user):
         """Test retrieving balance for unsupported provider"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth:
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user):
 
             response = client.get(
                 "/api/provider-credits/balance/unsupported-provider",
@@ -171,10 +163,8 @@ class TestGetSpecificProviderBalance:
     @pytest.mark.asyncio
     async def test_get_balance_with_error(self, client, mock_admin_user):
         """Test handling errors during balance retrieval"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth, \
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user), \
              patch("src.routes.provider_credits.check_openrouter_credits") as mock_check:
-
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
 
             mock_check.return_value = {
                 "provider": "openrouter",
@@ -202,10 +192,8 @@ class TestClearProviderCreditCache:
     @pytest.mark.asyncio
     async def test_clear_all_cache(self, client, mock_admin_user):
         """Test clearing all provider credit caches"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth, \
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user), \
              patch("src.routes.provider_credits.clear_credit_cache") as mock_clear:
-
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
 
             response = client.post(
                 "/api/provider-credits/balance/clear-cache",
@@ -223,10 +211,8 @@ class TestClearProviderCreditCache:
     @pytest.mark.asyncio
     async def test_clear_specific_provider_cache(self, client, mock_admin_user):
         """Test clearing cache for specific provider"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth, \
+        with patch("src.routes.provider_credits.require_admin", return_value=mock_admin_user), \
              patch("src.routes.provider_credits.clear_credit_cache") as mock_clear:
-
-            mock_auth.return_value = AsyncMock(return_value=mock_admin_user)
 
             response = client.post(
                 "/api/provider-credits/balance/clear-cache?provider=openrouter",
@@ -244,11 +230,12 @@ class TestClearProviderCreditCache:
     @pytest.mark.asyncio
     async def test_clear_cache_unauthorized(self, client, mock_regular_user):
         """Test that non-admin users cannot clear cache"""
-        with patch("src.routes.provider_credits.get_current_user_with_role") as mock_auth:
-            mock_auth.side_effect = lambda roles: AsyncMock(
-                side_effect=Exception("Forbidden")
-            )
+        from fastapi import HTTPException
 
+        async def mock_require_admin_raises():
+            raise HTTPException(status_code=403, detail="Administrator privileges required")
+
+        with patch("src.routes.provider_credits.require_admin", side_effect=mock_require_admin_raises):
             response = client.post(
                 "/api/provider-credits/balance/clear-cache",
                 headers={"Authorization": "Bearer user-key"}

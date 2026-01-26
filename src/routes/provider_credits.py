@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from src.security.deps import get_current_user_with_role
+from src.security.deps import require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class ProviderCreditsResponse(BaseModel):
 
 @router.get("/balance", response_model=ProviderCreditsResponse)
 async def get_provider_credit_balances(
-    current_user: dict = Depends(get_current_user_with_role(["admin", "super_admin"]))
+    current_user: dict = Depends(require_admin),
 ) -> ProviderCreditsResponse:
     """
     Get credit balances for all monitored providers.
@@ -86,7 +86,7 @@ async def get_provider_credit_balances(
 @router.get("/balance/{provider}", response_model=ProviderCreditBalance)
 async def get_provider_credit_balance(
     provider: str,
-    current_user: dict = Depends(get_current_user_with_role(["admin", "super_admin"])),
+    current_user: dict = Depends(require_admin),
 ) -> ProviderCreditBalance:
     """
     Get credit balance for a specific provider.
@@ -128,7 +128,7 @@ async def get_provider_credit_balance(
 @router.post("/balance/clear-cache")
 async def clear_provider_credit_cache(
     provider: str | None = None,
-    current_user: dict = Depends(get_current_user_with_role(["admin", "super_admin"])),
+    current_user: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """
     Clear the provider credit balance cache.
