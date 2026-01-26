@@ -49,9 +49,10 @@ class TestSchedulerLifecycle:
         scheduler_module._shutdown_event.clear()
 
         # Mock the scheduler loop to return immediately
-        with patch('src.services.pricing_sync_scheduler._pricing_sync_scheduler_loop') as mock_loop:
-            mock_loop.return_value = asyncio.coroutine(lambda: None)()
+        async def mock_loop_func():
+            return None
 
+        with patch('src.services.pricing_sync_scheduler._pricing_sync_scheduler_loop', new=mock_loop_func):
             await start_pricing_sync_scheduler()
 
             # Verify task was created
@@ -69,9 +70,10 @@ class TestSchedulerLifecycle:
         scheduler_module._scheduler_task = None
         scheduler_module._shutdown_event.clear()
 
-        with patch('src.services.pricing_sync_scheduler._pricing_sync_scheduler_loop') as mock_loop:
-            mock_loop.return_value = asyncio.coroutine(lambda: None)()
+        async def mock_loop_func():
+            return None
 
+        with patch('src.services.pricing_sync_scheduler._pricing_sync_scheduler_loop', new=mock_loop_func):
             # Start first time
             await start_pricing_sync_scheduler()
             first_task = scheduler_module._scheduler_task
@@ -88,24 +90,28 @@ class TestSchedulerLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_scheduler_sets_shutdown_event(self):
-        """Stopping scheduler sets shutdown event"""
+        """Stopping scheduler sets shutdown event and waits for task"""
         import src.services.pricing_sync_scheduler as scheduler_module
 
         # Ensure clean state
         scheduler_module._scheduler_task = None
         scheduler_module._shutdown_event.clear()
 
-        # Create a mock task that completes quickly
+        # Track if shutdown event was set during execution
+        shutdown_was_set = False
+
         async def quick_task():
+            nonlocal shutdown_was_set
             await asyncio.sleep(0.01)
+            shutdown_was_set = scheduler_module._shutdown_event.is_set()
 
         scheduler_module._scheduler_task = asyncio.create_task(quick_task())
 
         # Stop scheduler
         await stop_pricing_sync_scheduler()
 
-        # Verify shutdown event was set
-        assert scheduler_module._shutdown_event.is_set()
+        # Verify shutdown event was set during stop (even if cleared after)
+        assert shutdown_was_set
 
         # Verify task is None after stop
         assert scheduler_module._scheduler_task is None
@@ -127,7 +133,7 @@ class TestSchedulerLifecycle:
 
         # Stop with timeout (should cancel after 30s, but we mock time)
         with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError):
-            await stop_scheduler_sync_scheduler()
+            await stop_pricing_sync_scheduler()
 
         # Task should be cancelled and cleaned up
         assert scheduler_module._scheduler_task is None or scheduler_module._scheduler_task.cancelled()
@@ -272,28 +278,36 @@ class TestSchedulerLoop:
 
         # Mock wait_for to track timeout
         timeouts = []
+        original_wait_for = asyncio.wait_for
 
         async def mock_wait_for(coro, timeout):
-            timeouts.append(timeout)
-            # Simulate timeout (expected behavior)
-            raise asyncio.TimeoutError
+            # Only track calls with 30s or 21600s timeout (scheduler calls)
+            if timeout in [30.0, 21600.0, 3600.0]:
+                timeouts.append(timeout)
+                # First call: initial delay
+                if len(timeouts) == 1:
+                    raise asyncio.TimeoutError
+                # Second call: exit loop
+                else:
+                    return None
+            else:
+                # Pass through other calls (like our test timeout)
+                return await original_wait_for(coro, timeout)
+
+        async def mock_sync():
+            return {'status': 'success', 'total_models_updated': 10}
 
         with patch('asyncio.wait_for', side_effect=mock_wait_for):
-            with patch('src.services.pricing_sync_scheduler._run_scheduled_sync', return_value=asyncio.coroutine(lambda: {'status': 'success'})()):
-                pass
-
+            with patch('src.services.pricing_sync_scheduler._run_scheduled_sync', new=mock_sync):
                 # Start loop in background
                 task = asyncio.create_task(scheduler_module._pricing_sync_scheduler_loop())
 
-                # Let it run briefly
-                await asyncio.sleep(0.01)
-
-                # Stop it
-                scheduler_module._shutdown_event.set()
-
+                # Wait for task to complete
                 try:
-                    await asyncio.wait_for(task, timeout=1.0)
+                    await original_wait_for(task, timeout=2.0)
                 except asyncio.TimeoutError:
+                    # Force stop
+                    scheduler_module._shutdown_event.set()
                     task.cancel()
                     try:
                         await task
@@ -301,7 +315,7 @@ class TestSchedulerLoop:
                         pass
 
                 # Verify first timeout was 30 seconds (initial delay)
-                assert len(timeouts) > 0
+                assert len(timeouts) >= 1
                 assert timeouts[0] == 30.0
 
     @pytest.mark.asyncio
@@ -411,7 +425,7 @@ class TestPrometheusMetrics:
         # Mock metrics
         with patch.object(scheduled_sync_runs, 'labels') as mock_counter:
             with patch.object(scheduled_sync_duration, 'observe') as mock_histogram:
-                with patch('src.services.pricing_sync_scheduler.run_scheduled_sync', return_value=mock_result):
+                with patch('src.services.pricing_sync_service.run_scheduled_sync', return_value=mock_result):
                     await trigger_manual_sync()
 
                     # Note: Manual sync doesn't increment scheduled metrics

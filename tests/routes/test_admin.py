@@ -508,7 +508,8 @@ class TestPricingSchedulerStatus:
         # Should return 500 with error message
         assert response.status_code == 500
         data = response.json()
-        assert 'detail' in data
+        assert 'error' in data
+        assert 'detail' in data['error']
 
 
 class TestPricingSchedulerTrigger:
@@ -539,7 +540,7 @@ class TestPricingSchedulerTrigger:
                 }
             }
 
-        mock_trigger.return_value = mock_sync_result()
+        mock_trigger.side_effect = mock_sync_result
 
         response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
 
@@ -571,7 +572,7 @@ class TestPricingSchedulerTrigger:
                 'error_message': 'Provider API timeout'
             }
 
-        mock_trigger.return_value = mock_sync_result()
+        mock_trigger.side_effect = mock_sync_result
 
         response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
 
@@ -623,7 +624,7 @@ class TestPricingSchedulerTrigger:
                 'total_models_updated': 100
             }
 
-        mock_trigger.return_value = mock_sync_result()
+        mock_trigger.side_effect = mock_sync_result
 
         response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
 
@@ -658,7 +659,8 @@ class TestPricingSchedulerTrigger:
         # Should return 500 with error message
         assert response.status_code == 500
         data = response.json()
-        assert 'detail' in data
+        assert 'error' in data
+        assert 'detail' in data['error']
 
 
 class TestPricingSchedulerIntegration:
@@ -695,7 +697,7 @@ class TestPricingSchedulerIntegration:
                 'total_models_updated': 50
             }
 
-        mock_trigger.return_value = mock_sync_result()
+        mock_trigger.side_effect = mock_sync_result
 
         trigger_response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
         assert trigger_response.status_code == 200
@@ -730,7 +732,7 @@ class TestPricingSchedulerIntegration:
             }
 
         with patch('src.services.pricing_sync_scheduler.trigger_manual_sync') as mock_trigger:
-            mock_trigger.return_value = mock_sync_result()
+            mock_trigger.side_effect = mock_sync_result
 
             # Admin 1 triggers
             async def mock_get_admin1():
