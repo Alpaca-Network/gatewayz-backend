@@ -177,6 +177,71 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
     }
 
 
+@router.get("/otel/status", tags=["instrumentation"])
+async def otel_status(admin_key: str = Depends(get_admin_key)):
+    """
+    Get OpenTelemetry initialization status.
+
+    Returns detailed diagnostic info about the tracing setup.
+    """
+    from src.config.opentelemetry_config import OpenTelemetryConfig, OPENTELEMETRY_AVAILABLE
+
+    return {
+        "opentelemetry_available": OPENTELEMETRY_AVAILABLE,
+        "tempo_enabled": Config.TEMPO_ENABLED,
+        "initialized": OpenTelemetryConfig._initialized,
+        "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+        "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT if Config.TEMPO_ENABLED else None,
+        "service_name": Config.OTEL_SERVICE_NAME,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/otel/initialize", tags=["instrumentation"])
+async def otel_initialize(admin_key: str = Depends(get_admin_key)):
+    """
+    Manually initialize or re-initialize OpenTelemetry.
+
+    Useful for debugging when automatic initialization fails.
+    """
+    from src.config.opentelemetry_config import OpenTelemetryConfig, OPENTELEMETRY_AVAILABLE
+
+    if not OPENTELEMETRY_AVAILABLE:
+        return {
+            "status": "error",
+            "message": "OpenTelemetry packages not installed",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if not Config.TEMPO_ENABLED:
+        return {
+            "status": "error",
+            "message": "TEMPO_ENABLED is false - set to true in environment",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Reset state to force re-initialization
+    OpenTelemetryConfig._initialized = False
+    OpenTelemetryConfig._tracer_provider = None
+
+    try:
+        result = OpenTelemetryConfig.initialize()
+        return {
+            "status": "success" if result else "failed",
+            "initialized": OpenTelemetryConfig._initialized,
+            "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "error_type": type(e).__name__,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
 @router.post("/test-trace", tags=["instrumentation"])
 async def test_trace(admin_key: str = Depends(get_admin_key)):
     """
@@ -189,13 +254,23 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
     """
     from src.config.opentelemetry_config import OpenTelemetryConfig
 
+    # Try to initialize if not already done
+    if not OpenTelemetryConfig._initialized:
+        logger.info("OpenTelemetry not initialized, attempting initialization...")
+        OpenTelemetryConfig.initialize()
+
     tracer = OpenTelemetryConfig.get_tracer(__name__)
 
     if not tracer:
-        raise HTTPException(
-            status_code=503,
-            detail="OpenTelemetry tracing not available",
-        )
+        return {
+            "status": "error",
+            "message": "OpenTelemetry tracing not available - check /otel/status for details",
+            "initialized": OpenTelemetryConfig._initialized,
+            "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
+            "tempo_enabled": Config.TEMPO_ENABLED,
+            "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     trace_id = None
     span_id = None
