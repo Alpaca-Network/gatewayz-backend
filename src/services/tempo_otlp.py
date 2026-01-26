@@ -23,32 +23,59 @@ from src.config.opentelemetry_config import instrument_fastapi_application
 logger = logging.getLogger(__name__)
 
 
-def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 1.0) -> bool:
+def check_tempo_endpoint_reachable(endpoint: str, timeout: float = 5.0) -> bool:
     """
     Check if the Tempo OTLP endpoint is reachable.
 
-    This performs a basic DNS resolution and TCP connection test to verify
-    that the endpoint exists and is accepting connections before attempting
-    to initialize OpenTelemetry exporters.
+    For HTTPS endpoints (Railway public URLs), we do an actual HTTP POST request
+    since TCP socket checks may not work properly with Railway's proxy layer.
 
     Args:
-        endpoint: The OTLP endpoint URL (e.g., "http://tempo.railway.internal:4318")
-        timeout: Connection timeout in seconds (default: 2.0)
+        endpoint: The OTLP endpoint URL (including /v1/traces path for HTTPS)
+        timeout: Connection timeout in seconds
 
     Returns:
         bool: True if endpoint is reachable, False otherwise
     """
     try:
-        # Parse the endpoint URL
+        import requests as req_lib
+
         parsed = urlparse(endpoint)
         host = parsed.hostname
-        port = parsed.port
 
         if not host:
             logger.warning(f"Invalid Tempo endpoint URL: {endpoint}")
             return False
 
-        # Default port based on scheme if not specified
+        # For HTTPS endpoints, do an actual HTTP request
+        # This works better with Railway's proxy layer
+        if parsed.scheme == "https":
+            try:
+                # Send empty protobuf to the traces endpoint
+                # Tempo returns 200 for valid (even empty) requests
+                response = req_lib.post(
+                    endpoint,
+                    data=b"",
+                    headers={"Content-Type": "application/x-protobuf"},
+                    timeout=timeout,
+                )
+                # 200 = success, 400 = bad request (but reachable), 415 = wrong content type (but reachable)
+                if response.status_code in (200, 400, 415):
+                    logger.debug(
+                        f"Successfully reached Tempo at {endpoint} (HTTP {response.status_code})"
+                    )
+                    return True
+                else:
+                    logger.warning(
+                        f"Tempo endpoint returned unexpected status {response.status_code}: {response.text[:100]}"
+                    )
+                    return False
+            except req_lib.exceptions.RequestException as e:
+                logger.warning(f"Cannot reach Tempo endpoint {endpoint}: {e}")
+                return False
+
+        # For HTTP endpoints (internal DNS), use TCP socket check
+        port = parsed.port
         if not port:
             port = 4318 if parsed.scheme == "http" else 4317
 

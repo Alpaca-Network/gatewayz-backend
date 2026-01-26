@@ -17,6 +17,8 @@ import logging
 import socket
 from urllib.parse import urlparse
 
+import requests
+
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
 try:
     from opentelemetry import trace
@@ -45,37 +47,57 @@ from src.utils.resilient_span_processor import ResilientSpanProcessor
 logger = logging.getLogger(__name__)
 
 
-def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+def _check_endpoint_reachable(endpoint: str, timeout: float = 5.0) -> bool:
     """
     Check if the OTLP endpoint is reachable.
 
+    For HTTPS endpoints (Railway public URLs), we do an actual HTTP POST request
+    since TCP socket checks may not work properly with Railway's proxy layer.
+
     Args:
-        endpoint: The OTLP endpoint URL
+        endpoint: The OTLP endpoint URL (including /v1/traces path)
         timeout: Connection timeout in seconds
 
     Returns:
         bool: True if endpoint is reachable, False otherwise
     """
     try:
-        # Parse the endpoint URL
         parsed = urlparse(endpoint)
         host = parsed.hostname
-        port = parsed.port
 
         if not host:
             logger.warning(f"Invalid endpoint URL: {endpoint}")
             return False
 
-        # Default port if not specified
+        # For HTTPS endpoints, do an actual HTTP request
+        # This works better with Railway's proxy layer
+        if parsed.scheme == "https":
+            try:
+                # Send empty protobuf to the traces endpoint
+                # Tempo returns 200 for valid (even empty) requests
+                response = requests.post(
+                    endpoint,
+                    data=b"",
+                    headers={"Content-Type": "application/x-protobuf"},
+                    timeout=timeout,
+                )
+                # 200 = success, 400 = bad request (but reachable), 415 = wrong content type (but reachable)
+                if response.status_code in (200, 400, 415):
+                    logger.debug(f"Successfully reached {endpoint} (HTTP {response.status_code})")
+                    return True
+                else:
+                    logger.warning(
+                        f"Tempo endpoint returned unexpected status {response.status_code}: {response.text[:100]}"
+                    )
+                    return False
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Cannot reach Tempo endpoint {endpoint}: {e}")
+                return False
+
+        # For HTTP endpoints (internal DNS), use TCP socket check
+        port = parsed.port
         if not port:
-            # For HTTPS URLs (Railway public endpoints), use 443 (standard HTTPS port)
-            # Railway proxies HTTPS (443) to internal service ports
-            if parsed.scheme == "https":
-                port = 443
-            elif parsed.scheme == "http":
-                port = 4318
-            else:
-                port = 4317  # gRPC default
+            port = 4318 if parsed.scheme == "http" else 4317
 
         # Try to resolve the hostname (DNS check)
         try:
