@@ -116,10 +116,30 @@ def init_tempo_otlp():
 
     This sets up trace collection and export to Tempo using OTLP.
     Includes health check to prevent initialization if Tempo is unreachable.
+
+    NOTE: This function is DEPRECATED in favor of OpenTelemetryConfig.initialize()
+    which provides better configuration, resilient span processing, and circuit breaker.
+    This function now checks if OTEL is already initialized and skips if so.
     """
     if not Config.TEMPO_ENABLED:
         logger.info("Tempo/OTLP tracing is disabled")
         return
+
+    # Check if OpenTelemetry is already initialized by OpenTelemetryConfig
+    # to avoid duplicate/conflicting tracer providers
+    try:
+        from opentelemetry import trace
+
+        current_provider = trace.get_tracer_provider()
+        # If we have a real TracerProvider (not the default ProxyTracerProvider), skip
+        provider_name = type(current_provider).__name__
+        if provider_name == "TracerProvider":
+            logger.info(
+                "OpenTelemetry already initialized by OpenTelemetryConfig - skipping init_tempo_otlp()"
+            )
+            return current_provider
+    except Exception:
+        pass  # Continue with initialization if check fails
 
     # Check if Tempo endpoint is reachable before initializing
     tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT
