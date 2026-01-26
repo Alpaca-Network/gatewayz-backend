@@ -1253,6 +1253,318 @@
       "context_length": 128000
     }
   },
+  "helicone": {
+    "gemini-2.5-flash": {
+      "prompt": "0.30",
+      "completion": "2.50",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "gemini-2.5-flash-lite": {
+      "prompt": "0.10",
+      "completion": "0.40",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "gemini-2.5-pro": {
+      "prompt": "1.25",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "google/gemini-2.5-flash": {
+      "prompt": "0.30",
+      "completion": "2.50",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "google/gemini-2.5-flash-lite": {
+      "prompt": "0.10",
+      "completion": "0.40",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "google/gemini-2.5-pro": {
+      "prompt": "1.25",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "claude-opus-4": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-opus-4.5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-sonnet-4": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-3-5-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-3-5-haiku": {
+      "prompt": "0.80",
+      "completion": "4.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-3-opus": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-opus-4": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-opus-4.5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-sonnet-4": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-5-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-5-haiku": {
+      "prompt": "0.80",
+      "completion": "4.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-opus": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "gpt-4o": {
+      "prompt": "2.50",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "gpt-4o-mini": {
+      "prompt": "0.15",
+      "completion": "0.60",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "openai/gpt-4o": {
+      "prompt": "2.50",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "openai/gpt-4o-mini": {
+      "prompt": "0.15",
+      "completion": "0.60",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    }
+  },
+  "vercel-ai-gateway": {
+    "gemini-2.5-flash": {
+      "prompt": "0.30",
+      "completion": "2.50",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "gemini-2.5-flash-lite": {
+      "prompt": "0.10",
+      "completion": "0.40",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "gemini-2.5-pro": {
+      "prompt": "1.25",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "google/gemini-2.5-flash": {
+      "prompt": "0.30",
+      "completion": "2.50",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "google/gemini-2.5-flash-lite": {
+      "prompt": "0.10",
+      "completion": "0.40",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "google/gemini-2.5-pro": {
+      "prompt": "1.25",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 1000000
+    },
+    "claude-opus-4": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-opus-4.5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-sonnet-4": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-3-5-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-3-5-haiku": {
+      "prompt": "0.80",
+      "completion": "4.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "claude-3-opus": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-opus-4": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-opus-4.5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-sonnet-4": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-5-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-5-haiku": {
+      "prompt": "0.80",
+      "completion": "4.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-opus": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "gpt-4o": {
+      "prompt": "2.50",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "gpt-4o-mini": {
+      "prompt": "0.15",
+      "completion": "0.60",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "openai/gpt-4o": {
+      "prompt": "2.50",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    },
+    "openai/gpt-4o-mini": {
+      "prompt": "0.15",
+      "completion": "0.60",
+      "request": "0",
+      "image": "0",
+      "context_length": 128000
+    }
+  },
   "nosana": {
     "meta-llama/Llama-3.3-70B-Instruct": {
       "prompt": "0.90",
@@ -1327,12 +1639,13 @@
     }
   },
   "_metadata": {
-    "last_updated": "2026-01-20",
+    "last_updated": "2026-01-26",
     "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",
     "sources": [
       "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference, image generation, and speech-to-text)",
       "https://openai.com/api/pricing (OpenAI - official API pricing)",
       "https://www.anthropic.com/pricing (Anthropic - Claude models pricing)",
+      "https://ai.google.dev/gemini-api/docs/pricing (Google AI - Gemini models pricing)",
       "https://deepinfra.com/pricing",
       "https://featherless.ai/pricing",
       "https://chutes.ai/pricing",
@@ -1346,7 +1659,9 @@
       "https://www.together.ai/pricing (Together AI - 200+ models)",
       "https://akashml.com (Akash Network - decentralized AI inference)",
       "https://developers.cloudflare.com/workers-ai/platform/pricing/ (Cloudflare Workers AI - neuron-based pricing)",
-      "https://nosana.com (Nosana - distributed GPU computing network)"
+      "https://nosana.com (Nosana - distributed GPU computing network)",
+      "https://docs.helicone.ai (Helicone - AI gateway with observability, uses underlying provider pricing)",
+      "https://vercel.com/docs/ai-gateway (Vercel AI Gateway - unified interface to multiple AI providers)"
     ],
     "currency": "USD",
     "units": "per 1M tokens (unless specified otherwise)"
