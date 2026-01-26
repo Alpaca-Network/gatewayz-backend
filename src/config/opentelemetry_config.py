@@ -17,8 +17,6 @@ import logging
 import socket
 from urllib.parse import urlparse
 
-import requests
-
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
 try:
     from opentelemetry import trace
@@ -47,57 +45,37 @@ from src.utils.resilient_span_processor import ResilientSpanProcessor
 logger = logging.getLogger(__name__)
 
 
-def _check_endpoint_reachable(endpoint: str, timeout: float = 5.0) -> bool:
+def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
     """
     Check if the OTLP endpoint is reachable.
 
-    For HTTPS endpoints (Railway public URLs), we do an actual HTTP POST request
-    since TCP socket checks may not work properly with Railway's proxy layer.
-
     Args:
-        endpoint: The OTLP endpoint URL (including /v1/traces path)
+        endpoint: The OTLP endpoint URL
         timeout: Connection timeout in seconds
 
     Returns:
         bool: True if endpoint is reachable, False otherwise
     """
     try:
+        # Parse the endpoint URL
         parsed = urlparse(endpoint)
         host = parsed.hostname
+        port = parsed.port
 
         if not host:
             logger.warning(f"Invalid endpoint URL: {endpoint}")
             return False
 
-        # For endpoints with /v1/traces path, do an actual HTTP POST request
-        # This properly validates that Tempo's OTLP receiver is working
-        if "/v1/traces" in endpoint:
-            try:
-                # Send empty protobuf to the traces endpoint
-                # Tempo returns 200 for valid (even empty) requests
-                response = requests.post(
-                    endpoint,
-                    data=b"",
-                    headers={"Content-Type": "application/x-protobuf"},
-                    timeout=timeout,
-                )
-                # 200 = success, 400 = bad request (but reachable), 415 = wrong content type (but reachable)
-                if response.status_code in (200, 400, 415):
-                    logger.debug(f"Successfully reached {endpoint} (HTTP {response.status_code})")
-                    return True
-                else:
-                    logger.warning(
-                        f"Tempo endpoint returned unexpected status {response.status_code}: {response.text[:100]}"
-                    )
-                    return False
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Cannot reach Tempo endpoint {endpoint}: {e}")
-                return False
-
-        # For other HTTP endpoints, use TCP socket check
-        port = parsed.port
+        # Default port if not specified
         if not port:
-            port = 4318 if parsed.scheme == "http" else 4317
+            # For HTTPS URLs (Railway public endpoints), use 443 (standard HTTPS port)
+            # Railway proxies HTTPS (443) to internal service ports
+            if parsed.scheme == "https":
+                port = 443
+            elif parsed.scheme == "http":
+                port = 4318
+            else:
+                port = 4317  # gRPC default
 
         # Try to resolve the hostname (DNS check)
         try:
@@ -209,13 +187,8 @@ class OpenTelemetryConfig:
                 logger.info(f"   Railway public deployment detected - using HTTPS proxy")
                 logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
-            # CRITICAL: OTLPSpanExporter does NOT auto-append /v1/traces when using
-            # the endpoint parameter. We must append it manually.
-            # Only append if not already present (to avoid double-path issues)
-            if not tempo_endpoint.rstrip("/").endswith("/v1/traces"):
-                tempo_endpoint = f"{tempo_endpoint.rstrip('/')}/v1/traces"
-
-            logger.info(f"   Tempo endpoint (full path): {tempo_endpoint}")
+            logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
+            logger.info(f"   [DEBUG] Full OTLP path will be: {tempo_endpoint}/v1/traces")
 
             # Check if Tempo endpoint is reachable before attempting to create exporter
             # This check can be skipped with TEMPO_SKIP_REACHABILITY_CHECK=true for async/lazy connections
@@ -252,22 +225,29 @@ class OpenTelemetryConfig:
                 # Railway internal DNS is fast, but cross-project public URLs need more time
                 timeout_seconds = 30 if ".railway.app" in tempo_endpoint else 10
 
-                # NOTE: OTLPSpanExporter does NOT auto-append /v1/traces when using
-                # the endpoint parameter. We append it above before reaching here.
+                # NOTE: The OTLPSpanExporter from opentelemetry-exporter-otlp-proto-http
+                # AUTOMATICALLY appends /v1/traces to the endpoint URL.
+                # See: https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/trace_exporter/__init__.py
+                # DO NOT manually append /v1/traces - it will result in /v1/traces/v1/traces (404 error)
+
+                # Ensure endpoint ends with / for proper path joining
+                base_endpoint = tempo_endpoint.rstrip("/") + "/"
+
                 logger.info(
-                    f"   [DEBUG] Creating OTLP HTTP exporter with endpoint: {tempo_endpoint}"
+                    f"   [DEBUG] Creating OTLP HTTP exporter with base endpoint: {base_endpoint}"
                 )
                 logger.info(f"   [DEBUG] Timeout: {timeout_seconds}s")
+                logger.info(f"   [DEBUG] Note: OTLPSpanExporter will auto-append /v1/traces")
 
                 otlp_exporter = OTLPSpanExporter(
-                    endpoint=tempo_endpoint,  # Full path including /v1/traces
+                    endpoint=base_endpoint,  # Base URL only - exporter appends /v1/traces automatically
                     headers={},  # Add authentication headers if needed
                     timeout=timeout_seconds,
                 )
 
                 # Log the actual endpoint the exporter is using
                 logger.info(f"   [DEBUG] OTLP exporter created successfully")
-                logger.info(f"   [DEBUG] Will POST traces to: {tempo_endpoint}")
+                logger.info(f"   [DEBUG] Traces will be sent to: {base_endpoint}v1/traces")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:
                 logger.error(
@@ -291,9 +271,7 @@ class OpenTelemetryConfig:
                 # Wrap with resilient processor to handle connection errors gracefully
                 resilient_processor = ResilientSpanProcessor(batch_processor)
                 cls._tracer_provider.add_span_processor(resilient_processor)
-                logger.info(
-                    "   Resilient batch span processor configured (queue: 2048, batch: 512)"
-                )
+                logger.info("   Resilient batch span processor configured (queue: 2048, batch: 512)")
                 logger.info("   Circuit breaker enabled to handle connection failures")
             except Exception as e:
                 logger.error(
@@ -470,43 +448,3 @@ def get_current_span_id() -> str | None:
     except Exception:
         pass
     return None
-
-
-def test_trace_export() -> dict:
-    """
-    Create a test span and attempt to flush it to Tempo.
-    Returns diagnostic information about the export attempt.
-    """
-    if not OPENTELEMETRY_AVAILABLE:
-        return {"status": "error", "message": "OpenTelemetry not available"}
-
-    if not OpenTelemetryConfig._initialized:
-        return {"status": "error", "message": "OpenTelemetry not initialized"}
-
-    try:
-        # Create a test tracer
-        tracer = trace.get_tracer("test-tracer")
-
-        # Create a test span
-        with tracer.start_as_current_span("test-trace-export") as span:
-            span.set_attribute("test.type", "diagnostic")
-            span.set_attribute("test.timestamp", str(int(__import__("time").time())))
-            trace_id = format(span.get_span_context().trace_id, "032x")
-            span_id = format(span.get_span_context().span_id, "016x")
-
-        # Force flush to send traces immediately
-        if OpenTelemetryConfig._tracer_provider:
-            flush_result = OpenTelemetryConfig._tracer_provider.force_flush(timeout_millis=10000)
-            return {
-                "status": "success" if flush_result else "flush_failed",
-                "trace_id": trace_id,
-                "span_id": span_id,
-                "flush_result": flush_result,
-                "message": "Test span created and flush attempted. Check Tempo for trace_id: "
-                + trace_id,
-            }
-        else:
-            return {"status": "error", "message": "Tracer provider not available"}
-
-    except Exception as e:
-        return {"status": "error", "message": str(e), "error_type": type(e).__name__}
