@@ -451,6 +451,10 @@ class TestUserProfileResponse:
             user_id=1,
             api_key="gw_live_key",
             credits=100,
+            subscription_allowance=1500,  # $15.00 in cents
+            purchased_credits=500,  # $5.00 in cents
+            total_credits=2000,  # $20.00 in cents
+            allowance_reset_date="2024-01-01T00:00:00Z",
             username="testuser",
             email="test@example.com",
             auth_method="email",
@@ -466,6 +470,73 @@ class TestUserProfileResponse:
         assert response.email == "test@example.com"
         assert response.is_active is True
         assert response.subscription_status == "active"
+        # Verify tiered credit fields
+        assert response.subscription_allowance == 1500
+        assert response.purchased_credits == 500
+        assert response.total_credits == 2000
+        assert response.allowance_reset_date == "2024-01-01T00:00:00Z"
+
+    def test_create_with_tiered_credits_for_pro_user(self):
+        """Test creating profile response with tiered credits for a PRO user"""
+        from src.schemas.users import UserProfileResponse
+
+        response = UserProfileResponse(
+            user_id=1,
+            api_key="gw_live_key",
+            credits=1500,  # Total credits in cents ($15.00)
+            subscription_allowance=1500,  # PRO tier monthly allowance in cents
+            purchased_credits=0,  # No purchased credits
+            total_credits=1500,
+            allowance_reset_date="2024-02-01T00:00:00Z",
+            username="prouser",
+            email="pro@example.com",
+            auth_method="email",
+            subscription_status="active",
+            tier="pro",
+            tier_display_name="Pro",
+            trial_expires_at=None,
+            is_active=True,
+            registration_date="2024-01-01",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-15T12:00:00Z"
+        )
+
+        assert response.tier == "pro"
+        assert response.tier_display_name == "Pro"
+        assert response.subscription_allowance == 1500
+        assert response.purchased_credits == 0
+        assert response.total_credits == 1500
+
+    def test_create_with_tiered_credits_for_max_user(self):
+        """Test creating profile response with tiered credits for a MAX user"""
+        from src.schemas.users import UserProfileResponse
+
+        response = UserProfileResponse(
+            user_id=2,
+            api_key="gw_live_key",
+            credits=16000,  # Total credits in cents ($160.00)
+            subscription_allowance=15000,  # MAX tier monthly allowance in cents ($150.00)
+            purchased_credits=1000,  # $10.00 purchased credits
+            total_credits=16000,
+            allowance_reset_date="2024-02-01T00:00:00Z",
+            username="maxuser",
+            email="max@example.com",
+            auth_method="email",
+            subscription_status="active",
+            tier="max",
+            tier_display_name="MAX",
+            trial_expires_at=None,
+            is_active=True,
+            registration_date="2024-01-01",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-15T12:00:00Z"
+        )
+
+        assert response.tier == "max"
+        assert response.tier_display_name == "MAX"
+        assert response.subscription_allowance == 15000
+        assert response.purchased_credits == 1000
+        assert response.total_credits == 16000
 
 
 class TestDeleteAccountRequest:

@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
+    # Z.AI GLM models - route to Z.AI gateway
+    "zai/glm-4.7": "zai",
+    "zai/glm-4.6v": "zai",
+    "zai/glm-4.5-air": "zai",
+    "zai/glm-4.5": "zai",
+    "glm-4.7": "zai",
+    "glm-4.6v": "zai",
+    "glm-4.5-air": "zai",
+    "glm-4.5": "zai",
     # Featherless-only models - not available on OpenRouter
     "c10x/longwriter-qwen2.5-7b-instruct": "featherless",
     # Meta Llama model ID aliases (support both meta/ and meta-llama/)
@@ -54,6 +63,61 @@ MODEL_PROVIDER_OVERRIDES = {
     "deepseek-chat-v3": "openrouter",
     "deepseek-chat-v3.1": "openrouter",
     "deepseek-chat-v3-0324": "openrouter",
+    # Google Gemini models - route to Google Vertex AI by default
+    # Gemini 3 series
+    "gemini-3": "google-vertex",
+    "gemini-3-flash": "google-vertex",
+    "gemini-3-flash-preview": "google-vertex",
+    "gemini-3-pro": "google-vertex",
+    "gemini-3-pro-preview": "google-vertex",
+    "google/gemini-3": "google-vertex",
+    "google/gemini-3-flash": "google-vertex",
+    "google/gemini-3-flash-preview": "google-vertex",
+    "google/gemini-3-pro": "google-vertex",
+    "google/gemini-3-pro-preview": "google-vertex",
+    # Gemini 2.5 series
+    "gemini-2.5": "google-vertex",
+    "gemini-2.5-flash": "google-vertex",
+    "gemini-2.5-flash-lite": "google-vertex",
+    "gemini-2.5-flash-preview": "google-vertex",
+    "gemini-2.5-flash-image": "google-vertex",
+    "gemini-2.5-pro": "google-vertex",
+    "gemini-2.5-pro-preview": "google-vertex",
+    "google/gemini-2.5": "google-vertex",
+    "google/gemini-2.5-flash": "google-vertex",
+    "google/gemini-2.5-flash-lite": "google-vertex",
+    "google/gemini-2.5-flash-preview": "google-vertex",
+    "google/gemini-2.5-flash-image": "google-vertex",
+    "google/gemini-2.5-pro": "google-vertex",
+    "google/gemini-2.5-pro-preview": "google-vertex",
+    # Gemini 2.0 series
+    "gemini-2.0": "google-vertex",
+    "gemini-2.0-flash": "google-vertex",
+    "gemini-2.0-flash-thinking": "google-vertex",
+    "gemini-2.0-flash-exp": "google-vertex",
+    "gemini-2.0-pro": "google-vertex",
+    "google/gemini-2.0": "google-vertex",
+    "google/gemini-2.0-flash": "google-vertex",
+    "google/gemini-2.0-flash-thinking": "google-vertex",
+    "google/gemini-2.0-flash-exp": "google-vertex",
+    "google/gemini-2.0-pro": "google-vertex",
+    # Gemini 1.5 series (legacy)
+    "gemini-1.5": "google-vertex",
+    "gemini-1.5-flash": "google-vertex",
+    "gemini-1.5-pro": "google-vertex",
+    "google/gemini-1.5": "google-vertex",
+    "google/gemini-1.5-flash": "google-vertex",
+    "google/gemini-1.5-pro": "google-vertex",
+    # Gemini 1.0 series
+    "gemini-1.0": "google-vertex",
+    "gemini-1.0-pro": "google-vertex",
+    "gemini-1.0-pro-vision": "google-vertex",
+    "google/gemini-1.0": "google-vertex",
+    "google/gemini-1.0-pro": "google-vertex",
+    "google/gemini-1.0-pro-vision": "google-vertex",
+    # Generic Gemini (any variant not explicitly matched)
+    "gemini": "google-vertex",
+    "google/gemini": "google-vertex",
     # Note: Cerebras DOES support Llama models natively (3.1 and 3.3 series)
     # No override needed - let natural provider detection route to Cerebras
 }
@@ -61,6 +125,24 @@ MODEL_PROVIDER_OVERRIDES = {
 # Canonical aliases for commonly mistyped or reformatted model IDs.
 # Keep keys in lowercase to simplify lookups.
 MODEL_ID_ALIASES = {
+    # OpenAI GPT models without org prefix - map to canonical openai/ prefix
+    # This ensures proper provider routing (locks to OpenRouter) and failover behavior
+    "gpt-4": "openai/gpt-4",
+    "gpt-4-turbo": "openai/gpt-4-turbo",
+    "gpt-4-turbo-preview": "openai/gpt-4-turbo-preview",
+    "gpt-4o": "openai/gpt-4o",
+    "gpt-4o-mini": "openai/gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18": "openai/gpt-4o-mini-2024-07-18",
+    "gpt-4o-2024-05-13": "openai/gpt-4o-2024-05-13",
+    "gpt-4o-2024-08-06": "openai/gpt-4o-2024-08-06",
+    "gpt-4o-2024-11-20": "openai/gpt-4o-2024-11-20",
+    "gpt-4-0125-preview": "openai/gpt-4-0125-preview",
+    "gpt-4-1106-preview": "openai/gpt-4-1106-preview",
+    "gpt-4-vision-preview": "openai/gpt-4-vision-preview",
+    "gpt-3.5-turbo": "openai/gpt-3.5-turbo",
+    "gpt-3.5-turbo-16k": "openai/gpt-3.5-turbo-16k",
+    "gpt-3.5-turbo-0125": "openai/gpt-3.5-turbo-0125",
+    "gpt-3.5-turbo-1106": "openai/gpt-3.5-turbo-1106",
     # GPT-5.1 variants (hyphen, underscore, missing org, etc.)
     "openai/gpt-5-1": "openai/gpt-5.1",
     "openai/gpt5-1": "openai/gpt-5.1",
@@ -88,7 +170,13 @@ MODEL_ID_ALIASES = {
     "o4-mini-high": "openai/o4-mini-high",
     "o4-mini-deep-research": "openai/o4-mini-deep-research",
     # Anthropic Claude models - aliases for version variants
-    # Claude 3.5 Haiku
+    # This ensures proper provider routing (locks to OpenRouter) and failover behavior
+    # Claude 3 base models
+    "claude-3-opus": "anthropic/claude-3-opus",
+    "claude-3-sonnet": "anthropic/claude-3-sonnet",
+    "claude-3-haiku": "anthropic/claude-3-haiku",
+    # Claude 3.5 models
+    "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
     "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
     # Claude 3.7 Sonnet
     "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
@@ -102,6 +190,21 @@ MODEL_ID_ALIASES = {
     # Claude 4 series - Sonnet variants
     "claude-sonnet-4": "anthropic/claude-sonnet-4",
     "sonnet-4": "anthropic/claude-sonnet-4",
+    # Claude 4.5 series - Sonnet variants (Anthropic native dated format used by Claude Code)
+    "claude-sonnet-4-20250514": "anthropic/claude-sonnet-4.5",
+    "claude-sonnet-4.5-20250514": "anthropic/claude-sonnet-4.5",
+    "claude-4-5-sonnet-20250514": "anthropic/claude-sonnet-4.5",
+    "claude-4.5-sonnet-20250514": "anthropic/claude-sonnet-4.5",
+    "sonnet-4.5": "anthropic/claude-sonnet-4.5",
+    "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
+    # Claude 4.5 series - Opus variants (Anthropic native dated format used by Claude Code)
+    "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+    "claude-opus-4.5-20250514": "anthropic/claude-opus-4.5",
+    "claude-4-5-opus-20250514": "anthropic/claude-opus-4.5",
+    "claude-4.5-opus-20250514": "anthropic/claude-opus-4.5",
+    # Claude 3.5 series (Anthropic native dated formats)
+    "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
+    "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
     # Claude 4 series - Haiku variants
     "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
     "haiku-4.5": "anthropic/claude-haiku-4.5",
@@ -341,11 +444,11 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
         model_id = stripped
 
-    # Special handling for OneRouter: strip 'onerouter/' prefix if present
-    # OneRouter API expects just the model name without the provider prefix
+    # Special handling for Infron AI: strip 'onerouter/' prefix if present
+    # Infron AI API expects just the model name without the provider prefix
     if provider_lower == "onerouter" and model_id.startswith("onerouter/"):
         stripped = model_id[len("onerouter/") :]
-        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for OneRouter")
+        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for Infron AI")
         model_id = stripped
 
     # Get the mapping for this provider
@@ -478,6 +581,18 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_5,
             "claude-opus-4.5": "anthropic/claude-opus-4.5",
             "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+            # Claude Code native format (Anthropic API dated model IDs)
+            "claude-sonnet-4-20250514": CLAUDE_SONNET_4_5,
+            "claude-sonnet-4.5-20250514": CLAUDE_SONNET_4_5,
+            "claude-4-5-sonnet-20250514": CLAUDE_SONNET_4_5,
+            "claude-4.5-sonnet-20250514": CLAUDE_SONNET_4_5,
+            "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+            "claude-opus-4.5-20250514": "anthropic/claude-opus-4.5",
+            "claude-4-5-opus-20250514": "anthropic/claude-opus-4.5",
+            "claude-4.5-opus-20250514": "anthropic/claude-opus-4.5",
+            # Claude 3.5 series (Anthropic native dated formats)
+            "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
+            "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
             # Google Gemini models on OpenRouter
             "google/gemini-3-flash-preview": "google/gemini-3-flash-preview",
             "google/gemini-3-pro-preview": "google/gemini-3-pro-preview",
@@ -1114,9 +1229,9 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "deepseek-r1": "deepseek-r1",
         },
         "onerouter": {
-            # OneRouter uses OpenAI-compatible model identifiers with @ versioning
+            # Infron AI uses OpenAI-compatible model identifiers with @ versioning
             # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
-            # Models are dynamically fetched from OneRouter's /v1/models endpoint
+            # Models are dynamically fetched from Infron AI's /v1/models endpoint
             # Strip onerouter/ prefix for actual API calls
             "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
             "onerouter/gpt-4": "gpt-4@latest",
@@ -1127,7 +1242,7 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gpt-4@latest": "gpt-4@latest",
             "gpt-4o@latest": "gpt-4o@latest",
             "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
-            # Models can also use simpler names - OneRouter handles routing
+            # Models can also use simpler names - Infron AI handles routing
             "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
             "gpt-4": "gpt-4@latest",
             "gpt-4o": "gpt-4o@latest",
@@ -1380,6 +1495,19 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.info(f"Routing @ prefix model {model_id} to openrouter (Portkey removed)")
             return "openrouter"
 
+    # PRIORITY: Route OpenAI and Anthropic models to their native providers first
+    # This must be checked BEFORE the mapping loop to ensure these models aren't
+    # incorrectly routed to OpenRouter (which also has these models in its mapping)
+    # Failover to OpenRouter is handled separately by provider_failover.py
+    if "/" in model_id:
+        prefix = model_id.split("/", 1)[0].lower()
+        if prefix == "openai":
+            logger.info(f"Routing '{model_id}' to native OpenAI provider")
+            return "openai"
+        if prefix == "anthropic":
+            logger.info(f"Routing '{model_id}' to native Anthropic provider")
+            return "anthropic"
+
     # Check all mappings to see if this model exists
     # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
@@ -1451,7 +1579,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org == "morpheus":
             return "morpheus"
 
-        # OneRouter models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
+        # Infron AI models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
         if org == "onerouter":
             return "onerouter"
 
@@ -1482,13 +1610,15 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
             return "fireworks"
 
-        # OpenAI models go to OpenRouter
+        # OpenAI models go to native OpenAI provider first
+        # Failover to OpenRouter is handled by provider_failover.py
         if org == "openai":
-            return "openrouter"
+            return "openai"
 
-        # Anthropic models go to OpenRouter
+        # Anthropic models go to native Anthropic provider first
+        # Failover to OpenRouter is handled by provider_failover.py
         if org == "anthropic":
-            return "openrouter"
+            return "anthropic"
 
         # Fal.ai models (e.g., "fal-ai/stable-diffusion-v15", "minimax/video-01")
         if org == "fal-ai" or org in [

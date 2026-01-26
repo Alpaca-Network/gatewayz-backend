@@ -1,85 +1,17 @@
 """
 Pricing Analytics Service
-Integrates pricing_calculator.py with request tracking for admin analytics
+
+Provides admin analytics for model usage and costs. Pricing data is stored
+in the model_pricing database table and queried via the model_usage_analytics view.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-# Import the pricing calculator
-import sys
-from pathlib import Path
-
-# Add project root to path to import pricing_calculator
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from pricing_calculator import (
-    calculate_model_cost,
-    get_provider_standard,
-    normalize_to_per_token,
-)
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
-
-
-def calculate_request_cost_with_standard(
-    provider: str,
-    model_data: Dict[str, Any],
-    prompt_tokens: int,
-    completion_tokens: int
-) -> Dict[str, Any]:
-    """
-    Calculate cost for a request using provider pricing standards
-
-    Args:
-        provider: Provider name (e.g., 'openrouter', 'deepinfra')
-        model_data: Model data including pricing and modality
-        prompt_tokens: Number of prompt tokens
-        completion_tokens: Number of completion tokens
-
-    Returns:
-        Dict with cost breakdown:
-        {
-            "total_cost": float,
-            "input_cost": float,
-            "output_cost": float,
-            "pricing_source": str,
-            "provider": str,
-            "modality": str
-        }
-    """
-    try:
-        # Use pricing calculator
-        usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens
-        }
-
-        cost_data = calculate_model_cost(provider, model_data, usage)
-
-        return {
-            "total_cost": cost_data.get("total_cost", 0.0),
-            "input_cost": cost_data.get("prompt_cost", 0.0),
-            "output_cost": cost_data.get("completion_cost", 0.0),
-            "pricing_source": "pricing_calculator",
-            "provider": provider,
-            "modality": cost_data.get("modality", "unknown")
-        }
-
-    except Exception as e:
-        logger.error(f"Error calculating cost with pricing standard: {e}")
-        # Fallback to simple calculation
-        return {
-            "total_cost": (prompt_tokens + completion_tokens) * 0.00002,
-            "input_cost": prompt_tokens * 0.00002,
-            "output_cost": completion_tokens * 0.00002,
-            "pricing_source": "fallback",
-            "provider": provider,
-            "modality": "unknown"
-        }
 
 
 def get_model_usage_analytics(

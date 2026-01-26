@@ -99,6 +99,13 @@ _nebius_models_cache = {
 
 _xai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
+_zai_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,
+    "stale_ttl": 7200,
+}  # 1 hour TTL for Z.AI
+
 _novita_models_cache = {
     "data": None,
     "timestamp": None,
@@ -182,7 +189,7 @@ _alibaba_models_cache = {
 _onerouter_models_cache = {
     "data": None,
     "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for OneRouter catalog
+    "ttl": 3600,  # 1 hour TTL for Infron AI (formerly OneRouter) catalog
     "stale_ttl": 7200,
 }
 
@@ -228,6 +235,13 @@ _sybil_models_cache = {
     "stale_ttl": 7200,
 }
 
+_canopywave_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Canopy Wave catalog
+    "stale_ttl": 7200,
+}
+
 _morpheus_models_cache = {
     "data": None,
     "timestamp": None,
@@ -259,6 +273,7 @@ def get_models_cache(gateway: str):
         "cerebras": _cerebras_models_cache,
         "nebius": _nebius_models_cache,
         "xai": _xai_models_cache,
+        "zai": _zai_models_cache,
         "novita": _novita_models_cache,
         "huggingface": _huggingface_models_cache,
         "hug": _huggingface_models_cache,  # Alias for backward compatibility
@@ -277,6 +292,7 @@ def get_models_cache(gateway: str):
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
         "sybil": _sybil_models_cache,
+        "canopywave": _canopywave_models_cache,
         "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }
@@ -302,6 +318,7 @@ def clear_models_cache(gateway: str):
         "cerebras": _cerebras_models_cache,
         "nebius": _nebius_models_cache,
         "xai": _xai_models_cache,
+        "zai": _zai_models_cache,
         "novita": _novita_models_cache,
         "huggingface": _huggingface_models_cache,
         "hug": _huggingface_models_cache,  # Alias for backward compatibility
@@ -320,6 +337,7 @@ def clear_models_cache(gateway: str):
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
         "sybil": _sybil_models_cache,
+        "canopywave": _canopywave_models_cache,
         "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }

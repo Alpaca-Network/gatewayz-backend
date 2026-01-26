@@ -36,6 +36,7 @@ try:
 except Exception as e:
     logger.warning(f"Could not clear Prometheus registry: {e}")
 
+
 # Helper function to handle metric registration with --reload support
 def get_or_create_metric(metric_class, name, *args, **kwargs):
     """
@@ -45,7 +46,7 @@ def get_or_create_metric(metric_class, name, *args, **kwargs):
     # IMPORTANT: Check for existing metric FIRST (before trying to create)
     # This prevents duplication errors during reload
     for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name:
+        if hasattr(collector, "_name") and collector._name == name:
             logger.debug(f"Reusing existing metric: {name}")
             return collector
 
@@ -57,13 +58,10 @@ def get_or_create_metric(metric_class, name, *args, **kwargs):
         logger.warning(f"Unexpected duplicate metric error for {name}: {e}")
         raise
 
+
 # ==================== Application Info ====================
 # This metric helps Grafana dashboard populate the app_name variable dropdown
-fastapi_app_info = get_or_create_metric(
-    Info,
-    "fastapi_app_info",
-    "FastAPI application information"
-)
+fastapi_app_info = get_or_create_metric(Info, "fastapi_app_info", "FastAPI application information")
 # Set the app_name label value after creation (idempotent operation)
 try:
     fastapi_app_info.info({"app_name": APP_NAME})
@@ -79,27 +77,31 @@ fastapi_requests_total = get_or_create_metric(
     ["app_name", "method", "path", "status_code"],
 )
 
-fastapi_requests_duration_seconds = get_or_create_metric(Histogram,
+fastapi_requests_duration_seconds = get_or_create_metric(
+    Histogram,
     "fastapi_requests_duration_seconds",
     "FastAPI request duration in seconds",
     ["app_name", "method", "path"],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
 )
 
-fastapi_requests_in_progress = get_or_create_metric(Gauge,
+fastapi_requests_in_progress = get_or_create_metric(
+    Gauge,
     "fastapi_requests_in_progress",
     "Number of HTTP requests currently being processed",
     ["app_name", "method", "path"],
 )
 
 # Legacy metrics for backward compatibility
-http_request_count = get_or_create_metric(Counter,
+http_request_count = get_or_create_metric(
+    Counter,
     "http_requests_total",
     "Total HTTP requests by method, endpoint and status code",
     ["method", "endpoint", "status_code"],
 )
 
-http_request_duration = get_or_create_metric(Histogram,
+http_request_duration = get_or_create_metric(
+    Histogram,
     "http_request_duration_seconds",
     "HTTP request duration in seconds by method and endpoint",
     ["method", "endpoint"],
@@ -107,14 +109,16 @@ http_request_duration = get_or_create_metric(Histogram,
 )
 
 # Additional metrics for request/response size tracking
-fastapi_request_size_bytes = get_or_create_metric(Histogram,
+fastapi_request_size_bytes = get_or_create_metric(
+    Histogram,
     "fastapi_request_size_bytes",
     "HTTP request body size in bytes",
     ["app_name", "method", "path"],
     buckets=(100, 1000, 10000, 100000, 1000000),
 )
 
-fastapi_response_size_bytes = get_or_create_metric(Histogram,
+fastapi_response_size_bytes = get_or_create_metric(
+    Histogram,
     "fastapi_response_size_bytes",
     "HTTP response body size in bytes",
     ["app_name", "method", "path"],
@@ -122,167 +126,374 @@ fastapi_response_size_bytes = get_or_create_metric(Histogram,
 )
 
 # Exception tracking for Grafana dashboard
-fastapi_exceptions_total = get_or_create_metric(Counter,
+fastapi_exceptions_total = get_or_create_metric(
+    Counter,
     "fastapi_exceptions_total",
     "Total FastAPI exceptions",
     ["app_name", "exception_type"],
 )
 
 # ==================== Model Inference Metrics ====================
-model_inference_requests = get_or_create_metric(Counter,
+model_inference_requests = get_or_create_metric(
+    Counter,
     "model_inference_requests_total",
     "Total model inference requests",
     ["provider", "model", "status"],
 )
 
-model_inference_duration = get_or_create_metric(Histogram,
+model_inference_duration = get_or_create_metric(
+    Histogram,
     "model_inference_duration_seconds",
     "Model inference duration in seconds",
     ["provider", "model"],
     buckets=(0.1, 0.5, 1, 2.5, 5, 10, 25, 60),
 )
 
-tokens_used = get_or_create_metric(Counter,
+tokens_used = get_or_create_metric(
+    Counter,
     "tokens_used_total",
     "Total tokens used (input + output)",
     ["provider", "model", "token_type"],
 )
 
-credits_used = get_or_create_metric(Counter,
+credits_used = get_or_create_metric(
+    Counter,
     "credits_used_total",
     "Total credits consumed",
     ["provider", "model"],
 )
 
+# ==================== Cost Tracking Metrics ====================
+# Track actual USD costs for billing and budget monitoring
+api_cost_usd_total = get_or_create_metric(
+    Counter,
+    "gatewayz_api_cost_usd_total",
+    "Total API cost in USD",
+    ["provider", "model"],
+)
+
+api_cost_per_request = get_or_create_metric(
+    Histogram,
+    "gatewayz_api_cost_per_request_usd",
+    "Cost per API request in USD",
+    ["provider", "model"],
+    buckets=(0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0),
+)
+
+cost_per_1k_tokens = get_or_create_metric(
+    Histogram,
+    "gatewayz_cost_per_1k_tokens_usd",
+    "Cost per 1000 tokens in USD",
+    ["provider", "model", "token_type"],  # token_type: input, output
+    buckets=(0.0001, 0.001, 0.01, 0.1, 1.0, 10.0),
+)
+
+daily_cost_estimate = get_or_create_metric(
+    Gauge,
+    "gatewayz_daily_cost_estimate_usd",
+    "Estimated daily cost in USD (updated hourly)",
+    ["provider"],
+)
+
+monthly_cost_estimate = get_or_create_metric(
+    Gauge,
+    "gatewayz_monthly_cost_estimate_usd",
+    "Estimated monthly cost in USD (updated daily)",
+    ["provider"],
+)
+
+# Cost savings from caching
+cache_cost_savings_usd = get_or_create_metric(
+    Counter,
+    "gatewayz_cache_cost_savings_usd_total",
+    "Total cost saved from cache hits in USD",
+    ["provider", "model", "cache_type"],  # cache_type: butter, redis, local
+)
+
+# User-level cost tracking (aggregated by plan type for privacy)
+user_cost_by_plan = get_or_create_metric(
+    Counter,
+    "gatewayz_user_cost_by_plan_usd_total",
+    "Total user costs by plan type in USD",
+    ["plan_type"],  # free, trial, starter, professional, enterprise
+)
+
 # ==================== Database Metrics ====================
-database_query_count = get_or_create_metric(Counter,
+database_query_count = get_or_create_metric(
+    Counter,
     "database_queries_total",
     "Total database queries",
     ["table", "operation"],
 )
 
-database_query_duration = get_or_create_metric(Summary,
+database_query_duration = get_or_create_metric(
+    Summary,
     "database_query_duration_seconds",
     "Database query duration in seconds",
     ["table"],
 )
 
 # ==================== Connection Pool Metrics ====================
-connection_pool_size = get_or_create_metric(Gauge,
+connection_pool_size = get_or_create_metric(
+    Gauge,
     "connection_pool_size",
     "Total number of connections in the pool",
     ["pool_name"],
 )
 
-connection_pool_active = get_or_create_metric(Gauge,
+connection_pool_active = get_or_create_metric(
+    Gauge,
     "connection_pool_active_connections",
     "Number of active connections currently in use",
     ["pool_name"],
 )
 
-connection_pool_idle = get_or_create_metric(Gauge,
+connection_pool_idle = get_or_create_metric(
+    Gauge,
     "connection_pool_idle_connections",
     "Number of idle connections available for use",
     ["pool_name"],
 )
 
-connection_pool_utilization = get_or_create_metric(Gauge,
+connection_pool_utilization = get_or_create_metric(
+    Gauge,
     "connection_pool_utilization_ratio",
     "Connection pool utilization ratio (active/total)",
     ["pool_name"],
 )
 
-connection_pool_errors = get_or_create_metric(Counter,
+connection_pool_errors = get_or_create_metric(
+    Counter,
     "connection_pool_errors_total",
     "Total number of connection pool errors",
     ["pool_name", "error_type"],
 )
 
 # ==================== Cache Metrics ====================
-cache_hits = get_or_create_metric(Counter,
+cache_hits = get_or_create_metric(
+    Counter,
     "cache_hits_total",
     "Total cache hits",
     ["cache_name"],
 )
 
-cache_misses = get_or_create_metric(Counter,
+cache_misses = get_or_create_metric(
+    Counter,
     "cache_misses_total",
     "Total cache misses",
     ["cache_name"],
 )
 
-cache_size = get_or_create_metric(Gauge,
+# ==================== Butter.dev Cache Metrics ====================
+# Metrics for tracking LLM response caching via Butter.dev
+butter_cache_requests = get_or_create_metric(
+    Counter,
+    "butter_cache_requests_total",
+    "Total requests routed through Butter.dev cache",
+    ["provider", "model", "cache_result"],  # cache_result: hit, miss, error, skipped
+)
+
+butter_cache_savings_usd = get_or_create_metric(
+    Counter,
+    "butter_cache_savings_usd_total",
+    "Total USD savings from Butter.dev cache hits",
+    ["provider", "model"],
+)
+
+butter_cache_latency = get_or_create_metric(
+    Histogram,
+    "butter_cache_latency_seconds",
+    "Butter.dev request latency in seconds",
+    ["provider", "cache_result"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+butter_cache_errors = get_or_create_metric(
+    Counter,
+    "butter_cache_errors_total",
+    "Total Butter.dev errors (triggers fallback to direct provider)",
+    ["provider", "error_type"],
+)
+
+
+def track_butter_cache_request(
+    provider: str,
+    model: str,
+    cache_result: str,
+    latency_seconds: float | None = None,
+    savings_usd: float | None = None,
+):
+    """
+    Track a Butter.dev cache request in Prometheus metrics.
+
+    Args:
+        provider: Provider slug (e.g., 'openrouter', 'fireworks')
+        model: Model name
+        cache_result: One of 'hit', 'miss', 'error', 'skipped'
+        latency_seconds: Request latency (optional)
+        savings_usd: Cost saved from cache hit (optional)
+    """
+    # Increment request counter
+    butter_cache_requests.labels(
+        provider=provider,
+        model=model,
+        cache_result=cache_result,
+    ).inc()
+
+    # Record latency if provided
+    if latency_seconds is not None:
+        butter_cache_latency.labels(
+            provider=provider,
+            cache_result=cache_result,
+        ).observe(latency_seconds)
+
+    # Track savings for cache hits
+    if cache_result == "hit" and savings_usd is not None and savings_usd > 0:
+        butter_cache_savings_usd.labels(
+            provider=provider,
+            model=model,
+        ).inc(savings_usd)
+
+
+def track_butter_cache_error(provider: str, error_type: str):
+    """
+    Track a Butter.dev error (e.g., timeout, connection error).
+
+    Args:
+        provider: Provider slug
+        error_type: Type of error (e.g., 'timeout', 'connection_error', 'api_error')
+    """
+    butter_cache_errors.labels(
+        provider=provider,
+        error_type=error_type,
+    ).inc()
+
+
+cache_size = get_or_create_metric(
+    Gauge,
     "cache_size_bytes",
     "Cache size in bytes",
     ["cache_name"],
 )
 
 # ==================== Rate Limiting Metrics ====================
-rate_limited_requests = get_or_create_metric(Counter,
+rate_limited_requests = get_or_create_metric(
+    Counter,
     "rate_limited_requests_total",
     "Total rate-limited requests",
     ["limit_type"],
 )
 
-current_rate_limit = get_or_create_metric(Gauge,
+current_rate_limit = get_or_create_metric(
+    Gauge,
     "current_rate_limit",
     "Current rate limit status",
     ["limit_type"],
 )
 
 # ==================== Provider Health Metrics ====================
-provider_availability = get_or_create_metric(Gauge,
+provider_availability = get_or_create_metric(
+    Gauge,
     "provider_availability",
     "Provider availability status (1=available, 0=unavailable)",
     ["provider"],
 )
 
-provider_error_rate = get_or_create_metric(Gauge,
+provider_error_rate = get_or_create_metric(
+    Gauge,
     "provider_error_rate",
     "Provider error rate (0-1)",
     ["provider"],
 )
 
-provider_response_time = get_or_create_metric(Histogram,
+provider_response_time = get_or_create_metric(
+    Histogram,
     "provider_response_time_seconds",
     "Provider response time in seconds",
     ["provider"],
     buckets=(0.1, 0.5, 1, 2.5, 5, 10),
 )
 
+# ==================== Zero-Model Event Metrics ====================
+# These metrics track when gateways/providers return zero models
+# Critical for monitoring provider health and fallback activation
+
+gateway_zero_model_events = get_or_create_metric(Counter,
+    "gateway_zero_model_events_total",
+    "Total zero-model events by gateway (when API returns 0 models)",
+    ["gateway", "reason"],  # reason: api_empty, cache_empty, below_threshold, timeout
+)
+
+gateway_model_count = get_or_create_metric(Gauge,
+    "gateway_model_count",
+    "Current number of models available per gateway",
+    ["gateway"],
+)
+
+gateway_fallback_activations = get_or_create_metric(Counter,
+    "gateway_fallback_activations_total",
+    "Total fallback activations when primary gateway returns zero models",
+    ["primary_gateway", "fallback_source"],  # fallback_source: database, cache, static
+)
+
+gateway_recovery_events = get_or_create_metric(Counter,
+    "gateway_recovery_events_total",
+    "Total recovery events when gateway returns models after zero-model state",
+    ["gateway"],
+)
+
+gateway_health_check_duration = get_or_create_metric(Histogram,
+    "gateway_health_check_duration_seconds",
+    "Duration of gateway health checks",
+    ["gateway", "status"],  # status: healthy, unhealthy, timeout
+    buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30),
+)
+
+gateway_auto_fix_attempts = get_or_create_metric(Counter,
+    "gateway_auto_fix_attempts_total",
+    "Total auto-fix attempts for failing gateways",
+    ["gateway", "result"],  # result: success, failure
+)
+
 # ==================== API Key Tracking Metrics ====================
-api_key_lookup_attempts = get_or_create_metric(Counter,
+api_key_lookup_attempts = get_or_create_metric(
+    Counter,
     "api_key_lookup_attempts_total",
     "Total API key lookup attempts",
     ["status"],  # success, failed, retry
 )
 
-api_key_tracking_success = get_or_create_metric(Counter,
+api_key_tracking_success = get_or_create_metric(
+    Counter,
     "api_key_tracking_success_total",
     "Chat requests with successfully tracked API key",
     ["request_type"],  # authenticated, anonymous
 )
 
-api_key_tracking_failures = get_or_create_metric(Counter,
+api_key_tracking_failures = get_or_create_metric(
+    Counter,
     "api_key_tracking_failures_total",
     "Chat requests with failed API key tracking",
     ["reason"],  # lookup_failed, not_found, anonymous
 )
 
-api_key_tracking_rate = get_or_create_metric(Gauge,
+api_key_tracking_rate = get_or_create_metric(
+    Gauge,
     "api_key_tracking_rate",
     "Current API key tracking success rate (0-1)",
 )
 
 
 # ==================== Authentication & API Key Metrics ====================
-api_key_usage = get_or_create_metric(Counter,
+api_key_usage = get_or_create_metric(
+    Counter,
     "api_key_usage_total",
     "Total API key usage",
     ["status"],
 )
 
-active_api_keys = get_or_create_metric(Gauge,
+active_api_keys = get_or_create_metric(
+    Gauge,
     "active_api_keys",
     "Number of active API keys",
     ["status"],
@@ -290,38 +501,44 @@ active_api_keys = get_or_create_metric(Gauge,
 
 # ==================== Business Metrics ====================
 # Free model usage tracking for expired trials
-free_model_usage = get_or_create_metric(Counter,
+free_model_usage = get_or_create_metric(
+    Counter,
     "free_model_usage_total",
     "Total free model requests by user status (expired_trial, active_trial, paid)",
     ["user_status", "model"],
 )
 
-user_credit_balance = get_or_create_metric(Gauge,
+user_credit_balance = get_or_create_metric(
+    Gauge,
     "user_credit_balance",
     "Total user credit balance aggregated by plan type",
     ["plan_type"],
 )
 
-trial_status = get_or_create_metric(Gauge,
+trial_status = get_or_create_metric(
+    Gauge,
     "trial_active",
     "Active trials count",
     ["status"],
 )
 
-subscription_count = get_or_create_metric(Gauge,
+subscription_count = get_or_create_metric(
+    Gauge,
     "subscription_count",
     "Active subscriptions",
     ["plan_type", "billing_cycle"],
 )
 
 # ==================== System Metrics ====================
-active_connections = get_or_create_metric(Gauge,
+active_connections = get_or_create_metric(
+    Gauge,
     "active_connections",
     "Number of active connections",
     ["connection_type"],
 )
 
-queue_size = get_or_create_metric(Gauge,
+queue_size = get_or_create_metric(
+    Gauge,
     "queue_size",
     "Queue size for prioritization",
     ["queue_name"],
@@ -329,14 +546,16 @@ queue_size = get_or_create_metric(Gauge,
 
 # ==================== Performance Stage Metrics ====================
 # Detailed stage breakdown metrics for performance profiling
-backend_ttfb_seconds = get_or_create_metric(Histogram,
+backend_ttfb_seconds = get_or_create_metric(
+    Histogram,
     "backend_ttfb_seconds",
     "Backend API time to first byte (TTFB) in seconds",
     ["provider", "model", "endpoint"],
     buckets=(0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 5.0, 10.0),
 )
 
-streaming_duration_seconds = get_or_create_metric(Histogram,
+streaming_duration_seconds = get_or_create_metric(
+    Histogram,
     "streaming_duration_seconds",
     "Time spent streaming response to client in seconds",
     ["provider", "model", "endpoint"],
@@ -345,21 +564,24 @@ streaming_duration_seconds = get_or_create_metric(Histogram,
 
 # TTFC (Time to First Chunk) - Critical metric for perceived streaming latency
 # Measures time from stream_generator() entry to first SSE chunk yielded
-time_to_first_chunk_seconds = get_or_create_metric(Histogram,
+time_to_first_chunk_seconds = get_or_create_metric(
+    Histogram,
     "time_to_first_chunk_seconds",
     "Time from stream start to first SSE chunk sent to client (TTFC)",
     ["provider", "model"],
     buckets=(0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 10.0, 15.0),
 )
 
-frontend_processing_seconds = get_or_create_metric(Histogram,
+frontend_processing_seconds = get_or_create_metric(
+    Histogram,
     "frontend_processing_seconds",
     "Frontend processing time (request parsing, auth, preparation) in seconds",
     ["endpoint"],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
 )
 
-request_stage_duration_seconds = get_or_create_metric(Histogram,
+request_stage_duration_seconds = get_or_create_metric(
+    Histogram,
     "request_stage_duration_seconds",
     "Duration of specific request processing stages in seconds",
     ["stage", "endpoint"],
@@ -367,7 +589,8 @@ request_stage_duration_seconds = get_or_create_metric(Histogram,
 )
 
 # Stage breakdown percentages
-stage_percentage = get_or_create_metric(Gauge,
+stage_percentage = get_or_create_metric(
+    Gauge,
     "stage_percentage",
     "Percentage of total request time spent in each stage",
     ["stage", "endpoint"],
@@ -398,9 +621,7 @@ def record_http_response(method: str, endpoint: str, status_code: int, app_name:
     ).inc()
 
     # Also record in legacy metrics for backward compatibility
-    http_request_count.labels(
-        method=method, endpoint=endpoint, status_code=status_code
-    ).inc()
+    http_request_count.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
 
 
 @contextmanager
@@ -415,29 +636,17 @@ def track_model_inference(provider: str, model: str):
         logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
         duration = time.time() - start_time
-        model_inference_duration.labels(provider=provider, model=model).observe(
-            duration
-        )
-        model_inference_requests.labels(
-            provider=provider, model=model, status=status
-        ).inc()
+        model_inference_duration.labels(provider=provider, model=model).observe(duration)
+        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
 
 
-def record_tokens_used(
-    provider: str, model: str, input_tokens: int, output_tokens: int
-):
+def record_tokens_used(provider: str, model: str, input_tokens: int, output_tokens: int):
     """Record token consumption metrics."""
-    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
-        input_tokens
-    )
-    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
-        output_tokens
-    )
+    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
+    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
 
 
-def record_credits_used(
-    provider: str, model: str, user_id: str, credits: float
-):
+def record_credits_used(provider: str, model: str, user_id: str, credits: float):
     """Record credit consumption metrics."""
     # Note: user_id parameter kept for backwards compatibility but not used in labels
     # (avoid exposing PII in metric labels)
@@ -462,6 +671,7 @@ def track_database_query(table: str, operation: str, query_description: str | No
     trace_supabase_query = None
     try:
         from src.utils.sentry_insights import trace_supabase_query as _trace_supabase_query
+
         trace_supabase_query = _trace_supabase_query
     except ImportError:
         pass  # Sentry insights not available
@@ -543,7 +753,9 @@ def record_cache_miss(cache_name: str, key: str | None = None):
             pass  # Sentry insights not available
 
 
-def record_cache_set(cache_name: str, key: str, item_size: int | None = None, ttl: int | None = None):
+def record_cache_set(
+    cache_name: str, key: str, item_size: int | None = None, ttl: int | None = None
+):
     """
     Record cache set operation with Sentry Cache Insights.
 
@@ -616,6 +828,86 @@ def track_provider_response_time(provider: str, duration: float):
     provider_response_time.labels(provider=provider).observe(duration)
 
 
+# ==================== Zero-Model Event Helper Functions ====================
+
+def record_zero_model_event(gateway: str, reason: str = "api_empty"):
+    """
+    Record a zero-model event for a gateway.
+
+    Args:
+        gateway: Gateway/provider name (e.g., "openrouter", "featherless")
+        reason: Reason for zero models:
+            - "api_empty": API returned empty response
+            - "cache_empty": Cache was empty/expired
+            - "below_threshold": Model count below minimum threshold
+            - "timeout": Request timed out
+            - "error": Other error occurred
+    """
+    gateway_zero_model_events.labels(gateway=gateway, reason=reason).inc()
+
+
+def set_gateway_model_count(gateway: str, count: int):
+    """
+    Set the current model count for a gateway.
+
+    Args:
+        gateway: Gateway/provider name
+        count: Number of models currently available
+    """
+    gateway_model_count.labels(gateway=gateway).set(count)
+
+
+def record_fallback_activation(primary_gateway: str, fallback_source: str = "database"):
+    """
+    Record a fallback activation event.
+
+    Args:
+        primary_gateway: Gateway that triggered the fallback
+        fallback_source: Source of fallback models:
+            - "database": Models from database
+            - "cache": Models from stale cache
+            - "static": Static fallback model list
+    """
+    gateway_fallback_activations.labels(
+        primary_gateway=primary_gateway,
+        fallback_source=fallback_source
+    ).inc()
+
+
+def record_gateway_recovery(gateway: str):
+    """
+    Record a recovery event when a gateway returns models after being in zero-model state.
+
+    Args:
+        gateway: Gateway/provider name that recovered
+    """
+    gateway_recovery_events.labels(gateway=gateway).inc()
+
+
+def track_gateway_health_check(gateway: str, status: str, duration: float):
+    """
+    Track gateway health check duration and status.
+
+    Args:
+        gateway: Gateway/provider name
+        status: Health check result ("healthy", "unhealthy", "timeout")
+        duration: Duration of the health check in seconds
+    """
+    gateway_health_check_duration.labels(gateway=gateway, status=status).observe(duration)
+
+
+def record_auto_fix_attempt(gateway: str, success: bool):
+    """
+    Record an auto-fix attempt for a failing gateway.
+
+    Args:
+        gateway: Gateway/provider name
+        success: Whether the auto-fix was successful
+    """
+    result = "success" if success else "failure"
+    gateway_auto_fix_attempts.labels(gateway=gateway, result=result).inc()
+
+
 def record_api_key_usage(api_key_id: str, status: str = "success"):
     """Record API key usage."""
     # Note: api_key_id parameter kept for backwards compatibility but not used in labels
@@ -652,9 +944,7 @@ def record_free_model_usage(user_status: str, model: str):
 
 def set_subscription_count(plan_type: str, billing_cycle: str, count: int):
     """Set subscription count."""
-    subscription_count.labels(
-        plan_type=plan_type, billing_cycle=billing_cycle
-    ).set(count)
+    subscription_count.labels(plan_type=plan_type, billing_cycle=billing_cycle).set(count)
 
 
 def set_active_connections(connection_type: str, count: int):
@@ -705,6 +995,7 @@ def track_queue_publish(
     _trace_queue_publish = None
     try:
         from src.utils.sentry_insights import trace_queue_publish as _tqp
+
         _trace_queue_publish = _tqp
     except ImportError:
         pass  # Sentry insights not available
@@ -765,6 +1056,7 @@ def track_queue_process(
     _trace_queue_process = None
     try:
         from src.utils.sentry_insights import trace_queue_process as _tqp
+
         _trace_queue_process = _tqp
     except ImportError:
         pass  # Sentry insights not available
@@ -787,11 +1079,10 @@ def track_queue_process(
 
 # ==================== Performance Stage Tracking Functions ====================
 
+
 def track_backend_ttfb(provider: str, model: str, endpoint: str, duration: float):
     """Track backend API time to first byte (TTFB)."""
-    backend_ttfb_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(
-        duration
-    )
+    backend_ttfb_seconds.labels(provider=provider, model=model, endpoint=endpoint).observe(duration)
 
 
 def track_streaming_duration(provider: str, model: str, endpoint: str, duration: float):
@@ -878,17 +1169,159 @@ def track_connection_pool_stats(pool_name: str, stats: dict):
         logger.warning(f"Failed to track connection pool stats: {e}")
 
 
+# ==================== Cost Tracking Helper Functions ====================
+
+
+def track_api_cost(
+    provider: str,
+    model: str,
+    cost_usd: float,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    plan_type: str = "unknown",
+):
+    """
+    Track API cost in USD for a request.
+
+    Args:
+        provider: Provider name (e.g., 'openai', 'anthropic')
+        model: Model name (e.g., 'gpt-4', 'claude-3-opus')
+        cost_usd: Total cost in USD for this request
+        input_tokens: Number of input tokens (optional, for per-token cost)
+        output_tokens: Number of output tokens (optional, for per-token cost)
+        plan_type: User's plan type (free, trial, starter, professional, enterprise)
+
+    Example:
+        track_api_cost(
+            provider="openai",
+            model="gpt-4-turbo",
+            cost_usd=0.0234,
+            input_tokens=1500,
+            output_tokens=800,
+            plan_type="professional"
+        )
+    """
+    try:
+        # Track total cost
+        api_cost_usd_total.labels(provider=provider, model=model).inc(cost_usd)
+
+        # Track cost per request
+        api_cost_per_request.labels(provider=provider, model=model).observe(cost_usd)
+
+        # Track cost per 1k tokens (if token counts provided)
+        if input_tokens > 0:
+            input_cost_per_1k = (
+                (cost_usd * 1000) / (input_tokens + output_tokens)
+                if (input_tokens + output_tokens) > 0
+                else 0
+            )
+            cost_per_1k_tokens.labels(provider=provider, model=model, token_type="input").observe(
+                input_cost_per_1k
+            )
+
+        if output_tokens > 0:
+            output_cost_per_1k = (
+                (cost_usd * 1000) / (input_tokens + output_tokens)
+                if (input_tokens + output_tokens) > 0
+                else 0
+            )
+            cost_per_1k_tokens.labels(provider=provider, model=model, token_type="output").observe(
+                output_cost_per_1k
+            )
+
+        # Track user cost by plan type
+        user_cost_by_plan.labels(plan_type=plan_type).inc(cost_usd)
+
+    except Exception as e:
+        logger.warning(f"Error tracking API cost: {e}")
+
+
+def track_cache_cost_savings(
+    provider: str,
+    model: str,
+    savings_usd: float,
+    cache_type: str = "redis",
+):
+    """
+    Track cost savings from cache hits.
+
+    Args:
+        provider: Provider name
+        model: Model name
+        savings_usd: USD saved by serving from cache instead of API
+        cache_type: Type of cache (butter, redis, local)
+
+    Example:
+        # When serving from Butter.dev cache instead of OpenAI
+        track_cache_cost_savings(
+            provider="openai",
+            model="gpt-4-turbo",
+            savings_usd=0.0234,
+            cache_type="butter"
+        )
+    """
+    try:
+        cache_cost_savings_usd.labels(provider=provider, model=model, cache_type=cache_type).inc(
+            savings_usd
+        )
+    except Exception as e:
+        logger.warning(f"Error tracking cache cost savings: {e}")
+
+
+def update_daily_cost_estimate(provider: str, estimated_daily_usd: float):
+    """
+    Update the estimated daily cost for a provider.
+
+    This should be called periodically (e.g., hourly) to update the projection.
+
+    Args:
+        provider: Provider name
+        estimated_daily_usd: Estimated daily cost in USD
+
+    Example:
+        # Calculate from last hour's spend
+        hourly_spend = get_hourly_spend("openai")
+        estimated_daily = hourly_spend * 24
+        update_daily_cost_estimate("openai", estimated_daily)
+    """
+    try:
+        daily_cost_estimate.labels(provider=provider).set(estimated_daily_usd)
+    except Exception as e:
+        logger.warning(f"Error updating daily cost estimate: {e}")
+
+
+def update_monthly_cost_estimate(provider: str, estimated_monthly_usd: float):
+    """
+    Update the estimated monthly cost for a provider.
+
+    This should be called daily to update the monthly projection.
+
+    Args:
+        provider: Provider name
+        estimated_monthly_usd: Estimated monthly cost in USD
+
+    Example:
+        # Calculate from last 7 days average
+        weekly_avg = get_weekly_average_spend("openai")
+        estimated_monthly = (weekly_avg / 7) * 30
+        update_monthly_cost_estimate("openai", estimated_monthly)
+    """
+    try:
+        monthly_cost_estimate.labels(provider=provider).set(estimated_monthly_usd)
+    except Exception as e:
+        logger.warning(f"Error updating monthly cost estimate: {e}")
+
+
 def get_metrics_summary() -> dict:
     """Get a summary of key metrics for monitoring."""
     # This function returns a summary of metrics collected.
     # In production, use the /metrics endpoint which exports all metrics in Prometheus format.
     # This summary is for diagnostic purposes only.
     try:
-
         summary = {
             "enabled": True,
             "metrics_endpoint": "/metrics",
-            "message": "Use /metrics endpoint for Prometheus format metrics"
+            "message": "Use /metrics endpoint for Prometheus format metrics",
         }
         return summary
     except Exception as e:

@@ -845,7 +845,8 @@ class ModelHealthMonitor:
                     avg_response = provider_data.avg_response_time.replace("ms", "") if provider_data.avg_response_time else "0"
                     try:
                         gateway_health[gateway_name]["latency_ms"] = int(avg_response)
-                    except:
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Failed to parse latency for {gateway_name}: {e}")
                         gateway_health[gateway_name]["latency_ms"] = 0
                     gateway_health[gateway_name]["last_check"] = provider_data.last_checked
                 elif provider_data.status == "degraded" and gateway_health[gateway_name]["status"] == "offline":

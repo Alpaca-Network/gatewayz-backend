@@ -45,7 +45,8 @@ class TestSubscriptionProducts:
             {"tier": "max"}
         ]
 
-        tier = get_tier_from_product_id("prod_TKOqRE2L6qXu7s")
+        # Use the correct product ID that matches Stripe/frontend: prod_TKOraBpWMxMAIu
+        tier = get_tier_from_product_id("prod_TKOraBpWMxMAIu")
 
         assert tier == "max"
 
@@ -150,7 +151,8 @@ class TestSubscriptionProducts:
                 "credits_per_month": 20.00,
             },
             {
-                "product_id": "prod_TKOqRE2L6qXu7s",
+                # Use the correct product ID that matches Stripe/frontend: prod_TKOraBpWMxMAIu
+                "product_id": "prod_TKOraBpWMxMAIu",
                 "tier": "max",
                 "credits_per_month": 150.00,
             },

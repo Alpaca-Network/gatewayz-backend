@@ -132,7 +132,7 @@ class Config:
     OPENROUTER_SITE_URL = _get_env_var("OPENROUTER_SITE_URL", "https://your-site.com")
     OPENROUTER_SITE_NAME = _get_env_var("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
 
-    # OneRouter Configuration
+    # Infron AI Configuration (formerly OneRouter)
     ONEROUTER_API_KEY = os.environ.get("ONEROUTER_API_KEY")
 
     # DeepInfra Configuration (for direct API access)
@@ -234,9 +234,35 @@ class Config:
     # Sybil AI Configuration
     SYBIL_API_KEY = os.environ.get("SYBIL_API_KEY")
 
+    # Canopy Wave AI Configuration
+    CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
+    CANOPYWAVE_BASE_URL = os.environ.get("CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1")
+
     # Nosana GPU Computing Network Configuration
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
     NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
+
+    # Z.AI Configuration (Zhipu AI - GLM models)
+    ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
+
+    # Butter.dev LLM Response Caching Configuration
+    # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
+    # and serves cached responses to reduce costs and improve latency.
+    # See: https://butter.dev
+    # Supports both BUTTER_DEV_ENABLED and BUTTER_ENABLED env vars for compatibility
+    BUTTER_DEV_ENABLED: bool = (
+        os.environ.get("BUTTER_DEV_ENABLED", os.environ.get("BUTTER_ENABLED", "false"))
+        .lower()
+        in {"1", "true", "yes"}
+    )
+    BUTTER_DEV_BASE_URL: str = os.environ.get(
+        "BUTTER_DEV_BASE_URL", os.environ.get("BUTTER_PROXY_URL", "https://proxy.butter.dev/v1")
+    )
+    BUTTER_DEV_TIMEOUT: int = int(os.environ.get("BUTTER_DEV_TIMEOUT", "30"))
+    # Enable automatic fallback to direct provider on Butter.dev errors
+    BUTTER_DEV_FALLBACK_ENABLED: bool = os.environ.get(
+        "BUTTER_DEV_FALLBACK_ENABLED", "true"
+    ).lower() in {"1", "true", "yes"}
 
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")

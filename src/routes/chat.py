@@ -50,14 +50,29 @@ from src.utils.ai_tracing import AITracer, AIRequestType
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
-# Make braintrust optional for test environments
+# Braintrust tracing - use centralized service for proper project association
+# The key fix is using logger.start_span() instead of standalone start_span()
 try:
-    from braintrust import flush as braintrust_flush
-    from braintrust import start_span, traced
+    from src.services.braintrust_service import (
+        create_span,
+        flush as braintrust_flush,
+        is_available as check_braintrust_available,
+        NoopSpan,
+    )
+    # Import traced decorator from braintrust SDK for route decoration
+    from braintrust import traced
+
+    # Wrapper to maintain backward compatibility with existing code
+    def start_span(name=None, span_type=None, **kwargs):
+        """Create a span using the centralized service."""
+        return create_span(name=name, span_type=span_type or "llm", **kwargs)
 
     BRAINTRUST_AVAILABLE = True
 except ImportError:
     BRAINTRUST_AVAILABLE = False
+
+    def check_braintrust_available():
+        return False
 
     # Create no-op decorators and functions when braintrust is not available
     def traced(name=None, type=None):
@@ -66,18 +81,21 @@ except ImportError:
 
         return decorator
 
-    class MockSpan:
+    class NoopSpan:
         def log(self, *args, **kwargs):
             pass
 
         def end(self):
             pass
 
-    def start_span(name=None, type=None):
-        return MockSpan()
+    # Alias for backward compatibility
+    MockSpan = NoopSpan
+
+    def start_span(name=None, span_type=None, **kwargs):
+        return NoopSpan()
 
     def current_span():
-        return MockSpan()
+        return NoopSpan()
 
     def braintrust_flush():
         pass
@@ -259,6 +277,11 @@ PROVIDER_FUNCTIONS = {
         "process_nosana_response",
         "make_nosana_request_openai_stream",
     ],
+    "zai": [
+        "make_zai_request_openai",
+        "process_zai_response",
+        "make_zai_request_openai_stream",
+    ],
 }
 
 # Load all providers and expose functions to global namespace
@@ -391,6 +414,11 @@ PROVIDER_ROUTING = {
         "process": process_nosana_response,
         "stream": make_nosana_request_openai_stream,
     },
+    "zai": {
+        "request": make_zai_request_openai,
+        "process": process_zai_response,
+        "stream": make_zai_request_openai_stream,
+    },
 }
 
 import src.services.rate_limiting as rate_limiting_service
@@ -512,6 +540,11 @@ PROVIDER_TIMEOUTS = {
     "huggingface": 120,
     "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
+
+# Auto-routing constants
+# Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
+AUTO_ROUTE_MODEL_PREFIX = "router"
+AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
 
 
 def mask_key(k: str) -> str:
@@ -884,6 +917,7 @@ async def _process_stream_completion_background(
     is_anonymous=False,
     request_id=None,
     client_ip=None,
+    api_key_id=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -1357,6 +1391,7 @@ async def stream_generator(
                 is_anonymous=is_anonymous,
                 request_id=request_id,
                 client_ip=client_ip,
+                api_key_id=api_key_id,
             )
         )
 
@@ -1466,7 +1501,11 @@ async def chat_completions(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     # Determine if this is an authenticated or anonymous request
     is_anonymous = api_key is None
@@ -1480,8 +1519,8 @@ async def chat_completions(
         extra={"request_id": request_id},
     )
 
-    # Start Braintrust span for this request
-    span = start_span(name=f"chat_{req.model}", type="llm")
+    # Start Braintrust span for this request (uses logger.start_span() for project association)
+    span = start_span(name=f"chat_{req.model}", span_type="llm")
 
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
@@ -1494,7 +1533,13 @@ async def chat_completions(
                 # Get client IP for rate limiting
                 client_ip = "unknown"
                 if request:
-                    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                    # Parse X-Forwarded-For header with defensive bounds checking
+                    forwarded_for = request.headers.get("X-Forwarded-For", "")
+                    if forwarded_for:
+                        parts = forwarded_for.split(",")
+                        if parts:  # Defensive check (split always returns at least [''])
+                            client_ip = parts[0].strip()
+
                     if not client_ip:
                         client_ip = request.headers.get("X-Real-IP", "")
                     if not client_ip and hasattr(request, "client") and request.client:
@@ -1796,8 +1841,65 @@ async def chat_completions(
                     detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}",
                 )
 
-        # Store original model for response
+        # Store original model for response and routing logic
         original_model = req.model
+        is_auto_route = original_model and original_model.lower().startswith(AUTO_ROUTE_MODEL_PREFIX)
+
+        # === 2.3) Prompt-Level Routing (if model="auto") ===
+        # This is a fail-open router - if it fails or times out, it returns a default cheap model
+        router_decision = None
+        if is_auto_route:
+            with tracker.stage("prompt_routing"):
+                try:
+                    from src.services.prompt_router import (
+                        is_auto_route_request,
+                        parse_auto_route_options,
+                        route_request,
+                    )
+                    from src.schemas.router import UserRouterPreferences
+
+                    if is_auto_route_request(original_model):
+                        tier, optimization = parse_auto_route_options(original_model)
+
+                        # Build user preferences (could be loaded from DB in future)
+                        user_preferences = UserRouterPreferences(
+                            default_optimization=optimization,
+                            enabled=True,
+                        )
+
+                        # Get conversation ID for sticky routing (use session_id if available)
+                        conversation_id = str(session_id) if session_id else None
+
+                        # Route the request (fail-open, < 2ms target)
+                        router_decision = route_request(
+                            messages=messages,
+                            tools=getattr(req, "tools", None),
+                            response_format=getattr(req, "response_format", None),
+                            user_preferences=user_preferences,
+                            conversation_id=conversation_id,
+                            tier=tier,
+                        )
+
+                        # Update model with routed selection
+                        req.model = router_decision.selected_model
+
+                        logger.info(
+                            "Prompt router selected model: %s (category=%s, confidence=%.2f, time=%.2fms, reason=%s)",
+                            router_decision.selected_model,
+                            router_decision.classification.category.value if router_decision.classification else "unknown",
+                            router_decision.classification.confidence if router_decision.classification else 0,
+                            router_decision.decision_time_ms,
+                            router_decision.reason,
+                        )
+
+                except Exception as e:
+                    # Fail open - log warning and use default model
+                    logger.warning(
+                        "Prompt router failed, falling back to default: %s",
+                        str(e),
+                    )
+                    # Use default model since original was an auto-route request
+                    req.model = AUTO_ROUTE_DEFAULT_MODEL
 
         with tracker.stage("request_preparation"):
             optional = {}
@@ -2517,7 +2619,8 @@ async def chat_completions(
         # === 7) Log to Braintrust ===
         try:
             logger.info(
-                f"[Braintrust] Starting log for request_id={request_id}, model={model}, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}"
+                f"[Braintrust] Starting log for request_id={request_id}, model={model}, "
+                f"available={check_braintrust_available()}, span_type={type(span).__name__}"
             )
             # Safely convert messages to dicts, filtering out None values and sanitizing content
             messages_for_log = []
@@ -2771,7 +2874,11 @@ async def unified_responses(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     logger.info(
         "unified_responses start (request_id=%s, api_key=%s, model=%s)",
@@ -2781,8 +2888,8 @@ async def unified_responses(
         extra={"request_id": request_id},
     )
 
-    # Start Braintrust span for this request
-    span = start_span(name=f"responses_{req.model}", type="llm")
+    # Start Braintrust span for this request (uses logger.start_span() for project association)
+    span = start_span(name=f"responses_{req.model}", span_type="llm")
 
     rate_limit_mgr = None
     should_release_concurrency = False
@@ -3759,7 +3866,8 @@ async def unified_responses(
         # === 7) Log to Braintrust ===
         try:
             logger.info(
-                f"[Braintrust] Starting log for request_id={request_id}, model={model}, endpoint=/v1/responses, BRAINTRUST_AVAILABLE={BRAINTRUST_AVAILABLE}"
+                f"[Braintrust] Starting log for request_id={request_id}, model={model}, "
+                f"endpoint=/v1/responses, available={check_braintrust_available()}, span_type={type(span).__name__}"
             )
             # Convert input messages to loggable format, safely handling None values
             input_messages = []

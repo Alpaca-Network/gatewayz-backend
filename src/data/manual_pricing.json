@@ -1340,7 +1340,7 @@
       "https://cloud-api.near.ai/v1/model/list (Near AI - dynamic API)",
       "https://www.alibabacloud.com/help/en/model-studio/models (Alibaba Cloud / DashScope)",
       "https://docs.clarifai.com (Clarifai - based on underlying model provider pricing)",
-      "https://app.onerouter.pro/models (OneRouter - AI gateway with automatic fallbacks and prompt caching)",
+      "https://app.infron.ai/models (Infron AI - AI gateway with automatic fallbacks and prompt caching)",
       "https://fireworks.ai/pricing (Fireworks AI - serverless inference)",
       "https://groq.com/pricing (Groq - LPU inference, API: https://api.groq.com/openai/v1/models)",
       "https://www.together.ai/pricing (Together AI - 200+ models)",

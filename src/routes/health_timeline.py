@@ -513,6 +513,7 @@ async def get_gateways_uptime(
     Get gateway uptime timeline with time-bucketed samples.
 
     Returns uptime percentage, status samples, and incident summaries for each gateway.
+    Includes all configured gateways, even those without recent history data.
 
     Cached for 5 minutes to reduce database load.
     """
@@ -531,6 +532,15 @@ async def get_gateways_uptime(
     start_time = current_time - time_delta
     period_label = get_period_label(period)
 
+    # Get list of all configured gateways from gateway_health_service
+    all_configured_gateways = set()
+    try:
+        from src.services.gateway_health_service import GATEWAY_CONFIG
+        all_configured_gateways = set(GATEWAY_CONFIG.keys())
+        logger.debug(f"Found {len(all_configured_gateways)} configured gateways")
+    except ImportError:
+        logger.warning("Could not import GATEWAY_CONFIG for complete gateway list")
+
     # Query model_health_history for the time range
     response = (
         supabase.table("model_health_history")
@@ -541,10 +551,7 @@ async def get_gateways_uptime(
         .execute()
     )
 
-    history_records = response.data
-
-    if not history_records:
-        return GatewayUptimeResponse(success=True, gateways=[])
+    history_records = response.data or []
 
     # Group by gateway
     gateway_data = defaultdict(lambda: {
@@ -664,6 +671,29 @@ async def get_gateways_uptime(
                 incident_summary=incident_summary
             )
         )
+
+    # Add configured gateways that don't have history data
+    gateways_with_data = {g.gateway for g in gateways}
+    for gateway_name in all_configured_gateways:
+        if gateway_name not in gateways_with_data:
+            # Create an entry for gateways without history data
+            gateways.append(
+                GatewayUptimeData(
+                    gateway=gateway_name,
+                    uptime_percentage=0.0,  # No data = 0% uptime (unknown state)
+                    period_label=period_label,
+                    last_checked=current_time,
+                    total_providers=0,
+                    healthy_providers=0,
+                    samples=[],  # Empty samples to indicate no data
+                    incident_summary=IncidentSummary(
+                        total_incidents=0,
+                        mttr_minutes=0.0,
+                        worst_status="downtime"  # Show as downtime since we have no data
+                    )
+                )
+            )
+            logger.debug(f"Added gateway {gateway_name} with no history data")
 
     # Sort by uptime percentage (worst first for alerting)
     gateways.sort(key=lambda g: g.uptime_percentage)

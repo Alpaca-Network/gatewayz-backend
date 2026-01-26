@@ -1,7 +1,8 @@
 """
 Comprehensive tests for Sybil Client service
 """
-from unittest.mock import MagicMock, Mock, patch
+
+from unittest.mock import MagicMock
 
 import httpx
 import pytest

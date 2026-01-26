@@ -8,21 +8,20 @@ This test suite validates:
 - Rate limit counters and tracking
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from src.services.anonymous_rate_limiter import (
-    is_model_allowed_for_anonymous,
-    check_anonymous_rate_limit,
-    validate_anonymous_request,
-    record_anonymous_request,
-    get_anonymous_usage_count,
-    increment_anonymous_usage,
-    get_anonymous_stats,
     ANONYMOUS_DAILY_LIMIT,
-    ANONYMOUS_ALLOWED_MODELS,
     _anonymous_usage_cache,
     _hash_ip,
+    check_anonymous_rate_limit,
+    get_anonymous_stats,
+    get_anonymous_usage_count,
+    increment_anonymous_usage,
+    is_model_allowed_for_anonymous,
+    record_anonymous_request,
+    validate_anonymous_request,
 )
 
 
@@ -73,7 +72,7 @@ class TestAnonymousRateLimiting:
         yield
         _anonymous_usage_cache.clear()
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_rate_limit_allows_first_request(self, mock_redis):
         """Test that first request from IP is allowed"""
         mock_redis.return_value = None  # Use memory fallback
@@ -84,7 +83,7 @@ class TestAnonymousRateLimiting:
         assert result["remaining"] == ANONYMOUS_DAILY_LIMIT
         assert result["limit"] == ANONYMOUS_DAILY_LIMIT
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_rate_limit_blocks_after_limit(self, mock_redis):
         """Test that requests are blocked after daily limit"""
         mock_redis.return_value = None  # Use memory fallback
@@ -100,7 +99,7 @@ class TestAnonymousRateLimiting:
         assert result["remaining"] == 0
         assert "exceeded" in result["reason"].lower()
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_rate_limit_decrements_remaining(self, mock_redis):
         """Test that remaining count decreases properly"""
         mock_redis.return_value = None  # Use memory fallback
@@ -117,7 +116,7 @@ class TestAnonymousRateLimiting:
         result2 = check_anonymous_rate_limit(ip)
         assert result2["remaining"] == ANONYMOUS_DAILY_LIMIT - 1
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_different_ips_tracked_separately(self, mock_redis):
         """Test that different IPs have separate rate limits"""
         mock_redis.return_value = None  # Use memory fallback
@@ -149,35 +148,31 @@ class TestValidateAnonymousRequest:
         yield
         _anonymous_usage_cache.clear()
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_valid_request_allowed(self, mock_redis):
         """Test that valid request with free model and under limit is allowed"""
         mock_redis.return_value = None
 
         result = validate_anonymous_request(
-            ip_address="10.0.0.1",
-            model_id="google/gemini-2.0-flash-exp:free"
+            ip_address="10.0.0.1", model_id="google/gemini-2.0-flash-exp:free"
         )
 
         assert result["allowed"] is True
         assert result["model_allowed"] is True
         assert result["rate_limit_allowed"] is True
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_non_free_model_rejected(self, mock_redis):
         """Test that non-free model request is rejected"""
         mock_redis.return_value = None
 
-        result = validate_anonymous_request(
-            ip_address="10.0.0.2",
-            model_id="openai/gpt-4"
-        )
+        result = validate_anonymous_request(ip_address="10.0.0.2", model_id="openai/gpt-4")
 
         assert result["allowed"] is False
         assert result["model_allowed"] is False
         assert "not available for anonymous" in result["reason"].lower()
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_rate_limit_exceeded_rejected(self, mock_redis):
         """Test that request over rate limit is rejected"""
         mock_redis.return_value = None
@@ -188,8 +183,7 @@ class TestValidateAnonymousRequest:
             increment_anonymous_usage(ip)
 
         result = validate_anonymous_request(
-            ip_address=ip,
-            model_id="google/gemini-2.0-flash-exp:free"
+            ip_address=ip, model_id="google/gemini-2.0-flash-exp:free"
         )
 
         assert result["allowed"] is False
@@ -208,7 +202,7 @@ class TestRecordAnonymousRequest:
         yield
         _anonymous_usage_cache.clear()
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_record_increments_count(self, mock_redis):
         """Test that recording a request increments the counter"""
         mock_redis.return_value = None
@@ -222,7 +216,7 @@ class TestRecordAnonymousRequest:
         new_count = get_anonymous_usage_count(ip)
         assert new_count == 1
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_record_returns_remaining(self, mock_redis):
         """Test that recording returns correct remaining count"""
         mock_redis.return_value = None
@@ -267,7 +261,7 @@ class TestAnonymousStats:
         yield
         _anonymous_usage_cache.clear()
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_stats_empty(self, mock_redis):
         """Test stats when no usage"""
         mock_redis.return_value = None
@@ -278,7 +272,7 @@ class TestAnonymousStats:
         assert stats["total_requests_today"] == 0
         assert stats["storage"] == "memory"
 
-    @patch('src.services.anonymous_rate_limiter._get_redis_client')
+    @patch("src.services.anonymous_rate_limiter._get_redis_client")
     def test_stats_with_usage(self, mock_redis):
         """Test stats after some usage"""
         mock_redis.return_value = None
@@ -305,7 +299,9 @@ class TestRedisIntegration:
         mock_pipe.execute.return_value = [5, True]  # INCR returns 5, EXPIRE returns True
         mock_redis.pipeline.return_value = mock_pipe
 
-        with patch('src.services.anonymous_rate_limiter._get_redis_client', return_value=mock_redis):
+        with patch(
+            "src.services.anonymous_rate_limiter._get_redis_client", return_value=mock_redis
+        ):
             result = increment_anonymous_usage("test-ip")
             assert result == 5
             mock_pipe.incr.assert_called_once()
@@ -316,7 +312,9 @@ class TestRedisIntegration:
         mock_redis = MagicMock()
         mock_redis.get.return_value = b"3"
 
-        with patch('src.services.anonymous_rate_limiter._get_redis_client', return_value=mock_redis):
+        with patch(
+            "src.services.anonymous_rate_limiter._get_redis_client", return_value=mock_redis
+        ):
             result = get_anonymous_usage_count("test-ip")
             assert result == 3
 
@@ -325,7 +323,9 @@ class TestRedisIntegration:
         mock_redis = MagicMock()
         mock_redis.get.side_effect = Exception("Redis connection error")
 
-        with patch('src.services.anonymous_rate_limiter._get_redis_client', return_value=mock_redis):
+        with patch(
+            "src.services.anonymous_rate_limiter._get_redis_client", return_value=mock_redis
+        ):
             _anonymous_usage_cache.clear()
             result = get_anonymous_usage_count("fallback-ip")
             # Should return 0 from memory fallback, not raise

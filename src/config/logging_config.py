@@ -133,15 +133,48 @@ class LokiLogHandler(logging.Handler):
             # Format the log message
             log_entry = self.format(record)
 
+            # Build Loki labels with comprehensive filtering capabilities
+            labels = {**self.tags}
+
+            # Add log level for filtering (ERROR, WARNING, INFO, DEBUG)
+            labels["level"] = record.levelname
+
+            # Add logger name (module path: src.routes.chat, src.services.pricing)
+            labels["logger"] = record.name
+
             # Get trace context if available
             trace_id = getattr(record, "trace_id", None)
-
-            # Build Loki labels
-            labels = {**self.tags}
             if trace_id:
                 labels["trace_id"] = trace_id
+
+            # Add span_id for trace correlation
+            span_id = getattr(record, "span_id", None)
+            if span_id:
+                labels["span_id"] = span_id
+
+            # Add request path if available (from middleware)
             if hasattr(record, "request_path"):
                 labels["path"] = record.request_path
+
+            # Add HTTP method if available
+            if hasattr(record, "http_method"):
+                labels["method"] = record.http_method
+
+            # Add provider name for AI provider filtering
+            if hasattr(record, "provider"):
+                labels["provider"] = record.provider
+
+            # Add model name for model-specific filtering
+            if hasattr(record, "model"):
+                labels["model"] = record.model
+
+            # Add user_id for user-specific debugging (if not sensitive)
+            if hasattr(record, "user_id"):
+                labels["user_id"] = str(record.user_id)
+
+            # Add error type for error categorization
+            if record.exc_info and record.exc_info[0]:
+                labels["error_type"] = record.exc_info[0].__name__
 
             # Build Loki push payload
             # Format: {"streams": [{"stream": {...labels}, "values": [[timestamp_ns, log_line]]}]}
@@ -210,34 +243,48 @@ class LokiLogHandler(logging.Handler):
         if the queue cannot be drained in time. The worker thread (being a daemon)
         will be terminated when the process exits anyway.
         """
-        # Signal worker to stop accepting new items and drain queue
-        # Note: _closed is NOT set yet so worker can still send remaining items
-        self._shutdown.set()
+        try:
+            # Guard against Python interpreter shutdown where threading might be unavailable
+            if not hasattr(self, '_shutdown') or self._shutdown is None:
+                return
 
-        # Wait for worker thread to finish draining and exit (with timeout)
-        # The timeout prevents hanging during shutdown if Loki is slow/unreachable
-        if self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=5.0)
+            # Signal worker to stop accepting new items and drain queue
+            # Note: _closed is NOT set yet so worker can still send remaining items
+            self._shutdown.set()
 
-        # Only mark as closed and clean up session if worker has actually exited
-        # If timeout expired but worker is still running, leave resources available
-        # so it can continue draining. The daemon thread will be killed on process
-        # exit anyway, and resources will be garbage collected.
-        if not self._worker_thread.is_alive():
-            # Worker has exited - safe to clean up
-            self._closed.set()
+            # Wait for worker thread to finish draining and exit (with timeout)
+            # The timeout prevents hanging during shutdown if Loki is slow/unreachable
+            if hasattr(self, '_worker_thread') and self._worker_thread.is_alive():
+                self._worker_thread.join(timeout=5.0)
 
-            with self._session_lock:
-                if self._session:
-                    try:
-                        self._session.close()
-                    except Exception:
-                        # Ignore session close errors to avoid shutdown failures.
-                        # The session will be garbage collected anyway.
-                        pass
-                    self._session = None
+            # Only mark as closed and clean up session if worker has actually exited
+            # If timeout expired but worker is still running, leave resources available
+            # so it can continue draining. The daemon thread will be killed on process
+            # exit anyway, and resources will be garbage collected.
+            if hasattr(self, '_worker_thread') and not self._worker_thread.is_alive():
+                # Worker has exited - safe to clean up
+                if hasattr(self._closed, 'set'):
+                    self._closed.set()
 
-        super().close()
+                if hasattr(self, '_session_lock'):
+                    with self._session_lock:
+                        if self._session:
+                            try:
+                                self._session.close()
+                            except Exception:
+                                # Ignore session close errors to avoid shutdown failures.
+                                # The session will be garbage collected anyway.
+                                pass
+                            self._session = None
+
+        except Exception:
+            # Silently ignore any errors during shutdown to prevent crash
+            pass
+
+        try:
+            super().close()
+        except Exception:
+            pass
 
 
 class TraceContextFilter(logging.Filter):

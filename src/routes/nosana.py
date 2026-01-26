@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from src.routes.auth import get_current_user
+from src.security.deps import get_current_user
 from src.services.nosana_client import (
     DEPLOYMENT_STATUSES,
     DEPLOYMENT_STRATEGIES,

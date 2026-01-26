@@ -133,14 +133,54 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"FastAPI instrumentation warning: {e}")
 
-        # Initialize Tempo/OpenTelemetry OTLP exporter in background
-        # The endpoint check has 1s timeout, so defer to not block healthcheck
+        # Initialize Tempo/OpenTelemetry OTLP exporter in background with retry
+        # Uses exponential backoff to handle Railway timing issues where Tempo
+        # may not be ready when the backend starts
         async def init_tempo_exporter_background():
-            try:
-                init_tempo_otlp()
-                logger.info("Tempo/OTLP tracing initialized")
-            except Exception as e:
-                logger.warning(f"Tempo/OTLP initialization warning: {e}")
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+
+            max_retries = 5
+            base_delay = 2.0  # Start with 2 seconds
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # Check if already initialized (e.g., via on_startup event)
+                    if OpenTelemetryConfig._initialized:
+                        logger.info("Tempo/OTLP tracing already initialized")
+                        return
+
+                    success = OpenTelemetryConfig.initialize()
+                    if success:
+                        logger.info(f"Tempo/OTLP tracing initialized (attempt {attempt}/{max_retries})")
+                        return
+                    else:
+                        # Initialization returned False (endpoint not reachable, etc.)
+                        if attempt < max_retries:
+                            delay = base_delay * (2 ** (attempt - 1))  # Exponential backoff
+                            logger.info(
+                                f"Tempo/OTLP initialization attempt {attempt}/{max_retries} failed, "
+                                f"retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                        else:
+                            logger.warning(
+                                f"Tempo/OTLP initialization failed after {max_retries} attempts. "
+                                f"Tracing will be disabled. Use POST /api/instrumentation/otel/initialize "
+                                f"to manually retry."
+                            )
+                except Exception as e:
+                    if attempt < max_retries:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        logger.warning(
+                            f"Tempo/OTLP initialization attempt {attempt}/{max_retries} error: {e}, "
+                            f"retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.warning(
+                            f"Tempo/OTLP initialization failed after {max_retries} attempts: {e}. "
+                            f"Use POST /api/instrumentation/otel/initialize to manually retry."
+                        )
 
         _create_background_task(init_tempo_exporter_background(), name="init_tempo_exporter")
 
@@ -307,6 +347,24 @@ async def lifespan(app):
 
         _create_background_task(init_error_monitoring_background(), name="init_error_monitoring")
 
+        # Initialize router health snapshot background task
+        # This updates pre-computed healthy model lists for the prompt router
+        # Critical for meeting < 2ms router latency (single Redis read vs N awaits)
+        async def init_router_health_snapshots_background():
+            try:
+                router_enabled = os.environ.get("ROUTER_ENABLED", "true").lower() == "true"
+                if router_enabled:
+                    from src.services.background_tasks import start_router_health_snapshot_task
+
+                    start_router_health_snapshot_task()
+                    logger.info("✓ Router health snapshot background task started")
+                else:
+                    logger.info("⏭️  Router disabled via ROUTER_ENABLED env var")
+            except Exception as e:
+                logger.warning(f"Router health snapshot initialization warning: {e}")
+
+        _create_background_task(init_router_health_snapshots_background(), name="init_router_health_snapshots")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
@@ -344,6 +402,15 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Error monitoring shutdown warning: {e}")
 
+        # Stop router health snapshot background task
+        try:
+            from src.services.background_tasks import stop_router_health_snapshot_task
+
+            stop_router_health_snapshot_task()
+            logger.info("Router health snapshot task stopped")
+        except Exception as e:
+            logger.warning(f"Router health snapshot shutdown warning: {e}")
+
         # Health monitoring is handled by the dedicated health-service container
         # No health monitor shutdown needed in main API
         logger.info("Health monitoring: handled by health-service (no shutdown needed)")
@@ -355,6 +422,15 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
+
+        # Shutdown OpenTelemetry (Tempo tracing)
+        try:
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+
+            OpenTelemetryConfig.shutdown()
+            logger.info("OpenTelemetry (Tempo) shutdown complete")
+        except Exception as e:
+            logger.warning(f"OpenTelemetry shutdown warning: {e}")
 
         # Shutdown Arize OTEL
         try:
